@@ -343,7 +343,7 @@ def test_format_command_uses_fmt_action(
 
 def test_format_code_function_calls_command() -> None:
     """Verify format_code() routes through the library API."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         format_code(
             paths=["src"],
             tools="ruff",
@@ -360,7 +360,7 @@ def test_format_code_function_calls_command() -> None:
 
 def test_format_code_function_raises_on_failure() -> None:
     """Verify format_code() function raises RuntimeError on failure."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
+    with patch("lintro.api.core.run_lint_with_ai", return_value=1):
         with pytest.raises(RuntimeError) as exc_info:
             format_code(
                 paths=["src"],
@@ -372,7 +372,7 @@ def test_format_code_function_raises_on_failure() -> None:
 
 def test_format_code_function_default_parameters() -> None:
     """Verify format_code() function uses default parameters."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         # Call with only required parameters (all have defaults)
         format_code()
 
@@ -383,7 +383,7 @@ def test_format_code_function_default_parameters() -> None:
 
 def test_format_code_function_with_all_options() -> None:
     """Verify format_code() passes all options correctly."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         format_code(
             paths=["src", "tests"],
             tools="ruff,black",

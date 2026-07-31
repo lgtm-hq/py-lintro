@@ -16,6 +16,12 @@ import shutil
 from itertools import chain
 from pathlib import Path
 
+# Directories that never carry first-party project markers; excluded from the
+# recursive scans below to avoid false positives from vendored/generated trees.
+_VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
+    {"node_modules", ".venv", "venv", "vendor", ".git", "__pycache__"},
+)
+
 
 def detect_project_languages() -> list[str]:
     """Detect all languages and ecosystems in the current project.
@@ -30,8 +36,28 @@ def detect_project_languages() -> list[str]:
     cwd = Path.cwd()
     langs: set[str] = set()
 
-    # Python
-    if (cwd / "pyproject.toml").exists() or (cwd / "setup.py").exists():
+    # Python — include requirements-only projects so pip_audit is selected.
+    # Requirements files are discovered recursively (e.g. ``requirements/base.txt``
+    # or ``services/api/requirements.txt``); vendored/generated trees are skipped
+    # and next() short-circuits so at most one file is visited.
+    if (
+        (cwd / "pyproject.toml").exists()
+        or (cwd / "setup.py").exists()
+        or (cwd / "setup.cfg").exists()
+        or (cwd / "Pipfile").exists()
+        or next(
+            (
+                p
+                for p in chain(
+                    cwd.glob("**/requirements*.txt"),
+                    cwd.glob("**/requirements/*.txt"),
+                )
+                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
+            ),
+            None,
+        )
+        is not None
+    ):
         langs.add("python")
 
     # JavaScript / TypeScript
@@ -121,10 +147,13 @@ def detect_project_languages() -> list[str]:
         langs.add("github_actions")
 
     # SQL — next() short-circuits so only one file is visited.
-    _skip_dirs = {"node_modules", ".venv", "venv", "vendor", ".git", "__pycache__"}
     if (
         next(
-            (p for p in cwd.glob("**/*.sql") if not _skip_dirs.intersection(p.parts)),
+            (
+                p
+                for p in cwd.glob("**/*.sql")
+                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
+            ),
             None,
         )
         is not None

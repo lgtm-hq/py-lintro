@@ -12,8 +12,9 @@ import sys
 import click
 
 from lintro.api import core as api
+from lintro.api.pipeline import run_lint_with_ai
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -153,6 +154,11 @@ DEFAULT_ACTION: str = "check"
     default=None,
     help="Exit 1 if the health score is below this threshold (0-100).",
 )
+@click.option(
+    "--no-art",
+    is_flag=True,
+    help="Suppress the decorative ASCII art printed after the run.",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -177,8 +183,11 @@ def check_command(
     transport: str | None,
     score: bool,
     fail_under: float | None,
+    no_art: bool,
 ) -> None:
     """Check files for issues using the specified tools.
+
+    \u000c
 
     Args:
         paths: tuple: List of file/directory paths to check.
@@ -206,6 +215,7 @@ def check_command(
         transport: str | None: Override AI transport (``api`` or ``cli``).
         score: bool: Print only the health score, suppressing the summary.
         fail_under: float | None: Exit 1 if the health score is below this value.
+        no_art: bool: Suppress the decorative ASCII art printed after the run.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -215,6 +225,8 @@ def check_command(
         from lintro.utils.file_cache import clear_all_caches
 
         clear_all_caches()
+
+    validate_diff_base_ref(diff_base=diff_base)
 
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
@@ -228,8 +240,8 @@ def check_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    # Run with simplified approach
-    exit_code: int = run_lint_tools_simple(
+    # Run the AI-aware pipeline: execute, AI-enhance, render.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=path_list,
         tools=tools,
@@ -253,6 +265,7 @@ def check_command(
         transport=transport,
         score=score,
         fail_under=fail_under,
+        no_art=no_art,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any

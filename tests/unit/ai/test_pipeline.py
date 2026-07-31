@@ -83,7 +83,7 @@ def _make_fix_issues(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_budget_tracking_across_multiple_tools(
+async def test_budget_tracking_across_multiple_tools(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -119,7 +119,7 @@ def test_budget_tracking_across_multiple_tools(
 
     ai_config = _default_ai_config(max_fix_attempts=3)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -147,7 +147,7 @@ def test_budget_tracking_across_multiple_tools(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_safe_vs_risky_suggestion_splitting(
+async def test_safe_vs_risky_suggestion_splitting(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -173,7 +173,7 @@ def test_safe_vs_risky_suggestion_splitting(
 
     ai_config = _default_ai_config(auto_apply_safe_fixes=True)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -195,7 +195,7 @@ def test_safe_vs_risky_suggestion_splitting(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_auto_apply_fast_path_json_mode(
+async def test_auto_apply_fast_path_json_mode(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -217,7 +217,7 @@ def test_auto_apply_fast_path_json_mode(
 
     ai_config = _default_ai_config(auto_apply_safe_fixes=True, auto_apply=False)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -242,7 +242,7 @@ def test_auto_apply_fast_path_json_mode(
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
 @patch(f"{_PIPELINE}.sys.stdin.isatty", return_value=True)
-def test_interactive_review_path(
+async def test_interactive_review_path(
     _mock_isatty,
     mock_generate_fixes_from_params,
     mock_apply_fixes,
@@ -265,7 +265,7 @@ def test_interactive_review_path(
 
     ai_config = _default_ai_config(auto_apply=False, auto_apply_safe_fixes=False)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -287,7 +287,7 @@ def test_interactive_review_path(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_no_suggestions_returns_early(
+async def test_no_suggestions_returns_early(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -305,7 +305,7 @@ def test_no_suggestions_returns_early(
 
     ai_config = _default_ai_config()
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -328,7 +328,7 @@ def test_no_suggestions_returns_early(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_post_fix_summary_generation(
+async def test_post_fix_summary_generation(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -356,7 +356,7 @@ def test_post_fix_summary_generation(
 
     ai_config = _default_ai_config(auto_apply=True)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -379,7 +379,7 @@ def test_post_fix_summary_generation(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_verify_fixes_flow(
+async def test_verify_fixes_flow(
     mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
@@ -407,7 +407,7 @@ def test_verify_fixes_flow(
 
     ai_config = _default_ai_config(auto_apply=True)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,

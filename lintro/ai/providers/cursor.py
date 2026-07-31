@@ -23,12 +23,22 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
+)
+from lintro.ai.raw_response import (
+    CLI_ENVELOPE_STAGE,
+    describe_raw_response,
+    recover_prose_envelope,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.token_budget import estimate_tokens
@@ -53,15 +63,36 @@ class _CursorCliTransport(CliTransport):
         try:
             data = json.loads(stdout.strip())
         except json.JSONDecodeError as exc:
-            raise AIProviderError(
-                f"Cursor CLI returned invalid JSON: {exc}\n"
-                f"Raw output: {stdout[:500]}",
-            ) from exc
+            recovered = recover_prose_envelope(
+                provider="Cursor agent",
+                stdout=stdout,
+                reason=str(exc),
+            )
+            if recovered is None:
+                evidence = describe_raw_response(
+                    provider="Cursor agent",
+                    stage=CLI_ENVELOPE_STAGE,
+                    raw=stdout,
+                )
+                raise AIProviderError(
+                    f"Cursor CLI returned invalid JSON: {exc}\n{evidence}",
+                ) from exc
+            return (
+                AIResponse(
+                    content=recovered,
+                    model=self._model,
+                    provider=AIProvider.CURSOR,
+                ),
+                None,
+            )
 
         if data.get("is_error") or data.get("subtype") == "error":
-            raise AIProviderError(
-                f"Cursor CLI reported error: {data.get('result', stdout[:500])}",
+            cause = data.get("result") or describe_raw_response(
+                provider="Cursor agent",
+                stage=CLI_ENVELOPE_STAGE,
+                raw=stdout,
             )
+            raise AIProviderError(f"Cursor CLI reported error: {cause}")
 
         content = data.get("result", "")
         if not content:
@@ -115,6 +146,7 @@ class _CursorCliTransport(CliTransport):
             binary_name="Cursor agent",
             install_hint="Install with: curl https://cursor.com/install -fsS | bash",
             api_key_env=DEFAULT_API_KEY_ENV,
+            contract=cli_contract_for(AIProvider.CURSOR),
         )
         self._model = model
 
@@ -200,6 +232,29 @@ class CursorProvider(BaseAIProvider):
         """
         return _find_agent() is not None
 
+    def _cli_transport(self) -> _CursorCliTransport:
+        """Return the ``agent`` CLI transport.
+
+        Returns:
+            The CLI transport; Cursor supports no other transport, so one is
+            always constructed.
+        """
+        return self._cli
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare Cursor capabilities.
+
+        Returns:
+            The ``agent`` CLI resumes sessions but exposes neither native
+            structured output nor token streaming to lintro.
+        """
+        return ProviderCapabilities(
+            supports_sessions=True,
+            supports_structured_output=False,
+            supports_streaming=False,
+        )
+
     def begin_durable_session(self, *, repo_root: str) -> None:
         """Start a reusable CLI session for single-chunk reviews.
 
@@ -214,7 +269,7 @@ class CursorProvider(BaseAIProvider):
         self._session_id = None
         self._durable_repo_root = None
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -263,21 +318,23 @@ class CursorProvider(BaseAIProvider):
             "--print",
             "--output-format",
             "json",
+            "--mode",
+            "ask",
+            "--model",
+            effective_model,
+            "--workspace",
+            effective_root,
         ]
+
+        candidates: list[OptionalArg] = []
         if self._trust_workspace:
-            cmd.append("--trust")
-        cmd.extend(
-            [
-                "--mode",
-                "ask",
-                "--model",
-                effective_model,
-                "--workspace",
-                effective_root,
-            ],
-        )
+            candidates.append(OptionalArg(flag="--trust"))
         if resume_session and self._session_id is not None:
-            cmd.extend(["--resume", self._session_id])
+            candidates.append(
+                OptionalArg(flag="--resume", values=(self._session_id,)),
+            )
+
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Cursor CLI request: model={effective_model}, "
@@ -287,8 +344,9 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        result = self._cli.run(
+        result = await self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             input_text=combined_prompt,
             timeout=effective_timeout,
         )

@@ -5,6 +5,7 @@ import json
 import shutil
 import tempfile
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,7 +13,19 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.output import OutputManager
+
+
+@dataclass
+class _ReportIssue(BaseIssue):
+    """Minimal BaseIssue subclass for report tests.
+
+    Attributes:
+        code: Rule code, which may be ``None`` to simulate parsers that omit it.
+    """
+
+    code: str | None = None
 
 
 @pytest.fixture
@@ -50,7 +63,7 @@ def make_tool_result(
     )
 
 
-def make_issue(file: str, line: int, code: str, message: str) -> SimpleNamespace:
+def make_issue(file: str, line: int, code: str, message: str) -> _ReportIssue:
     """Factory for issue-like objects used in report tests.
 
     Args:
@@ -60,9 +73,9 @@ def make_issue(file: str, line: int, code: str, message: str) -> SimpleNamespace
         message: Description.
 
     Returns:
-        SimpleNamespace with file, line, code, and message.
+        A BaseIssue subclass instance with file, line, code, and message.
     """
-    return SimpleNamespace(file=file, line=line, code=code, message=message)
+    return _ReportIssue(file=file, line=line, code=code, message=message)
 
 
 def test_run_dir_creation(temp_output_dir: str) -> None:
@@ -182,7 +195,7 @@ def test_write_reports_from_results_with_none_code(temp_output_dir: str) -> None
         temp_output_dir: Temporary directory fixture for test output.
     """
     om = OutputManager(base_dir=temp_output_dir)
-    issues = [SimpleNamespace(file="bar.py", line=5, code=None, message="Some warning")]
+    issues = [_ReportIssue(file="bar.py", line=5, code=None, message="Some warning")]
     results = [make_tool_result("tool1", 1, issues)]
     om.write_reports_from_results(results)  # type: ignore[arg-type]
     md = (om.get_run_dir() / "report.md").read_text()

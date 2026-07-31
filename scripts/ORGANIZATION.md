@@ -37,7 +37,10 @@ pipelines.
 **Examples**:
 
 - `ci-post-pr-comment.sh` - Post comments to PRs via GitHub API
-- `maintenance/delete-ci-ghcr-tags.sh` - Delete ephemeral CI GHCR tags after docker-ci
+- `maintenance/delete-ci-ghcr-tags.sh` - Manually delete a specific ephemeral CI GHCR
+  tag
+- `maintenance/sweep-ci-ghcr-tags.sh` - Age-based weekly sweep of ephemeral `ci-*` GHCR
+  tags
 
 ### `scripts/local/` - Local Development Scripts
 

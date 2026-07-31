@@ -203,6 +203,113 @@ def test_get_cwd_empty_paths_returns_none(fake_tool_plugin: FakeToolPlugin) -> N
     assert_that(result).is_none()
 
 
+def test_get_execution_cwd_anchors_to_project_root_regardless_of_scope(
+    tmp_path: Path,
+) -> None:
+    """The anchor is the files' project root, identical across input scopes.
+
+    Regression for #1616: walking up from a single file's directory or from the
+    whole-repo common ancestor reaches the same project marker, so the path a
+    tool sees for a file is stable across file/directory/``.`` invocations.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    from lintro.plugins.file_discovery import get_execution_cwd
+
+    (tmp_path / ".git").mkdir()  # project marker at the root
+    nested = tmp_path / "src" / "gen"
+    nested.mkdir(parents=True)
+    target = nested / "foo.ts"
+    target.write_text("const x = 1;\n")
+
+    # Same discovered file, whether reached as a single file or among many.
+    single = get_execution_cwd([str(target)])
+    among_many = get_execution_cwd([str(target), str(tmp_path / "other.ts")])
+
+    assert_that(Path(single).resolve()).is_equal_to(tmp_path.resolve())
+    assert_that(Path(among_many).resolve()).is_equal_to(tmp_path.resolve())
+
+
+def test_get_execution_cwd_anchors_to_nearest_nested_project_marker(
+    tmp_path: Path,
+) -> None:
+    """A file in a nested project anchors to that project, not the outer repo.
+
+    The nearest marker wins so a tool's own config discovery (e.g. tsconfig for
+    a monorepo package) resolves against the project the file belongs to. A file
+    scanned together with siblings from the same package therefore shares that
+    package's anchor.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    from lintro.plugins.file_discovery import get_execution_cwd
+
+    (tmp_path / ".git").mkdir()  # outer repo root
+    pkg = tmp_path / "packages" / "a"
+    (pkg / "src").mkdir(parents=True)
+    (pkg / "package.json").write_text("{}\n")  # nested project marker
+    file_one = pkg / "src" / "foo.ts"
+    file_one.write_text("const x = 1;\n")
+    file_two = pkg / "src" / "bar.ts"
+    file_two.write_text("const y = 2;\n")
+
+    single = get_execution_cwd([str(file_one)])
+    both = get_execution_cwd([str(file_one), str(file_two)])
+
+    assert_that(Path(single).resolve()).is_equal_to(pkg.resolve())
+    assert_that(Path(both).resolve()).is_equal_to(pkg.resolve())
+
+
+def test_get_execution_cwd_falls_back_to_common_ancestor_without_marker(
+    tmp_path: Path,
+) -> None:
+    """Without a project marker, the anchor is the files' common ancestor.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    from lintro.plugins.file_discovery import get_execution_cwd
+
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    target = nested / "foo.ts"
+    target.write_text("const x = 1;\n")
+
+    result = get_execution_cwd([str(target)])
+
+    assert_that(Path(result).resolve()).is_equal_to(nested.resolve())
+
+
+def test_get_execution_cwd_bounds_marker_search_depth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project marker beyond the depth bound is ignored (falls back).
+
+    Guards against anchoring to a distant unrelated marker, e.g. a
+    dotfile-managed ``~/.git`` far above a marker-less working directory.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.plugins.file_discovery as fd
+
+    monkeypatch.setattr(fd, "_PROJECT_ROOT_SEARCH_MAX_DEPTH", 2)
+    (tmp_path / ".git").mkdir()  # marker far above the files
+    deep = tmp_path / "a" / "b" / "c" / "d"
+    deep.mkdir(parents=True)
+    target = deep / "foo.ts"
+    target.write_text("const x = 1;\n")
+
+    result = fd.get_execution_cwd([str(target)])
+
+    # .git is 4 levels up but the search stops after 2 -> fall back to common.
+    assert_that(Path(result).resolve()).is_equal_to(deep.resolve())
+
+
 # =============================================================================
 # BaseToolPlugin._prepare_execution Tests
 # =============================================================================
@@ -304,6 +411,58 @@ def test_prepare_execution_successful_returns_context_with_files(
         assert_that(ctx.should_skip).is_false()
         assert_that(ctx.files).is_length(1)
         assert_that(ctx.files).is_equal_to([str(test_file)])
+
+
+def test_prepare_execution_cwd_and_rel_files_are_scope_independent(
+    fake_tool_plugin: FakeToolPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cwd and rel_files must not depend on the input path scope.
+
+    Regression for #1616: the tool subprocess is anchored to the project root
+    (process cwd), so the path a tool sees for a given file — and thus config
+    ``overrides`` keyed on it — is identical whether the user passed a file, a
+    directory, or ``.``. Previously the cwd was the commonpath/dirname of the
+    discovered files, which varied by scope.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / ".git").mkdir()  # project marker at the root
+    nested = tmp_path / "src" / "gen"
+    nested.mkdir(parents=True)
+    target = nested / "foo.ts"
+    target.write_text("const x = 1;\n")
+    monkeypatch.chdir(tmp_path)
+
+    contexts = []
+    for scope in (["."], ["src/gen"], ["src/gen/foo.ts"]):
+        with (
+            patch(
+                "lintro.plugins.execution_preparation.verify_tool_version",
+                return_value=None,
+            ),
+            patch(
+                "lintro.plugins.execution_preparation.discover_files",
+                return_value=[str(target)],
+            ),
+        ):
+            contexts.append(fake_tool_plugin._prepare_execution(scope, {}))
+
+    cwds = {ctx.cwd for ctx in contexts}
+    rel_file_sets = {tuple(ctx.rel_files) for ctx in contexts}
+
+    # Identical across all three invocation scopes.
+    assert_that(cwds).is_length(1)
+    assert_that(rel_file_sets).is_length(1)
+    # Anchored to the project root, with the full relative path preserved.
+    cwd0 = contexts[0].cwd
+    assert_that(cwd0).is_not_none()
+    assert_that(Path(str(cwd0)).resolve()).is_equal_to(tmp_path.resolve())
+    assert_that(contexts[0].rel_files).is_equal_to(["src/gen/foo.ts"])
 
 
 # =============================================================================

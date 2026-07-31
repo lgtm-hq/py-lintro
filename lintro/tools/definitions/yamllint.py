@@ -488,6 +488,7 @@ class YamllintPlugin(BaseToolPlugin):
             output=combined_output,
             issues_count=results["total_issues"],
             issues=results["all_issues"],
+            timed_out=results["timeout_count"] > 0,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

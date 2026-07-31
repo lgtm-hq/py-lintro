@@ -3,8 +3,9 @@
 import click
 
 from lintro.api import core as api
+from lintro.api.pipeline import run_lint_with_ai
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -117,6 +118,11 @@ DEFAULT_ACTION: str = "fmt"
         "would be fixed and 1 when fixes are available (useful for CI checks)."
     ),
 )
+@click.option(
+    "--no-art",
+    is_flag=True,
+    help="Suppress the decorative ASCII art printed after the run.",
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -136,11 +142,14 @@ def format_command(
     auto_install: bool,
     yes: bool,
     dry_run: bool,
+    no_art: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
     Runs code formatting tools on the specified paths to automatically fix style issues.
     Uses simplified Loguru-based logging for clean output and proper file logging.
+
+    \u000c
 
     Args:
         ctx: click.Context: Click context object for command execution.
@@ -164,12 +173,15 @@ def format_command(
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
+        no_art: bool: Suppress the decorative ASCII art printed after the run.
     """
+    validate_diff_base_ref(diff_base=diff_base)
+
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
-    # Run with simplified approach
-    exit_code: int = run_lint_tools_simple(
+    # Run the AI-aware pipeline: execute, AI-enhance, render.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=normalized_paths,
         tools=tools,
@@ -188,6 +200,7 @@ def format_command(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        no_art=no_art,
     )
 
     # Exit with code from tool execution.

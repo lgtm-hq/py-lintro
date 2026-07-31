@@ -17,20 +17,22 @@ concurrency:
 jobs:
   sbom:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
     with:
       target: .
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       egress-policy: block
       egress-preset: sbom
     permissions:
-      # write: reusable-sbom v0.52.3 requests contents: write (release SBOM
-      # asset upload); a lower caller grant is a parse-time startup_failure
-      contents: write
+      # read: SBOM generation, vuln scan and attestation only read the repo.
+      # The contents:write release-asset upload moved out to
+      # reusable-sbom-release-upload.yml upstream (lgtm-ci#770), so every job
+      # in reusable-sbom.yml now declares contents: read.
+      contents: read
       security-events: write
       id-token: write
       attestations: write

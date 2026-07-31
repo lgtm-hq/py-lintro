@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: AI - CLI Contract Tests
+
+# Catch agent-CLI drift before it reaches a user's review (issue #1614, epic
+# #1609). lintro's `--transport cli` providers shell out to `claude`, `codex` and
+# Cursor's `agent`, all of which move their flag surfaces independently of lintro.
+# When @anthropic-ai/claude-code 2.1.218 removed `--json-schema-name`, every CLI
+# review broke and CI never noticed (#1611) — this workflow is what would have.
+#
+# Two tiers, split by cost:
+#
+#   Tier 1 (every PR + push + weekly) — flag surface. Runs `--version` and
+#     `--help` only, so it needs no credential and spends no quota. Free enough to
+#     be a required check.
+#   Tier 2 (weekly + manual) — real invocation. Walks presence -> liveness ->
+#     invoke per provider and spends quota, so it stays off the PR hot path.
+#
+# NO PATH FILTER, deliberately. A path-filtered required check never reports on
+# the PRs it filters out, and those PRs then hang forever in the merge queue
+# waiting for a check that will never arrive (#1196). Tier 1 pulls one image and
+# runs three help probes, which is cheap enough to run unconditionally so this can
+# safely be made required.
+#
+# Both tiers run inside the digest-pinned lintro-ai-tools image resolved from the
+# root Dockerfile's `aitools` stage, so they verify exactly the CLI versions the
+# released `ai` variant ships — and there is only ever one pin site to bump.
+
+'on':
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly (Monday 05:17 UTC), after the ai-tools image rebuild at 03:47 so the
+    # scheduled run exercises the freshly published CLIs.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ai-contract-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  tier1-flag-surface:
+    name: 🧾 AI CLI Flag Surface (Tier 1)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout the contract suite and the image pin
+      packages: read # pull the pinned lintro-ai-tools image from GHCR
+    # Pull + uv sync + three help probes; 15 fails a stalled run fast.
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve pinned lintro-ai-tools image
+        id: image
+        # Single pin site: the digest lives in the root Dockerfile's `aitools`
+        # stage and is Renovate-managed there. Copying it here would drift.
+        run: |
+          echo "ref=$(python3 scripts/ci/ai_tools_image_pin.py)" >>"$GITHUB_OUTPUT"
+
+      - name: Run tier-1 contract tests
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+          TIER: '1'
+        run: scripts/ci/run-ai-contract-tests.sh
+
+  tier2-invocation-smoke:
+    name: 🔥 AI CLI Invocation Smoke (Tier 2)
+    # Scheduled and manual only: this tier spends provider quota.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # Gated on the free tier: there is no point spending quota to discover a
+    # problem `--help` already proved.
+    needs: [tier1-flag-surface]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout the contract suite and the image pin
+      packages: read # pull the pinned lintro-ai-tools image from GHCR
+    timeout-minutes: 25
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            api.anthropic.com:443
+            api.openai.com:443
+            api.cursor.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve pinned lintro-ai-tools image
+        id: image
+        run: |
+          echo "ref=$(python3 scripts/ci/ai_tools_image_pin.py)" >>"$GITHUB_OUTPUT"
+
+      - name: Run tier-2 invocation smoke
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+          TIER: '2'
+          # Credentials are forwarded, never defaulted: an unset secret must
+          # reach the suite as unset so it reports a visible skip naming the
+          # missing link, rather than a pass.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: scripts/ci/run-ai-contract-tests.sh

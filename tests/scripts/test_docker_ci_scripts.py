@@ -19,11 +19,19 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/detect-fork-pr.sh",
         "scripts/ci/free-disk-space.sh",
         "scripts/ci/fail-on-security-audit.sh",
+        "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/evaluate-code-quality-gate.sh",
+        "scripts/ci/assert-required-check.sh",
+        "scripts/ci/is-infra-flake-failure.sh",
         "scripts/ci/promote-ci-docker-images.sh",
         "scripts/ci/cosign-sign-images.sh",
         "scripts/ci/testing/pull-ci-docker-images.sh",
         "scripts/ci/testing/load-ci-docker-images.sh",
+        "scripts/ci/testing/pull-lintro-image.sh",
+        "scripts/ci/testing/resolve-lintro-image.sh",
         "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        "scripts/ci/validate-docker-backfill-inputs.sh",
         "scripts/docker/save-ci-images-tarball.sh",
         "scripts/docker/run-docker-test-suite.sh",
         "scripts/docker/smoke-test-base-image.sh",
@@ -238,6 +246,178 @@ def test_promote_ci_docker_images_fails_on_digest_mismatch(
     assert_that(result.stderr).contains("Digest mismatch after promotion")
 
 
+def test_promote_ci_docker_images_retries_transient_promote_error(
+    tmp_path: Path,
+) -> None:
+    """A transient CDN error during the retag is retried and then succeeds."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    # inspect always resolves the digest; the first two `create` calls flake
+    # with the exact registry-CDN signature from run 30097353380, the third
+    # succeeds. The verify inspects then confirm the promoted digest matches.
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *" create "* ]]; then\n'
+            '  n="$(grep -c " create " "$DOCKER_LOG")"\n'
+            "  if (( n < 3 )); then\n"
+            '    echo "ERROR: httpReadSeeker: failed open: read tcp'
+            " 10.1.1.153->185.199.108.154:443: read: connection reset by"
+            ' peer" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).contains("Transient registry error")
+    # Two flakes + one success == three create attempts.
+    create_calls = docker_log.read_text().count("imagetools create")
+    assert_that(create_calls).is_equal_to(3)
+
+
+def test_promote_ci_docker_images_retries_transient_inspect_error(
+    tmp_path: Path,
+) -> None:
+    """A transient error during the source digest resolve is retried too.
+
+    The retry wraps every registry call, not just the retag — the source
+    digest `inspect` must recover from a transient blip as well.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    # The first inspect (source digest resolve) flakes once, then every
+    # inspect resolves the digest and create succeeds.
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  n="$(grep -c " inspect " "$DOCKER_LOG")"\n'
+            "  if (( n == 1 )); then\n"
+            '    echo "ERROR: httpReadSeeker: failed open: read: connection'
+            ' reset by peer" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).contains("Transient registry error")
+
+
+def test_promote_ci_docker_images_rejects_non_numeric_attempts(
+    tmp_path: Path,
+) -> None:
+    """A non-numeric PROMOTE_MAX_ATTEMPTS fails fast before any registry call."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    _write_stub(bin_dir, "docker", 'echo "$*" >> "$DOCKER_LOG"\nexit 0')
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "PROMOTE_MAX_ATTEMPTS": "not-a-number",
+            "DOCKER_LOG": str(docker_log),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("PROMOTE_MAX_ATTEMPTS must be")
+    assert_that(docker_log.exists()).is_false()
+
+
+def test_promote_ci_docker_images_does_not_retry_fatal_error(
+    tmp_path: Path,
+) -> None:
+    """A genuine denied/auth error fails on the first attempt (no retry)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *" create "* ]]; then\n'
+            '  echo "denied: requested access to the resource is denied"'
+            " >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stderr).does_not_contain("Transient registry error")
+    create_calls = docker_log.read_text().count("imagetools create")
+    assert_that(create_calls).is_equal_to(1)
+
+
 def test_cosign_sign_images_requires_images() -> None:
     """cosign-sign-images.sh should fail when IMAGES is missing."""
     script_path = (_REPO_ROOT / "scripts/ci/cosign-sign-images.sh").resolve()
@@ -384,3 +564,728 @@ def test_delete_ci_ghcr_tags_recheck_catches_new_tags(
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("tags changed since snapshot")
     assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_requires_token() -> None:
+    """sweep-ci-ghcr-tags.sh should fail when GH_TOKEN is missing."""
+    script_path = (
+        _REPO_ROOT / "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ).resolve()
+    result = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ.copy(),
+            "GH_TOKEN": "",
+        },  # nosec B105 - empty token for required-env validation
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("GH_TOKEN is required")
+
+
+def test_sweep_ci_ghcr_tags_validates_min_age_days() -> None:
+    """sweep-ci-ghcr-tags.sh should reject a non-integer MIN_AGE_DAYS."""
+    script_path = (
+        _REPO_ROOT / "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ).resolve()
+    result = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ.copy(),
+            "GH_TOKEN": "x",  # nosec B105 - placeholder token for arg validation
+            "MIN_AGE_DAYS": "notanumber",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("MIN_AGE_DAYS must be")
+
+
+def _run_sweep_validation(
+    tmp_path: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run the GHCR sweep with a no-op ``gh`` stub so no network call happens.
+
+    The stub prints nothing, so any invocation that reaches the sweep body
+    finds no candidate versions and exits 0. Only input validation is
+    exercised.
+
+    Sweep-specific variables the caller does not set are blanked rather than
+    inherited, so an ambient ``MIN_AGE_DAYS``/``TAG_PREFIX`` in the developer
+    or CI environment cannot mask the script's own defaults.
+
+    Args:
+        tmp_path: Pytest temporary directory for the PATH shim.
+        env: Extra environment variables for the script.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed process.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir, "gh", "exit 0")
+    scrubbed = {
+        name: ""
+        for name in (
+            "MIN_AGE_DAYS",
+            "TAG_PREFIX",
+            "ALLOW_SHORT_RETENTION",
+            "DRY_RUN",
+            "VOLATILE_TAG_PREFIXES",
+        )
+        if name not in env
+    }
+    return _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token, gh is stubbed
+            "PACKAGES": "py-lintro",
+            **scrubbed,
+            **env,
+        },
+    )
+
+
+@pytest.mark.parametrize("min_age_days", ["0", "1", "90"])
+def test_sweep_ci_ghcr_tags_rejects_short_retention(
+    tmp_path: Path,
+    min_age_days: str,
+) -> None:
+    """MIN_AGE_DAYS below the 91d rerun window must be rejected (#1138).
+
+    90 pins the boundary so a regressed floor cannot pass unnoticed.
+    """
+    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": min_age_days})
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("below the 91d")
+    assert_that(result.stderr).contains("rerun-retention window")
+    assert_that(result.stderr).contains("ALLOW_SHORT_RETENTION=true")
+
+
+def test_sweep_ci_ghcr_tags_short_retention_override(tmp_path: Path) -> None:
+    """ALLOW_SHORT_RETENTION=true permits a sub-floor MIN_AGE_DAYS, loudly."""
+    result = _run_sweep_validation(
+        tmp_path,
+        {"MIN_AGE_DAYS": "0", "ALLOW_SHORT_RETENTION": "true"},
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 0d")
+    # The bypass must never be silent: an inherited value has to be visible.
+    assert_that(result.stderr).contains("::warning::ALLOW_SHORT_RETENTION=true")
+    assert_that(result.stderr).contains("waives the 91d guard")
+
+
+def test_sweep_ci_ghcr_tags_accepts_floor_value(tmp_path: Path) -> None:
+    """MIN_AGE_DAYS equal to the 91d floor must pass validation."""
+    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": "91"})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 91d")
+
+
+def test_sweep_ci_ghcr_tags_default_min_age_is_the_floor(tmp_path: Path) -> None:
+    """With MIN_AGE_DAYS unset the script must default to the 91d floor."""
+    result = _run_sweep_validation(tmp_path, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 91d")
+
+
+@pytest.mark.parametrize(
+    "tag_prefix",
+    [
+        'ci-" or true or "',
+        "ci-$(id)",
+        "ci-*",
+        "ci with space",
+    ],
+)
+def test_sweep_ci_ghcr_tags_rejects_unsafe_tag_prefix(
+    tmp_path: Path,
+    tag_prefix: str,
+) -> None:
+    """TAG_PREFIX is interpolated into jq, so unsafe characters must fail."""
+    result = _run_sweep_validation(tmp_path, {"TAG_PREFIX": tag_prefix})
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("TAG_PREFIX must match")
+
+
+@pytest.mark.parametrize("tag_prefix", ["ci-", "ci", "ci.1_0-x"])
+def test_sweep_ci_ghcr_tags_accepts_safe_tag_prefix(
+    tmp_path: Path,
+    tag_prefix: str,
+) -> None:
+    """A TAG_PREFIX within the allowed character class must pass validation."""
+    result = _run_sweep_validation(tmp_path, {"TAG_PREFIX": tag_prefix})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains(f"Sweeping {tag_prefix}* tags")
+
+
+def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
+    tmp_path: Path,
+) -> None:
+    """Sweep should delete CI-only versions after dual pre-delete rechecks."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            # Match /versions/<id> (not the list endpoint .../versions).
+            'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
+            '  vid="${BASH_REMATCH[1]}"\n'
+            '  case "$vid" in\n'
+            "  201) printf '%s\\t%s\\n' '2026-01-01T00:00:00Z' 'ci-1 ci-2' ;;\n"
+            "  202) printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old' ;;\n"
+            '  *) echo "unexpected version $vid" >&2; exit 99 ;;\n'
+            "  esac\n"
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            # id\\tupdated_at\\ttags (jq filtering is stubbed).
+            "GH_VERSIONS_TSV": (
+                "201\t2026-01-01T00:00:00Z\tci-1 ci-2\n"
+                "202\t2026-01-02T00:00:00Z\tci-old"
+            ),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stdout).contains("not sole-tagged")
+    assert_that(result.stdout).does_not_contain("Deleted py-lintro version 201")
+    log = gh_log.read_text()
+    assert_that(log).contains("versions/202")
+    # Two rechecks per deleted (sole-tag) version before DELETE.
+    assert_that(log.count("versions/202")).is_greater_than_or_equal_to(2)
+    assert_that(log).does_not_contain(
+        "--method DELETE orgs/lgtm-hq/packages/container/py-lintro/versions/201",
+    )
+
+
+def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
+    tmp_path: Path,
+) -> None:
+    """A persistent tag attached between list and delete must abort delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_STATE"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            # Promotion attached main between snapshot and delete.
+            "GH_VERSION_STATE": "2026-01-02T00:00:00Z\tci-old main",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("tags changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_recheck_aborts_on_updated_at_change(
+    tmp_path: Path,
+) -> None:
+    """An updated_at change between list and delete must abort delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_STATE"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            "GH_VERSION_STATE": "2026-01-03T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("updated_at changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_fails_on_query_error(
+    tmp_path: Path,
+) -> None:
+    """Package version query failures must fail the sweep job."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(
+        bin_dir,
+        "gh",
+        ('echo "boom" >&2\n' "exit 1\n"),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to query versions")
+
+
+def test_sweep_ci_ghcr_tags_recheck_404_is_benign(
+    tmp_path: Path,
+) -> None:
+    """A 404 on pre-delete recheck means the version is already gone."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "gh: Not Found (HTTP 404)" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("already deleted")
+    assert_that(result.stderr).does_not_contain("Failed to re-check")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_recheck_hard_error_fails(
+    tmp_path: Path,
+) -> None:
+    """Non-404 recheck failures must fail closed (auth/network/rate-limit)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'if [[ "$*" == *"/versions/"* && "$*" != *"DELETE"* ]]; then\n'
+            '  echo "API rate limit exceeded" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to re-check")
+
+
+def test_sweep_ci_ghcr_tags_recheck_aborts_on_second_ci_tag(
+    tmp_path: Path,
+) -> None:
+    """A second ci-* tag attached between list and delete must abort delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
+            '  echo "$GH_VERSION_STATE"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            # Concurrent build attached another ci-* tag.
+            "GH_VERSION_STATE": "2026-01-02T00:00:00Z\tci-old ci-new",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("no longer sole-tagged")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
+    tmp_path: Path,
+) -> None:
+    """DRY_RUN=true should log candidates without calling DELETE."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        ('echo "$*" >> "$GH_LOG"\n' 'printf "%s\\n" "$GH_VERSIONS_TSV"'),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "DRY_RUN": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("[dry-run] Would delete")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+    # A dry run deletes nothing, so it must not pay for a baseline listing.
+    assert_that(gh_log.read_text()).does_not_contain(_PERSISTENT_QUERY_MARKER)
+
+
+# The persistent-tag listing is the only gh call whose jq program binds the tag
+# to ``$tag``; the candidate query filters with ``all(startswith(...))``.
+_PERSISTENT_QUERY_MARKER = ". as $tag"
+
+_SWEEP_VERIFY_GH_STUB = (
+    'echo "$*" >> "$GH_LOG"\n'
+    'if [[ "$*" == *"DELETE"* ]]; then\n'
+    "  exit 0\n"
+    "fi\n"
+    f'if [[ "$*" == *"{_PERSISTENT_QUERY_MARKER}"* ]]; then\n'
+    "  n=0\n"
+    '  if [[ -f "$GH_PERSISTENT_COUNT" ]]; then\n'
+    '    n="$(cat "$GH_PERSISTENT_COUNT")"\n'
+    "  fi\n"
+    "  n=$((n + 1))\n"
+    '  echo "$n" > "$GH_PERSISTENT_COUNT"\n'
+    '  case " ${GH_PERSISTENT_FAIL} " in\n'
+    '  *" ${n} "*)\n'
+    '    echo "API rate limit exceeded" >&2\n'
+    "    exit 1\n"
+    "    ;;\n"
+    "  esac\n"
+    '  var="GH_PERSISTENT_${n}"\n'
+    '  if [[ -n "${!var:-}" ]]; then\n'
+    '    printf "%s\\n" "${!var}"\n'
+    "  else\n"
+    '    printf "%s\\n" "$GH_PERSISTENT_DEFAULT"\n'
+    "  fi\n"
+    "  exit 0\n"
+    "fi\n"
+    'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
+    "  printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old'\n"
+    "  exit 0\n"
+    "fi\n"
+    'printf "%s\\n" "$GH_VERSIONS_TSV"'
+)
+
+
+def _run_sweep_with_persistent_tags(
+    tmp_path: Path,
+    gh_log: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run the sweep against a ``gh`` stub that scripts the persistent listings.
+
+    The stub answers the persistent-tag listing from ``GH_PERSISTENT_<n>``
+    (1-based call order, falling back to ``GH_PERSISTENT_DEFAULT``) so a test
+    can make a tag vanish, come back, or make a read fail outright.
+
+    Args:
+        tmp_path: Pytest temporary directory for the PATH shim.
+        gh_log: File the stub appends every ``gh`` invocation to.
+        env: Extra environment variables, typically ``GH_PERSISTENT_*``.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed process.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir, "gh", _SWEEP_VERIFY_GH_STUB)
+
+    return _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            "GH_PERSISTENT_COUNT": str(tmp_path / "persistent.count"),
+            "GH_PERSISTENT_DEFAULT": "latest\n0.9.9",
+            "GH_PERSISTENT_FAIL": "",
+            **env,
+        },
+    )
+
+
+def test_sweep_ci_ghcr_tags_verifies_persistent_tags_after_delete(
+    tmp_path: Path,
+) -> None:
+    """A clean sweep still re-reads the persistent tags and stays green (#1652)."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    # Baseline before the delete, one confirmation after it.
+    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(2)
+
+
+def test_sweep_ci_ghcr_tags_alerts_when_a_persistent_tag_disappears(
+    tmp_path: Path,
+) -> None:
+    """A release tag lost to the recheck/DELETE race must fail the job (#1652).
+
+    This is the residual TOCTOU the sole-tag rule and dual recheck cannot
+    close: GHCR has no conditional delete, so a promotion landing in the
+    window takes its tag down with the CI version.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            # Baseline sees the release tag; both post-delete reads do not.
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_3": "latest",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stderr).contains("Persistent tags disappeared from py-lintro")
+    assert_that(result.stderr).contains("0.9.9")
+    assert_that(result.stderr).contains("202")
+
+
+def test_sweep_ci_ghcr_tags_tolerates_a_transient_listing_gap(
+    tmp_path: Path,
+) -> None:
+    """A tag missing from one read only is not reported (#1652).
+
+    A paginated listing on a busy registry can momentarily under-report, and a
+    false "we deleted a release tag" alarm is worse than no alarm at all.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_3": "latest\n0.9.9",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(3)
+
+
+def test_sweep_ci_ghcr_tags_skips_deletes_when_the_baseline_fails(
+    tmp_path: Path,
+) -> None:
+    """Without a baseline the verification is blind, so nothing is deleted."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {"GH_PERSISTENT_FAIL": "1"},
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to snapshot persistent tags")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_fails_when_verification_cannot_read(
+    tmp_path: Path,
+) -> None:
+    """An unreadable post-delete listing fails closed without claiming a loss."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {"GH_PERSISTENT_FAIL": "2"},
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Could not verify persistent tags")
+    # Never accuse the sweep of a deletion it did not observe.
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+
+
+def test_sweep_ci_ghcr_tags_fails_when_the_confirmation_read_cannot_run(
+    tmp_path: Path,
+) -> None:
+    """A failed confirmation read must not be treated as proof of loss."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_FAIL": "3",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Could not confirm persistent tags")
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+
+
+def test_sweep_ci_ghcr_tags_baseline_excludes_volatile_prefixes(
+    tmp_path: Path,
+) -> None:
+    """The baseline must ignore tag families a sibling sweep may delete (#1652).
+
+    ghcr-cleanup.yml runs the ci-* and sha-* sweeps as parallel jobs. Without
+    the exclusion the sha-* sweep would report the ci-* sweep's legitimate
+    deletions as lost release tags — exactly the false alarm to avoid.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    listing = gh_log.read_text()
+    assert_that(listing).contains('"ci-"')
+    assert_that(listing).contains('"sha-"')
+
+
+def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
+    tmp_path: Path,
+) -> None:
+    """VOLATILE_TAG_PREFIXES is interpolated into jq, so it must be validated."""
+    result = _run_sweep_validation(
+        tmp_path,
+        {"VOLATILE_TAG_PREFIXES": 'ci-" or true or "'},
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("VOLATILE_TAG_PREFIXES entries must match")

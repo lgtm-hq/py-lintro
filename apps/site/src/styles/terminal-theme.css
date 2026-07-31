@@ -3,7 +3,7 @@
 [data-theme='terminal'] {
   --turbo-bg-base: #0d0d0d;
   --turbo-bg-surface: #080808;
-  --turbo-bg-overlay: #111111;
+  --turbo-bg-overlay: #111;
   --turbo-text-primary: #e8ffe8;
   --turbo-text-secondary: #8fbc8f;
   --turbo-text-inverse: #0d0d0d;
@@ -12,7 +12,7 @@
   --turbo-state-info: #7dd3fc;
   --turbo-state-success: #39ff14;
   --turbo-state-warning: #ffb000;
-  --turbo-state-danger: #ff4444;
+  --turbo-state-danger: #f44;
   --turbo-border-default: #2a4a2a;
   --turbo-heading-h1: #e8ffe8;
   --turbo-heading-h2: #e8ffe8;
@@ -38,11 +38,11 @@
   --turbo-syntax-variable: #e8ffe8;
   --turbo-syntax-operator: #6b9e6b;
   --turbo-syntax-punctuation: #6b9e6b;
-  --turbo-syntax-tag: #ff4444;
+  --turbo-syntax-tag: #f44;
   --turbo-syntax-attribute: #7dd3fc;
   --turbo-syntax-value: #c8ffc8;
-  --turbo-syntax-error: #ff4444;
-  --turbo-syntax-deleted: #ff4444;
+  --turbo-syntax-error: #f44;
+  --turbo-syntax-deleted: #f44;
   --turbo-syntax-inserted: #39ff14;
   --turbo-table-border: #2a4a2a;
   --turbo-table-stripe: #0a0a0a;
@@ -54,7 +54,7 @@
   --turbo-card-header-bg: #0d0d0d;
   --turbo-card-footer-bg: #080808;
   --turbo-message-bg: #080808;
-  --turbo-message-header-bg: #111111;
+  --turbo-message-header-bg: #111;
   --turbo-message-border: #2a4a2a;
   --turbo-message-body-fg: #c8ffc8;
   --turbo-panel-bg: #080808;
@@ -63,7 +63,7 @@
   --turbo-panel-border: #2a4a2a;
   --turbo-dropdown-bg: #080808;
   --turbo-dropdown-border: #2a4a2a;
-  --turbo-dropdown-item-hover: #111111;
+  --turbo-dropdown-item-hover: #111;
   --gradient-primary: linear-gradient(135deg, #39ff14 0%, #2acc10 100%);
   --shadow-md: none;
   --shadow-lg: none;

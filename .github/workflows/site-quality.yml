@@ -25,8 +25,13 @@ name: Quality - Documentation Site
 permissions:
   contents: read
 
+# Same self-cancellation hazard as #1673: on push, github.ref is
+# `refs/heads/main` for every commit, so consecutive merges would cancel each
+# other's site build. Key pushes on the unique github.sha; other events keep
+# github.ref so a force-push still supersedes that PR's in-flight run.
 concurrency:
-  group: site-quality-${{ github.ref }}
+  group: >-
+    site-quality-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -54,18 +59,18 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
         with:
           python-version: '3.12'
           install-dependencies: false
 
       - name: Setup Node and Bun
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
         with:
           node-version: '24'
           working-directory: apps/site
@@ -80,11 +85,11 @@ jobs:
         run: ./scripts/ci/site/build.sh
 
       - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: 31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+          ref: d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -148,18 +153,18 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
         with:
           python-version: '3.12'
           install-dependencies: false
 
       - name: Setup Node and Bun
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
         with:
           node-version: '24'
           working-directory: apps/site

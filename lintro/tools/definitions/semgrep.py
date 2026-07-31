@@ -309,6 +309,7 @@ class SemgrepPlugin(BaseToolPlugin):
                 success=False,
                 output=timeout_msg,
                 issues_count=0,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             logger.error(f"Failed to run Semgrep: {e}")

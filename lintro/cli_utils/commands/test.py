@@ -5,7 +5,7 @@ from typing import Any, cast
 import click
 
 from lintro.api import core as api
-from lintro.utils.tool_executor import run_lint_tools_simple
+from lintro.api.pipeline import run_lint_with_ai
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -165,6 +165,8 @@ def test_command(
 
     This CLI command wraps pytest with lintro's output formatting.
 
+    \u000c
+
     Args:
         paths: Paths to test files or directories.
         exclude: Pattern to exclude paths.
@@ -251,8 +253,8 @@ def test_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    # Run with pytest tool
-    exit_code: int = run_lint_tools_simple(
+    # Run with pytest tool. AI never applies to the test action.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=path_list,
         tools="pytest",
@@ -266,6 +268,7 @@ def test_command(
         output_file=output,
         debug=debug,
         yes=yes,
+        ai_enabled=False,
     )
 
     # Exit with code only

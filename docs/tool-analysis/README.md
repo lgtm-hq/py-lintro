@@ -37,7 +37,7 @@ implementations with the core tools themselves.
 **Fast Rust-based JavaScript/TypeScript Linter and Formatter**
 
 - ✅ **Preserved**: Linting, formatting, auto-fix, native config discovery, JSON output
-- ⚠️ **Limited**: Plugin control, stdin piping, type-aware linting
+- ⚠️ **Limited**: Plugin control, stdin piping
 - 🚀 **Enhanced**: Normalized issues, unified API, much faster than traditional tools
 
 ### [Yamllint Analysis](./yamllint-analysis.md)
@@ -107,6 +107,16 @@ implementations with the core tools themselves.
 - ✅ **Preserved**: Test discovery/execution, JSON/JUnit/plain outputs, config respect
 - ⚠️ **Limited**: No impact analysis or mutation testing; plugin install not managed
 - 🚀 **Enhanced**: Coverage helpers, parallel presets, plugin/marker/fixture listings
+
+### [Idiom Review Analysis](./idiom-review-analysis.md)
+
+### AI-Powered Idiomatic Code Reviewer (built-in plugin)
+
+- ✅ **Preserved**: Native `ToolDefinition` plugin, shared AI provider abstraction,
+  content-hash caching, cost controls
+- ⚠️ **Limitations**: No auto-fix, non-deterministic, API cost per uncached file
+- 🚀 **Notes**: No external binary; participates in `--diff` scoping; graceful skip on
+  provider unavailability
 
 ## Analysis Framework
 

@@ -266,7 +266,8 @@ def test_verify_tool_version_fails_returns_skip_result(
     with patch("lintro.tools.core.version_requirements.check_tool_version") as mock:
         mock.return_value = MagicMock(
             version_check_passed=False,
-            error_message="Version too old",
+            current_version="0.9.0",
+            error_message="Version 0.9.0 is below minimum requirement 1.0.0",
             min_version="1.0.0",
             install_hint="pip install tool",
         )
@@ -276,4 +277,56 @@ def test_verify_tool_version_fails_returns_skip_result(
         assert_that(result).is_not_none()
         assert_that(result).is_instance_of(ToolResult)
         # result is verified non-None by assertpy above
+        assert_that(result.output).contains("Skipping")  # type: ignore[union-attr]
+
+
+def test_verify_tool_version_below_min_allowed_via_env(
+    fake_tool_plugin: FakeToolPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Below-minimum binaries proceed when listed in LINTRO_ALLOW_VERSION_LAG.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_ALLOW_VERSION_LAG", fake_tool_plugin.definition.name)
+    with patch("lintro.tools.core.version_requirements.check_tool_version") as mock:
+        mock.return_value = MagicMock(
+            version_check_passed=False,
+            current_version="0.9.0",
+            error_message="Version 0.9.0 is below minimum requirement 1.0.0",
+            min_version="1.0.0",
+            install_hint="pip install tool",
+            below_recommended=False,
+        )
+
+        result = fake_tool_plugin._verify_tool_version()
+
+        assert_that(result).is_none()
+
+
+def test_verify_tool_version_missing_binary_not_allowed_via_env(
+    fake_tool_plugin: FakeToolPlugin,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing binaries still skip even when the tool is version-lag allowlisted.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_ALLOW_VERSION_LAG", fake_tool_plugin.definition.name)
+    with patch("lintro.tools.core.version_requirements.check_tool_version") as mock:
+        mock.return_value = MagicMock(
+            version_check_passed=False,
+            current_version=None,
+            error_message="Tool not found",
+            min_version="1.0.0",
+            install_hint="pip install tool",
+        )
+
+        result = fake_tool_plugin._verify_tool_version()
+
+        assert_that(result).is_not_none()
         assert_that(result.output).contains("Skipping")  # type: ignore[union-attr]

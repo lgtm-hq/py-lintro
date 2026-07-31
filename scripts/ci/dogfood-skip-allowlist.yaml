@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+#
+# Dogfood no-silent-skip allowlist (issue #1510, epic #1508).
+#
+# scripts/ci/check-dogfood-skips.py fails CI when an enabled tool reports
+# `skipped: true` in `lintro chk --output-format json` output for a reason not
+# covered here. Every skip is classified into one of:
+#
+#   binary_missing  - tool binary absent / version check failed. An IMAGE BUG.
+#                     Never permanently allowlistable; may only be tolerated as
+#                     a tracked `interim` entry (which emits a loud warning).
+#   no_config       - no resolvable config in the repo, so the tool self-skips.
+#   opt_in_disabled - an opt-in tool is disabled by default.
+#   other           - unrecognised skip reason.
+#
+# Two sections:
+#   allowlist  Permanent, intentional skips. Only `no_config` /
+#              `opt_in_disabled` are permitted here.
+#   interim    Temporary tolerations pending remediation. Each MUST carry a
+#              tracking `issue` and is reported as a WARNING. Delete the entry
+#              once the issue closes and the tool runs for real.
+#
+# Fields (per entry): tool, reason_class, rationale, and (interim only) issue.
+---
+allowlist:
+  - tool: idiom-review
+    reason_class: opt_in_disabled
+    rationale: >-
+      idiom-review is an opt-in AI reviewer. CI has no AI provider/API key, so
+      it stays disabled by design rather than being a regression.
+
+interim:
+  # TODO(1491): add a root stylelint config so the site CSS is linted for real
+  # instead of hitting the "no configuration found" skip path.
+  - tool: stylelint
+    reason_class: no_config
+    issue: 1491
+    rationale: >-
+      TODO(1491): repo has no stylelint config, so stylelint self-skips and
+      apps/site CSS is unlinted. Remove once a root .stylelintrc lands.
+
+  # TODO(1492): add a root .vale.ini so repo docs are prose-linted for real.
+  - tool: vale
+    reason_class: no_config
+    issue: 1492
+    rationale: >-
+      TODO(1492): repo has no root .vale.ini (the only one is under
+      test_samples/, which is ignored), so vale self-skips. Remove once a root
+      .vale.ini lands.
+
+  # TODO(1493): wire commitlint config, or document the PR-title check as the
+  # canonical gate, so commitlint stops silently self-skipping.
+  - tool: commitlint
+    reason_class: no_config
+    issue: 1493
+    rationale: >-
+      TODO(1493): repo ships no commitlint config, so the plugin self-skips.
+      Remove once the config is added or the PR-title check is documented as
+      canonical.
+
+  # TODO(1505): pip-audit was absent from the pinned tools image, so it skipped
+  # on a failed version check (a missing binary / image bug). Interim toleration
+  # keeps the gate green until the image bump + Dockerfile verification land; a
+  # missing binary is otherwise never allowlistable.
+  - tool: pip_audit
+    reason_class: binary_missing
+    issue: 1505
+    rationale: >-
+      TODO(1505): pip-audit missing from the pinned tools image (silent SKIP).
+      Interim only — remove once the tools-image bump and the Dockerfile
+      `pip-audit --version` verification land so it can never regress silently.
+
+  # TODO(1510): decide whether the repository should run raw tsc in dogfood CI
+  # or keep delegating site TypeScript checks to astro-check/vue-tsc.
+  - tool: tsc
+    reason_class: other
+    issue: 1510
+    rationale: >-
+      TODO(1510): tsc currently self-skips because repository TypeScript
+      coverage is delegated to astro-check/vue-tsc. Interim only — remove once
+      dogfood CI either runs tsc directly or disables it explicitly.

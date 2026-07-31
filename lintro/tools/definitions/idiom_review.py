@@ -9,8 +9,9 @@ detected by a syntax-matching linter. Two modes are offered:
 * **duplication** (Mode 2) — flag the same utility logic reimplemented
   across files, invisible to any per-file linter.
 
-The tool ships disabled by default (``DEFAULT_ENABLED = False``): it is a
-no-op unless the user opts in via ``tools.idiom-review`` config or
+The tool ships disabled by default via the ``enabled: False`` option in
+``default_options``: ``check()`` returns a skipped result immediately unless
+the caller opts in via ``tools.idiom-review`` config or
 ``--tool-options idiom-review:enabled=true``. When no AI provider is
 available (missing SDK, key, or credits) it degrades gracefully to a
 skipped result rather than failing the run.
@@ -18,17 +19,19 @@ skipped result rather than failing the run.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import ClassVar, cast
+from typing import cast
 
 from loguru import logger
 
 from lintro.ai.availability import is_ai_available
 from lintro.ai.budget import CostBudget
-from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.exceptions import AIError
+from lintro.ai.interface import resolve_ai_config
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.providers import get_provider
+from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
@@ -69,9 +72,6 @@ def _confidence_rank(value: str) -> int:
 @dataclass
 class IdiomReviewPlugin(BaseToolPlugin):
     """AI idiom-review plugin (idiomatic-miss + cross-file duplication)."""
-
-    #: Ships disabled: only runs when explicitly opted in.
-    DEFAULT_ENABLED: ClassVar[bool] = False
 
     @property
     def definition(self) -> ToolDefinition:
@@ -179,7 +179,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
             ToolResult with the aggregated, confidence-filtered findings.
         """
         lintro_config = self._get_lintro_config()
-        ai_config = lintro_config.ai
+        ai_config = resolve_ai_config(lintro_config)
         provider = get_provider(ai_config)
         budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
@@ -236,27 +236,18 @@ class IdiomReviewPlugin(BaseToolPlugin):
             IdiomReviewMode.BOTH.value,
         )
 
-        scoped = files[:max_files]
-        issues: list[IdiomReviewIssue] = []
-        signatures: list[Signature] = []
-
-        for file_path in scoped:
-            source = self._read_source(file_path)
-            if source is None:
-                continue
-            if run_per_file:
-                issues.extend(
-                    engine.review_file(
-                        file_path=file_path,
-                        source=source,
-                        language=language,
-                    ),
-                )
-            if run_dupe:
-                signatures.extend(extract_python_signatures(file_path, source))
-
-        if run_dupe:
-            issues.extend(engine.review_duplication(signatures))
+        # The engine is async end to end; this tool runs inside the
+        # synchronous plugin protocol, so ``asyncio.run`` is entered once
+        # here for the whole review rather than per provider call.
+        issues = asyncio.run(
+            self._collect_issues(
+                engine=engine,
+                scoped=files[:max_files],
+                run_per_file=run_per_file,
+                run_dupe=run_dupe,
+                language=language,
+            ),
+        )
 
         min_rank = _confidence_rank(min_conf)
         filtered = [i for i in issues if _confidence_rank(i.confidence) >= min_rank]
@@ -268,6 +259,50 @@ class IdiomReviewPlugin(BaseToolPlugin):
             issues_count=len(filtered),
             issues=filtered,
         )
+
+    async def _collect_issues(
+        self,
+        *,
+        engine: IdiomReviewEngine,
+        scoped: list[str],
+        run_per_file: bool,
+        run_dupe: bool,
+        language: str,
+    ) -> list[IdiomReviewIssue]:
+        """Drive the async engine over the scoped files.
+
+        Args:
+            engine: Configured idiom-review engine.
+            scoped: Absolute paths of files to review.
+            run_per_file: Whether to run the per-file review mode.
+            run_dupe: Whether to run the cross-file duplication mode.
+            language: Target language for the per-file prompts.
+
+        Returns:
+            All issues reported across the requested modes.
+        """
+        issues: list[IdiomReviewIssue] = []
+        signatures: list[Signature] = []
+
+        for file_path in scoped:
+            source = self._read_source(file_path)
+            if source is None:
+                continue
+            if run_per_file:
+                issues.extend(
+                    await engine.review_file(
+                        file_path=file_path,
+                        source=source,
+                        language=language,
+                    ),
+                )
+            if run_dupe:
+                signatures.extend(extract_python_signatures(file_path, source))
+
+        if run_dupe:
+            issues.extend(await engine.review_duplication(signatures))
+
+        return issues
 
     @staticmethod
     def _read_source(file_path: str) -> str | None:

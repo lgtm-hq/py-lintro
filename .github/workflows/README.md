@@ -2,9 +2,10 @@
 
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
-[lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`31c25ef2e8992960e218524780e34f44f51271b5` (**v0.54.0**). All workflow SHA pins include
-trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
+[lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at a single
+canonical commit — read the current value off any `uses:` line rather than from here,
+since a copy in prose only ever drifts (#1771). All SHA pins include trailing `# vX.Y.Z`
+comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
 [org Renovate preset](https://github.com/lgtm-hq/.github/pull/12)
@@ -16,8 +17,9 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
   `reusable-test-python.yml`
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
-  CI-built image), integration tests, security audit, GHCR publish (main), CI tag
-  cleanup. PRs without global-lint-impact changes lint only their changed files
+  CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral
+  `ci-<run_id>` tags are retained for partial reruns (#1138) and reclaimed by the weekly
+  GHCR sweep. PRs without global-lint-impact changes lint only their changed files
   (`dogfooding-lint-changed`, same image/tool set); merge queue, pushes, and
   global-impact PRs keep the full-repo run (#1361)
 - **dogfood-nightly.yml** — Nightly full-repo dogfooding lint on `main`
@@ -61,9 +63,21 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
 ## Security & maintenance
 
 - **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
-  (`py-lintro`, `py-lintro-base`)
+  (`py-lintro`, `py-lintro-base`) plus age-based sweep of ephemeral `ci-*` tags
+  (`sweep-ci-ghcr-tags.sh`, #1138)
 - **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
   `reusable-vuln-suppression-check.yml`
+- **dependency-vuln-gate.yml** — Pre-merge mirror of the release SBOM vulnerability gate
+  (#1667): same lgtm-ci syft/grype actions, same pin, same `fail-on: high` as
+  `publish-pypi-on-tag.yml`'s `sbom` job, so a dependency change that would break the
+  tagged publish fails on the PR instead. The release gate is `syft scan dir:.` over the
+  whole repo, so the scan steps are gated (inside the job) on **every** language
+  manifest that graph is cataloged from — Python (`pyproject.toml` / `uv.lock` /
+  `requirements*.txt`), JavaScript (`package.json` / lockfiles incl. `bun.lock`), Rust
+  (`Cargo.toml` / `Cargo.lock`) and Go (`go.mod` / `go.sum`) at any depth — a pure
+  allow-list, not just the Python lock, or the pre-merge gate would be looser than the
+  release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
+  always reports and is safe to require
 - **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
   `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,

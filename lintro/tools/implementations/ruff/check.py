@@ -87,6 +87,7 @@ def execute_ruff_check(
         return ToolResult(
             name=tool.definition.name,
             success=timeout_result.success,
+            timed_out=timeout_result.timed_out,
             output=timeout_result.output,
             issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
@@ -131,6 +132,7 @@ def execute_ruff_check(
             return ToolResult(
                 name=tool.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=timeout_result.output,
                 issues_count=lint_issues_count + timeout_result.issues_count,
                 issues=lint_issues + timeout_result.issues,

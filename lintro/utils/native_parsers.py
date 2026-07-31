@@ -261,3 +261,9 @@ def _load_native_tool_config(tool_name: str) -> dict[str, Any]:
         return {}
 
     return {}
+
+
+# Public alias for cross-module use. Prefer this name over the underscore-prefixed
+# ``_load_native_tool_config`` when importing from other modules; the private name
+# is retained for backward compatibility with existing internal callers and tests.
+load_native_tool_config = _load_native_tool_config

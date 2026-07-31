@@ -52,6 +52,24 @@ else
 	echo -e "${GREEN}✓ Using existing Docker image${NC}"
 fi
 
+# When BASE_REF is set (PR CI) and the caller has not already supplied an
+# allowlist, tolerate baked-tool version lag the same way the manifest-vs-image
+# gate does (--allow-version-lag / #1582). Without this, plugins skip older
+# image binaries after a Renovate min-version bump and integration assertions
+# that require findings (e.g. trufflehog secrets) fail with issues_count == 0.
+if [[ -z "${LINTRO_ALLOW_VERSION_LAG:-}" && -n "${BASE_REF:-}" ]]; then
+	repo_root="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+	LINTRO_ALLOW_VERSION_LAG="$(
+		cd "$repo_root" &&
+			EMIT=version-changed BASE_REF="$BASE_REF" \
+				scripts/ci/compute-new-manifest-tools.sh
+	)"
+	export LINTRO_ALLOW_VERSION_LAG
+	if [[ -n "$LINTRO_ALLOW_VERSION_LAG" ]]; then
+		echo -e "${YELLOW}Allowing version lag for: ${LINTRO_ALLOW_VERSION_LAG}${NC}"
+	fi
+fi
+
 # Run the integration tests in Docker using run-tests.sh
 echo -e "${BLUE}Running integration tests in Docker...${NC}"
 echo -e "${YELLOW}All tools are pre-installed in the Docker environment${NC}"

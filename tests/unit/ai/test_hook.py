@@ -21,7 +21,9 @@ from tests.unit.ai.conftest import MockIssue
 
 def test_should_run_returns_true_for_check_when_enabled():
     """Verify should_run returns True for CHECK action when AI is enabled."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config)
 
     result = hook.should_run(Action.CHECK)
@@ -31,7 +33,9 @@ def test_should_run_returns_true_for_check_when_enabled():
 
 def test_should_run_returns_true_for_fix_when_enabled():
     """Verify should_run returns True for FIX action when AI is enabled."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config)
 
     result = hook.should_run(Action.FIX)
@@ -41,7 +45,9 @@ def test_should_run_returns_true_for_fix_when_enabled():
 
 def test_should_run_returns_false_for_test_action():
     """Verify should_run returns False for TEST action even when AI is enabled."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config)
 
     result = hook.should_run(Action.TEST)
@@ -51,7 +57,7 @@ def test_should_run_returns_false_for_test_action():
 
 def test_should_run_returns_false_when_disabled():
     """Verify should_run returns False when AI is disabled."""
-    config = LintroConfig(ai=AIConfig(enabled=False))
+    config = LintroConfig(ai=AIConfig(enabled=False).model_dump())
     hook = AIPostExecutionHook(config)
 
     result = hook.should_run(Action.CHECK)
@@ -62,7 +68,12 @@ def test_should_run_returns_false_when_disabled():
 def test_should_run_true_when_lint_enabled():
     """Lint summarization runs when ai.lint is enabled."""
     config = LintroConfig(
-        ai=AIConfig(enabled=True, lint=True, review=False, transport=AITransport.API),
+        ai=AIConfig(
+            enabled=True,
+            lint=True,
+            review=False,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     hook = AIPostExecutionHook(config)
 
@@ -72,7 +83,12 @@ def test_should_run_true_when_lint_enabled():
 def test_should_run_false_when_only_review_enabled():
     """Review-only config does not trigger the lint-summary hook."""
     config = LintroConfig(
-        ai=AIConfig(enabled=True, lint=False, review=True, transport=AITransport.API),
+        ai=AIConfig(
+            enabled=True,
+            lint=False,
+            review=True,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     hook = AIPostExecutionHook(config)
 
@@ -88,7 +104,9 @@ def test_should_run_false_when_only_review_enabled():
 @patch("lintro.ai.orchestrator.run_ai_enhancement")
 def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
     """Verify execute delegates to run_ai_enhancement with correct arguments."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config, ai_fix=True)
     console_logger = MagicMock()
     results = [
@@ -118,6 +136,7 @@ def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
         action=Action.CHECK,
         all_results=results,
         lintro_config=config,
+        ai_config=AIConfig.from_mapping(config.ai),
         logger=console_logger,
         output_format="json",
         ai_fix=True,
@@ -129,7 +148,9 @@ def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
 def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
     """Exceptions don't propagate; warning is logged."""
     mock_run_ai_enhancement.side_effect = RuntimeError("provider exploded")
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config)
     console_logger = MagicMock()
     results = [
@@ -162,7 +183,9 @@ def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
 
 def test_execute_handles_import_failure():
     """Verify graceful handling when the lazy import of run_ai_enhancement fails."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     hook = AIPostExecutionHook(config)
     console_logger = MagicMock()
     results = [

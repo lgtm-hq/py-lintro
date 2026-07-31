@@ -1,8 +1,11 @@
 """Tests for config_loader module."""
 
+from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.config.config_loader import (
     _convert_pyproject_to_config,
@@ -15,6 +18,7 @@ from lintro.config.config_loader import (
     get_default_config,
     load_config,
 )
+from lintro.plugins import discovery
 
 
 def test_empty_data() -> None:
@@ -265,3 +269,156 @@ def test_returns_sensible_defaults() -> None:
     # target_python is None to let tools infer from requires-python
     assert_that(config.enforce.target_python).is_none()
     assert_that(config.execution.tool_order).is_equal_to("priority")
+
+
+def _fake_plugin_names(
+    monkeypatch: pytest.MonkeyPatch,
+    *names: str,
+) -> None:
+    """Pretend the given tool names are advertised by installed plugins.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        *names: Entry-point tool names to advertise.
+    """
+    monkeypatch.setattr(
+        discovery,
+        "_advertised_plugin_tool_names",
+        lambda: frozenset(names),
+    )
+
+
+def _capture_warnings(callback: Callable[[], object]) -> str:
+    """Run a callback and return the WARNING-level loguru output it emitted.
+
+    Args:
+        callback: Zero-argument callable to invoke while capturing. Any return
+            value is discarded.
+
+    Returns:
+        str: Concatenated warning records emitted during the call.
+    """
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        callback()
+    finally:
+        logger.remove(handler_id)
+    return "".join(messages)
+
+
+def test_plugin_tool_section_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A top-level section for an installed plugin tool must survive (#1757).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _fake_plugin_names(monkeypatch, "my-plugin")
+
+    result = _convert_pyproject_to_config({"my_plugin": {"enabled": False}})
+
+    assert_that(result["tools"]).contains_key("my-plugin")
+    assert_that(result["tools"]["my-plugin"]).is_equal_to({"enabled": False})
+
+
+def test_nested_plugin_tool_section_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A nested ``[tool.lintro.tool.<plugin>]`` section must survive (#1757).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _fake_plugin_names(monkeypatch, "my-plugin")
+
+    result = _convert_pyproject_to_config(
+        {"tool": {"my_plugin": {"enabled": False}}},
+    )
+
+    assert_that(result["tools"]).contains_key("my-plugin")
+    assert_that(result["tools"]["my-plugin"]).is_equal_to({"enabled": False})
+
+
+def test_unknown_plugin_tool_section_is_still_dropped() -> None:
+    """A section for a tool nobody advertises is not silently promoted."""
+    result = _convert_pyproject_to_config({"my_plugin": {"enabled": False}})
+
+    assert_that(result["tools"]).does_not_contain_key("my-plugin")
+    assert_that(result["tools"]).does_not_contain_key("my_plugin")
+
+
+def test_unknown_key_warns() -> None:
+    """An unrecognized top-level key warns instead of vanishing."""
+    output = _capture_warnings(
+        lambda: _convert_pyproject_to_config({"totally_bogus_key": 1}),
+    )
+
+    assert_that(output).contains("totally_bogus_key")
+    assert_that(output).contains("Ignoring unrecognized")
+
+
+def test_unknown_nested_tool_key_warns() -> None:
+    """An unrecognized nested tool name warns instead of vanishing."""
+    output = _capture_warnings(
+        lambda: _convert_pyproject_to_config({"tool": {"nope": {"enabled": False}}}),
+    )
+
+    assert_that(output).contains("tool.nope")
+
+
+def test_known_keys_do_not_warn() -> None:
+    """Recognized tools, sections and externally parsed tables stay quiet."""
+    output = _capture_warnings(
+        lambda: _convert_pyproject_to_config(
+            {
+                "ruff": {"enabled": True},
+                "line_length": 88,
+                "tool_order": "priority",
+                "post_checks": {},
+                "versions": {},
+                "module_size": {},
+                "plugins": {"enabled": True},
+            },
+        ),
+    )
+
+    assert_that(output).is_empty()
+
+
+def test_externally_parsed_keys_do_not_warn() -> None:
+    """Documented keys parsed by other loaders must not trip the warning.
+
+    ``licenses`` is read by ``lintro.config.licenses_config`` and the ordering
+    keys by ``lintro.utils.config.get_tool_order_config``; none of them reach
+    this converter, so warning about them would cry wolf on valid config.
+    """
+    output = _capture_warnings(
+        lambda: _convert_pyproject_to_config(
+            {
+                "licenses": {"allow": ["MIT"]},
+                "tool_order": "custom",
+                "tool_order_custom": ["ruff", "black"],
+                "tool_priorities": {"ruff": 5},
+            },
+        ),
+    )
+
+    assert_that(output).is_empty()
+
+
+def test_plugin_cannot_shadow_reserved_config_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An entry point named like a config key must not hijack that key.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _fake_plugin_names(monkeypatch, "fail-fast", "line-length")
+
+    result = _convert_pyproject_to_config({"fail_fast": True, "line_length": 100})
+
+    assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["enforce"]["line_length"]).is_equal_to(100)
+    assert_that(result["tools"]).is_empty()

@@ -202,6 +202,7 @@ class ShfmtPlugin(BaseToolPlugin):
                 output="",
                 issues=[],
                 skipped=True,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             return FileProcessingResult(
@@ -247,6 +248,7 @@ class ShfmtPlugin(BaseToolPlugin):
                     output="",
                     issues=[],
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=0,
                 fixed_count=0,
@@ -315,6 +317,7 @@ class ShfmtPlugin(BaseToolPlugin):
                     output="",
                     issues=check_issues,
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=len(check_issues),
                 fixed_count=0,
@@ -382,6 +385,7 @@ class ShfmtPlugin(BaseToolPlugin):
             success=result.all_success and result.total_issues == 0,
             output=result.build_output(timeout=ctx.timeout),
             issues_count=result.total_issues,
+            timed_out=result.timed_out,
             issues=result.all_issues,
         )
 
@@ -484,4 +488,5 @@ class ShfmtPlugin(BaseToolPlugin):
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
             initial_issues=all_initial_issues if all_initial_issues else None,
+            timed_out=result.timed_out,
         )

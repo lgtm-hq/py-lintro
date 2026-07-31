@@ -46,7 +46,9 @@ def test_check_with_timeout(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
-    assert_that(result.issues_count).is_equal_to(1)
+    # A timeout is an execution failure, not a lint finding (#1768).
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_fix_with_timeout_on_initial_check(
@@ -79,8 +81,10 @@ def test_fix_with_timeout_on_initial_check(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
-    # Timeout is counted as an execution failure (consistent with clippy)
-    assert_that(result.issues_count).is_equal_to(1)
+    # A timeout is an execution failure, not a lint finding, so it never
+    # inflates the issue counts (consistent with every other tool, #1768).
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_fix_with_timeout_on_fix_command(

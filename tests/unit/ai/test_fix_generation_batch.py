@@ -21,7 +21,7 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 # ---------------------------------------------------------------------------
 
 
-def test_batch_prompt_for_multi_issue_file(tmp_path):
+async def test_batch_prompt_for_multi_issue_file(tmp_path):
     """Multiple issues in one file should trigger a batch prompt."""
     source = tmp_path / "multi.py"
     source.write_text("x = 1\ny = 2\nz = 3\n")
@@ -72,7 +72,7 @@ def test_batch_prompt_for_multi_issue_file(tmp_path):
     )
     provider = MockAIProvider(responses=[batch_response])
 
-    result = generate_fixes(
+    result = await generate_fixes(
         issues,
         provider,
         tool_name="ruff",
@@ -92,7 +92,7 @@ def test_batch_prompt_for_multi_issue_file(tmp_path):
     assert_that(result[0].tool_name).is_equal_to("ruff")
 
 
-def test_batch_fallback_to_single_on_parse_failure(tmp_path):
+async def test_batch_fallback_to_single_on_parse_failure(tmp_path):
     """Failed batch parse falls back to single-issue mode."""
     source = tmp_path / "multi.py"
     source.write_text("x = 1\ny = 2\n")
@@ -155,7 +155,7 @@ def test_batch_fallback_to_single_on_parse_failure(tmp_path):
     ]
     provider = MockAIProvider(responses=responses)
 
-    result = generate_fixes(
+    result = await generate_fixes(
         issues,
         provider,
         tool_name="ruff",

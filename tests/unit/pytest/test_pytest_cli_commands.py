@@ -13,7 +13,7 @@ from lintro.cli_utils.commands.test import test_command as pytest_cli_command
 def test_test_command_collect_only() -> None:
     """Test test command with --collect-only flag."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(pytest_cli_command, ["--collect-only"])
         call_args = mock_run.call_args
@@ -25,7 +25,7 @@ def test_test_command_collect_only() -> None:
 def test_test_command_fixtures() -> None:
     """Test test command with --fixtures flag."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(pytest_cli_command, ["--fixtures"])
         call_args = mock_run.call_args
@@ -37,7 +37,7 @@ def test_test_command_fixtures() -> None:
 def test_test_command_fixture_info() -> None:
     """Test test command with --fixture-info flag."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(pytest_cli_command, ["--fixture-info", "sample_data"])
         call_args = mock_run.call_args
@@ -49,7 +49,7 @@ def test_test_command_fixture_info() -> None:
 def test_test_command_markers() -> None:
     """Test test command with --markers flag."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(pytest_cli_command, ["--markers"])
         call_args = mock_run.call_args
@@ -61,7 +61,7 @@ def test_test_command_markers() -> None:
 def test_test_command_parametrize_help() -> None:
     """Test test command with --parametrize-help flag."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(pytest_cli_command, ["--parametrize-help"])
         call_args = mock_run.call_args
@@ -73,7 +73,7 @@ def test_test_command_parametrize_help() -> None:
 def test_test_command_coverage_options() -> None:
     """Test test command with coverage report options."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,
@@ -94,7 +94,7 @@ def test_test_command_coverage_options() -> None:
 def test_test_command_multiple_new_flags() -> None:
     """Test test command with multiple new flags."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,
@@ -114,7 +114,7 @@ def test_test_command_multiple_new_flags() -> None:
 def test_test_command_tool_options_without_prefix() -> None:
     """Test test command with tool options without pytest: prefix."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,
@@ -129,7 +129,7 @@ def test_test_command_tool_options_without_prefix() -> None:
 def test_test_command_tool_options_with_prefix() -> None:
     """Test test command with tool options already prefixed."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,
@@ -143,7 +143,7 @@ def test_test_command_tool_options_with_prefix() -> None:
 def test_test_command_tool_options_mixed() -> None:
     """Test test command with mixed prefixed and unprefixed tool options."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,
@@ -158,7 +158,7 @@ def test_test_command_tool_options_mixed() -> None:
 def test_test_command_exit_code_success() -> None:
     """Test test command propagates success exit code."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         result = runner.invoke(pytest_cli_command, [])
         assert_that(result.exit_code).is_equal_to(0)
@@ -167,7 +167,7 @@ def test_test_command_exit_code_success() -> None:
 def test_test_command_exit_code_failure() -> None:
     """Test test command propagates failure exit code."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 1
         result = runner.invoke(pytest_cli_command, [])
         assert_that(result.exit_code).is_equal_to(1)
@@ -176,7 +176,7 @@ def test_test_command_exit_code_failure() -> None:
 def test_test_command_combined_options() -> None:
     """Test test command with multiple options combined."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
             pytest_cli_command,

@@ -18,7 +18,6 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.parsers.stylelint.stylelint_parser import parse_stylelint_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -173,6 +172,12 @@ class StylelintPlugin(BaseToolPlugin):
             timeout_val: The timeout value that was exceeded.
             cwd: Working directory for the tool result.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): the timeout is reported via
+        ``timed_out=True`` and ``success=False`` rather than as a synthetic
+        ``TIMEOUT`` pseudo-issue, so it never inflates the issue counts. Only
+        genuine issues detected before the timeout are reported.
+
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
         """
@@ -182,22 +187,14 @@ class StylelintPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options stylelint:timeout=N"
         )
-        timeout_issue = StylelintIssue(
-            file="execution",
-            line=1,
-            column=1,
-            code="TIMEOUT",
-            message=timeout_msg,
-            severity="error",
-            fixable=False,
-        )
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=1,
-            issues=[timeout_issue],
+            issues_count=0,
+            issues=[],
             cwd=cwd,
+            timed_out=True,
         )
 
     def doc_url(self, code: str) -> str | None:

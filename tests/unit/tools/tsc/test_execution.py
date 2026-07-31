@@ -120,7 +120,9 @@ def test_check_with_timeout(
             result = tsc_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.issues_count).is_greater_than(0)
+    # A timeout is an execution failure, not a lint finding (#1768).
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_check_with_no_typescript_files(

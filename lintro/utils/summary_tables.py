@@ -10,16 +10,34 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
-from lintro.utils.ai_metadata import get_ai_count
 from lintro.utils.console import (
     RE_CANNOT_AUTOFIX,
     RE_REMAINING_OR_CANNOT,
     get_summary_value,
     get_tool_emoji,
 )
+from lintro.utils.tool_metadata import get_ai_count
 
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
+
+# Note shown when a tool passed without inspecting a single file. A zero-file
+# run and a genuinely clean run are both ``PASS 0``; without this note they are
+# indistinguishable, which is how a fully excluded scan reads as green (#1678).
+NO_FILES_NOTE: str = "no files matched"
+# Fragments (any terminal period stripped before matching) that a framework
+# "nothing to do" message ends with. Covers every discovery outcome —
+# ``No <ext> found to check``, ``No files to format``, ``No .py/.pyi files
+# found`` — across check and fix. Deliberately excludes ``No issues found``
+# and ``No configuration found``, which mean the tool *did* run.
+_NO_FILES_SUFFIXES: tuple[str, ...] = (
+    " found to check",
+    " found to fix",
+    " files to check",
+    " files to fix",
+    " files to format",
+    " files found",
+)
 
 # ANSI color codes — only emit when stdout is a terminal
 _USE_COLOR = sys.stdout.isatty()
@@ -113,6 +131,21 @@ def _get_ai_unverified_count(result: object) -> int:
     return get_ai_count(result, "unverified_count")
 
 
+def _is_no_files_result(output: object) -> bool:
+    """Report whether a tool result means "no files were inspected".
+
+    Args:
+        output: The tool result ``output`` value.
+
+    Returns:
+        True when the output is one of the framework's no-files messages.
+    """
+    if not isinstance(output, str):
+        return False
+    text = output.strip().rstrip(".")
+    return text.startswith("No ") and text.endswith(_NO_FILES_SUFFIXES)
+
+
 def _is_result_skipped(result: object) -> tuple[bool, str]:
     """Check if a tool result represents a skipped tool.
 
@@ -145,18 +178,28 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
 
 
 def count_affected_files(tool_results: Sequence[object]) -> int:
-    """Count unique file paths with issues across all tool results.
+    """Count unique file paths affected across all tool results.
+
+    A file is "affected" when it had at least one issue that was either
+    fixed or still remains. In fix mode this unions the pre-fix
+    ``initial_issues`` with the post-fix ``issues`` so files that were fully
+    reformatted (and therefore have no remaining issues) are still counted;
+    previously only ``issues`` was consulted, so a file fixed clean reported
+    ``Affected Files 0``. In check mode ``initial_issues`` is absent and the
+    count falls back to ``issues``.
 
     Args:
         tool_results: Sequence of tool results to inspect.
 
     Returns:
-        Number of unique files that have at least one issue.
+        Number of unique files affected (fixed or remaining).
     """
     files: set[str] = set()
     for result in tool_results:
-        issues = getattr(result, "issues", None)
-        if issues:
+        for attr in ("initial_issues", "issues"):
+            issues = getattr(result, attr, None)
+            if not issues:
+                continue
             for issue in issues:
                 file_path = getattr(issue, "file", "")
                 if file_path:
@@ -391,11 +434,12 @@ def print_summary_table(
                 ai_verified_value = _get_ai_verified_count(result)
                 ai_verified_display: str = f"{_GREEN}{ai_verified_value}{_RESET}"
                 ai_unverified_value = _get_ai_unverified_count(result)
-                notes_display = (
-                    f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
-                    if ai_unverified_value > 0
-                    else ""
-                )
+                if ai_unverified_value > 0:
+                    notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
+                elif _is_no_files_result(result_output):
+                    notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
+                else:
+                    notes_display = ""
 
                 # Remaining issues display
                 if isinstance(remaining_count, str):
@@ -439,7 +483,11 @@ def print_summary_table(
                     or "tool execution failed" in result_output.lower()
                 )
 
-                notes_display = ""
+                notes_display = (
+                    f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
+                    if _is_no_files_result(result_output)
+                    else ""
+                )
 
                 # Check for framework deferral pattern in output
                 if (
@@ -450,10 +498,10 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
                 # Surface stale/expired suppression counts for security tools
-                ai_meta = getattr(result, "ai_metadata", None)
-                if not isinstance(ai_meta, dict):
-                    ai_meta = {}
-                suppressions = ai_meta.get("suppressions", [])
+                tool_meta = getattr(result, "metadata", None)
+                if not isinstance(tool_meta, dict):
+                    tool_meta = {}
+                suppressions = tool_meta.get("suppressions", [])
                 if suppressions:
                     stale = sum(
                         1

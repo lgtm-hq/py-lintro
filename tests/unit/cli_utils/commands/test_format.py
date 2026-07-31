@@ -42,12 +42,12 @@ def test_default_action_is_fmt() -> None:
 # =============================================================================
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_defaults_to_current_dir(mock_run: MagicMock) -> None:
     """format_command uses current directory when no paths given.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -61,12 +61,12 @@ def test_format_command_defaults_to_current_dir(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["action"]).is_equal_to("fmt")
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_paths(mock_run: MagicMock, tmp_path: Path) -> None:
     """format_command passes provided paths.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
         tmp_path: Temporary path fixture.
     """
     mock_run.return_value = 0
@@ -79,12 +79,12 @@ def test_format_command_with_paths(mock_run: MagicMock, tmp_path: Path) -> None:
     assert_that(call_kwargs["paths"]).contains(str(tmp_path))
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_tools_option(mock_run: MagicMock) -> None:
     """format_command passes tools option.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -96,12 +96,12 @@ def test_format_command_with_tools_option(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["tools"]).is_equal_to("ruff,black")
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_exclude(mock_run: MagicMock) -> None:
     """format_command passes exclude option.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -113,12 +113,12 @@ def test_format_command_with_exclude(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["exclude"]).is_equal_to("*.pyc")
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_include_venv(mock_run: MagicMock) -> None:
     """format_command passes include_venv flag.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -130,12 +130,12 @@ def test_format_command_with_include_venv(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["include_venv"]).is_true()
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_verbose(mock_run: MagicMock) -> None:
     """format_command passes verbose flag.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -147,12 +147,12 @@ def test_format_command_with_verbose(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["verbose"]).is_true()
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_with_output_format(mock_run: MagicMock) -> None:
     """format_command passes output_format option.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -164,12 +164,12 @@ def test_format_command_with_output_format(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["output_format"]).is_equal_to("json")
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_dry_run_flag_passed(mock_run: MagicMock) -> None:
     """format_command forwards --dry-run as dry_run=True.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -181,12 +181,12 @@ def test_format_command_dry_run_flag_passed(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["dry_run"]).is_true()
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_dry_run_defaults_false(mock_run: MagicMock) -> None:
     """format_command defaults dry_run to False when flag absent.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 0
     runner = CliRunner()
@@ -198,12 +198,12 @@ def test_format_command_dry_run_defaults_false(mock_run: MagicMock) -> None:
     assert_that(call_kwargs["dry_run"]).is_false()
 
 
-@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+@patch("lintro.cli_utils.commands.format.run_lint_with_ai")
 def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
     """format_command returns exit code from tool execution.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple.
+        mock_run: Mock for run_lint_with_ai.
     """
     mock_run.return_value = 1
     runner = CliRunner()
@@ -218,12 +218,12 @@ def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
 # =============================================================================
 
 
-@patch("lintro.api.core.run_lint_tools_simple")
+@patch("lintro.api.core.run_lint_with_ai")
 def test_format_code_invokes_command(mock_run: MagicMock) -> None:
     """format_code routes through the library API.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple used by the API.
+        mock_run: Mock for run_lint_with_ai used by the API.
     """
     mock_run.return_value = 0
 
@@ -232,12 +232,12 @@ def test_format_code_invokes_command(mock_run: MagicMock) -> None:
     mock_run.assert_called_once()
 
 
-@patch("lintro.api.core.run_lint_tools_simple")
+@patch("lintro.api.core.run_lint_with_ai")
 def test_format_code_raises_on_failure(mock_run: MagicMock) -> None:
     """format_code raises RuntimeError on non-zero exit.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple used by the API.
+        mock_run: Mock for run_lint_with_ai used by the API.
     """
     mock_run.return_value = 1
 
@@ -245,12 +245,12 @@ def test_format_code_raises_on_failure(mock_run: MagicMock) -> None:
         format_code(paths=["src/"])
 
 
-@patch("lintro.api.core.run_lint_tools_simple")
+@patch("lintro.api.core.run_lint_with_ai")
 def test_format_code_passes_options(mock_run: MagicMock) -> None:
     """format_code passes all options through to the API.
 
     Args:
-        mock_run: Mock for run_lint_tools_simple used by the API.
+        mock_run: Mock for run_lint_with_ai used by the API.
     """
     mock_run.return_value = 0
 

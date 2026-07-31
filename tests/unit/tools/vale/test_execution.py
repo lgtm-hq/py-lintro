@@ -29,7 +29,7 @@ def _write_md(tmp_path: Path) -> str:
     md = copy_sample(
         tmp_path,
         "tools",
-        "config",
+        "markdown",
         "vale",
         "vale_violations.md",
         dest_name="doc.md",

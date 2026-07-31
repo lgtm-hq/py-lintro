@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Build - Lintro AI Tools Image
+# Builds and publishes ghcr.io/lgtm-hq/lintro-ai-tools — the lintro-tools base
+# plus the agent CLIs lintro's `--transport cli` providers drive (claude,
+# codex, Cursor's agent) — via lgtm-ci reusable-docker. Once the first image is
+# published, the root Dockerfile gains an `ai` stage that consumes it through a
+# digest-pinned FROM; Renovate bumps the digest from then on (issue #1613).
+#
+# Triggers:
+#   - push (main) / pull_request touching the AI tools Dockerfile, its
+#     installer or its smoke test. PR runs validate only (no push). Not a
+#     required check, so on.<event>.paths filtering is safe here (see
+#     docker-ci.yml header for the required-check deadlock caveat).
+#   - weekly schedule with no-cache. The agent CLIs release close to daily;
+#     Renovate batches the version ARGs weekly and this rebuild also refreshes
+#     the OS layer for CVE patches instead of reusing stale cached layers.
+#   - workflow_dispatch with force_publish for maintainer-driven publishes
+#     from a branch (e.g. seeding the first image before the FROM pin lands).
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - 'docker/ai-tools.Dockerfile'
+      - '.github/workflows/docker-ai-tools-publish.yml'
+      - 'scripts/utils/install-ai-tools.sh'
+      - 'scripts/ci/smoke-test-ai-tools.sh'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'docker/ai-tools.Dockerfile'
+      - '.github/workflows/docker-ai-tools-publish.yml'
+      - 'scripts/utils/install-ai-tools.sh'
+      - 'scripts/ci/smoke-test-ai-tools.sh'
+  schedule:
+    # Weekly rebuild (Monday 03:47 UTC), staggered after the tools image so the
+    # two multi-arch builds do not contend for runners.
+    - cron: '47 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Publish from this branch (maintainer seeding/testing)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-ai-tools-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ai-tools-image:
+    name: 🤖 Lintro AI Tools Image
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
+    permissions:
+      contents: read
+      packages: write # push image, cache, and staging tags to GHCR
+      id-token: write # OIDC token for cosign keyless signing
+      attestations: write # publish SBOM + build provenance attestations
+      security-events: write # upload Trivy SARIF to code scanning
+    with:
+      file: docker/ai-tools.Dockerfile
+      image-name: lgtm-hq/lintro-ai-tools
+      # No app version: the image floats on latest/main/sha-* tags and
+      # consumers pin by digest (Renovate-managed FROM in the root Dockerfile).
+      tags: latest
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || (github.event_name == 'workflow_dispatch'
+        && inputs.force_publish == 'true')) }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Build-time RUN steps only exercise the architecture they ran on, so the
+      # smoke test re-runs every CLI per platform: that is what catches a
+      # broken per-platform npm resolution or a corrupt arch-specific Cursor
+      # tarball before the manifest merges. A script rather than the
+      # `smoke-test` shorthand because three commands are needed, not one.
+      smoke-test-script: scripts/ci/smoke-test-ai-tools.sh
+      validate-on-pr: true
+      cache-registry-ref: ghcr.io/lgtm-hq/lintro-ai-tools:cache
+      # Scheduled rebuilds must not reuse cached layers, otherwise the weekly
+      # CLI-freshness rebuild is a no-op cache hit.
+      no-cache: ${{ github.event_name == 'schedule' }}
+      provenance: true
+      sbom: true
+      cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
+      egress-policy: block
+      egress-preset: docker
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The sigstore
+      # hosts cover cosign keyless signing in the merge job; get.trivy.dev
+      # serves the Trivy binary and mirror.gcr.io is its DB fallback.
+      # nodejs.org serves the bundled Node.js tarball + SHASUMS256.txt, and
+      # downloads.cursor.com the pinned Cursor agent package.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        nodejs.org:443
+        downloads.cursor.com:443
+        registry.npmjs.org:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
+        get.trivy.dev:443
+        mirror.gcr.io:443

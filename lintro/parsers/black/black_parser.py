@@ -42,11 +42,15 @@ def _iter_issue_lines(lines: Iterable[str]) -> Iterable[str]:
         yield s
 
 
-def parse_black_output(output: str) -> list[BlackIssue]:
+def parse_black_output(output: str, *, applied: bool = False) -> list[BlackIssue]:
     """Parse Black CLI output into a list of ``BlackIssue`` objects.
 
     Args:
         output: Raw stdout+stderr from a Black invocation.
+        applied: When True, the parse is happening in an applied-changes
+            (fix) context, so preview-tense ``black --check`` phrasing
+            ("would reformat foo.py") is normalized to the past-tense
+            "Reformatted file" message. Defaults to False (check mode).
 
     Returns:
         list[BlackIssue]: Per-file issues indicating formatting diffs. If only
@@ -55,6 +59,8 @@ def parse_black_output(output: str) -> list[BlackIssue]:
     """
     if not output:
         return []
+
+    would_reformat_message = "Reformatted file" if applied else "Would reformat file"
 
     # Strip ANSI codes for consistent parsing across environments
     output = strip_ansi_codes(output)
@@ -68,7 +74,7 @@ def parse_black_output(output: str) -> list[BlackIssue]:
                     file_match = m.group("file")
                     if file_match:
                         issues.append(
-                            BlackIssue(file=file_match, message="Would reformat file"),
+                            BlackIssue(file=file_match, message=would_reformat_message),
                         )
                     continue
                 m = _REFORMATTED.match(line)
