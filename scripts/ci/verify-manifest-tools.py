@@ -16,6 +16,16 @@ _VERSION_RE = re.compile(r"\d+(?:\.\d+){1,3}")
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
+    """Run a version-probe command and return its exit code and output.
+
+    Args:
+        cmd: Argv of the probe command (run with ``shell=False``).
+
+    Returns:
+        tuple[int, str]: The exit code (or a synthetic code: 127 missing
+        binary, 126 permission denied, 125 OS error, 124 timeout) and the
+        combined stdout/stderr text captured before the command ended.
+    """
     try:
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             cmd,
@@ -134,6 +144,14 @@ def _iter_tools(
 # exit means the binary IS present but misbehaving, which stays a hard failure
 # even for an allow-missing tool.
 _MISSING_BINARY_EXIT = 127
+
+# Exit code returned by `_run` when the probe exceeded its timeout. Some tools
+# print their version immediately and then hang on blocked egress before
+# exiting (semgrep's telemetry / version check on network-restricted runners,
+# #1874). When the captured output already carries the expected version, the
+# probe answered the only question the gate asks, so it is treated as a PASS.
+# A timeout with no usable version output stays a hard failure.
+_TIMEOUT_EXIT = 124
 
 
 def _parse_allow_missing(values: list[str] | None) -> set[str]:
@@ -273,6 +291,7 @@ def main() -> int:
 
     failures: list[str] = []
     warnings: list[str] = []
+    notices: list[str] = []
     for tool in tools:
         name = str(tool.get("name", "")).strip()
         expected = str(tool.get("version", "")).strip()
@@ -286,6 +305,22 @@ def main() -> int:
             failures.append(f"{name}: invalid manifest entry ({exc})")
             continue
         code, output = _run(cmd)
+        if code == _TIMEOUT_EXIT:
+            # Exit-lag tolerance (#1874): the binary printed its version and
+            # then hung (blocked telemetry/version-check egress). If that
+            # captured output already matches the manifest, the probe proved
+            # what the gate needs; otherwise fall through to the hard failure.
+            timed_out_version = _parse_version(output, name)
+            if timed_out_version and _versions_match(
+                name,
+                expected,
+                timed_out_version,
+            ):
+                notices.append(
+                    f"{name}: version {timed_out_version} matched before the "
+                    f"probe timed out; treating the hung exit as a pass",
+                )
+                continue
         if code != 0:
             cmd_str = " ".join(cmd)
             # Tolerate ONLY a genuinely-absent binary (127) for a tool the PR
@@ -331,6 +366,12 @@ def main() -> int:
             failures.append(
                 f"{name}: version mismatch (expected {expected}, got {actual})",
             )
+
+    if notices:
+        # Informational only: the tool verified correctly, it just did not
+        # exit before the probe deadline.
+        for item in notices:
+            print(f"::notice::{item}")
 
     if warnings:
         # GitHub Actions annotation (::warning::) plus a human-readable block so

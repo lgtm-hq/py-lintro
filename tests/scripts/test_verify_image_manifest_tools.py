@@ -192,6 +192,24 @@ def test_runs_verifier_inside_image(
     assert_that(invocation).contains("--tiers tools")
 
 
+def test_semgrep_network_env_is_disabled(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """The container probe runs with semgrep telemetry/version checks off (#1874)."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(image_repo, bin_dir, args_log)
+
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    invocation = run_lines[0]
+    assert_that(invocation).contains("-e SEMGREP_SEND_METRICS=off")
+    assert_that(invocation).contains("-e SEMGREP_ENABLE_VERSION_CHECK=0")
+
+
 def test_tiers_override_passed_through(
     image_repo: Path,
     docker_stub: tuple[Path, Path],
