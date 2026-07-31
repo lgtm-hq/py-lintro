@@ -6,11 +6,14 @@ the appropriate AI provider based on configuration.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
+from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.transcript import maybe_start_transcript
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -25,11 +28,17 @@ DEFAULT_API_KEY_ENVS: dict[str, str] = {
 }
 
 
-def get_provider(config: AIConfig) -> BaseAIProvider:
+def get_provider(
+    config: AIConfig,
+    *,
+    workspace_root: Path | None = None,
+) -> BaseAIProvider:
     """Instantiate an AI provider from configuration.
 
     Args:
         config: AI configuration specifying provider, model, and API key.
+        workspace_root: Optional workspace root for transcript cache paths.
+            Defaults to the current working directory.
 
     Returns:
         BaseAIProvider: Configured provider instance.
@@ -68,6 +77,12 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             f"AI provider '{provider_enum.value}' is recognized but not "
             f"implemented. Implemented providers: {implemented}",
         )
+
+    maybe_start_transcript(
+        workspace_root=workspace_root or resolve_workspace_root(None),
+        config_enabled=config.transcript_logging,
+        retention=config.transcript_retention,
+    )
 
     provider_cls: type[BaseAIProvider]
     if provider_enum is AIProvider.ANTHROPIC:

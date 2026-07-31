@@ -126,7 +126,7 @@ class _FakeEngine:
 
 def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg: object())
+    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg, **_kwargs: object())
     monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _FakeEngine)
 
 
@@ -168,7 +168,7 @@ def test_engine_is_built_from_the_raw_ai_mapping(
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda cfg: cfg)
+    monkeypatch.setattr(plugin_module, "get_provider", lambda cfg, **_kwargs: cfg)
     monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RecordingEngine)
     monkeypatch.setattr(
         IdiomReviewPlugin,
@@ -212,7 +212,7 @@ def test_ai_error_degrades_gracefully(
 ) -> None:
     """Provider errors (e.g. depleted credits) skip instead of crashing."""
     monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg: object())
+    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg, **_kwargs: object())
 
     class _RaisingEngine(_FakeEngine):
         async def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:

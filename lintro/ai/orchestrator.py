@@ -130,7 +130,7 @@ async def run_ai_enhancement_async(
 
         ai_config = apply_transport_override(base_ai_config, transport)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
-        provider = get_provider(ai_config)
+        provider = get_provider(ai_config, workspace_root=workspace_root)
         is_json = output_format.lower() == OutputFormat.JSON
 
         # P5-4: Verbose — log provider, model, and workspace at info level

@@ -147,6 +147,7 @@ class _CursorCliTransport(CliTransport):
             install_hint="Install with: curl https://cursor.com/install -fsS | bash",
             api_key_env=DEFAULT_API_KEY_ENV,
             contract=cli_contract_for(AIProvider.CURSOR),
+            provider_name=AIProvider.CURSOR.value,
         )
         self._model = model
 

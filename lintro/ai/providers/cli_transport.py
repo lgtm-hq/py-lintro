@@ -47,6 +47,7 @@ from lintro.ai.providers.cli_contracts import (
     format_version,
     unadvertised_flags,
 )
+from lintro.ai.transcript import cli_transcript
 
 __all__ = ["CliTransport", "OptionalArg", "flag_named_in"]
 
@@ -157,6 +158,7 @@ class CliTransport(ABC):
         install_hint: str,
         api_key_env: str | None = None,
         contract: CliContract | None = None,
+        provider_name: str | None = None,
     ) -> None:
         """Initialize CLI transport metadata.
 
@@ -168,11 +170,14 @@ class CliTransport(ABC):
             contract: Declared flag surface and version floor for this binary.
                 When omitted, the capability guard is inert and every optional
                 flag is sent as-is.
+            provider_name: Provider id recorded in transcript events. Defaults
+                to a lowercased ``binary_name``.
         """
         self._binary_path = binary_path
         self._binary_name = binary_name
         self._install_hint = install_hint
         self._api_key_env = api_key_env
+        self._provider_name = provider_name or binary_name.lower()
         self._contract = contract
         self._capability_lock = threading.RLock()
         self._version: tuple[int, ...] | None = None
@@ -648,43 +653,56 @@ class CliTransport(ABC):
             f"timeout={timeout:.0f}s, cwd={cwd}",
         )
 
-        try:
-            process = await asyncio.create_subprocess_exec(  # nosec B603 - argv is an internally-built list; exec form takes no shell
-                *cmd,
-                stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=cwd,
-            )
-        except FileNotFoundError as exc:
-            raise AINotAvailableError(
-                f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
-            ) from exc
+        with cli_transcript(
+            provider=self._provider_name,
+            cmd=cmd,
+            cwd=cwd,
+            timeout=timeout,
+            stdin=input_text,
+        ) as record:
+            try:
+                process = await asyncio.create_subprocess_exec(  # nosec B603 - argv is an internally-built list; exec form takes no shell
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    cwd=cwd,
+                )
+            except FileNotFoundError as exc:
+                raise AINotAvailableError(
+                    f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
+                ) from exc
 
-        payload = input_text.encode() if input_text is not None else None
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(payload),
-                timeout=timeout,
-            )
-        except TimeoutError as exc:
-            await _terminate(process)
-            raise AIProviderError(
-                f"{self._binary_name} CLI timed out after {timeout:.0f}s",
-            ) from exc
-        except asyncio.CancelledError:
-            # A cancelled review (e.g. a sibling chunk failed) must not leave
-            # an agent CLI running against the repository.
-            await _terminate(process)
-            raise
+            payload = input_text.encode() if input_text is not None else None
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    process.communicate(payload),
+                    timeout=timeout,
+                )
+            except TimeoutError as exc:
+                await _terminate(process)
+                raise AIProviderError(
+                    f"{self._binary_name} CLI timed out after {timeout:.0f}s",
+                ) from exc
+            except asyncio.CancelledError:
+                # A cancelled review (e.g. a sibling chunk failed) must not
+                # leave an agent CLI running against the repository.
+                await _terminate(process)
+                raise
 
-        return subprocess.CompletedProcess(
-            args=list(cmd),
-            returncode=process.returncode if process.returncode is not None else 0,
-            stdout=_decode(stdout_bytes),
-            stderr=_decode(stderr_bytes),
-        )
+            result = subprocess.CompletedProcess(
+                args=list(cmd),
+                returncode=process.returncode if process.returncode is not None else 0,
+                stdout=_decode(stdout_bytes),
+                stderr=_decode(stderr_bytes),
+            )
+            record(
+                returncode=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+            return result
 
     def check_exit_code(
         self,

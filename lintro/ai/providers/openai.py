@@ -43,6 +43,7 @@ from lintro.ai.raw_response import (
     recover_prose_envelope,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 _has_openai = False
 try:
@@ -85,6 +86,7 @@ class _CodexCliTransport(CliTransport):
             install_hint="Install Codex CLI: https://developers.openai.com/codex/cli",
             api_key_env="CODEX_API_KEY",
             contract=cli_contract_for(AIProvider.OPENAI),
+            provider_name=AIProvider.OPENAI.value,
         )
         self._model = model
 
@@ -421,6 +423,18 @@ class OpenAIProvider(BaseAIProvider):
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
 
+            log_transcript_event(
+                provider=AIProvider.OPENAI.value,
+                transport=AITransport.API.value,
+                direction=TranscriptDirection.REQUEST,
+                payload={
+                    "model": effective_model,
+                    "max_tokens": effective_max,
+                    "messages": messages,
+                    "timeout": timeout,
+                },
+            )
+
             response = await client.chat.completions.create(
                 model=effective_model,
                 messages=messages,
@@ -437,6 +451,19 @@ class OpenAIProvider(BaseAIProvider):
                 output_tokens = response.usage.completion_tokens
 
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
+
+            log_transcript_event(
+                provider=AIProvider.OPENAI.value,
+                transport=AITransport.API.value,
+                direction=TranscriptDirection.RESPONSE,
+                payload={
+                    "model": effective_model,
+                    "content": content,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost_estimate": cost,
+                },
+            )
 
             return AIResponse(
                 content=content,
@@ -490,6 +517,19 @@ class OpenAIProvider(BaseAIProvider):
             f"max_tokens={effective_max}",
         )
 
+        log_transcript_event(
+            provider=AIProvider.OPENAI.value,
+            transport=AITransport.API.value,
+            direction=TranscriptDirection.REQUEST,
+            payload={
+                "model": effective_model,
+                "max_tokens": effective_max,
+                "messages": messages,
+                "timeout": timeout,
+                "stream": True,
+            },
+        )
+
         final_response: list[AIResponse] = []
         accumulated_text: list[str] = []
 
@@ -522,6 +562,19 @@ class OpenAIProvider(BaseAIProvider):
                         output_tokens = chunk.usage.completion_tokens
 
                 cost = estimate_cost(effective_model, input_tokens, output_tokens)
+                log_transcript_event(
+                    provider=AIProvider.OPENAI.value,
+                    transport=AITransport.API.value,
+                    direction=TranscriptDirection.RESPONSE,
+                    payload={
+                        "model": effective_model,
+                        "stream": True,
+                        "content": "".join(accumulated_text),
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cost_estimate": cost,
+                    },
+                )
                 final_response.append(
                     AIResponse(
                         content="".join(accumulated_text),

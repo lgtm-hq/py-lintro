@@ -15,7 +15,9 @@ from lintro.ai.availability import (
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessState, check_liveness_sync
+from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.registry import AIProvider
+from lintro.ai.transcript import TRANSCRIPT_DIR, is_transcript_enabled
 from lintro.enums.tool_status import ToolStatus
 
 __all__ = ["AICheckResult", "check_ai_configuration", "check_ai_liveness"]
@@ -93,12 +95,29 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
 
     Returns:
         List of check results (empty when no AI feature -- ai.lint or
-        ai.review -- is enabled).
+        ai.review -- is enabled, unless transcript logging is on).
     """
-    if not config.any_feature_enabled:
-        return []
-
     results: list[AICheckResult] = []
+
+    if is_transcript_enabled(config_enabled=config.transcript_logging):
+        transcript_path = resolve_workspace_root(None) / TRANSCRIPT_DIR
+        results.append(
+            AICheckResult(
+                name="ai.transcript",
+                status=ToolStatus.OK,
+                message=(
+                    f"AI transcript logging enabled; writing NDJSON under "
+                    f"{transcript_path}"
+                ),
+                hint=(
+                    "Disable with ai.transcript_logging: false and unset "
+                    "LINTRO_AI_TRANSCRIPT"
+                ),
+            ),
+        )
+
+    if not config.any_feature_enabled:
+        return results
 
     if config.transport is None:
         results.append(
