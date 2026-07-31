@@ -68,10 +68,11 @@ log.
   covered by the unit tests.
 - 🔑 **Bring-your-own key** — reads the `ANTHROPIC_API_KEY` repository secret
 - 💸 **Bounded spend** — caps cost via `ai.max_cost_usd` (from the trusted base config,
-  so a PR cannot raise the cap). Setting a cap also serializes provider calls: the
-  budget is enforced under a lock held across each call, so budgeted requests run one at
-  a time rather than concurrently. Leave `ai.max_cost_usd` unset if you would rather
-  have concurrent chunk reviews than a hard spend ceiling.
+  so a PR cannot raise the cap). Setting a cap does **not** serialize provider calls:
+  the budget checks and charges the ceiling around each call rather than holding a lock
+  across it, so budgeted chunk reviews still run concurrently. The trade-off is that
+  calls already in flight when the ceiling is reached still finish, so the final total
+  can overshoot `ai.max_cost_usd` by roughly one round of concurrent calls.
 - 🟢 **Non-blocking / informational** — runs with `continue-on-error` and always exits
   0, so it can never fail a pull request. It is intentionally not a required check.
 - ⏭️ **Graceful skip** — when `ANTHROPIC_API_KEY` is absent (secret not configured yet,
