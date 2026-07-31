@@ -227,6 +227,10 @@ def run_lint_artifact(
     return artifact
 
 
+# NOTE: keep this signature in lockstep with ``run_lint_artifact`` above. It is
+# spelled out rather than delegated through ``*args``/ParamSpec because callers
+# (and the CLI/API tests that mock this function) assert on individual keyword
+# arguments, which a transparent wrapper would erase.
 def run_lint_with_ai(
     *,
     action: str | Action,

@@ -123,6 +123,21 @@ def _is_type_checking(test: ast.expr) -> bool:
     return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
 
 
+def _is_ai_module(name: str) -> bool:
+    """Whether a dotted module name is the AI package or lives inside it.
+
+    Matched on a package boundary so a future ``lintro.aisomething`` module is
+    not mistaken for ``lintro.ai``.
+
+    Args:
+        name: Dotted module name from an import statement.
+
+    Returns:
+        bool: True when the name refers to the AI package.
+    """
+    return name == "lintro.ai" or name.startswith("lintro.ai.")
+
+
 def _imports_ai(node: ast.AST) -> bool:
     """Whether an AST node is a runtime import of :mod:`lintro.ai`.
 
@@ -133,9 +148,9 @@ def _imports_ai(node: ast.AST) -> bool:
         bool: True when the node imports from the AI package.
     """
     if isinstance(node, ast.ImportFrom):
-        return (node.module or "").startswith("lintro.ai")
+        return _is_ai_module(node.module or "")
     if isinstance(node, ast.Import):
-        return any(alias.name.startswith("lintro.ai") for alias in node.names)
+        return any(_is_ai_module(alias.name) for alias in node.names)
     return False
 
 

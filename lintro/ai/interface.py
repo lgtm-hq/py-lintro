@@ -307,9 +307,9 @@ def enhance_artifact(
         ai_fix=ai_fix,
         transport=transport,
     )
+    # ``run_ai_layer`` never forces a failure without having run, so a
+    # non-running outcome leaves the artifact exactly as the executor built it.
     if not outcome.ran:
-        if outcome.force_failure:
-            artifact.exit_code = 1
         return artifact
 
     from lintro.utils.tool_executor import refresh_artifact
