@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.97.0] - 2026-07-31
+
+### Added
+
+- **ai**: add opt-in NDJSON transcript logging for provider calls (#1577) (ff589fb)
+
+### Changed
+
+- **ai**: flatten class-based tests in claude/codex CLI provider suites to pytest
+  functions (#1381) (2720536)
+- **ai**: keep provider calls concurrent under ai.max_cost_usd budget gate (#1870)
+  (4904608)
+
 ## [0.96.0] - 2026-07-31
 
 ### Added
