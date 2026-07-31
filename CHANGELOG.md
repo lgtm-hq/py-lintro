@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.99.0] - 2026-07-31
+
+### Added
+
+- **review**: add user-defined review agents as markdown files (#1878) (bd1f92d)
+
+### Changed
+
+- **ai**: assert full uv-managed regeneration command in corpus headers (#1882)
+  (d54992a)
+
 ## [0.98.0] - 2026-07-31
 
 ### Added
