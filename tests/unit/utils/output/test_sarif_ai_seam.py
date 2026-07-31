@@ -13,6 +13,7 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 import lintro
@@ -148,10 +149,43 @@ def _imports_ai(node: ast.AST) -> bool:
         bool: True when the node imports from the AI package.
     """
     if isinstance(node, ast.ImportFrom):
-        return _is_ai_module(node.module or "")
+        module = node.module or ""
+        if _is_ai_module(module):
+            return True
+        # ``from lintro import ai`` binds the AI package under a module named
+        # ``lintro``, so the package name alone is not enough.
+        return module == "lintro" and any(alias.name == "ai" for alias in node.names)
     if isinstance(node, ast.Import):
         return any(_is_ai_module(alias.name) for alias in node.names)
     return False
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("from lintro.ai.interface import enhance_artifact", True),
+        ("from lintro.ai import interface", True),
+        ("import lintro.ai.sarif_bridge", True),
+        ("from lintro import ai", True),
+        ("from lintro import ai as ai_layer", True),
+        ("from lintro.enums.action import Action", False),
+        ("import lintro.utils.output", False),
+        ("from lintro import enums", False),
+    ],
+)
+def test_imports_ai_recognizes_every_runtime_import_form(
+    source: str,
+    expected: bool,
+) -> None:
+    """The boundary check must not be dodged by an alternate import spelling.
+
+    Args:
+        source: A single import statement.
+        expected: Whether it brings the AI package into scope at runtime.
+    """
+    node = ast.parse(source).body[0]
+
+    assert_that(_imports_ai(node)).is_equal_to(expected)
 
 
 def test_core_render_path_never_imports_the_ai_layer() -> None:
