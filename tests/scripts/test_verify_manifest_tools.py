@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
 from types import ModuleType
 
@@ -238,7 +239,7 @@ def test_empty_allow_missing_leaves_behavior_unchanged(
     module = _load_verify_manifest_tools_module()
     # `git --version` -> "git version X.Y.Z"; declare that exact version so the
     # match succeeds regardless of the runner's git build.
-    _, output = module._run(["git", "--version"])  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
     actual = module._parse_version(output, "git")  # noqa: SLF001
     manifest = _write_manifest(
         tmp_path,
@@ -293,7 +294,7 @@ def test_allow_version_lag_older_image_passes_with_warning(
 ) -> None:
     """An allow-version-lag tool with an older installed version warns, not fails."""
     module = _load_verify_manifest_tools_module()
-    _, output = module._run(["git", "--version"])  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
     actual = module._parse_version(output, "git")  # noqa: SLF001
     assert_that(actual).is_not_none()
     # Declare a version strictly newer than whatever git reports on this runner.
@@ -361,5 +362,144 @@ def test_allow_version_lag_missing_binary_still_fails(
         monkeypatch,
         ["--manifest", str(manifest), "--allow-version-lag", "brandnew"],
     )
+
+    assert_that(code).is_equal_to(1)
+
+
+def _fake_timeout_run(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stdout: bytes | str | None,
+) -> None:
+    """Make every probe raise TimeoutExpired with the given captured output.
+
+    Args:
+        module: The loaded verify-manifest-tools module.
+        monkeypatch: Pytest monkeypatch fixture.
+        stdout: Output captured before the timeout fired, as bytes, text, or
+            ``None`` when the command produced nothing.
+    """
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(
+            cmd=["semgrep", "--version"],
+            timeout=10,
+            output=stdout,
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", _raise)
+
+
+def test_run_returns_timeout_code_with_captured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out probe reports code 124 and the output captured so far."""
+    module = _load_verify_manifest_tools_module()
+    _fake_timeout_run(module, monkeypatch, stdout=b"1.151.0\n")
+
+    code, output, timed_out = module._run(["semgrep", "--version"])  # noqa: SLF001
+
+    assert_that(code).is_equal_to(124)
+    assert_that(output).is_equal_to("1.151.0")
+    assert_that(timed_out).is_true()
+
+
+def test_timeout_with_matching_version_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A hung probe that already printed the expected version passes (#1874)."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="semgrep",
+        version="1.151.0",
+        version_command=["semgrep", "--version"],
+    )
+    _fake_timeout_run(module, monkeypatch, stdout=b"1.151.0\n")
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(0)
+    out = capsys.readouterr().out
+    assert_that(out).contains("::notice::")
+    assert_that(out).contains("semgrep")
+
+
+def test_timeout_without_output_still_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A timeout with no usable version output stays a hard failure."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="semgrep",
+        version="1.151.0",
+        version_command=["semgrep", "--version"],
+    )
+    _fake_timeout_run(module, monkeypatch, stdout=None)
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    out = capsys.readouterr().out
+    assert_that(out).contains("exit code 124")
+
+
+def test_ordinary_exit_code_124_is_not_treated_as_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child process that legitimately returns 124 is NOT a timeout.
+
+    `_TIMEOUT_EXIT` (124) is only synthetic when `_run` actually caught
+    `subprocess.TimeoutExpired`. A well-behaved probe that happens to exit
+    with the same numeric code -- while printing output that matches the
+    manifest version -- must still hard-fail; only a genuine timeout may use
+    the exit-lag tolerance.
+    """
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="semgrep",
+        version="1.151.0",
+        version_command=["semgrep", "--version"],
+    )
+
+    class _FakeCompleted:
+        returncode = 124
+        stdout = "1.151.0\n"
+        stderr = ""
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *args, **kwargs: _FakeCompleted(),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+
+
+def test_timeout_with_wrong_version_still_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hung probe whose printed version drifts is not tolerated."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="semgrep",
+        version="1.151.0",
+        version_command=["semgrep", "--version"],
+    )
+    _fake_timeout_run(module, monkeypatch, stdout=b"1.150.0\n")
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
 
     assert_that(code).is_equal_to(1)

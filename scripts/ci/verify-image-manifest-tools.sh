@@ -114,9 +114,17 @@ fi
 
 # Bypass the image entrypoint so the container's baked ENV is used verbatim and
 # the checkout is mounted read-only outside /code (the entrypoint's gosu path).
+# Silence semgrep's telemetry POST and update check (#1874). On egress-blocked
+# runners `semgrep --version` prints the version and then stalls on those
+# requests until the probe's 10s timeout fires, failing the gate for a tool
+# that is actually correct. SEMGREP_SEND_METRICS=off disables metrics upload;
+# SEMGREP_ENABLE_VERSION_CHECK=0 disables the new-version check (semgrep
+# >= 1.61.1). Both are inert for every other tool in the manifest.
 declare -a docker_args=(
 	docker run --rm
 	--entrypoint python3
+	-e SEMGREP_SEND_METRICS=off
+	-e SEMGREP_ENABLE_VERSION_CHECK=0
 	-v "${repo_root}:/repo:ro"
 	-w /repo
 	"$IMAGE"
