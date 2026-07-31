@@ -76,6 +76,7 @@ class CostBudget:
 
         raise AICostBudgetExceededError(
             f"AI cost budget exceeded: ${self._spent:.4f} spent, "
+            f"${self._reserved:.4f} reserved, "
             f"limit is ${self.max_cost_usd:.2f}",
         )
 
@@ -150,8 +151,9 @@ class CostBudget:
         self._reserve(estimate)
         try:
             result = await fn()
+            actual = cost_of(result)
         except BaseException:
             self._release(estimate)
             raise
-        self._settle(estimate=estimate, actual=cost_of(result))
+        self._settle(estimate=estimate, actual=actual)
         return result
