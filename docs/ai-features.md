@@ -147,6 +147,79 @@ Or enable it ad hoc from the CLI:
 lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
 ```
 
+### Custom Review Agents (`.lintro/review-agents/*.md`)
+
+`lintro review` ships a built-in checklist corpus, but house rules ("no raw SQL outside
+the repository layer", "every Effect service follows X") are prose, not YAML. Write them
+as markdown files under `.lintro/review-agents/` — YAML front matter carries the
+machine-readable scope and policy, and the body carries the review instruction.
+
+```markdown
+---
+name: no-raw-sql
+description: SQL must go through the repository layer
+include:
+  - 'src/**/*.py'
+exclude:
+  - 'src/repositories/**'
+severity: high
+strictness: focused
+model: default
+enabled: true
+---
+
+Review the changed code for raw SQL strings executed outside the repository layer. Flag
+any direct `cursor.execute` / `connection.execute` call with a string literal, and point
+at the repository method that should be used instead.
+```
+
+**Front-matter fields:**
+
+| Field         | Type      | Default    | Description                                                      |
+| ------------- | --------- | ---------- | ---------------------------------------------------------------- |
+| `name`        | string    | _required_ | Unique agent id; becomes the `source` attribution on findings    |
+| `include`     | list[str] | _required_ | Globs selecting the changed files the agent reviews              |
+| `description` | string    | `""`       | One-line summary shown by `--list-agents`                        |
+| `exclude`     | list[str] | `[]`       | Globs removing files from the `include` set                      |
+| `severity`    | string    | `P2`       | `P1`/`P2`/`P3` or `high`/`medium`/`low`; applied to all findings |
+| `strictness`  | string    | `balanced` | `focused` · `balanced` · `thorough`                              |
+| `model`       | string    | `default`  | Optional per-agent model override                                |
+| `enabled`     | bool      | `true`     | Set `false` to keep the file but stop running it                 |
+
+**Behavior:**
+
+- Agents are **enabled by default**. Control them with `review.custom_agents` in
+  `.lintro-config.yaml`: `true` (run alongside the built-in checklist), `false` (skip
+  discovery entirely), or `only` (run agents _instead of_ the built-in checklist).
+- An agent runs only when at least one changed file matches its `include` globs after
+  `exclude` is applied. Agents that match nothing — and agents with `enabled: false` —
+  are reported as skipped and cost nothing.
+- Findings merge into the normal terminal, JSON, and PR-comment output, attributed with
+  `source: <agent-name>`. The agent's declared `severity` is the severity its findings
+  carry, so a `severity: high` agent produces P1 findings that fail the exit gate.
+- Each scoped agent is one extra provider call and counts against `ai.max_cost_usd`
+  exactly like a built-in checklist chunk.
+- A file with invalid front matter is reported with the offending field and skipped —
+  never fatal, and the rest of the review still runs.
+
+**Safety:** agent bodies are maintainer-authored workspace content, so they are treated
+as untrusted data. A body never becomes the system prompt; it is redacted for secrets,
+sanitized, and embedded in the user prompt inside a per-call unique boundary marker with
+explicit instructions that nothing inside it can change the model's role or output
+contract.
+
+List what would run without spending anything:
+
+```bash
+lintro review --list-agents
+```
+
+```yaml
+# .lintro-config.yaml
+review:
+  custom_agents: true # true | false | only
+```
+
 ## Configuration
 
 ### Basic Setup

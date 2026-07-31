@@ -13,6 +13,9 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 
 __all__ = [
     "REVIEW_ADVERSARIAL_SWEEP_TEMPLATE",
+    "REVIEW_CUSTOM_AGENT_OUTPUT_SCHEMA",
+    "REVIEW_CUSTOM_AGENT_SYSTEM",
+    "REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE",
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
     "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
@@ -68,6 +71,21 @@ REVIEW_ADVERSARIAL_SWEEP_TEMPLATE = load_prompt_template(
 REVIEW_SCHEMA_REMINDER_TEMPLATE = load_prompt_template(
     "review",
     "schema_reminder.md",
+)
+
+REVIEW_CUSTOM_AGENT_SYSTEM = load_prompt_template(
+    "review",
+    "custom_agent_system.md",
+)
+
+REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE = load_prompt_template(
+    "review",
+    "custom_agent_user.md",
+)
+
+REVIEW_CUSTOM_AGENT_OUTPUT_SCHEMA = load_prompt_template(
+    "review",
+    "custom_agent_output_schema.json",
 )
 
 

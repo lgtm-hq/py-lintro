@@ -7,6 +7,7 @@ from rich.console import Console
 
 from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 
@@ -106,3 +107,40 @@ def test_render_review_terminal_all_shows_appendix(
     assert_that(text).contains("Checklist concerns without findings (1)")
     assert_that(text).contains("Is migration documented?")
     assert_that(text).does_not_contain("(none — good)")
+
+
+def test_render_review_terminal_attributes_custom_agent_findings() -> None:
+    """A finding from a custom agent shows its source in the panel title."""
+    result = ReviewResult(
+        metadata=ReviewMetadata(
+            model="gpt-4o",
+            provider="openai",
+            context_window=128_000,
+            depth=1,
+            chunks_total=1,
+            chunks_current=1,
+            files_reviewed=1,
+            files_total=1,
+            checklist_items=0,
+        ),
+        summary="Merge with fixes.",
+        checklist=(),
+        findings=(
+            ReviewFinding(
+                severity=Severity.P1,
+                category="security",
+                file="src/app.py",
+                line=2,
+                title="Raw SQL in handler",
+                description="Executes SQL directly",
+                cause="cursor.execute",
+                fix="Use the repository",
+                confidence="high",
+                source="no-raw-sql",
+            ),
+        ),
+    )
+    console = Console(record=True, width=200)
+    render_review_terminal(result=result, console=console)
+
+    assert_that(console.export_text()).contains("via no-raw-sql")

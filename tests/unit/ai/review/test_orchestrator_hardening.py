@@ -9,6 +9,7 @@ from __future__ import annotations
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.ai.review.finding_parser import normalize_severity, parse_findings
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -17,8 +18,6 @@ from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.orchestrator import (
-    _normalize_severity,
-    _parse_findings,
     build_git_native_review_prompt,
     build_review_prompt,
 )
@@ -240,7 +239,7 @@ def test_build_review_prompt_logs_secret_warning() -> None:
 
 def test_severity_normalization_lowercase() -> None:
     """A lowercase 'p1' severity normalizes to Severity.P1."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[{"severity": "p1", "title": "Bug"}],
     )
 
@@ -250,7 +249,7 @@ def test_severity_normalization_lowercase() -> None:
 
 def test_severity_normalization_whitespace() -> None:
     """A trailing-space 'P1 ' severity normalizes to Severity.P1."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[{"severity": "P1 ", "title": "Bug"}],
     )
 
@@ -260,7 +259,7 @@ def test_severity_normalization_whitespace() -> None:
 
 def test_severity_synonym_critical_maps_to_p1() -> None:
     """A blocking synonym like 'critical' maps to Severity.P1."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[{"severity": "critical", "title": "Bug"}],
     )
 
@@ -270,27 +269,27 @@ def test_severity_synonym_critical_maps_to_p1() -> None:
 
 def test_normalize_severity_critical_maps_to_p1() -> None:
     """A blocking synonym like 'critical' maps directly to Severity.P1."""
-    assert_that(_normalize_severity(raw="critical")).is_equal_to(Severity.P1)
+    assert_that(normalize_severity(raw="critical")).is_equal_to(Severity.P1)
 
 
 def test_normalize_severity_gibberish_fails_closed_to_p1() -> None:
     """A truly unknown label fails closed to Severity.P1 so it can't bypass the gate."""
-    assert_that(_normalize_severity(raw="banana")).is_equal_to(Severity.P1)
+    assert_that(normalize_severity(raw="banana")).is_equal_to(Severity.P1)
 
 
 def test_normalize_severity_warning_maps_to_p2() -> None:
     """A P2 synonym like 'warning' maps to Severity.P2."""
-    assert_that(_normalize_severity(raw="warning")).is_equal_to(Severity.P2)
+    assert_that(normalize_severity(raw="warning")).is_equal_to(Severity.P2)
 
 
 def test_normalize_severity_minor_maps_to_p3() -> None:
     """A P3 synonym like 'minor' maps to Severity.P3."""
-    assert_that(_normalize_severity(raw="minor")).is_equal_to(Severity.P3)
+    assert_that(normalize_severity(raw="minor")).is_equal_to(Severity.P3)
 
 
 def test_has_p1_findings_after_lowercase_normalization() -> None:
     """The exit gate fires when a lowercase 'p1' finding is normalized."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[{"severity": "p1", "title": "Bug", "file": "a.py", "line": 1}],
     )
     result = ReviewResult(
@@ -305,7 +304,7 @@ def test_has_p1_findings_after_lowercase_normalization() -> None:
 
 def test_has_p1_findings_true_for_blocking_synonym() -> None:
     """A blocking synonym like 'blocker' trips the P1 exit gate."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[
             {"severity": "blocker", "title": "Bug", "file": "a.py", "line": 1},
         ],
@@ -322,7 +321,7 @@ def test_has_p1_findings_true_for_blocking_synonym() -> None:
 
 def test_has_p1_findings_true_for_gibberish_severity() -> None:
     """A truly unknown severity fails closed to P1 and trips the exit gate."""
-    findings = _parse_findings(
+    findings = parse_findings(
         raw_findings=[{"severity": "banana", "title": "Bug"}],
     )
     result = ReviewResult(

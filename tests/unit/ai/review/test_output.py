@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from assertpy import assert_that
 
@@ -50,3 +51,19 @@ def test_render_review_output_json_dispatches_to_render_review_json(
     expected = render_review_json(result=sample_review_result)
 
     assert_that(output).is_equal_to(expected)
+
+
+def test_review_result_json_carries_custom_agent_attribution(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Findings serialize a ``source`` field for custom agent attribution."""
+    attributed = replace(
+        sample_review_result,
+        findings=(replace(sample_review_result.findings[0], source="no-raw-sql"),),
+    )
+
+    payload = review_result_to_dict(result=attributed)
+
+    assert_that(payload["findings"][0]["source"]).is_equal_to("no-raw-sql")
+    assert_that(payload["metadata"]).contains_key("custom_agents_run")
+    assert_that(payload["metadata"]).contains_key("custom_agents_skipped")

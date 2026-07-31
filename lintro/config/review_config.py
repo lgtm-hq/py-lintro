@@ -21,6 +21,7 @@ from identify.identify import ALL_TAGS
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lintro.enums.checklist_display import ChecklistDisplay
+from lintro.enums.custom_agent_mode import CustomAgentMode
 from lintro.enums.file_domain import FileDomain
 from lintro.enums.review_category import ReviewCategory
 from lintro.enums.review_strictness import ReviewStrictness
@@ -155,3 +156,50 @@ class ReviewConfig(BaseModel):
             "(one agent call per chunk) but can surface more per-file doc nits."
         ),
     )
+    custom_agents: CustomAgentMode = Field(
+        default=CustomAgentMode.ENABLED,
+        description=(
+            "User-defined review agents from .lintro/review-agents/*.md: "
+            "true/enabled (default, run alongside the built-in checklist), "
+            "false/disabled (skip discovery), or only (run agents instead of "
+            "the built-in checklist)."
+        ),
+    )
+
+    @field_validator("custom_agents", mode="before")
+    @classmethod
+    def _coerce_custom_agents(cls, value: object) -> object:
+        """Accept the ``true`` / ``false`` YAML spellings for the mode enum.
+
+        Args:
+            value: Raw ``review.custom_agents`` value from configuration.
+
+        Returns:
+            A value the ``CustomAgentMode`` enum can validate.
+
+        Raises:
+            ValueError: When the value is not a recognized mode spelling.
+        """
+        if isinstance(value, bool):
+            return CustomAgentMode.ENABLED if value else CustomAgentMode.DISABLED
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            aliases = {
+                "true": CustomAgentMode.ENABLED,
+                "yes": CustomAgentMode.ENABLED,
+                "on": CustomAgentMode.ENABLED,
+                "false": CustomAgentMode.DISABLED,
+                "no": CustomAgentMode.DISABLED,
+                "off": CustomAgentMode.DISABLED,
+            }
+            if normalized in aliases:
+                return aliases[normalized]
+            if normalized in {mode.value for mode in CustomAgentMode}:
+                return normalized
+            allowed = ", ".join(mode.value for mode in CustomAgentMode)
+            msg = (
+                f"review.custom_agents must be true, false, or one of: "
+                f"{allowed} (got {value!r})"
+            )
+            raise ValueError(msg)
+        return value

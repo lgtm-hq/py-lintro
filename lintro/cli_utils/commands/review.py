@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
+from pathlib import Path
 
 import click
 from loguru import logger
@@ -26,6 +27,12 @@ from lintro.ai.review.checklist_display import (
     enrich_review_result,
     resolve_checklist_display,
 )
+from lintro.ai.review.custom_agents import (
+    CustomAgentSpec,
+    discover_custom_agents,
+    format_custom_agent_listing,
+)
+from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
@@ -141,6 +148,14 @@ from lintro.config.config_loader import get_config
     multiple=True,
     help="Limit review to specific path prefixes.",
 )
+@click.option(
+    "--list-agents",
+    is_flag=True,
+    help=(
+        "List user-defined review agents discovered in "
+        ".lintro/review-agents/*.md and exit."
+    ),
+)
 def review_command(
     *,
     base: str | None,
@@ -158,10 +173,22 @@ def review_command(
     timeout: float | None,
     path_filter: tuple[str, ...],
     transport: str | None,
+    list_agents: bool,
 ) -> None:
     """Run AI-powered diff-based code review."""
-    require_ai()
     lintro_config = get_config()
+    workspace_root = resolve_workspace_root(lintro_config.config_path)
+    if list_agents:
+        # Listing is config inspection only: no provider and no AI credentials
+        # are needed to answer "which agents would run?".
+        click.echo(
+            format_custom_agent_listing(
+                discovery=discover_custom_agents(workspace_root=workspace_root),
+            ),
+        )
+        raise SystemExit(0)
+
+    require_ai()
     ai_config = resolve_ai_config(lintro_config)
     if not ai_config.review_enabled:
         raise click.UsageError(
@@ -247,7 +274,6 @@ def review_command(
             update={"api_timeout": timeout},
         )
 
-    workspace_root = resolve_workspace_root(lintro_config.config_path)
     provider = get_provider(effective_ai_config, workspace_root=workspace_root)
     effective_depth = depth if depth is not None else lintro_config.review.depth
     effective_strictness = ReviewStrictness(
@@ -259,6 +285,11 @@ def review_command(
     )
     force_semantic_chunking = (
         semantic_chunks or lintro_config.review.force_semantic_chunking
+    )
+    custom_agent_mode = lintro_config.review.custom_agents
+    custom_agents = _resolve_custom_agents(
+        mode=custom_agent_mode,
+        workspace_root=workspace_root,
     )
 
     progress_tracker = None
@@ -282,6 +313,9 @@ def review_command(
             progress=progress_tracker,
             sensitivity=sensitivity,
             force_semantic_chunking=force_semantic_chunking,
+            custom_agents=custom_agents,
+            run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
+            workspace_root=workspace_root,
         )
     except (AIError, ValueError) as exc:
         if post and resolved_pr is not None and effective_repo:
@@ -342,6 +376,37 @@ def review_command(
     raise SystemExit(exit_code)
 
 
+def _resolve_custom_agents(
+    *,
+    mode: CustomAgentMode,
+    workspace_root: Path,
+) -> tuple[CustomAgentSpec, ...]:
+    """Discover user-defined review agents for the configured mode.
+
+    Invalid agent files are reported as warnings and skipped so one malformed
+    file never fails the review run.
+
+    Args:
+        mode: Configured ``review.custom_agents`` mode.
+        workspace_root: Absolute workspace root to scan.
+
+    Returns:
+        The discovered agents, or an empty tuple when discovery is disabled.
+    """
+    if mode == CustomAgentMode.DISABLED:
+        return ()
+    discovery = discover_custom_agents(workspace_root=workspace_root)
+    for issue in discovery.issues:
+        logger.warning("Skipping invalid review agent — {issue}", issue=issue.format())
+    if mode == CustomAgentMode.ONLY and not discovery.agents:
+        logger.warning(
+            "review.custom_agents is 'only' but no valid agents were found in "
+            "{directory}; the review will have nothing to run.",
+            directory=discovery.directory,
+        )
+    return discovery.agents
+
+
 def _detect_pr_number_from_env() -> int | None:
     """Detect PR number from common CI environment variables."""
     github_ref = os.environ.get("GITHUB_REF", "")
@@ -354,7 +419,6 @@ def _detect_pr_number_from_env() -> int | None:
         return None
     try:
         import json
-        from pathlib import Path
 
         payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
         number = payload.get("pull_request", {}).get("number")
