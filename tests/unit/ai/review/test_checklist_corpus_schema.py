@@ -292,4 +292,6 @@ def test_corpus_files_document_regeneration(file_name: str) -> None:
         file_name: Corpus YAML file name.
     """
     text = (CORPUS_DIR / file_name).read_text(encoding="utf-8")
-    assert_that(text).contains("scripts/generate-checklist-corpus-schema.py")
+    assert_that(text).contains(
+        "uv run python scripts/generate-checklist-corpus-schema.py",
+    )
