@@ -41,15 +41,15 @@ values is worse than no schema.
 
 ## Current state
 
-| Artifact | Role today |
-| -------- | ---------- |
-| `corpus/tier1.yaml`, `corpus/tier2.yaml` | Data SSOT for built-in checklist rows |
-| `loader.py` | Parse + fail-fast validation at import |
-| `ChecklistItem` (`models/checklist_item.py`) | **Frozen dataclass** (not Pydantic) |
-| `ReviewCategory`, `FileDomain` | `HyphenatedStrEnum` vocabulary for category/domains |
-| `identify.identify.ALL_TAGS` | Vocabulary for `languages` (~311 tags) |
-| `constants.py` | Tier/id range constants (`1–15`, `≥100`, …) |
-| `.yamllint` | **Ignores** `lintro/ai/review/checklist/corpus/` (long prose questions) |
+| Artifact                                                | Role today                                                                                                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `corpus/tier1.yaml`, `corpus/tier2.yaml`                | Data SSOT for built-in checklist rows                                                                                                                     |
+| `loader.py`                                             | Parse + fail-fast validation at import                                                                                                                    |
+| `ChecklistItem` (`models/checklist_item.py`)            | **Frozen dataclass** (not Pydantic)                                                                                                                       |
+| `ReviewCategory`, `FileDomain`                          | `HyphenatedStrEnum` vocabulary for category/domains                                                                                                       |
+| `identify.identify.ALL_TAGS`                            | Vocabulary for `languages` (~311 tags)                                                                                                                    |
+| `constants.py`                                          | Tier/id range constants (`1–15`, `≥100`, …)                                                                                                               |
+| `.yamllint`                                             | **Ignores** `lintro/ai/review/checklist/corpus/` (long prose questions)                                                                                   |
 | `ReviewChecklistItemConfig` (`config/review_config.py`) | **Pydantic** model for _user_ checklist items in `.lintro-config.yaml` — related vocabulary, different shape (no `id`/`tier`; requires at least one axis) |
 
 Implications for schema generation:
@@ -57,9 +57,9 @@ Implications for schema generation:
 - There is **no** `ChecklistItem.model_json_schema()` path today.
 - Pydantic is already a first-class dependency and already emits correct enums for
   `ReviewCategory` / `FileDomain` when a throwaway model is built around them.
-- Converting `ChecklistItem` to Pydantic solely to get a schema is unnecessary churn;
-  a small generator that reads the enums (and optionally a thin Pydantic
-  `TypeAdapter`) is enough.
+- Converting `ChecklistItem` to Pydantic solely to get a schema is unnecessary churn; a
+  small generator that reads the enums (and optionally a thin Pydantic `TypeAdapter`) is
+  enough.
 
 ## Prototype findings
 
@@ -73,15 +73,15 @@ investigation axes.
   `allOf`/`if`/`then` constraints for Tier 1 empty axes + id ranges and Tier 2 id
   minimums.
 - Both corpus files validated cleanly against that schema via `check-jsonschema`
-  (`uvx --from check-jsonschema`, v0.37.4). A deliberate bad `category: nope` failed
-  as expected.
-- A parallel Pydantic `TypeAdapter(list[CorpusRow])` (throwaway model) produced a
-  usable `json_schema()` with `$defs` for the two enums. It did **not** enum
-  `languages` unless the generator injected `ALL_TAGS` — so a dedicated generator is
-  preferable to raw `model_json_schema()` alone.
+  (`uvx --from check-jsonschema`, v0.37.4). A deliberate bad `category: nope` failed as
+  expected.
+- A parallel Pydantic `TypeAdapter(list[CorpusRow])` (throwaway model) produced a usable
+  `json_schema()` with `$defs` for the two enums. It did **not** enum `languages` unless
+  the generator injected `ALL_TAGS` — so a dedicated generator is preferable to raw
+  `model_json_schema()` alone.
 - **yamllint conflict:** none observed. Adding either
-  `# yaml-language-server: $schema=./checklist-corpus.schema.json` or the IntelliJ
-  form `# $schema: ./…` to sample files passed both the repo `.yamllint` config and
+  `# yaml-language-server: $schema=./checklist-corpus.schema.json` or the IntelliJ form
+  `# $schema: ./…` to sample files passed both the repo `.yamllint` config and
   `extends: default` (line-length disabled for the sample). The corpus directory is
   already ignored by the repo config, so the directive is belt-and-suspenders for
   local/ad-hoc yamllint runs.
@@ -98,37 +98,37 @@ investigation axes.
 
 ### b. CI-side validation via `check-jsonschema` or `lintro chk`
 
-| Mechanism | Result |
-| --------- | ------ |
-| `check-jsonschema --schemafile … corpus/*.yaml` | Works today via `uvx`; catches enum/shape errors. Not a repo dependency. |
-| `lintro chk` / yamllint | Style only; **no** schema validation. Corpus path is ignored. Extending the yamllint plugin into a schema checker would be a new product surface. |
-| Existing loader + unit tests | Already fail CI on invalid corpus at import. Do **not** replace; keep as defense in depth. |
-| `jsonschema` Python package | Present in the lockfile as a transitive dependency, **not** a direct importable dep of the default env. Prefer not to lean on it without an explicit dependency decision. |
+| Mechanism                                       | Result                                                                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `check-jsonschema --schemafile … corpus/*.yaml` | Works today via `uvx`; catches enum/shape errors. Not a repo dependency.                                                                                                  |
+| `lintro chk` / yamllint                         | Style only; **no** schema validation. Corpus path is ignored. Extending the yamllint plugin into a schema checker would be a new product surface.                         |
+| Existing loader + unit tests                    | Already fail CI on invalid corpus at import. Do **not** replace; keep as defense in depth.                                                                                |
+| `jsonschema` Python package                     | Present in the lockfile as a transitive dependency, **not** a direct importable dep of the default env. Prefer not to lean on it without an explicit dependency decision. |
 
 Conclusion: editor schema + a pytest/regenerate drift guard cover the acceptance
-criteria without adding `check-jsonschema` as a hard CI dependency. Optional later:
-a thin `uvx check-jsonschema` step for belt-and-suspenders.
+criteria without adding `check-jsonschema` as a hard CI dependency. Optional later: a
+thin `uvx check-jsonschema` step for belt-and-suspenders.
 
 ### c. Alternatives noted
 
-| Alternative | Verdict |
-| ----------- | ------- |
-| Convert `ChecklistItem` → Pydantic for `model_json_schema()` | Rejected for v1. Larger model migration than needed; generator can reuse enum types without changing the runtime dataclass. |
-| Re-author corpus in Python | Undoes #1130's non-Python-fluent editing goal. |
-| Spectral / custom YAML linter | Extra toolchain; JSON Schema already has mainstream editor + CLI support. |
-| Docs-only enum tables | Useful as a supplement; alone fails completion/inline-validation acceptance. |
-| Schema for full `.lintro-config.yaml` via `LintroConfig.model_json_schema()` | Valuable later, out of scope for this spike (see [Scope call](#scope-call)). |
+| Alternative                                                                  | Verdict                                                                                                                     |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Convert `ChecklistItem` → Pydantic for `model_json_schema()`                 | Rejected for v1. Larger model migration than needed; generator can reuse enum types without changing the runtime dataclass. |
+| Re-author corpus in Python                                                   | Undoes #1130's non-Python-fluent editing goal.                                                                              |
+| Spectral / custom YAML linter                                                | Extra toolchain; JSON Schema already has mainstream editor + CLI support.                                                   |
+| Docs-only enum tables                                                        | Useful as a supplement; alone fails completion/inline-validation acceptance.                                                |
+| Schema for full `.lintro-config.yaml` via `LintroConfig.model_json_schema()` | Valuable later, out of scope for this spike (see [Scope call](#scope-call)).                                                |
 
 ## Approach comparison
 
-| Approach | Editor completion / inline errors | Works without local Python | Drift risk | CI cost | Fits repo today |
-| -------- | --------------------------------- | -------------------------- | ---------- | ------- | --------------- |
-| **A. Generated JSON Schema + modelines** (committed artifact) | ✅ VS Code/Cursor (Red Hat YAML) + JetBrains via dual modeline | ✅ schema in git | Low **if** regenerate-and-diff is mandatory | Low (pytest) | ✅ mirrors `generate-tool-versions.py --check` |
-| **B. `check-jsonschema` in CI only** | ❌ no editor UX | N/A for authors | Low if schema generated | Medium (`uvx` or new dep) | Partial — CI only |
-| **C. Wire schema check into `lintro chk`** | ❌ unless combined with A | N/A | Low if generated | Medium–high (new tool surface) | Overkill for a single internal corpus |
-| **D. Docs reference tables only** | ❌ | ✅ | Medium (hand-updated docs) | None | Weak alone |
-| **E. Hand-maintained schema** | ✅ | ✅ | **High — rejected by issue** | Low | ❌ |
-| **A + loader tests** (recommended combo) | ✅ | ✅ | Mechanically guarded | Low | ✅ |
+| Approach                                                      | Editor completion / inline errors                              | Works without local Python | Drift risk                                  | CI cost                        | Fits repo today                                |
+| ------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------- | ------------------------------------------- | ------------------------------ | ---------------------------------------------- |
+| **A. Generated JSON Schema + modelines** (committed artifact) | ✅ VS Code/Cursor (Red Hat YAML) + JetBrains via dual modeline | ✅ schema in git           | Low **if** regenerate-and-diff is mandatory | Low (pytest)                   | ✅ mirrors `generate-tool-versions.py --check` |
+| **B. `check-jsonschema` in CI only**                          | ❌ no editor UX                                                | N/A for authors            | Low if schema generated                     | Medium (`uvx` or new dep)      | Partial — CI only                              |
+| **C. Wire schema check into `lintro chk`**                    | ❌ unless combined with A                                      | N/A                        | Low if generated                            | Medium–high (new tool surface) | Overkill for a single internal corpus          |
+| **D. Docs reference tables only**                             | ❌                                                             | ✅                         | Medium (hand-updated docs)                  | None                           | Weak alone                                     |
+| **E. Hand-maintained schema**                                 | ✅                                                             | ✅                         | **High — rejected by issue**                | Low                            | ❌                                             |
+| **A + loader tests** (recommended combo)                      | ✅                                                             | ✅                         | Mechanically guarded                        | Low                            | ✅                                             |
 
 ## Drift guard design
 
@@ -164,11 +164,11 @@ Defense in depth: schema (authoring + optional CI) **and** loader (runtime) both
 
 **Checklist corpus only for the implementation PR.**
 
-| Surface | Decision |
-| ------- | -------- |
-| `corpus/tier1.yaml`, `corpus/tier2.yaml` | **In scope** — primary pain from #1130 |
-| `.lintro-config.yaml` / `LintroConfig` | **Out of scope for v1.** Already Pydantic-validated at load; authoring schema is a larger nested product surface (tools/defaults/ai/review/…). Revisit as a follow-up that can call `LintroConfig.model_json_schema()` (or a curated subset for `review.checklist.items`) using the same generator/`--check` pattern. |
-| Future corpora | Use the same generator pattern when they appear; do not generalize prematurely. |
+| Surface                                  | Decision                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `corpus/tier1.yaml`, `corpus/tier2.yaml` | **In scope** — primary pain from #1130                                                                                                                                                                                                                                                                                |
+| `.lintro-config.yaml` / `LintroConfig`   | **Out of scope for v1.** Already Pydantic-validated at load; authoring schema is a larger nested product surface (tools/defaults/ai/review/…). Revisit as a follow-up that can call `LintroConfig.model_json_schema()` (or a curated subset for `review.checklist.items`) using the same generator/`--check` pattern. |
+| Future corpora                           | Use the same generator pattern when they appear; do not generalize prematurely.                                                                                                                                                                                                                                       |
 
 ## Recommendation
 
@@ -178,8 +178,8 @@ regenerate-and-diff script + unit test.**
 
 Rationale:
 
-1. Restores completion and inline validation for `category`, `domains`, and
-   `languages` in mainstream editors without requiring a Python env to _edit_.
+1. Restores completion and inline validation for `category`, `domains`, and `languages`
+   in mainstream editors without requiring a Python env to _edit_.
 2. Keeps enums as the only vocabulary SSOT; the schema is a build artifact with a
    mechanical gate (same operational model as tool-version generation).
 3. Leaves `ChecklistItem` as a dataclass and leaves `lintro chk` / yamllint unchanged.
@@ -264,18 +264,17 @@ Follow-up implementation PR (after maintainer sign-off on this spike):
      `TypeAdapter` or an explicit direct `jsonschema` dependency — prefer reusing
      Pydantic already in-tree, or validate via the generator’s own structural checks
      plus loader tests, to avoid a new direct dep solely for this)
-5. Document the regenerate command in the relevant contributor doc and/or corpus
-   header.
+5. Document the regenerate command in the relevant contributor doc and/or corpus header.
 6. Keep `loader.py` behavior unchanged; add no `lintro chk` tool wiring in v1.
 7. Explicitly leave `.lintro-config.yaml` schema generation to a separate issue.
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-| ---- | -------- | ---------- |
-| Large `languages` enum (~311 identify tags) makes noisy diffs on `identify` bumps | Low–Med | Sorted emission; regenerating on dependency bumps is correct SSOT behavior |
-| Editor without YAML schema support | Low | Loader + unit tests remain the CI backstop; docs list valid enums as supplement if desired |
-| Schema/`if`/`then` incomplete vs loader | Low | Document intentional gaps (uniqueness); never remove loader checks |
-| Contributors hand-edit `corpus.schema.json` | Med | File header + `--check` test failure message |
-| Relative modeline path wrong after move | Low | Keep schema as fixed sibling of `corpus/`; test fixture asserts modeline substring |
-| Scope creep into full config schema | Med | This doc’s scope call; separate issue |
+| Risk                                                                              | Severity | Mitigation                                                                                 |
+| --------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| Large `languages` enum (~311 identify tags) makes noisy diffs on `identify` bumps | Low–Med  | Sorted emission; regenerating on dependency bumps is correct SSOT behavior                 |
+| Editor without YAML schema support                                                | Low      | Loader + unit tests remain the CI backstop; docs list valid enums as supplement if desired |
+| Schema/`if`/`then` incomplete vs loader                                           | Low      | Document intentional gaps (uniqueness); never remove loader checks                         |
+| Contributors hand-edit `corpus.schema.json`                                       | Med      | File header + `--check` test failure message                                               |
+| Relative modeline path wrong after move                                           | Low      | Keep schema as fixed sibling of `corpus/`; test fixture asserts modeline substring         |
+| Scope creep into full config schema                                               | Med      | This doc’s scope call; separate issue                                                      |
