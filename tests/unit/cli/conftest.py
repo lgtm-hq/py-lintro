@@ -22,20 +22,22 @@ def isolated_cli_runner() -> CliRunner:
     Returns:
         A CliRunner instance with isolated filesystem.
     """
-    return CliRunner(mix_stderr=False)
+    # click >= 8.2 removed the ``mix_stderr`` argument; stdout and stderr are
+    # always captured separately, which is the behaviour this fixture wants.
+    return CliRunner()
 
 
 @pytest.fixture
-def mock_run_lint_tools_simple() -> Generator[tuple[MagicMock, MagicMock], None, None]:
-    """Mock the run_lint_tools_simple function used by check/format commands.
+def mock_run_lint_with_ai() -> Generator[tuple[MagicMock, MagicMock], None, None]:
+    """Mock the run_lint_with_ai function used by check/format commands.
 
     Yields:
         tuple[MagicMock, MagicMock]: Check and format mock instances.
     """
     with (
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
         patch(
-            "lintro.cli_utils.commands.format.run_lint_tools_simple",
+            "lintro.cli_utils.commands.format.run_lint_with_ai",
         ) as mock_format,
     ):
         # Configure both mocks to return 0 by default
@@ -46,24 +48,24 @@ def mock_run_lint_tools_simple() -> Generator[tuple[MagicMock, MagicMock], None,
 
 @pytest.fixture
 def mock_run_lint_tools_check() -> Generator[MagicMock, None, None]:
-    """Mock run_lint_tools_simple specifically for check command.
+    """Mock run_lint_with_ai specifically for check command.
 
     Yields:
         MagicMock: A MagicMock instance for the mocked check function.
     """
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock:
         mock.return_value = EXIT_SUCCESS
         yield mock
 
 
 @pytest.fixture
 def mock_run_lint_tools_format() -> Generator[MagicMock, None, None]:
-    """Mock run_lint_tools_simple specifically for format command.
+    """Mock run_lint_with_ai specifically for format command.
 
     Yields:
         MagicMock: A MagicMock instance for the mocked format function.
     """
-    with patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock:
+    with patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock:
         mock.return_value = EXIT_SUCCESS
         yield mock
 

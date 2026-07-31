@@ -2,12 +2,16 @@
 
 This module exposes :func:`check`, :func:`format` (aliased :func:`fmt`), and
 :func:`test` as genuine Python functions that perform the work directly by
-delegating to :func:`lintro.utils.tool_executor.run_lint_tools_simple`.
+delegating to :func:`lintro.api.pipeline.run_lint_with_ai`.
 
 Unlike the previous approach that routed programmatic calls through
 ``click.testing.CliRunner``, these functions:
 
 - Return a structured :class:`LintroResult` instead of a Click ``Result``.
+- Offer ``*_run`` variants returning the full
+  :class:`~lintro.models.core.run_artifact.RunArtifact` (issue #1823), so
+  callers can inspect per-tool results instead of re-parsing lintro's own
+  JSON output.
 - Let exceptions propagate to the caller instead of swallowing them.
 - Do not redirect or buffer stdout/stderr, so live output stays visible.
 
@@ -18,9 +22,13 @@ The Click commands and the backward-compatible programmatic wrappers in
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from lintro.api.pipeline import run_lint_artifact, run_lint_with_ai
 from lintro.enums.action import Action
-from lintro.utils.tool_executor import run_lint_tools_simple
+
+if TYPE_CHECKING:
+    from lintro.models.core.run_artifact import RunArtifact
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -125,7 +133,7 @@ def check(
     """
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
-    exit_code: int = run_lint_tools_simple(
+    exit_code: int = run_lint_with_ai(
         action=Action.CHECK,
         paths=path_list,
         tools=tools,
@@ -199,7 +207,7 @@ def format(
     """
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
-    exit_code: int = run_lint_tools_simple(
+    exit_code: int = run_lint_with_ai(
         action="fmt",
         paths=path_list,
         tools=tools,
@@ -327,7 +335,7 @@ def test(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    exit_code: int = run_lint_tools_simple(
+    exit_code: int = run_lint_with_ai(
         action=Action.TEST,
         paths=path_list,
         tools="pytest",
@@ -341,5 +349,217 @@ def test(
         output_file=output,
         debug=debug,
         yes=yes,
+        ai_enabled=False,
     )
     return LintroResult(action="test", exit_code=exit_code)
+
+
+def check_run(
+    *,
+    paths: list[str] | tuple[str, ...] | None = None,
+    tools: str | None = None,
+    tool_options: str | None = None,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    output: str | None = None,
+    output_format: str = "grid",
+    group_by: str = "file",
+    ignore_conflicts: bool = False,
+    verbose: bool = False,
+    no_log: bool = False,
+    raw_output: bool = False,
+    incremental: bool = False,
+    diff_base: str | None = None,
+    stream: bool = False,
+    debug: bool = False,
+    auto_install: bool = False,
+    yes: bool = False,
+    ai_fix: bool = False,
+    transport: str | None = None,
+    score: bool = False,
+    fail_under: float | None = None,
+) -> RunArtifact:
+    """Check files and return the full run artifact.
+
+    Result-returning counterpart to :func:`check` (issue #1823). Identical
+    behaviour and options; the difference is that callers get every tool
+    result, the totals, and the health score instead of only an exit code.
+
+    Args:
+        paths: File/directory paths to check. Defaults to the current directory.
+        tools: Comma-separated list of tool names to run, or ``"all"``.
+        tool_options: Tool-specific configuration options.
+        exclude: Comma-separated patterns of files/dirs to exclude.
+        include_venv: Whether to include virtual environment directories.
+        output: Path to an output file for results.
+        output_format: Format for displaying results (grid, json, etc).
+        group_by: How to group issues in output (file, code, none, auto).
+        ignore_conflicts: Whether to ignore tool configuration conflicts.
+        verbose: Whether to show verbose output during execution.
+        no_log: Whether to disable logging to file.
+        raw_output: Whether to show raw tool output instead of formatted output.
+        incremental: Whether to only check files changed since the last run.
+        diff_base: Git base ref for ``--diff`` scanning, or ``None``.
+        stream: Whether to stream tool output in real-time.
+        debug: Whether to enable debug output on console.
+        auto_install: Whether to auto-install Node.js deps if missing.
+        yes: Skip confirmation prompt and proceed immediately.
+        ai_fix: Generate AI fix suggestions.
+        transport: Override AI transport (``api`` or ``cli``).
+        score: Print only the health score, suppressing the summary.
+        fail_under: Exit non-zero if the health score is below this value.
+
+    Returns:
+        RunArtifact: Everything the run produced.
+    """
+    return run_lint_artifact(
+        action=Action.CHECK,
+        paths=list(paths) if paths else list(DEFAULT_PATHS),
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        group_by=group_by,
+        output_format=output_format,
+        verbose=verbose,
+        raw_output=raw_output,
+        output_file=output,
+        incremental=incremental,
+        diff_base=diff_base,
+        debug=debug,
+        stream=stream,
+        no_log=no_log,
+        auto_install=auto_install,
+        yes=yes,
+        ai_fix=ai_fix,
+        ignore_conflicts=ignore_conflicts,
+        transport=transport,
+        score=score,
+        fail_under=fail_under,
+    )
+
+
+def format_run(
+    *,
+    paths: list[str] | tuple[str, ...] | None = None,
+    tools: str | None = None,
+    tool_options: str | None = None,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    group_by: str = "auto",
+    output: str | None = None,
+    output_format: str = "grid",
+    verbose: bool = False,
+    no_log: bool = False,
+    raw_output: bool = False,
+    diff_base: str | None = None,
+    stream: bool = False,
+    debug: bool = False,
+    auto_install: bool = False,
+    yes: bool = False,
+    dry_run: bool = False,
+) -> RunArtifact:
+    """Format code and return the full run artifact.
+
+    Result-returning counterpart to :func:`format` (issue #1823).
+
+    Args:
+        paths: File/directory paths to format. Defaults to the current directory.
+        tools: Comma-separated list of tool names to run, or ``"all"``.
+        tool_options: Tool-specific configuration options.
+        exclude: Comma-separated patterns of files/dirs to exclude.
+        include_venv: Whether to include virtual environment directories.
+        group_by: How to group issues in output (file, code, none, auto).
+        output: Path to an output file for results.
+        output_format: Format for displaying results (grid, json, etc).
+        verbose: Whether to show verbose output during execution.
+        no_log: Whether to disable logging to file.
+        raw_output: Whether to show raw tool output instead of formatted output.
+        diff_base: Git base ref for ``--diff`` scanning, or ``None``.
+        stream: Whether to stream tool output in real-time.
+        debug: Whether to enable debug output on console.
+        auto_install: Whether to auto-install Node.js deps if missing.
+        yes: Skip confirmation prompt and proceed immediately.
+        dry_run: Preview would-be fixes without modifying any files.
+
+    Returns:
+        RunArtifact: Everything the run produced.
+    """
+    return run_lint_artifact(
+        action="fmt",
+        paths=list(paths) if paths else list(DEFAULT_PATHS),
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        group_by=group_by,
+        output_format=output_format,
+        verbose=verbose,
+        raw_output=raw_output,
+        output_file=output,
+        diff_base=diff_base,
+        debug=debug,
+        stream=stream,
+        no_log=no_log,
+        auto_install=auto_install,
+        yes=yes,
+        dry_run=dry_run,
+    )
+
+
+# Alias mirroring the ``fmt``/``format`` pair above.
+fmt_run = format_run
+
+
+def test_run(
+    *,
+    paths: list[str] | tuple[str, ...] | None = None,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    output: str | None = None,
+    output_format: str = "grid",
+    group_by: str = "file",
+    verbose: bool = False,
+    raw_output: bool = False,
+    tool_options: str | None = None,
+    debug: bool = False,
+    yes: bool = False,
+) -> RunArtifact:
+    """Run tests through lintro and return the full run artifact.
+
+    Result-returning counterpart to :func:`test` (issue #1823). Takes raw
+    ``tool_options``; the convenience flags on :func:`test` are sugar over the
+    same string.
+
+    Args:
+        paths: Paths to test files or directories. Defaults to the current dir.
+        exclude: Comma-separated patterns of files/dirs to exclude.
+        include_venv: Whether to include virtual environment directories.
+        output: Path to an output file for results.
+        output_format: Format for displaying results (grid, json, etc).
+        group_by: How to group issues in output (file, code, none, auto).
+        verbose: Whether to show verbose output during execution.
+        raw_output: Whether to show raw tool output instead of formatted output.
+        tool_options: Tool-specific options in ``pytest:option=value`` form.
+        debug: Whether to enable debug output on console.
+        yes: Skip confirmation prompt and proceed immediately.
+
+    Returns:
+        RunArtifact: Everything the run produced.
+    """
+    return run_lint_artifact(
+        action=Action.TEST,
+        paths=list(paths) if paths else list(DEFAULT_PATHS),
+        tools="pytest",
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        group_by=group_by,
+        output_format=output_format,
+        verbose=verbose,
+        raw_output=raw_output,
+        output_file=output,
+        debug=debug,
+        yes=yes,
+        ai_enabled=False,
+    )

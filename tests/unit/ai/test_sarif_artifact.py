@@ -146,6 +146,10 @@ def test_sarif_auto_emits_in_github_actions(
 
     sarif_path = tmp_path / ".lintro" / "artifacts" / "sarif" / "results.sarif.json"
     assert_that(sarif_path.exists()).is_true()
+    # JSON is auto-emitted alongside it so CI has a structured report that
+    # covers clean tools and issue-free failures (see #1768).
+    json_path = tmp_path / ".lintro" / "artifacts" / "json" / "results.json"
+    assert_that(json_path.exists()).is_true()
 
 
 def test_unknown_artifact_format_warns(
@@ -181,6 +185,9 @@ def test_artifact_logs_warning_on_write_failure(
     results = [ToolResult(name="ruff", success=True, issues_count=0)]
     _call_write(results, _make_config(), logger)
 
-    logger.console_output.assert_called_once()
-    call_arg = logger.console_output.call_args[0][0]
-    assert_that(call_arg).contains("sarif artifact")
+    # Both GHA auto-emitted artifacts (SARIF and JSON) fail to write, and each
+    # reports its own warning rather than aborting the run.
+    warnings = [call.args[0] for call in logger.console_output.call_args_list]
+    assert_that(warnings).is_length(2)
+    assert_that(any("sarif artifact" in warning for warning in warnings)).is_true()
+    assert_that(any("json artifact" in warning for warning in warnings)).is_true()

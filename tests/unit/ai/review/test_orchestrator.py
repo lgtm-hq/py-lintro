@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-import threading
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +14,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
+from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -65,6 +65,10 @@ def _mock_provider(*, content: str) -> MagicMock:
     provider = MagicMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
+    # Declare capabilities explicitly: a bare MagicMock attribute is truthy, so
+    # without this a single-chunk review would spuriously take the durable-
+    # session path. Tests that exercise that path override this.
+    provider.capabilities = ProviderCapabilities(supports_sessions=False)
     provider.complete.return_value = AIResponse(
         content=content,
         model="claude-sonnet-4-20250514",
@@ -476,7 +480,7 @@ def _single_file_context() -> ReviewContext:
     )
 
 
-def test_review_chunk_checks_budget_before_each_provider_call() -> None:
+async def test_review_chunk_checks_budget_before_each_provider_call() -> None:
     """Depth-3 review checks the budget before every intra-chunk call."""
     events: list[str] = []
     budget = CostBudget(max_cost_usd=None)
@@ -505,7 +509,7 @@ def test_review_chunk_checks_budget_before_each_provider_call() -> None:
             side_effect=_fake_call_ai,
         ),
     ):
-        _review_chunk(
+        await _review_chunk(
             chunk=_single_chunk(),
             context=_single_file_context(),
             provider=MagicMock(),
@@ -527,7 +531,7 @@ def test_review_chunk_checks_budget_before_each_provider_call() -> None:
             assert_that(events[index - 1]).is_equal_to("check")
 
 
-def test_review_chunk_budget_stops_runaway_calls() -> None:
+async def test_review_chunk_budget_stops_runaway_calls() -> None:
     """An exhausted budget halts the chunk before overspending on more calls."""
     calls: list[str] = []
     budget = CostBudget(max_cost_usd=0.01)
@@ -551,7 +555,7 @@ def test_review_chunk_budget_stops_runaway_calls() -> None:
         side_effect=_fake_call_ai,
     ):
         with pytest.raises(AIError):
-            _review_chunk(
+            await _review_chunk(
                 chunk=_single_chunk(),
                 context=_single_file_context(),
                 provider=MagicMock(),
@@ -641,20 +645,33 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
         for index in range(4)
     ]
     provider = _mock_provider(content=_sample_response_json(include_finding=False))
-    lock = threading.Lock()
     active = 0
     max_active = 0
 
-    def _track_concurrency(*, provider, user_prompt, **kwargs):
+    async def _track_concurrency(
+        *,
+        provider: MagicMock,
+        user_prompt: str,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Record how many chunk reviews overlap on the event loop.
+
+        Args:
+            provider: The provider under review.
+            user_prompt: Ignored prompt text.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            The provider's canned response.
+        """
         del user_prompt, kwargs
         nonlocal active, max_active
-        with lock:
-            active += 1
-            max_active = max(max_active, active)
-        time.sleep(0.05)
-        with lock:
-            active -= 1
-        return provider.complete("prompt")
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        response: AIResponse = provider.complete("prompt")
+        return response
 
     with (
         patch(
@@ -920,3 +937,63 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
 
     assert_that(user_prompt).contains("git diff")
     assert_that(user_prompt).does_not_contain("<pull_request_diff>")
+
+
+def _capability_provider(*, supports_sessions: bool) -> MagicMock:
+    """Build a mock provider declaring a session capability.
+
+    Args:
+        supports_sessions: Value of ``capabilities.supports_sessions``.
+
+    Returns:
+        A configured provider mock.
+    """
+    provider = _mock_provider(content=_sample_response_json())
+    provider.capabilities = ProviderCapabilities(
+        supports_sessions=supports_sessions,
+    )
+    return provider
+
+
+def _run_single_chunk_review(provider: MagicMock) -> None:
+    """Run a one-chunk review against *provider*.
+
+    Args:
+        provider: The provider mock under test.
+    """
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+        ),
+    ):
+        run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+
+def test_run_review_opens_durable_session_when_capability_declared() -> None:
+    """Open a durable session for any provider declaring session support."""
+    provider = _capability_provider(supports_sessions=True)
+
+    _run_single_chunk_review(provider)
+
+    provider.begin_durable_session.assert_called_once()
+    provider.end_durable_session.assert_called_once()
+
+
+def test_run_review_skips_durable_session_without_capability() -> None:
+    """Leave sessions alone for providers that declare no session support."""
+    provider = _capability_provider(supports_sessions=False)
+
+    _run_single_chunk_review(provider)
+
+    provider.begin_durable_session.assert_not_called()
+    provider.end_durable_session.assert_not_called()

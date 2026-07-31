@@ -12,12 +12,15 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
+from lintro.ai.enums import AITransport
 from lintro.ai.secrets import redact_secrets
 
 __all__ = [
@@ -25,6 +28,7 @@ __all__ = [
     "TranscriptDirection",
     "TranscriptWriter",
     "clear_active_transcript",
+    "cli_transcript",
     "get_active_transcript",
     "is_transcript_enabled",
     "log_transcript_event",
@@ -323,3 +327,64 @@ def log_transcript_event(
         direction=direction,
         payload=payload,
     )
+
+
+@contextmanager
+def cli_transcript(
+    *,
+    provider: str,
+    cmd: list[str],
+    cwd: str | None,
+    timeout: float,
+    stdin: str | None,
+) -> Iterator[Callable[..., None]]:
+    """Record one CLI subprocess call as a request/response transcript pair.
+
+    The spawn arguments are logged on entry. The caller records the outcome
+    through the yielded callable; if the block leaves via an exception before
+    doing so, the exception itself is recorded instead, so a transcript never
+    shows a request with no matching response.
+
+    Args:
+        provider: Provider identifier (e.g. ``anthropic``).
+        cmd: Full argv including the binary path.
+        cwd: Working directory the child is spawned in.
+        timeout: Subprocess timeout in seconds.
+        stdin: Optional stdin payload.
+
+    Yields:
+        Callable[..., None]: Records the response event from keyword arguments.
+
+    Raises:
+        BaseException: Re-raised unchanged after the failure is recorded.
+    """
+    transport = AITransport.CLI.value
+    log_transcript_event(
+        provider=provider,
+        transport=transport,
+        direction=TranscriptDirection.REQUEST,
+        payload={"cmd": list(cmd), "cwd": cwd, "timeout": timeout, "stdin": stdin},
+    )
+    recorded = False
+
+    def record(**payload: Any) -> None:
+        """Append the response event for this call.
+
+        Args:
+            **payload: Event body fields (e.g. ``returncode``, ``stdout``).
+        """
+        nonlocal recorded
+        recorded = True
+        log_transcript_event(
+            provider=provider,
+            transport=transport,
+            direction=TranscriptDirection.RESPONSE,
+            payload=payload,
+        )
+
+    try:
+        yield record
+    except BaseException as exc:
+        if not recorded:
+            record(error=type(exc).__name__, message=str(exc))
+        raise

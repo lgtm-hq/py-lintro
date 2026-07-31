@@ -23,6 +23,8 @@ _COMPLETION_INSTRUCTIONS: Final = {
 def completions_command(shell: str) -> None:
     """Print a shell completion script for bash, zsh, or fish.
 
+    \u000c
+
     Args:
         shell: The shell completion script to generate.
     """

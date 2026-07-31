@@ -129,6 +129,7 @@ def execute_ruff_fix(
         return ToolResult(
             name=tool.definition.name,
             success=timeout_result.success,
+            timed_out=timeout_result.timed_out,
             output=timeout_result.output,
             issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,
@@ -166,12 +167,15 @@ def execute_ruff_fix(
                 name=tool.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=1,  # Count timeout as execution failure
+                # A timeout is an execution failure, not a finding: only
+                # genuine pre-timeout issues are counted.
+                issues_count=initial_count,
                 # Include any lint issues found before timeout
                 issues=initial_issues,
                 initial_issues_count=initial_count,
                 fixed_issues_count=0,
-                remaining_issues_count=1,
+                remaining_issues_count=initial_count,
+                timed_out=True,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
         initial_format_count = len(format_files)
@@ -203,11 +207,14 @@ def execute_ruff_fix(
                 name=tool.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=1,  # Count timeout as execution failure
+                # A timeout is an execution failure, not a finding: only
+                # genuine pre-timeout issues are counted.
+                issues_count=total_initial_count,
                 issues=initial_issues,  # Include initial issues found
                 initial_issues_count=total_initial_count,
                 fixed_issues_count=0,
-                remaining_issues_count=1,
+                remaining_issues_count=total_initial_count,
+                timed_out=True,
             )
         remaining_issues = parse_ruff_output(output=output)
         remaining_count = len(remaining_issues)
@@ -289,11 +296,14 @@ def execute_ruff_fix(
                 name=tool.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=1,  # Count timeout as execution failure
+                # A timeout is an execution failure, not a finding: only
+                # genuine pre-timeout issues are counted.
+                issues_count=total_initial_count - fixed_lint_count,
                 issues=remaining_issues,  # Include any issues found before timeout
                 initial_issues_count=total_initial_count,
                 fixed_issues_count=fixed_lint_count,
-                remaining_issues_count=1,
+                remaining_issues_count=total_initial_count - fixed_lint_count,
+                timed_out=True,
             )
         # Formatting fixes are counted separately from lint fixes
         if initial_format_count > 0:

@@ -12,7 +12,7 @@ from lintro.cli_utils.commands.test import test
 
 def test_test_function_with_default_options() -> None:
     """Test programmatic test function with explicit default options."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -29,7 +29,7 @@ def test_test_function_with_default_options() -> None:
 
 def test_test_function_with_paths() -> None:
     """Test programmatic test function with paths."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=("tests/",),
             exclude=None,
@@ -45,7 +45,7 @@ def test_test_function_with_paths() -> None:
 
 def test_test_function_with_exclude() -> None:
     """Test programmatic test function with exclude patterns."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude="*.venv",
@@ -61,7 +61,7 @@ def test_test_function_with_exclude() -> None:
 
 def test_test_function_with_include_venv() -> None:
     """Test programmatic test function with include-venv."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -77,7 +77,7 @@ def test_test_function_with_include_venv() -> None:
 
 def test_test_function_with_output() -> None:
     """Test programmatic test function with output file."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -95,7 +95,7 @@ def test_test_function_with_output() -> None:
 
 def test_test_function_with_output_format() -> None:
     """Test programmatic test function with output format."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -111,7 +111,7 @@ def test_test_function_with_output_format() -> None:
 
 def test_test_function_with_group_by() -> None:
     """Test programmatic test function with group-by."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -127,7 +127,7 @@ def test_test_function_with_group_by() -> None:
 
 def test_test_function_with_verbose() -> None:
     """Test programmatic test function with verbose flag."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -143,7 +143,7 @@ def test_test_function_with_verbose() -> None:
 
 def test_test_function_with_raw_output() -> None:
     """Test programmatic test function with raw-output flag."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -160,7 +160,7 @@ def test_test_function_with_raw_output() -> None:
 
 def test_test_function_with_tool_options() -> None:
     """Test programmatic test function with tool options."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         test(
             paths=(),
             exclude=None,
@@ -178,7 +178,7 @@ def test_test_function_with_tool_options() -> None:
 
 def test_test_function_exit_code_success() -> None:
     """Test programmatic function returns on success code."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         # test() returns None on success, no assignment needed
         test(
             paths=(),
@@ -195,7 +195,7 @@ def test_test_function_exit_code_success() -> None:
 
 def test_test_function_exit_code_failure() -> None:
     """Test programmatic function exits with failure code."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
+    with patch("lintro.api.core.run_lint_with_ai", return_value=1):
         with pytest.raises(SystemExit) as exc_info:
             test(
                 paths=(),

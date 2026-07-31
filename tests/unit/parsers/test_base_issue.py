@@ -245,3 +245,49 @@ def test_get_severity_passes_through_enum_instance() -> None:
 
     issue = EnumIssue(file="test.py", line=1)
     assert_that(issue.get_severity()).is_equal_to(SeverityLevel.ERROR)
+
+
+def test_get_code_default_field() -> None:
+    """get_code reads the ``code`` attribute by default."""
+
+    @dataclass
+    class CodeIssue(BaseIssue):
+        code: str = ""
+
+    issue = CodeIssue(file="test.py", line=1, code="E501")
+    assert_that(issue.get_code()).is_equal_to("E501")
+
+
+def test_get_code_resolves_mapped_field() -> None:
+    """get_code resolves the native field named by DISPLAY_FIELD_MAP."""
+
+    @dataclass
+    class RuleIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: str | None = None
+
+    issue = RuleIssue(file="test.py", line=1, rule="colons")
+    assert_that(issue.get_code()).is_equal_to("colons")
+
+
+def test_get_code_empty_when_unset() -> None:
+    """get_code returns an empty string when the code is missing."""
+    assert_that(BaseIssue().get_code()).is_equal_to("")
+
+
+def test_to_display_row_uses_get_code() -> None:
+    """to_display_row renders the mapped code via get_code."""
+
+    @dataclass
+    class RuleIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: str | None = None
+
+    issue = RuleIssue(file="test.py", line=1, rule="indentation")
+    assert_that(issue.to_display_row()["code"]).is_equal_to("indentation")

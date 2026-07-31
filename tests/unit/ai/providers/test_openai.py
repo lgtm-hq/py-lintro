@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from collections.abc import Generator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -10,9 +12,75 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
+    AIProviderError,
+    AIRateLimitError,
 )
 from lintro.ai.providers import openai as mod
 from lintro.ai.providers.openai import OpenAIProvider
+
+
+class _FakeOpenAIError(Exception):
+    """Stand-in for the SDK base ``openai.OpenAIError``."""
+
+
+class _FakeAuthError(_FakeOpenAIError):
+    """Stand-in for ``openai.AuthenticationError``."""
+
+
+class _FakeRateLimitError(_FakeOpenAIError):
+    """Stand-in for ``openai.RateLimitError``."""
+
+
+class _FakeTimeoutError(_FakeOpenAIError):
+    """Stand-in for ``openai.APITimeoutError``."""
+
+
+@pytest.fixture
+def fake_openai_sdk() -> Generator[SimpleNamespace]:
+    """Patch the module's ``openai`` reference with fake error classes."""
+    fake = SimpleNamespace(
+        OpenAIError=_FakeOpenAIError,
+        AuthenticationError=_FakeAuthError,
+        RateLimitError=_FakeRateLimitError,
+        APITimeoutError=_FakeTimeoutError,
+    )
+    with patch.object(mod, "openai", fake, create=True):
+        yield fake
+
+
+def test_map_errors_authentication(fake_openai_sdk: SimpleNamespace) -> None:
+    """SDK AuthenticationError maps to AIAuthenticationError."""
+    with pytest.raises(AIAuthenticationError):
+        with OpenAIProvider._map_errors():
+            raise _FakeAuthError("bad key")
+
+
+def test_map_errors_rate_limit(fake_openai_sdk: SimpleNamespace) -> None:
+    """SDK RateLimitError maps to AIRateLimitError."""
+    with pytest.raises(AIRateLimitError):
+        with OpenAIProvider._map_errors():
+            raise _FakeRateLimitError("slow down")
+
+
+def test_map_errors_timeout(fake_openai_sdk: SimpleNamespace) -> None:
+    """SDK APITimeoutError maps to the generic AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with OpenAIProvider._map_errors():
+            raise _FakeTimeoutError("timed out")
+
+
+def test_map_errors_generic_api_error(fake_openai_sdk: SimpleNamespace) -> None:
+    """A generic SDK OpenAIError maps to AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with OpenAIProvider._map_errors():
+            raise _FakeOpenAIError("boom")
+
+
+def test_map_errors_passes_through_on_success(fake_openai_sdk: SimpleNamespace) -> None:
+    """The context manager is transparent when no error is raised."""
+    with OpenAIProvider._map_errors():
+        value = 21 * 2
+    assert_that(value).is_equal_to(42)
 
 
 def test_openai_provider_raises_when_sdk_missing():
@@ -69,7 +137,7 @@ def test_openai_provider_get_client_no_key_raises():
             provider._get_client()
 
 
-def test_openai_complete_parses_response():
+async def test_openai_complete_parses_response():
     """complete() extracts content, tokens, and cost from SDK response."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -90,11 +158,11 @@ def test_openai_complete_parses_response():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"TEST_KEY": "sk-test"}):
-            result = provider.complete(
+            result = await provider.complete(
                 "test prompt",
                 system="be helpful",
             )
@@ -114,7 +182,7 @@ def test_openai_complete_parses_response():
         )
 
 
-def test_openai_complete_without_system_prompt():
+async def test_openai_complete_without_system_prompt():
     """complete() omits system message when system is None."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -134,11 +202,11 @@ def test_openai_complete_without_system_prompt():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            provider.complete("prompt")
+            await provider.complete("prompt")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert_that(call_kwargs["messages"]).is_equal_to(
@@ -146,7 +214,7 @@ def test_openai_complete_without_system_prompt():
         )
 
 
-def test_openai_complete_handles_none_usage():
+async def test_openai_complete_handles_none_usage():
     """complete() handles None usage gracefully (tokens default to 0)."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -162,17 +230,17 @@ def test_openai_complete_handles_none_usage():
         mock_response.usage = None
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            result = provider.complete("prompt")
+            result = await provider.complete("prompt")
 
         assert_that(result.input_tokens).is_equal_to(0)
         assert_that(result.output_tokens).is_equal_to(0)
 
 
-def test_openai_complete_respects_max_tokens_cap():
+async def test_openai_complete_respects_max_tokens_cap():
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider(max_tokens=2048)
@@ -190,11 +258,11 @@ def test_openai_complete_respects_max_tokens_cap():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            provider.complete("prompt", max_tokens=4096)
+            await provider.complete("prompt", max_tokens=4096)
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)

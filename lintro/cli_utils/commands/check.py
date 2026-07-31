@@ -12,8 +12,9 @@ import sys
 import click
 
 from lintro.api import core as api
+from lintro.api.pipeline import run_lint_with_ai
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -186,6 +187,8 @@ def check_command(
 ) -> None:
     """Check files for issues using the specified tools.
 
+    \u000c
+
     Args:
         paths: tuple: List of file/directory paths to check.
         tools: str | None: Comma-separated list of tool names to run.
@@ -223,6 +226,8 @@ def check_command(
 
         clear_all_caches()
 
+    validate_diff_base_ref(diff_base=diff_base)
+
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
@@ -235,8 +240,8 @@ def check_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    # Run with simplified approach
-    exit_code: int = run_lint_tools_simple(
+    # Run the AI-aware pipeline: execute, AI-enhance, render.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=path_list,
         tools=tools,

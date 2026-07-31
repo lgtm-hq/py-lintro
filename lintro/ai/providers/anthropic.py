@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
 
 from lintro.ai.cost import estimate_cost
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
@@ -24,12 +24,24 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    AsyncAIStreamResult,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.claude_auth import should_send_bare
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
+)
+from lintro.ai.raw_response import (
+    CLI_ENVELOPE_STAGE,
+    describe_raw_response,
+    recover_prose_envelope,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
@@ -52,6 +64,31 @@ def _find_claude() -> str | None:
     return CliTransport.find_binary(_CLAUDE_BIN)
 
 
+def _auth_hint(*, bare: bool) -> str:
+    """Return guidance matching the auth mode the failed call actually used.
+
+    A subscription user told to "run /login" after a bare invocation has
+    already done so; the real remedy differs per mode, so the hint must too.
+
+    Args:
+        bare: Whether ``--bare`` was sent on the failing invocation.
+
+    Returns:
+        Actionable guidance for the mode that failed.
+    """
+    if bare:
+        return (
+            "Set ANTHROPIC_API_KEY or configure apiKeyHelper "
+            "(--bare mode does not use OAuth login), or set "
+            "ai.cli_bare: never / LINTRO_CLI_BARE=never to use the CLI's "
+            "own login session."
+        )
+    return (
+        "Log in with 'claude /login', or set ANTHROPIC_API_KEY to "
+        "authenticate the CLI with an API key."
+    )
+
+
 class _AnthropicCliTransport(CliTransport):
     """Anthropic ``claude -p`` subprocess transport."""
 
@@ -66,6 +103,7 @@ class _AnthropicCliTransport(CliTransport):
             binary_name="Claude",
             install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
             api_key_env=DEFAULT_API_KEY_ENV,
+            contract=cli_contract_for(AIProvider.ANTHROPIC),
             provider_name=AIProvider.ANTHROPIC.value,
         )
         self._model = model
@@ -75,15 +113,36 @@ class _AnthropicCliTransport(CliTransport):
         try:
             data = json.loads(stdout.strip())
         except json.JSONDecodeError as exc:
-            raise AIProviderError(
-                f"Claude CLI returned invalid JSON: {exc}\n"
-                f"Raw output: {stdout[:500]}",
-            ) from exc
+            recovered = recover_prose_envelope(
+                provider="Claude",
+                stdout=stdout,
+                reason=str(exc),
+            )
+            if recovered is None:
+                evidence = describe_raw_response(
+                    provider="Claude",
+                    stage=CLI_ENVELOPE_STAGE,
+                    raw=stdout,
+                )
+                raise AIProviderError(
+                    f"Claude CLI returned invalid JSON: {exc}\n{evidence}",
+                ) from exc
+            return (
+                AIResponse(
+                    content=recovered,
+                    model=self._model,
+                    provider=AIProvider.ANTHROPIC,
+                ),
+                None,
+            )
 
         if data.get("is_error") or data.get("subtype") == "error":
-            raise AIProviderError(
-                f"Claude CLI reported error: {data.get('result', stdout[:500])}",
+            cause = data.get("result") or describe_raw_response(
+                provider="Claude",
+                stage=CLI_ENVELOPE_STAGE,
+                raw=stdout,
             )
+            raise AIProviderError(f"Claude CLI reported error: {cause}")
 
         content = data.get("result", "")
         structured = data.get("structured_output")
@@ -162,6 +221,7 @@ class AnthropicProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
         transport: AITransport = AITransport.API,
+        cli_bare: CliBareMode = CliBareMode.AUTO,
     ) -> None:
         """Initialize the Anthropic provider.
 
@@ -173,12 +233,16 @@ class AnthropicProvider(BaseAIProvider):
             base_url: Custom API base URL for Anthropic-compatible
                 endpoints (proxies, self-hosted, etc.).
             transport: ``api`` for SDK or ``cli`` for ``claude -p``.
+            cli_bare: Whether CLI transport passes ``--bare``. Defaults to
+                auto-detection from the CLI's own API-key sources; see
+                :mod:`lintro.ai.providers.claude_auth`.
 
         Raises:
             AINotAvailableError: When CLI transport is selected but the
                 ``claude`` binary is not on PATH.
         """
         self._transport = transport
+        self._cli_bare = cli_bare
         self._cli: _AnthropicCliTransport | None = None
 
         if transport == AITransport.CLI:
@@ -228,12 +292,12 @@ class AnthropicProvider(BaseAIProvider):
             api_key: The resolved API key.
 
         Returns:
-            anthropic.Anthropic: The API client.
+            anthropic.AsyncAnthropic: The async API client.
         """
         kwargs: dict[str, Any] = {"api_key": api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
-        return anthropic.Anthropic(**kwargs)
+        return anthropic.AsyncAnthropic(**kwargs)
 
     def is_available(self) -> bool:
         """Return True when the configured transport is usable."""
@@ -241,7 +305,53 @@ class AnthropicProvider(BaseAIProvider):
             return _find_claude() is not None
         return super().is_available()
 
-    def _complete_cli(
+    def _cli_transport(self) -> _AnthropicCliTransport | None:
+        """Return the ``claude`` CLI transport, when one was constructed.
+
+        Returns:
+            The CLI transport, or ``None`` under API transport.
+        """
+        return self._cli
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare Anthropic capabilities for the configured transport.
+
+        Returns:
+            CLI transport resumes ``claude`` sessions and accepts a native JSON
+            schema but streams only via the base fallback; API transport streams
+            natively and has no server-side session to resume.
+        """
+        if self._transport == AITransport.CLI:
+            return ProviderCapabilities(
+                supports_sessions=True,
+                supports_structured_output=True,
+                supports_streaming=False,
+            )
+        return ProviderCapabilities(
+            supports_sessions=False,
+            supports_structured_output=False,
+            supports_streaming=True,
+        )
+
+    def begin_durable_session(self, *, repo_root: str) -> None:
+        """Start a fresh reusable ``claude`` session.
+
+        Args:
+            repo_root: Absolute path to the repository under review. Unused;
+                the working directory is passed per call instead.
+        """
+        del repo_root
+        self.end_durable_session()
+
+    def end_durable_session(self) -> None:
+        """Drop the resumable session id so the next call starts clean."""
+        if self._transport != AITransport.CLI:
+            return
+        with self._session_lock:
+            self._session_id = None
+
+    async def _complete_cli(
         self,
         prompt: str,
         *,
@@ -256,9 +366,14 @@ class AnthropicProvider(BaseAIProvider):
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
         effective_model = model or self._model
+        working_dir = repo_root or os.getcwd()
+        # `--bare` disables the CLI's OAuth session login, so it may only be
+        # sent when the binary can reach an API key. Forcing it locked every
+        # subscription-authenticated user out of this transport (#1838).
+        bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
         cmd = [
             self._cli._binary_path,
-            "--bare",
+            *(("--bare",) if bare else ()),
             "-p",
             prompt,
             "--output-format",
@@ -270,33 +385,43 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
+
+        candidates: list[OptionalArg] = []
         if cli_schema is not None:
             cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
             if cli_schema.schema_name:
-                cmd.extend(["--json-schema-name", cli_schema.schema_name])
+                candidates.append(
+                    OptionalArg(
+                        flag="--json-schema-name",
+                        values=(cli_schema.schema_name,),
+                    ),
+                )
         with self._session_lock:
             resume_session_id = None if use_one_shot else self._session_id
         if resume_session_id is not None:
-            cmd.extend(["--resume", resume_session_id])
+            candidates.append(
+                OptionalArg(flag="--resume", values=(resume_session_id,)),
+            )
+
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
             f"resume={resume_session_id is not None}, "
+            f"bare={bare}, "
             f"prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run(
+        result = await self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             timeout=timeout,
-            cwd=repo_root or os.getcwd(),
+            cwd=working_dir,
         )
         self._cli.check_exit_code(
             result,
             auth_patterns=("authentication", "login", "not logged in"),
-            auth_hint=(
-                "Set ANTHROPIC_API_KEY or configure apiKeyHelper "
-                "(--bare mode does not use OAuth login)."
-            ),
+            auth_hint=_auth_hint(bare=bare),
         )
 
         response, session_id = self._cli.parse_stdout(result.stdout)
@@ -305,7 +430,7 @@ class AnthropicProvider(BaseAIProvider):
                 self._session_id = session_id
         return response
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -334,7 +459,7 @@ class AnthropicProvider(BaseAIProvider):
         """
         if self._transport == AITransport.CLI:
             del max_tokens
-            return self._complete_cli(
+            return await self._complete_cli(
                 prompt,
                 system=system,
                 timeout=timeout,
@@ -363,7 +488,7 @@ class AnthropicProvider(BaseAIProvider):
 
             log_transcript_event(
                 provider=AIProvider.ANTHROPIC.value,
-                transport="api",
+                transport=AITransport.API.value,
                 direction=TranscriptDirection.REQUEST,
                 payload={
                     "model": effective_model,
@@ -374,7 +499,7 @@ class AnthropicProvider(BaseAIProvider):
                 },
             )
 
-            response = client.messages.create(**kwargs)
+            response = await client.messages.create(**kwargs)
 
             content = ""
             for block in response.content:
@@ -387,7 +512,7 @@ class AnthropicProvider(BaseAIProvider):
 
             log_transcript_event(
                 provider=AIProvider.ANTHROPIC.value,
-                transport="api",
+                transport=AITransport.API.value,
                 direction=TranscriptDirection.RESPONSE,
                 payload={
                     "model": effective_model,
@@ -407,7 +532,7 @@ class AnthropicProvider(BaseAIProvider):
                 provider=AIProvider.ANTHROPIC,
             )
 
-    def stream_complete(
+    async def stream_complete(
         self,
         prompt: str,
         *,
@@ -415,7 +540,7 @@ class AnthropicProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
         model: str | None = None,
-    ) -> AIStreamResult:
+    ) -> AsyncAIStreamResult:
         """Stream a completion from the Anthropic API token-by-token.
 
         Args:
@@ -426,10 +551,10 @@ class AnthropicProvider(BaseAIProvider):
             model: Optional per-call model override.
 
         Returns:
-            An AIStreamResult wrapping the token stream.
+            An AsyncAIStreamResult wrapping the token stream.
         """
         if self._transport == AITransport.CLI:
-            return super().stream_complete(
+            return await super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
@@ -454,17 +579,49 @@ class AnthropicProvider(BaseAIProvider):
             f"max_tokens={effective_max}",
         )
 
+        log_transcript_event(
+            provider=AIProvider.ANTHROPIC.value,
+            transport=AITransport.API.value,
+            direction=TranscriptDirection.REQUEST,
+            payload={
+                "model": effective_model,
+                "max_tokens": effective_max,
+                "system": system,
+                "messages": kwargs["messages"],
+                "timeout": timeout,
+                "stream": True,
+            },
+        )
+
         final_response: list[AIResponse] = []
 
-        def _generate() -> Iterator[str]:
+        async def _generate() -> AsyncIterator[str]:
+            """Yield tokens from the Anthropic stream and capture usage.
+
+            Yields:
+                str: Text deltas in arrival order.
+            """
             with self._map_errors():
-                with client.messages.stream(**kwargs) as stream:
-                    yield from stream.text_stream
-                    final_message = stream.get_final_message()
+                async with client.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                    final_message = await stream.get_final_message()
 
                 input_tokens = final_message.usage.input_tokens
                 output_tokens = final_message.usage.output_tokens
                 cost = estimate_cost(effective_model, input_tokens, output_tokens)
+                log_transcript_event(
+                    provider=AIProvider.ANTHROPIC.value,
+                    transport=AITransport.API.value,
+                    direction=TranscriptDirection.RESPONSE,
+                    payload={
+                        "model": effective_model,
+                        "stream": True,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cost_estimate": cost,
+                    },
+                )
                 final_response.append(
                     AIResponse(
                         content="",
@@ -483,7 +640,7 @@ class AnthropicProvider(BaseAIProvider):
                 )
             return final_response[0]
 
-        return AIStreamResult(
+        return AsyncAIStreamResult(
             _chunks=_generate(),
             _on_done=_on_done,
         )

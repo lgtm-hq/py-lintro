@@ -1,22 +1,12 @@
-"""Checklist visibility modes for review output."""
+"""Checklist visibility modes for review output.
+
+Compatibility re-export: the enum now lives in :mod:`lintro.enums` so that
+``lintro.config.review_config`` can reference it without importing
+``lintro.ai`` (issue #724).
+"""
 
 from __future__ import annotations
 
-from enum import auto
-
-from lintro.enums.hyphenated_str_enum import HyphenatedStrEnum
+from lintro.enums.checklist_display import ChecklistDisplay
 
 __all__ = ["ChecklistDisplay"]
-
-
-class ChecklistDisplay(HyphenatedStrEnum):
-    """How structured checklist results appear in human-facing output.
-
-    * **off** — findings only (default).
-    * **linked** — review questions under findings with checklist_ids.
-    * **all** — linked plus cleared-check and orphan appendices.
-    """
-
-    OFF = auto()
-    LINKED = auto()
-    ALL = auto()

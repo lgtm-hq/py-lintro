@@ -106,10 +106,22 @@ system.
 <td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
 </tr>
 <tr>
+<td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
+<td>🐹 Go</td>
+<td>✅</td>
+<td><code>brew install golangci-lint</code><br><a href="https://golangci-lint.run/welcome/install/">Install docs</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>
 <td><a href="https://github.com/hadolint/hadolint/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://html-validate.org/"><img src="https://img.shields.io/badge/html--validate-e34f26?logo=html5&logoColor=white" alt="html-validate"></a></td>
+<td>🌐 HTML</td>
+<td>-</td>
+<td><code>bun add -D html-validate</code><br><code>npm install -D html-validate</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
@@ -127,7 +139,7 @@ system.
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>
 <td>🟨 JS/TS</td>
 <td>✅</td>
-<td><code>bun add -g oxlint</code><br><code>npm install -g oxlint</code></td>
+<td><code>bun add -D oxlint</code><br><code>npm install -D oxlint</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/jsh9/pydoclint"><img src="https://img.shields.io/badge/pydoclint-3776AB?logo=python&logoColor=white" alt="pydoclint"></a></td>
@@ -158,7 +170,7 @@ system.
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxfmt-e05d44?logo=javascript&logoColor=white" alt="Oxfmt"></a></td>
 <td>🟨 JS/TS</td>
 <td>✅</td>
-<td><code>bun add -g oxfmt</code><br><code>npm install -g oxfmt</code></td>
+<td><code>bun add -D oxfmt</code><br><code>npm install -D oxfmt</code></td>
 </tr>
 <tr>
 <td><a href="https://prettier.io/"><img src="https://img.shields.io/badge/Prettier-1a2b34?logo=prettier&logoColor=white" alt="Prettier"></a></td>
@@ -207,7 +219,7 @@ system.
 <td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
 <td>🎨 CSS/SCSS/Sass/Less</td>
 <td>✅</td>
-<td><code>bun add -g stylelint</code><br><code>npm install -g stylelint</code></td>
+<td><code>bun add -D stylelint</code><br><code>npm install -D stylelint</code></td>
 </tr>
 <tr><th colspan="4">Type Checkers</th></tr>
 <tr>
@@ -283,6 +295,12 @@ system.
 <td>-</td>
 <td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
+<tr>
+<td><a href="https://github.com/trufflesecurity/trufflehog"><img src="https://img.shields.io/badge/TruffleHog-800000?logo=trufflesecurity&logoColor=white" alt="TruffleHog"></a></td>
+<td>🔐 Secret Detection</td>
+<td>-</td>
+<td><code>brew install trufflehog</code><br><a href="https://github.com/trufflesecurity/trufflehog/releases">GitHub Releases</a></td>
+</tr>
 <tr><th colspan="4">AI Tools</th></tr>
 <tr>
 <td><a href="docs/ai-features.md#ai-idiom-review-idiom-review-tool"><img src="https://img.shields.io/badge/idiom--review-6941c6?logo=openai&logoColor=white" alt="idiom-review"></a></td>
@@ -294,7 +312,13 @@ system.
 </table>
 
 > 📦 = bundled with lintro — no separate install needed\
-> ⚡ Node.js tools support `--auto-install` to install dependencies automatically
+> ⚡ Node.js tools support `--auto-install` to install dependencies automatically\
+> 🟨 Node.js tools do not all resolve the same way — the command above is the one that
+> works for that tool. Tools shown with `-D` (oxlint, oxfmt, stylelint, html-validate)
+> are run through `bunx`/`npx`, which look in the checked project's `node_modules` and
+> never at `PATH`, so a global or Homebrew install is not what Lintro picks up. The rest
+> prefer a binary on `PATH`, which is what `-g` and `brew install` provide. See
+> [Node.js tool resolution](docs/configuration.md#nodejs-tool-resolution).
 
 <!-- markdownlint-enable MD013 MD033 MD060 -->
 

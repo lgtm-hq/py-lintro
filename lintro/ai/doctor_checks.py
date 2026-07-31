@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
 from lintro.ai.availability import (
     codex_auth_configured,
@@ -15,11 +14,28 @@ from lintro.ai.availability import (
 )
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.liveness import LivenessState, check_liveness_sync
+from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.registry import AIProvider
 from lintro.ai.transcript import TRANSCRIPT_DIR, is_transcript_enabled
 from lintro.enums.tool_status import ToolStatus
 
-__all__ = ["AICheckResult", "check_ai_configuration"]
+__all__ = ["AICheckResult", "check_ai_configuration", "check_ai_liveness"]
+
+# Liveness states mapped onto the doctor status vocabulary. A depleted balance or
+# a rejected key is a hard failure, not an "unknown": doctor exists to tell the
+# operator that AI work will not run, and a soft status is how that gets missed.
+_LIVENESS_STATUS: dict[LivenessState, ToolStatus] = {
+    LivenessState.OK: ToolStatus.OK,
+    LivenessState.MISSING_CREDENTIAL: ToolStatus.MISSING,
+    LivenessState.AUTH_FAILED: ToolStatus.INCOMPATIBLE,
+    LivenessState.NO_QUOTA: ToolStatus.INCOMPATIBLE,
+    LivenessState.INCOMPATIBLE_CLI: ToolStatus.INCOMPATIBLE,
+    # Transient: the credential itself may be fine, so do not brand it broken.
+    LivenessState.RATE_LIMITED: ToolStatus.UNKNOWN,
+    LivenessState.UNREACHABLE: ToolStatus.UNKNOWN,
+    LivenessState.UNKNOWN: ToolStatus.UNKNOWN,
+}
 
 
 @dataclass(frozen=True)
@@ -32,8 +48,47 @@ class AICheckResult:
     hint: str = ""
 
 
+def check_ai_liveness(config: AIConfig) -> list[AICheckResult]:
+    """Probe the configured provider's credential and report it doctor-style.
+
+    Opt-in rather than part of :func:`check_ai_configuration`: under API
+    transport the probe is a real (one-token) call, and ``lintro doctor`` must not
+    silently spend money or hit an external service on every invocation. It is
+    what surfaces the one condition every presence check misses — a valid key with
+    a depleted balance (#1826).
+
+    Args:
+        config: Parsed AI configuration.
+
+    Returns:
+        A single-element list describing the probe, or an empty list when no AI
+        feature is enabled or no transport is configured.
+    """
+    if not config.any_feature_enabled or config.transport is None:
+        return []
+    if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
+        # Structurally impossible pairing. check_ai_configuration already reports
+        # it; probing anyway would fail on provider construction and surface a
+        # misleading "no credential" verdict for what is a configuration error.
+        return []
+
+    result = check_liveness_sync(config=config)
+    return [
+        AICheckResult(
+            name=f"ai.liveness.{result.provider}",
+            status=_LIVENESS_STATUS.get(result.state, ToolStatus.UNKNOWN),
+            message=result.message,
+            hint=result.hint,
+        ),
+    ]
+
+
 def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
     """Run transport-aware AI checks when AI features are enabled.
+
+    Presence only -- SDK installed, binary on ``PATH``, key variable set. Whether
+    the credential actually works is :func:`check_ai_liveness`, which is opt-in
+    because probing costs a real call.
 
     Args:
         config: Parsed AI configuration.
@@ -45,7 +100,7 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
     results: list[AICheckResult] = []
 
     if is_transcript_enabled(config_enabled=config.transcript_logging):
-        transcript_path = Path.cwd() / TRANSCRIPT_DIR
+        transcript_path = resolve_workspace_root(None) / TRANSCRIPT_DIR
         results.append(
             AICheckResult(
                 name="ai.transcript",

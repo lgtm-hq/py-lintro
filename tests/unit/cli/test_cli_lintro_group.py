@@ -64,7 +64,7 @@ def test_list_tools_command_help_displays() -> None:
 def test_invoke_single_command_execution() -> None:
     """Test that invoke executes single command correctly."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         result = runner.invoke(cli, ["check", "."])
         assert_that(result.exit_code).is_equal_to(0)
@@ -75,8 +75,8 @@ def test_invoke_with_comma_separated_commands() -> None:
     """Test that invoke handles comma-separated command chaining."""
     runner = CliRunner()
     with (
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
-        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
+        patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock_fmt,
     ):
         mock_check.return_value = 0
         mock_fmt.return_value = 0
@@ -140,8 +140,8 @@ def test_invoke_forwards_no_art_flag() -> None:
     """Test that chained commands forward the enabled --no-art flag."""
     runner = CliRunner()
     with (
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
-        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
+        patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock_fmt,
     ):
         mock_check.return_value = 0
         mock_fmt.return_value = 0
@@ -208,7 +208,7 @@ def test_invoke_command_not_found() -> None:
 def test_chaining_ignores_empty_command_groups() -> None:
     """Test that chaining ignores empty command groups."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         # Multiple commas in a row would create empty groups
         result = runner.invoke(cli, ["check", ".", ",", ",", "check", "."])
@@ -223,7 +223,7 @@ def test_chaining_ignores_empty_command_groups() -> None:
 def test_chaining_with_flags() -> None:
     """Test that chaining preserves flags for each command."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         mock_run.return_value = 0
         result = runner.invoke(
             cli,
@@ -249,8 +249,8 @@ def test_invoke_with_realistic_comma_separated_inputs() -> None:
     """
     runner = CliRunner()
     with (
-        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
     ):
         mock_fmt.return_value = 0
         mock_check.return_value = 0
@@ -266,8 +266,8 @@ def test_invoke_with_chk_tst_input() -> None:
     """Test that invoke handles chk,tst style input."""
     runner = CliRunner()
     with (
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
-        patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_test,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
+        patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_test,
     ):
         mock_check.return_value = 0
         mock_test.return_value = 0
@@ -282,7 +282,7 @@ def test_invoke_with_chk_tst_input() -> None:
 def test_invoke_handles_system_exit() -> None:
     """Test that invoke properly handles SystemExit exceptions."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         mock_run.side_effect = SystemExit(1)
         result = runner.invoke(cli, ["check", "."])
         # Should handle SystemExit gracefully
@@ -294,7 +294,7 @@ def test_invoke_handles_system_exit() -> None:
 def test_invoke_preserves_max_exit_code() -> None:
     """Test that chained command execution preserves the max exit code."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         # Simulate different exit codes from multiple runs
         mock_run.side_effect = [0, 1]
         result = runner.invoke(cli, ["check", ".", ",", "check", "."])
@@ -305,7 +305,7 @@ def test_invoke_preserves_max_exit_code() -> None:
 def test_invoke_with_exception_in_command() -> None:
     """Test error handling when command raises exception."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_run:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
         mock_run.side_effect = Exception("Test error")
         result = runner.invoke(cli, ["check", "."])
         # Should handle exceptions gracefully with non-zero exit code

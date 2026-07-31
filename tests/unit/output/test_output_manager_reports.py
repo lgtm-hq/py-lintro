@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.output import OutputManager
 
 
-class DummyIssue:
+class DummyIssue(BaseIssue):
     """Simple container for issue fields used in reports."""
 
     def __init__(self, file: str, line: int, code: str, message: str) -> None:

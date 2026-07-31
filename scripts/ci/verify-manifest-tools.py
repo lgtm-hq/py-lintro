@@ -155,6 +155,68 @@ def _parse_allow_missing(values: list[str] | None) -> set[str]:
     return names
 
 
+# Alias: --allow-version-lag uses the same comma/repeat parsing as allow-missing.
+_parse_allow_version_lag = _parse_allow_missing
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Parse a dotted numeric version into a comparable integer tuple.
+
+    Non-numeric trailing segments (pre-release tags) are dropped so
+    ``7.1.0-rc.1`` compares as ``(7, 1, 0)``.
+
+    Args:
+        version: A dotted version string.
+
+    Returns:
+        Integer segments for lexicographic comparison. Empty when no digits
+        are found.
+    """
+    parts: list[int] = []
+    for segment in version.split("."):
+        digits = ""
+        for char in segment:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+        if len(digits) != len(segment):
+            # Segment had trailing non-digit content (e.g. "0-rc"): stop
+            # entirely so a pre-release tag drops everything after it and
+            # "7.1.0-rc.1" compares as (7, 1, 0), per the documented contract.
+            break
+    return tuple(parts)
+
+
+def _is_image_older_than_manifest(*, expected: str, actual: str) -> bool:
+    """Return True when the installed version is strictly older than expected.
+
+    Used by ``--allow-version-lag``: an image that still ships the pre-bump
+    version is tolerated; an image that is *newer* than the manifest (or
+    equal) must not use this escape hatch.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when ``actual < expected`` under numeric segment comparison.
+        False when equal, newer, or either side cannot be parsed.
+    """
+    expected_parts = _version_tuple(expected)
+    actual_parts = _version_tuple(actual)
+    if not expected_parts or not actual_parts:
+        return False
+    # Pad the shorter tuple with zeros so 7.1 vs 7.1.0 compares fairly.
+    width = max(len(expected_parts), len(actual_parts))
+    expected_padded = expected_parts + (0,) * (width - len(expected_parts))
+    actual_padded = actual_parts + (0,) * (width - len(actual_parts))
+    return actual_padded < expected_padded
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -180,10 +242,24 @@ def main() -> int:
             "version-match; every other tool keeps hard-fail behavior."
         ),
     )
+    parser.add_argument(
+        "--allow-version-lag",
+        action="append",
+        default=None,
+        help=(
+            "Tool name(s) whose *older-than-manifest* installed version "
+            "downgrades to a warning instead of failing. Repeatable and/or "
+            "comma-separated. Intended for a PR that bumps a baked tool's "
+            "manifest version before the digest-pinned base image republishes "
+            "(#1582). Missing binaries, parse failures, and image-newer-than-"
+            "manifest mismatches still hard-fail for these tools."
+        ),
+    )
     args = parser.parse_args()
 
     tiers = [t.strip() for t in args.tiers.split(",")]
     allow_missing = _parse_allow_missing(args.allow_missing)
+    allow_version_lag = _parse_allow_version_lag(args.allow_version_lag)
     try:
         all_tools = _load_manifest(args.manifest)
     except (ValueError, OSError, json.JSONDecodeError) as exc:
@@ -238,6 +314,20 @@ def main() -> int:
             continue
 
         if not _versions_match(name, expected, actual):
+            # Digest-lag version bump (#1582): when the PR raised the manifest
+            # version and the digest-pinned base image still ships the older
+            # build, tolerate with a loud warning. Image-newer-than-manifest
+            # (or unparseable ordering) stays a hard failure.
+            if name in allow_version_lag and _is_image_older_than_manifest(
+                expected=expected,
+                actual=actual,
+            ):
+                warnings.append(
+                    f"{name}: version lag (manifest {expected}, image {actual}); "
+                    f"tolerated because this PR bumped the tool version and the "
+                    f"digest-pinned base image has not republished yet",
+                )
+                continue
             failures.append(
                 f"{name}: version mismatch (expected {expected}, got {actual})",
             )
@@ -245,10 +335,10 @@ def main() -> int:
     if warnings:
         # GitHub Actions annotation (::warning::) plus a human-readable block so
         # the tolerated tool is prominent in both the checks UI and raw logs.
-        print("::warning::Tool verification tolerated newly-added tool(s):")
+        print("::warning::Tool verification tolerated digest-lag tool(s):")
         for item in warnings:
             print(f"::warning::{item}")
-        print("Tolerated missing tool(s) (newly added by this PR):")
+        print("Tolerated tool(s) (newly added or version-bumped by this PR):")
         for item in warnings:
             print(f"  - {item}")
 
@@ -261,7 +351,7 @@ def main() -> int:
     tiers_str = ", ".join(tiers)
     summary = f"Verified {len(tools)} tool(s) against manifest tiers: {tiers_str}"
     if warnings:
-        summary = f"{summary} ({len(warnings)} newly-added tool(s) tolerated)"
+        summary = f"{summary} ({len(warnings)} digest-lag tool(s) tolerated)"
     print(summary)
     return 0
 

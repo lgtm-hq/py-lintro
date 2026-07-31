@@ -12,15 +12,16 @@ NPM_VERSIONS: dict[str, str] = {
     "@astrojs/check": "0.9.9",
     "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
-    "astro": "7.0.9",
-    "markdownlint-cli2": "0.23.0",
-    "oxfmt": "0.58.0",
-    "oxlint": "1.73.0",
+    "astro": "7.1.3",
+    "html-validate": "11.5.6",
+    "markdownlint-cli2": "0.23.1",
+    "oxfmt": "0.60.0",
+    "oxlint": "1.75.0",
     "prettier": "3.9.4",
-    "stylelint": "17.14.0",
-    "svelte-check": "4.7.2",
+    "stylelint": "17.14.1",
+    "svelte-check": "4.7.3",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.7",
+    "vue-tsc": "3.3.8",
 }
 
 PYPI_VERSIONS: dict[str, str] = {

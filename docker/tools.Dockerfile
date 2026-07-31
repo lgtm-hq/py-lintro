@@ -23,7 +23,7 @@
 FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS tools
 
 ARG BUN_VERSION=1.3.14
-ARG UV_VERSION=0.11.29
+ARG UV_VERSION=0.11.33
 ARG GO_VERSION=1.26.5
 
 LABEL maintainer="lgtm-hq"
@@ -120,13 +120,22 @@ COPY package.json /app/package.json
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup
 
+# Keep rustup's bundled HTML doc trees (rust-docs component) out of the
+# image: generated Rust API docs have no runtime use here, they add tens of
+# thousands of small files per toolchain, and Trivy's secret scanner walked
+# them until it hit its timeout (#1703). Install the stable toolchain with
+# --profile minimal (no rust-docs download; clippy/rustfmt added explicitly)
+# and rm any remaining share/doc trees — e.g. from the pinned toolchain
+# install-tools.sh installs with the default profile — in the same layer so
+# they never reach the committed image.
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
     --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
     /app/scripts/utils/install-tools.sh --docker && \
+    rustup toolchain install stable --profile minimal --component clippy,rustfmt && \
     rustup default stable && \
-    rustup component add clippy
+    rm -rf /opt/rustup/toolchains/*/share/doc
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
     chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun && \
@@ -138,6 +147,7 @@ RUN echo "=== Verifying all tools ===" && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && commitlint --version && gitleaks version && \
+    golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \

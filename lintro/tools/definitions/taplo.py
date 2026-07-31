@@ -158,6 +158,11 @@ class TaploPlugin(BaseToolPlugin):
             initial_count: Optional initial issues count for fix operations.
             initial_issues: Optional list of initial issues found before timeout.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): a timeout is an execution
+        failure reported via ``timed_out=True`` and ``success=False``, never a
+        lint finding, so it does not contribute to the issue counts.
+
         Returns:
             Standardized timeout error result.
         """
@@ -167,32 +172,26 @@ class TaploPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options taplo:timeout=N"
         )
-        timeout_issue = TaploIssue(
-            file="execution",
-            line=0,
-            column=0,
-            level="error",
-            code="TIMEOUT",
-            message=f"Taplo execution timed out ({timeout_val}s limit exceeded)",
-        )
         if initial_count is not None and initial_count > 0:
-            combined_issues = (initial_issues or []) + [timeout_issue]
+            combined_issues = list(initial_issues or [])
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=len(combined_issues),
+                issues_count=initial_count,
                 issues=combined_issues,
                 initial_issues_count=initial_count,
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
+                timed_out=True,
             )
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=1,
-            issues=[timeout_issue],
+            issues_count=0,
+            issues=[],
+            timed_out=True,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -349,6 +348,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         lint_issues = parse_taplo_output(output=lint_output)
@@ -371,6 +371,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         # Check for remaining formatting issues
@@ -384,6 +385,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         remaining_format_issues = parse_taplo_output(output=final_output)
@@ -399,6 +401,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         remaining_lint_issues = parse_taplo_output(output=final_lint_output)

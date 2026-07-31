@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import asyncio
+import time
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from assertpy import assert_that
@@ -12,19 +14,34 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.fallback import complete_with_fallback
+from lintro.ai.fallback import _with_fallback, complete_with_fallback
 from lintro.ai.providers.base import AIResponse
 
 
 def _make_provider(model: str = "primary-model") -> MagicMock:
-    """Create a mock provider with a configurable model_name attribute."""
+    """Create a mock provider with an async ``complete`` and a model name.
+
+    Args:
+        model: Value reported by ``provider.model_name``.
+
+    Returns:
+        A mock provider suitable for the fallback chain.
+    """
     provider = MagicMock()
     provider.model_name = model
+    provider.complete = AsyncMock()
     return provider
 
 
 def _ok_response(model: str = "primary-model") -> AIResponse:
-    """Create a successful mock AI response."""
+    """Create a successful mock AI response.
+
+    Args:
+        model: Model identifier recorded on the response.
+
+    Returns:
+        A populated ``AIResponse``.
+    """
     return AIResponse(
         content="ok",
         model=model,
@@ -38,34 +55,34 @@ def _ok_response(model: str = "primary-model") -> AIResponse:
 # -- TestCompleteWithFallbackPrimarySuccess: Primary model succeeds on first try.
 
 
-def test_returns_response_without_fallback() -> None:
+async def test_returns_response_without_fallback() -> None:
     """Return response when primary succeeds without fallback."""
     provider = _make_provider()
     provider.complete.return_value = _ok_response()
 
-    result = complete_with_fallback(provider, "hello")
+    result = await complete_with_fallback(provider, "hello")
 
     assert_that(result.content).is_equal_to("ok")
     provider.complete.assert_called_once()
 
 
-def test_returns_response_with_empty_fallback_list() -> None:
+async def test_returns_response_with_empty_fallback_list() -> None:
     """Return response when fallback list is empty."""
     provider = _make_provider()
     provider.complete.return_value = _ok_response()
 
-    result = complete_with_fallback(provider, "hello", fallback_models=[])
+    result = await complete_with_fallback(provider, "hello", fallback_models=[])
 
     assert_that(result.content).is_equal_to("ok")
     provider.complete.assert_called_once()
 
 
-def test_does_not_try_fallbacks_on_success() -> None:
+async def test_does_not_try_fallbacks_on_success() -> None:
     """Skip fallback models when primary succeeds."""
     provider = _make_provider()
     provider.complete.return_value = _ok_response()
 
-    result = complete_with_fallback(
+    result = await complete_with_fallback(
         provider,
         "hello",
         fallback_models=["fb-1", "fb-2"],
@@ -80,7 +97,7 @@ def test_does_not_try_fallbacks_on_success() -> None:
 # -- TestCompleteWithFallbackChain: Primary fails, fallback models are tried in order.
 
 
-def test_falls_back_on_provider_error() -> None:
+async def test_falls_back_on_provider_error() -> None:
     """Fall back to next model on provider error."""
     provider = _make_provider()
     provider.complete.side_effect = [
@@ -88,7 +105,7 @@ def test_falls_back_on_provider_error() -> None:
         _ok_response("fb-1"),
     ]
 
-    result = complete_with_fallback(
+    result = await complete_with_fallback(
         provider,
         "hello",
         fallback_models=["fb-1"],
@@ -99,7 +116,7 @@ def test_falls_back_on_provider_error() -> None:
     assert_that(provider.model_name).is_equal_to("primary-model")  # restored
 
 
-def test_falls_back_on_rate_limit_error() -> None:
+async def test_falls_back_on_rate_limit_error() -> None:
     """Fall back to next model on rate limit error."""
     provider = _make_provider()
     provider.complete.side_effect = [
@@ -107,7 +124,7 @@ def test_falls_back_on_rate_limit_error() -> None:
         _ok_response("fb-1"),
     ]
 
-    result = complete_with_fallback(
+    result = await complete_with_fallback(
         provider,
         "hello",
         fallback_models=["fb-1"],
@@ -117,7 +134,7 @@ def test_falls_back_on_rate_limit_error() -> None:
     assert_that(provider.complete.call_count).is_equal_to(2)
 
 
-def test_tries_multiple_fallbacks_in_order() -> None:
+async def test_tries_multiple_fallbacks_in_order() -> None:
     """Try fallback models sequentially until one succeeds."""
     provider = _make_provider()
     provider.complete.side_effect = [
@@ -126,7 +143,7 @@ def test_tries_multiple_fallbacks_in_order() -> None:
         _ok_response("fb-2"),
     ]
 
-    result = complete_with_fallback(
+    result = await complete_with_fallback(
         provider,
         "hello",
         fallback_models=["fb-1", "fb-2"],
@@ -137,21 +154,22 @@ def test_tries_multiple_fallbacks_in_order() -> None:
     assert_that(provider.model_name).is_equal_to("primary-model")  # restored
 
 
-def test_model_is_swapped_for_each_fallback() -> None:
+async def test_model_is_swapped_for_each_fallback() -> None:
     """Verify each fallback attempt passes the expected model override."""
     provider = _make_provider("primary")
     models_seen: list[str] = []
 
-    def capture_model(*args, **kwargs):
+    def capture_model(*args: object, **kwargs: object) -> AIResponse:
         """Record the per-call model and fail until the third call."""
-        models_seen.append(kwargs["model"])
+        model = str(kwargs["model"])
+        models_seen.append(model)
         if len(models_seen) < 3:
             raise AIProviderError("fail")
-        return _ok_response(kwargs["model"])
+        return _ok_response(model)
 
     provider.complete.side_effect = capture_model
 
-    complete_with_fallback(
+    await complete_with_fallback(
         provider,
         "hello",
         fallback_models=["fb-1", "fb-2"],
@@ -164,7 +182,7 @@ def test_model_is_swapped_for_each_fallback() -> None:
 # -- TestCompleteWithFallbackAllFail: All models fail -- last error is raised.
 
 
-def test_raises_last_error_when_all_fail() -> None:
+async def test_raises_last_error_when_all_fail() -> None:
     """Raise the last error when all models fail."""
     provider = _make_provider()
     provider.complete.side_effect = [
@@ -174,7 +192,7 @@ def test_raises_last_error_when_all_fail() -> None:
     ]
 
     with pytest.raises(AIProviderError, match="fb-2 down"):
-        complete_with_fallback(
+        await complete_with_fallback(
             provider,
             "hello",
             fallback_models=["fb-1", "fb-2"],
@@ -183,25 +201,25 @@ def test_raises_last_error_when_all_fail() -> None:
     assert_that(provider.model_name).is_equal_to("primary-model")  # restored
 
 
-def test_raises_primary_error_when_no_fallbacks() -> None:
+async def test_raises_primary_error_when_no_fallbacks() -> None:
     """Raise the primary error when no fallbacks are configured."""
     provider = _make_provider()
     provider.complete.side_effect = AIProviderError("primary down")
 
     with pytest.raises(AIProviderError, match="primary down"):
-        complete_with_fallback(provider, "hello")
+        await complete_with_fallback(provider, "hello")
 
 
 # -- TestCompleteWithFallbackAuthError: AIAuthenticationError is never retried.
 
 
-def test_auth_error_propagates_immediately() -> None:
+async def test_auth_error_propagates_immediately() -> None:
     """Propagate authentication error without trying fallbacks."""
     provider = _make_provider()
     provider.complete.side_effect = AIAuthenticationError("bad key")
 
     with pytest.raises(AIAuthenticationError, match="bad key"):
-        complete_with_fallback(
+        await complete_with_fallback(
             provider,
             "hello",
             fallback_models=["fb-1", "fb-2"],
@@ -212,7 +230,7 @@ def test_auth_error_propagates_immediately() -> None:
     assert_that(provider.model_name).is_equal_to("primary-model")  # restored
 
 
-def test_auth_error_on_fallback_propagates() -> None:
+async def test_auth_error_on_fallback_propagates() -> None:
     """Propagate authentication error raised by a fallback model."""
     provider = _make_provider()
     provider.complete.side_effect = [
@@ -221,7 +239,7 @@ def test_auth_error_on_fallback_propagates() -> None:
     ]
 
     with pytest.raises(AIAuthenticationError, match="bad key on fallback"):
-        complete_with_fallback(
+        await complete_with_fallback(
             provider,
             "hello",
             fallback_models=["fb-1"],
@@ -234,13 +252,13 @@ def test_auth_error_on_fallback_propagates() -> None:
 # -- TestCompleteWithFallbackModelRestoration: model_name restored.
 
 
-def test_model_restored_on_auth_error() -> None:
+async def test_model_restored_on_auth_error() -> None:
     """Restore original model after authentication error."""
     provider = _make_provider("orig")
     provider.complete.side_effect = AIAuthenticationError("err")
 
     with pytest.raises(AIAuthenticationError):
-        complete_with_fallback(
+        await complete_with_fallback(
             provider,
             "hello",
             fallback_models=["x"],
@@ -249,18 +267,18 @@ def test_model_restored_on_auth_error() -> None:
     assert_that(provider.model_name).is_equal_to("orig")
 
 
-def test_model_restored_on_provider_error() -> None:
+async def test_model_restored_on_provider_error() -> None:
     """Restore original model after provider error."""
     provider = _make_provider("orig")
     provider.complete.side_effect = AIProviderError("err")
 
     with pytest.raises(AIProviderError):
-        complete_with_fallback(provider, "hello")
+        await complete_with_fallback(provider, "hello")
 
     assert_that(provider.model_name).is_equal_to("orig")
 
 
-def test_model_restored_on_success() -> None:
+async def test_model_restored_on_success() -> None:
     """Restore original model after successful fallback."""
     provider = _make_provider("orig")
     provider.complete.side_effect = [
@@ -268,7 +286,7 @@ def test_model_restored_on_success() -> None:
         _ok_response("fb"),
     ]
 
-    complete_with_fallback(provider, "hello", fallback_models=["fb"])
+    await complete_with_fallback(provider, "hello", fallback_models=["fb"])
 
     assert_that(provider.model_name).is_equal_to("orig")
 
@@ -276,12 +294,12 @@ def test_model_restored_on_success() -> None:
 # -- TestCompleteWithFallbackKwargsPassthrough: kwargs forwarded. -
 
 
-def test_forwards_all_kwargs() -> None:
+async def test_forwards_all_kwargs() -> None:
     """Forward all keyword arguments to provider.complete."""
     provider = _make_provider()
     provider.complete.return_value = _ok_response()
 
-    complete_with_fallback(
+    await complete_with_fallback(
         provider,
         "hello",
         system="sys",
@@ -299,3 +317,95 @@ def test_forwards_all_kwargs() -> None:
         model="primary-model",
         cli_schema=None,
     )
+
+
+# -- TestCompleteWithFallbackConcurrency: parallel calls must not serialize.
+
+
+async def test_with_fallback_parallel_calls_overlap() -> None:
+    """Prove _with_fallback does not serialize concurrent provider calls."""
+    provider = _make_provider()
+    worker_count = 5
+    sleep_seconds = 0.10
+    active_calls = 0
+    max_concurrent_calls = 0
+
+    async def slow_attempt(
+        _prompt: str,
+        _system: str | None,
+        _max_tokens: int,
+        _timeout: float,
+        model: str,
+    ) -> str:
+        """Sleep to simulate provider latency and track concurrent overlap.
+
+        Args:
+            _prompt: Ignored prompt.
+            _system: Ignored system prompt.
+            _max_tokens: Ignored token cap.
+            _timeout: Ignored timeout.
+            model: The model identifier for this attempt.
+
+        Returns:
+            The model identifier that served the attempt.
+        """
+        nonlocal active_calls, max_concurrent_calls
+        active_calls += 1
+        max_concurrent_calls = max(max_concurrent_calls, active_calls)
+        await asyncio.sleep(sleep_seconds)
+        active_calls -= 1
+        return model
+
+    started_at = time.perf_counter()
+    results = await asyncio.gather(
+        *(_with_fallback(provider, slow_attempt, "hello") for _ in range(worker_count)),
+    )
+    elapsed = time.perf_counter() - started_at
+
+    serialized_minimum = sleep_seconds * worker_count
+    assert_that(max_concurrent_calls).is_greater_than_or_equal_to(2)
+    assert_that(elapsed).is_less_than(serialized_minimum * 0.75)
+    assert_that(results).is_length(worker_count)
+    assert_that(set(results)).is_equal_to({"primary-model"})
+
+
+async def test_complete_with_fallback_parallel_calls_overlap() -> None:
+    """Prove complete_with_fallback allows concurrent provider.complete calls."""
+    provider = _make_provider()
+    worker_count = 5
+    sleep_seconds = 0.10
+    active_calls = 0
+    max_concurrent_calls = 0
+
+    async def slow_complete(*_args: object, **_kwargs: object) -> AIResponse:
+        """Sleep to simulate provider HTTP latency.
+
+        Args:
+            *_args: Ignored positional arguments.
+            **_kwargs: Ignored keyword arguments.
+
+        Returns:
+            A successful response.
+        """
+        nonlocal active_calls, max_concurrent_calls
+        active_calls += 1
+        max_concurrent_calls = max(max_concurrent_calls, active_calls)
+        await asyncio.sleep(sleep_seconds)
+        active_calls -= 1
+        return _ok_response()
+
+    provider.complete.side_effect = slow_complete
+
+    started_at = time.perf_counter()
+    results = await asyncio.gather(
+        *(complete_with_fallback(provider, "hello") for _ in range(worker_count)),
+    )
+    elapsed = time.perf_counter() - started_at
+
+    serialized_minimum = sleep_seconds * worker_count
+    assert_that(max_concurrent_calls).is_greater_than_or_equal_to(2)
+    assert_that(elapsed).is_less_than(serialized_minimum * 0.75)
+    assert_that(results).is_length(worker_count)
+    for result in results:
+        assert_that(result.content).is_equal_to("ok")
+    assert_that(provider.complete.call_count).is_equal_to(worker_count)

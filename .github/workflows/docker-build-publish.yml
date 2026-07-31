@@ -12,7 +12,9 @@ name: Build - Docker Image & Registry
   workflow_dispatch:
     inputs:
       force_publish:
-        description: 'Run publish on this branch (manual testing)'
+        description: >-
+          Run publish on this branch (manual testing). Requires backfill_version
+          so :latest is not moved with an empty version tag.
         required: false
         default: 'false'
       backfill_version:
@@ -31,105 +33,70 @@ permissions:
   contents: read
 
 jobs:
-  docker-full:
-    name: 🐳 Docker Full Image
-    # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-      security-events: write
-    with:
-      file: Dockerfile
-      target: full
-      image-name: lgtm-hq/py-lintro
-      version: >-
-        ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
-        || (startsWith(github.ref, 'refs/tags/')
-        && github.ref_name
-        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
-      push: >-
-        ${{ github.event_name != 'pull_request'
-        && (github.ref == 'refs/heads/main'
-        || startsWith(github.ref, 'refs/tags/')
-        || github.event_name == 'release'
-        || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
-      source-ref: >-
-        ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
-      tag-latest: >-
-        ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
-      platforms: linux/amd64,linux/arm64
-      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
-      smoke-test: lintro --version
-      validate-on-pr: false
-      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
-      # Release (tag) builds reuse the registry cache (#1358): BuildKit
-      # cache is content-addressed, so a tag build reassembles exactly the
-      # layers already built and validated on main instead of a cold
-      # multi-arch rebuild. Backfills stay no-cache so historical
-      # republishes remain fully cold.
-      no-cache: >-
-        ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '' }}
-      provenance: false
-      sbom: false
-      cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
-      egress-policy: block
-      egress-preset: docker
-      # Full list (v0.50.0+ replace semantics): the reusable passes
-      # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the docker preset baseline. The
-      # sigstore hosts cover cosign keyless signing in the merge job.
-      allowed-endpoints-mode: replace
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        objects.githubusercontent.com:443
-        raw.githubusercontent.com:443
-        release-assets.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        pipelines.actions.githubusercontent.com:443
-        ghcr.io:443
-        pkg-containers.githubusercontent.com:443
-        docker.io:443
-        registry-1.docker.io:443
-        auth.docker.io:443
-        production.cloudflare.docker.com:443
-        production.cloudfront.docker.com:443
-        deb.debian.org:80
-        pypi.org:443
-        files.pythonhosted.org:443
-        static.rust-lang.org:443
-        bun.sh:443
-        astral.sh:443
-        releases.astral.sh:443
-        sh.rustup.rs:443
-        registry.npmjs.org:443
-        crates.io:443
-        static.crates.io:443
-        index.crates.io:443
-        semgrep.dev:443
-        metrics.semgrep.dev:443
-        token.actions.githubusercontent.com:443
-        fulcio.sigstore.dev:443
-        rekor.sigstore.dev:443
-        tuf-repo-cdn.sigstore.dev:443
-        timestamp.sigstore.dev:443
-        oauth2.sigstore.dev:443
+  resolve-endpoints:
+    # Single source of truth for the harden-runner allowlist shared by the
+    # three image jobs (#1821). GitHub Actions rejects YAML anchors and the
+    # `env` context is unavailable in job-level `with:` blocks of
+    # reusable-workflow calls, so the list reaches them as a job output.
+    name: Resolve allowed endpoints
+    runs-on: ubuntu-24.04
+    outputs:
+      endpoints: ${{ steps.resolve.outputs.endpoints }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve allowed endpoints
+        id: resolve
+        env:
+          ENDPOINTS_FILE: .github/allowed-endpoints/docker-build-publish.txt
+        run: ./scripts/ci/resolve-allowed-endpoints.sh
+
+  validate-backfill-inputs:
+    if: github.event_name == 'workflow_dispatch'
+    name: Validate backfill inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      backfill_version: ${{ steps.validate.outputs.backfill_version }}
+      backfill_ref: ${{ steps.validate.outputs.backfill_ref }}
+      force_publish: ${{ steps.validate.outputs.force_publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate dispatch inputs
+        id: validate
+        env:
+          BACKFILL_VERSION: ${{ inputs.backfill_version }}
+          BACKFILL_REF: ${{ inputs.backfill_ref }}
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+        run: ./scripts/ci/validate-docker-backfill-inputs.sh
 
   docker-base:
     name: 🐳 Docker Base Image
-    needs: docker-full
+    needs: [validate-backfill-inputs, resolve-endpoints]
+    if: >-
+      always() && !cancelled() &&
+      (needs.validate-backfill-inputs.result == 'success' ||
+      needs.validate-backfill-inputs.result == 'skipped') &&
+      needs.resolve-endpoints.result == 'success'
+    # Base image (tools layer) publishes before full; a full-image failure must
+    # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
     permissions:
       contents: read
       packages: write
@@ -142,7 +109,8 @@ jobs:
       image-name: lgtm-hq/py-lintro-base
       version: >-
         ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
+        && needs.validate-backfill-inputs.outputs.backfill_version != '')
+        && needs.validate-backfill-inputs.outputs.backfill_version
         || (startsWith(github.ref, 'refs/tags/')
         && github.ref_name
         || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
@@ -152,13 +120,14 @@ jobs:
         || startsWith(github.ref, 'refs/tags/')
         || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
+        || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
       source-ref: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
         ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
@@ -171,51 +140,162 @@ jobs:
       # republishes remain fully cold.
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       egress-policy: block
       egress-preset: docker
-      # Full list (v0.50.0+ replace semantics): the reusable passes
-      # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the docker preset baseline. The
-      # sigstore hosts cover cosign keyless signing in the merge job.
+      # Shared allowlist, maintained once in
+      # .github/allowed-endpoints/docker-build-publish.txt: the reusable
+      # passes allowed-endpoints verbatim to step-security/harden-runner
+      # under v0.50.0+ replace semantics, so the file carries the docker
+      # preset baseline as well as the extras this build needs.
       allowed-endpoints-mode: replace
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        objects.githubusercontent.com:443
-        raw.githubusercontent.com:443
-        release-assets.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        pipelines.actions.githubusercontent.com:443
-        ghcr.io:443
-        pkg-containers.githubusercontent.com:443
-        docker.io:443
-        registry-1.docker.io:443
-        auth.docker.io:443
-        production.cloudflare.docker.com:443
-        production.cloudfront.docker.com:443
-        deb.debian.org:80
-        pypi.org:443
-        files.pythonhosted.org:443
-        static.rust-lang.org:443
-        bun.sh:443
-        astral.sh:443
-        releases.astral.sh:443
-        sh.rustup.rs:443
-        registry.npmjs.org:443
-        crates.io:443
-        static.crates.io:443
-        index.crates.io:443
-        semgrep.dev:443
-        metrics.semgrep.dev:443
-        token.actions.githubusercontent.com:443
-        fulcio.sigstore.dev:443
-        rekor.sigstore.dev:443
-        tuf-repo-cdn.sigstore.dev:443
-        timestamp.sigstore.dev:443
-        oauth2.sigstore.dev:443
+      allowed-endpoints: ${{ needs.resolve-endpoints.outputs.endpoints }}
+
+  docker-full:
+    name: 🐳 Docker Full Image
+    needs: [validate-backfill-inputs, resolve-endpoints, docker-base]
+    if: >-
+      always() && !cancelled() &&
+      (needs.validate-backfill-inputs.result == 'success' ||
+      needs.validate-backfill-inputs.result == 'skipped') &&
+      needs.resolve-endpoints.result == 'success' &&
+      needs.docker-base.result == 'success'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: Dockerfile
+      target: full
+      image-name: lgtm-hq/py-lintro
+      version: >-
+        ${{ (github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '')
+        && needs.validate-backfill-inputs.outputs.backfill_version
+        || (startsWith(github.ref, 'refs/tags/')
+        && github.ref_name
+        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/')
+        || github.event_name == 'release'
+        || (github.event_name == 'workflow_dispatch'
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
+        || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
+      source-ref: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
+      tag-latest: >-
+        ${{ !(github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: lintro --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
+      no-cache: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
+      provenance: false
+      sbom: false
+      cosign-sign: true
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
+      egress-policy: block
+      egress-preset: docker
+      # Shared allowlist, maintained once in
+      # .github/allowed-endpoints/docker-build-publish.txt: the reusable
+      # passes allowed-endpoints verbatim to step-security/harden-runner
+      # under v0.50.0+ replace semantics, so the file carries the docker
+      # preset baseline as well as the extras this build needs.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: ${{ needs.resolve-endpoints.outputs.endpoints }}
+
+  docker-ai:
+    name: 🤖 Docker AI Image
+    needs: [validate-backfill-inputs, resolve-endpoints, docker-full]
+    # Published as a separate GHCR package (py-lintro-ai) rather than an `ai`
+    # tag on py-lintro: the reusable always emits floating `sha-<ref>` and
+    # branch tags, which on a shared package would clobber the release image's
+    # promotion tags (see docker-ci.yml's promote step). A dedicated package
+    # keeps the lint-only pull lean and the tag surface unambiguous.
+    #
+    # Runs after docker-full so a failure in the optional AI variant can never
+    # delay or block the release image.
+    if: >-
+      always() && !cancelled() &&
+      (needs.validate-backfill-inputs.result == 'success' ||
+      needs.validate-backfill-inputs.result == 'skipped') &&
+      needs.resolve-endpoints.result == 'success' &&
+      needs.docker-full.result == 'success'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: Dockerfile
+      target: ai
+      image-name: lgtm-hq/py-lintro-ai
+      version: >-
+        ${{ (github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '')
+        && needs.validate-backfill-inputs.outputs.backfill_version
+        || (startsWith(github.ref, 'refs/tags/')
+        && github.ref_name
+        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/')
+        || github.event_name == 'release'
+        || (github.event_name == 'workflow_dispatch'
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
+        || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
+      source-ref: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
+      tag-latest: >-
+        ${{ !(github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: lintro --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-ai:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
+      no-cache: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
+      provenance: false
+      sbom: false
+      cosign-sign: true
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
+      egress-policy: block
+      egress-preset: docker
+      # Shared allowlist, maintained once in
+      # .github/allowed-endpoints/docker-build-publish.txt (see docker-base).
+      # The agent CLIs arrive prebuilt in the digest-pinned lintro-ai-tools
+      # layer, so this build needs no vendor endpoints of its own.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: ${{ needs.resolve-endpoints.outputs.endpoints }}

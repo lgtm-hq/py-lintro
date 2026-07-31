@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.88.1"
+version = "0.96.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -31,7 +31,9 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-  "click>=8.1.8",
+  # click 8.1.8 is vulnerable to PYSEC-2026-2132 / CVE-2026-7246
+  # (GHSA-47fr-3ffg-hgmw, High); fixed in 8.3.3.
+  "click>=8.3.3",
   "loguru>=0.7.3",
   "packaging>=25.0",
   "pathspec>=0.12.1",
@@ -115,6 +117,7 @@ dev = [
   "types-defusedxml>=0.7.0.20250822",
   "tomlkit>=0.13.3",
   "click-man>=0.5.1",
+  "pytest-asyncio>=1.3.0",
 ]
 build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 
@@ -128,7 +131,6 @@ packages = [
   "lintro.ai.integrations",
   "lintro.ai.metadata",
   "lintro.ai.models",
-  "lintro.ai.output",
   "lintro.ai.prompts",
   "lintro.ai.prompts.templates",
   "lintro.ai.providers",
@@ -161,7 +163,9 @@ packages = [
   "lintro.parsers.commitlint",
   "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
+  "lintro.parsers.golangci_lint",
   "lintro.parsers.hadolint",
+  "lintro.parsers.html_validate",
   "lintro.parsers.idiom_review",
   "lintro.parsers.markdownlint",
   "lintro.parsers.pytest",
@@ -182,6 +186,7 @@ packages = [
   "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
+  "lintro.parsers.trufflehog",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",
   "lintro.parsers.vale",
@@ -200,6 +205,7 @@ packages = [
   "lintro.utils.environment",
   "lintro.utils.execution",
   "lintro.utils.output",
+  "lintro.utils.output.sarif",
 ]
 
 [tool.setuptools.package-data]
@@ -281,11 +287,7 @@ enabled = true
 threshold = 800
 baseline = [
   "lintro/ai/review/orchestrator.py",
-  "lintro/utils/tool_executor.py",
   "lintro/cli_utils/commands/doctor.py",
-  "lintro/tools/definitions/tsc.py",
-  "lintro/ai/review/checklist_builtin.py",
-  "lintro/tools/definitions/_ts_checker_base.py",
 ]
 exclude = [
   "test_samples/",
@@ -379,6 +381,24 @@ override-dependencies = [
   # Safe: lintro invokes semgrep as a subprocess; rich version doesn't affect its behavior.
   # TODO: Remove once semgrep drops the rich<14 pin (not tracked by Renovate).
   "rich>=14.2.0",
+  # semgrep 1.168.0 pins mcp==1.23.3 exactly, but mcp 1.23.3 carries high GHSAs
+  # that fail the release SBOM `fail-on-severity: high` gate (#1659). An exact
+  # pin cannot be lifted by constraint-dependencies, so an override is required.
+  # NOTE: unlike a pure subprocess dependency, semgrep *does* import mcp eagerly
+  # (semgrep/mcp/server.py imports mcp.server.fastmcp at `import semgrep.cli`
+  # time), so this override really does change semgrep's runtime dependency.
+  # Validated by CI: the Dockerized dogfooding-lint job builds from this lock and
+  # runs `semgrep (check)` to completion, exercising that import path.
+  # TODO: Remove once semgrep pins an mcp release without these advisories.
+  # (GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58, GHSA-vj7q-gjh5-988w)
+  "mcp>=1.28.1",
+  # click 8.1.8 has PYSEC-2026-2132 / CVE-2026-7246 (High). No semgrep release
+  # accepts click 8.3.x (<=1.170.1 pins <8.2, >=1.171.0 pins ~=8.4.2) and
+  # sqlfluff caps click<8.4.0, so an override is the only way to ship a patched
+  # click alongside both tools. Upper bound keeps sqlfluff natively satisfied;
+  # only semgrep's pin is overridden. Validated: semgrep 1.168.0 and sqlfluff
+  # 4.2.2 both run to completion under click 8.3.3 (dogfooding-lint in CI).
+  "click>=8.3.3,<8.4.0",
 ]
 
 [tool.pydoclint]

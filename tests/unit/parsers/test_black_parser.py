@@ -43,3 +43,24 @@ def test_parse_black_output_ansi_codes_stripped() -> None:
     issues = parse_black_output(output)
     assert_that(issues).is_length(1)
     assert_that(issues[0].file).ends_with("src/app.py")
+
+
+def test_parse_black_output_applied_uses_past_tense() -> None:
+    """In applied (fix) context, 'would reformat' becomes 'Reformatted file'.
+
+    Regression test for #1423: the pre-fix ``--check`` output used to build a
+    fix result's detected issues must not read as preview-tense "Would
+    reformat file" once the changes are applied.
+    """
+    output = "would reformat src/app.py\n1 file would be reformatted."
+    issues = parse_black_output(output, applied=True)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].file).ends_with("src/app.py")
+    assert_that(issues[0].message).is_equal_to("Reformatted file")
+
+
+def test_parse_black_output_check_mode_keeps_preview_tense() -> None:
+    """Default (check) context keeps the preview-tense 'Would reformat file'."""
+    output = "would reformat src/app.py\n1 file would be reformatted."
+    issues = parse_black_output(output)
+    assert_that(issues[0].message).is_equal_to("Would reformat file")

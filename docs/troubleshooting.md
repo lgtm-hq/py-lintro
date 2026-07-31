@@ -139,6 +139,28 @@ lintro check --tools ruff,prettier
 
 ---
 
+### Every tool passes with 0 issues
+
+**Cause**: Nothing was actually scanned. The summary table marks such rows with a
+`no files matched` note — a run where every tool carries that note inspected no files at
+all.
+
+**Solution**: Check your exclusions. Exclude patterns from `.lintro-ignore` and the
+built-in defaults are gitignore-style and are interpreted **relative to the project
+root** (the nearest directory containing `.lintro-ignore`, `.lintro-config.yaml`,
+`pyproject.toml`, `package.json` or `.git`). Directories _above_ that root never exclude
+your files, so a checkout living under a path such as `~/build/my-project` is scanned
+normally. Inside the project, verify the paths you passed are not matched by a pattern:
+
+```bash
+lintro check --verbose
+```
+
+A tool that could not run at all is reported separately as a `⏭️ SKIP` row with the
+reason, never as a pass.
+
+---
+
 ### Configuration not being applied
 
 **Cause**: Lintro may not be finding your configuration file.

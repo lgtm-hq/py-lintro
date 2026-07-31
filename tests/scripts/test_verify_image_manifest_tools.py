@@ -278,3 +278,23 @@ def test_no_allow_missing_without_base_ref(
     ]
     assert_that(run_lines).is_length(1)
     assert_that(run_lines[0]).does_not_contain("--allow-missing")
+
+
+def test_explicit_allow_version_lag_passes_through(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """An explicit ALLOW_VERSION_LAG flows through as --allow-version-lag (#1582)."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        image_repo,
+        bin_dir,
+        args_log,
+        extra_env={"ALLOW_VERSION_LAG": "astro_check"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).contains("--allow-version-lag astro_check")

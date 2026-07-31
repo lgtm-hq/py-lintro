@@ -26,7 +26,7 @@ def test_check_invokes_executor(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.update(kwargs)
         return 0
 
-    monkeypatch.setattr(check_mod, "run_lint_tools_simple", lambda **k: fake_run(**k))
+    monkeypatch.setattr(check_mod, "run_lint_with_ai", lambda **k: fake_run(**k))
     runner = CliRunner()
     result = runner.invoke(check_command, ["--tools", "ruff", "."])
     assert_that(result.exit_code).is_equal_to(0)
@@ -46,7 +46,7 @@ def test_format_invokes_executor(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.update(kwargs)
         return 0
 
-    monkeypatch.setattr(format_mod, "run_lint_tools_simple", lambda **k: fake_run(**k))
+    monkeypatch.setattr(format_mod, "run_lint_with_ai", lambda **k: fake_run(**k))
     runner = CliRunner()
     result = runner.invoke(format_command, ["--tools", "prettier", "."])
     assert_that(result.exit_code).is_equal_to(0)

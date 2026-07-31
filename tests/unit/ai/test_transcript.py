@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -14,6 +14,8 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.doctor_checks import check_ai_configuration
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIError, AIProviderError
+from lintro.ai.providers import get_provider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.ai.transcript import (
@@ -28,6 +30,7 @@ from lintro.ai.transcript import (
     set_active_transcript,
 )
 from lintro.enums.tool_status import ToolStatus
+from tests.unit.ai.conftest import HANG, completed_process, patch_cli_exec
 
 
 @pytest.fixture(autouse=True)
@@ -234,7 +237,7 @@ def test_doctor_omits_transcript_when_disabled() -> None:
     assert_that([item.name for item in results]).does_not_contain("ai.transcript")
 
 
-def test_cli_transport_logs_spawn_args_and_output(tmp_path: Path) -> None:
+async def test_cli_transport_logs_spawn_args_and_output(tmp_path: Path) -> None:
     """CLI transport records request argv and response stdout/stderr."""
     writer = TranscriptWriter(workspace_root=tmp_path, command="check", enabled=True)
     set_active_transcript(writer)
@@ -245,47 +248,66 @@ def test_cli_transport_logs_spawn_args_and_output(tmp_path: Path) -> None:
         install_hint="n/a",
         provider_name="anthropic",
     )
-    fake = MagicMock()
-    fake.returncode = 0
-    fake.stdout = "cli-out"
-    fake.stderr = "cli-err"
 
-    with patch(
-        "lintro.ai.providers.cli_transport.subprocess.run",
-        return_value=fake,
-    ) as run_mock:
-        result = transport.run(["/usr/bin/true", "--flag"], timeout=5.0, cwd="/tmp")
+    with patch_cli_exec(
+        return_value=completed_process(stdout="cli-out", stderr="cli-err"),
+    ):
+        result = await transport.run(
+            ["/usr/bin/true", "--flag"],
+            timeout=5.0,
+            cwd="/tmp",  # noqa: S108 -- inert cwd string; no file is created here
+        )
 
     assert_that(result.stdout).is_equal_to("cli-out")
-    run_mock.assert_called_once()
     assert writer.path is not None
     events = _read_events(writer.path)
     assert_that([e["direction"] for e in events]).is_equal_to(["request", "response"])
     assert_that(events[0]["transport"]).is_equal_to("cli")
+    assert_that(events[0]["provider"]).is_equal_to("anthropic")
     assert_that(events[0]["payload"]["cmd"]).is_equal_to(["/usr/bin/true", "--flag"])
+    assert_that(events[1]["payload"]["returncode"]).is_equal_to(0)
     assert_that(events[1]["payload"]["stdout"]).is_equal_to("cli-out")
     assert_that(events[1]["payload"]["stderr"]).is_equal_to("cli-err")
 
 
+async def test_cli_transport_records_a_response_for_a_failed_call(
+    tmp_path: Path,
+) -> None:
+    """A request that raises still records a response naming the failure."""
+    writer = TranscriptWriter(workspace_root=tmp_path, command="check", enabled=True)
+    set_active_transcript(writer)
+
+    transport = _make_cli_transport(
+        binary_path="/usr/bin/true",
+        binary_name="true",
+        install_hint="n/a",
+        provider_name="anthropic",
+    )
+
+    with patch_cli_exec(return_value=HANG), pytest.raises(AIProviderError):
+        await transport.run(["/usr/bin/true"], timeout=0.01)
+
+    assert writer.path is not None
+    events = _read_events(writer.path)
+    assert_that([e["direction"] for e in events]).is_equal_to(["request", "response"])
+    assert_that(events[1]["payload"]["error"]).is_equal_to("AIProviderError")
+    assert_that(events[1]["payload"]["message"]).contains("timed out")
+
+
 def test_get_provider_starts_transcript_when_enabled(tmp_path: Path) -> None:
     """Factory starts a transcript session when config enables logging."""
-    from lintro.ai.providers import get_provider
-
-    clear_active_transcript()
     config = AIConfig(
-        enabled=True,
+        lint=True,
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.API,
         transcript_logging=True,
         api_base_url="http://localhost:9",
     )
-    from lintro.ai.exceptions import AINotAvailableError
 
-    try:
+    # Provider construction may fail when the SDK is absent; the transcript
+    # session is started first either way, which is what this asserts.
+    with contextlib.suppress(AIError, ValueError, ImportError, OSError):
         get_provider(config, workspace_root=tmp_path)
-    except (AINotAvailableError, ValueError, ImportError, OSError):
-        # Provider construction may fail without SDK; session start happens first.
-        assert list((tmp_path / TRANSCRIPT_DIR).glob("*.ndjson"))
 
     files = list((tmp_path / TRANSCRIPT_DIR).glob("*.ndjson"))
     assert_that(files).is_not_empty()

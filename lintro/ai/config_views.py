@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import (
+    AITransport,
+    CliBareMode,
+    ConfidenceLevel,
+    SanitizeMode,
+)
 from lintro.ai.registry import AIProvider
 
 
@@ -20,6 +25,7 @@ class AIProviderConfig:
 
     provider: AIProvider
     transport: AITransport | None
+    cli_bare: CliBareMode
     model: str | None
     api_key_env: str | None
     api_base_url: str | None

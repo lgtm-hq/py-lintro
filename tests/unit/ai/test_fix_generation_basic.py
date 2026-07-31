@@ -48,9 +48,9 @@ def single_issue(source_file):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_fixes_empty_issues(mock_provider):
+async def test_generate_fixes_empty_issues(mock_provider):
     """Verify that an empty issue list returns an empty result."""
-    result = generate_fixes(
+    result = await generate_fixes(
         [],
         mock_provider,
         tool_name="ruff",
@@ -58,7 +58,7 @@ def test_generate_fixes_empty_issues(mock_provider):
     assert_that(result).is_empty()
 
 
-def test_generate_fixes_generates_fixes_for_unfixable(tmp_path):
+async def test_generate_fixes_generates_fixes_for_unfixable(tmp_path):
     """Unfixable issues are sent to the AI and produce suggestions."""
     source = tmp_path / "test.py"
     source.write_text("assert x > 0\nprint('hello')\n")
@@ -88,7 +88,7 @@ def test_generate_fixes_generates_fixes_for_unfixable(tmp_path):
     )
     provider = MockAIProvider(responses=[response])
 
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="bandit",
@@ -100,7 +100,7 @@ def test_generate_fixes_generates_fixes_for_unfixable(tmp_path):
     assert_that(result[0].diff).is_not_empty()
 
 
-def test_generate_fixes_processes_fixable_issues(tmp_path):
+async def test_generate_fixes_processes_fixable_issues(tmp_path):
     """AI should attempt fixes for ALL issues, including fixable ones."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
@@ -114,7 +114,7 @@ def test_generate_fixes_processes_fixable_issues(tmp_path):
     )
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -124,10 +124,10 @@ def test_generate_fixes_processes_fixable_issues(tmp_path):
     assert_that(provider.calls).is_not_empty()
 
 
-def test_generate_fixes_skips_issues_without_file(mock_provider):
+async def test_generate_fixes_skips_issues_without_file(mock_provider):
     """Verify that issues without a file path are skipped."""
     issue = MockIssue(line=1, code="B101", message="test")
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         mock_provider,
         tool_name="ruff",
@@ -135,7 +135,7 @@ def test_generate_fixes_skips_issues_without_file(mock_provider):
     assert_that(result).is_empty()
 
 
-def test_generate_fixes_respects_max_issues(tmp_path):
+async def test_generate_fixes_respects_max_issues(tmp_path):
     """Verify that the max_issues parameter limits the number of provider calls."""
     # Use separate files so batching does not group them
     sources = []
@@ -155,7 +155,7 @@ def test_generate_fixes_respects_max_issues(tmp_path):
     ]
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         issues,
         provider,
         tool_name="ruff",
@@ -166,7 +166,7 @@ def test_generate_fixes_respects_max_issues(tmp_path):
     assert_that(provider.calls).is_length(2)
 
 
-def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
+async def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
     """Provider prompt contains workspace-relative paths, not absolute."""
     source = tmp_path / "src" / "service.py"
     source.parent.mkdir(parents=True)
@@ -196,7 +196,7 @@ def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
     )
     provider = MockAIProvider(responses=[response])
 
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -211,7 +211,7 @@ def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
     assert_that(provider.calls[0]["max_tokens"]).is_equal_to(333)
 
 
-def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
+async def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
     """Verify that issues with files outside the workspace root are skipped."""
     outside = tmp_path.parent / "outside.py"
     outside.write_text("assert x\n", encoding="utf-8")
@@ -224,7 +224,7 @@ def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
     )
 
     provider = MockAIProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -240,7 +240,7 @@ def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_timeout_reaches_provider(tmp_path):
+async def test_timeout_reaches_provider(tmp_path):
     """Custom timeout value is passed through to provider.complete()."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
@@ -253,7 +253,7 @@ def test_timeout_reaches_provider(tmp_path):
     )
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -265,7 +265,7 @@ def test_timeout_reaches_provider(tmp_path):
     assert_that(provider.calls[0]["timeout"]).is_equal_to(120.0)
 
 
-def test_default_timeout_is_60(tmp_path):
+async def test_default_timeout_is_60(tmp_path):
     """Default timeout (60s) is used when no custom value is provided."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
@@ -278,7 +278,7 @@ def test_default_timeout_is_60(tmp_path):
     )
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -311,7 +311,7 @@ def test_tool_result_cwd_preserves_value():
 # ---------------------------------------------------------------------------
 
 
-def test_resolves_relative_paths_with_cwd(tmp_path):
+async def test_resolves_relative_paths_with_cwd(tmp_path):
     """Issues with relative paths should be resolved using result.cwd."""
     tool_cwd = tmp_path / "test_samples" / "tools"
     js_dir = tool_cwd / "javascript" / "oxlint"
@@ -331,7 +331,7 @@ def test_resolves_relative_paths_with_cwd(tmp_path):
         issue.file = os.path.join(cwd, issue.file)
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="oxlint",
@@ -373,7 +373,7 @@ def test_no_resolution_when_cwd_is_none():
     assert_that(issue.file).is_equal_to("relative/path/file.js")
 
 
-def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
+async def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
     """Relative paths not resolvable from CWD are silently skipped."""
     subdir = tmp_path / "tools" / "js"
     subdir.mkdir(parents=True)
@@ -388,7 +388,7 @@ def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
     )
 
     provider = MockAIProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="oxlint",
@@ -398,7 +398,7 @@ def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
     assert_that(result).is_empty()
 
 
-def test_single_issue_file_not_batched(tmp_path):
+async def test_single_issue_file_not_batched(tmp_path):
     """A file with only 1 issue should use the single-issue path."""
     source = tmp_path / "single.py"
     source.write_text("x = 1\n")
@@ -411,7 +411,7 @@ def test_single_issue_file_not_batched(tmp_path):
     )
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",

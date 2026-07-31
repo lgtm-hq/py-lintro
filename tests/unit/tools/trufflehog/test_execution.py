@@ -1,0 +1,623 @@
+"""Unit tests for the trufflehog plugin check execution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
+
+from assertpy import assert_that
+
+from lintro.parsers.trufflehog.trufflehog_issue import TrufflehogIssue
+from lintro.plugins.base import ExecutionContext
+from lintro.tools.definitions.trufflehog import TrufflehogPlugin
+from tests.unit.tools.trufflehog.conftest import (
+    make_subprocess_result,
+    run_check_with_stderr,
+    sample_finding_line,
+)
+
+
+def test_check_clean_scan_passes(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An empty stdout with exit 0 is a clean scan.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""No secrets here."""\n')
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_detects_secret(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A finding on stdout should be parsed into an issue.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "config.py"
+    test_file.write_text("TOKEN = 'ghp_fake'\n")
+
+    output = sample_finding_line(file=str(test_file), line=1)
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout=output, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).is_length(1)
+    issues = result.issues
+    assert issues is not None  # nosec B101 - narrows Optional for type checkers
+    issue = issues[0]
+    assert isinstance(issue, TrufflehogIssue)
+    assert_that(issue.detector_name).is_equal_to("Github")
+
+
+def test_check_passes_absolute_paths_to_command(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """The scan command must receive an absolute path, not a relative one.
+
+    Relative paths make TruffleHog exit 0 with no output when its working
+    directory differs from the caller's, which would silently hide secrets.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "config.py"
+    test_file.write_text("TOKEN = 'ghp_fake'\n")
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        captured["cmd"] = cmd
+        return make_subprocess_result(stdout="", returncode=0)
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        side_effect=fake_run,
+    ):
+        trufflehog_plugin.check([str(test_file)], {})
+
+    # The resolved absolute path should appear in the command.
+    assert_that(captured["cmd"]).contains(str(test_file.resolve()))
+
+
+def test_check_fails_when_resolved_scan_target_disappears(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A resolved scan-set file disappearing before invoke must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    prepared = ExecutionContext(
+        files=[str(test_file)],
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+    test_file.unlink()
+
+    with (
+        patch.object(trufflehog_plugin, "_prepare_execution", return_value=prepared),
+        patch.object(trufflehog_plugin, "_run_subprocess_result") as run_mock,
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("disappeared before execution")
+    assert_that(result.output).contains(str(test_file.resolve()))
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    run_mock.assert_not_called()
+
+
+def test_check_fails_when_config_is_absent(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing explicit config must not fall back to default detectors.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    missing_config = tmp_path / "missing-trufflehog.yaml"
+    trufflehog_plugin.set_options(config=str(missing_config))
+
+    with patch.object(trufflehog_plugin, "_run_subprocess_result") as run_mock:
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("config file does not exist")
+    assert_that(result.output).contains(str(missing_config))
+    run_mock.assert_not_called()
+
+
+def test_check_unparseable_output_is_not_clean(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Non-empty stdout that yields no findings must not report a clean pass.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="}{ garbage", returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_benign_missing_path_scan_error_passes(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Lstat missing-path errors outside the scan set must not hard-fail.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory",'
+        '"lstat /nope/lighthouse-reports: no such file or directory"]}'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    # Benign scan noise must not surface as a version-incompat parse warning.
+    assert_that(result.parse_failures_count in (0, None)).is_true()
+
+
+def test_check_realistic_json_log_stream_with_benign_error_passes(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Routine JSON progress logs must not turn a benign scan into a failure.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source","source_manager_worker_id":"x"}\n'
+        '{"level":"error","msg":"encountered errors during scan","job":1,'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1,"bytes":3}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_standalone_error_record_without_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unreadable target logged without an aggregate must still fail closed.
+
+    This is the stderr TruffleHog emits when the unreadable file is reached
+    through a scanned directory: a standalone error record and no
+    ``encountered errors during scan`` banner at all.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source","with_units":true}\n'
+        '{"level":"error","msg":"error scanning file","unit_kind":"unit",'
+        '"path":"/nope/locked.py",'
+        '"error":"unable to open file: open /nope/locked.py: permission denied"}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_json_error_record_beside_benign_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A JSON error record must fail the batch despite a benign aggregate.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source"}\n'
+        '{"level":"error","msg":"error scanning file","path":"/nope/secret.txt",'
+        '"error":"unable to open file: open /nope/secret.txt: permission denied"}\n'
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_unclassified_error_beside_benign_one_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unrecognised diagnostic must fail closed even next to benign noise.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        "failed to open archive /repo/src/big.zip: unexpected EOF\n"
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_permission_denied_scan_error_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A permission-denied scan error is a genuine incomplete scan.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["open /secret: permission denied"]}'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_missing_scan_set_path_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing path that was part of the resolved scan set must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    resolved = str(test_file.resolve())
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat ' + resolved + ': no such file or directory"]}'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+        scan_path=test_file,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_benign_scan_error_with_findings_still_reports_secrets(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Benign missing-path noise must not hide or fail real secret findings.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "config.py"
+    test_file.write_text("TOKEN = 'ghp_fake'\n")
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /ci-only/coverage: no such file or directory"]}'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout=sample_finding_line(file=str(test_file), line=1),
+            stderr=stderr,
+            returncode=0,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count in (0, None)).is_true()
+
+
+def test_check_unparseable_scan_error_details_fail_closed(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Scan-error banner without extractable reasons must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout="",
+            stderr="level=error msg=encountered errors during scan",
+            returncode=0,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_nonzero_exit_without_output_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no stdout is an execution failure.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout="",
+            stderr="fatal: boom",
+            returncode=1,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_nonzero_exit_with_partial_findings_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crash after emitting findings is a failure with findings preserved.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text("AWS_KEY = 'AKIA...'\n")
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout=sample_finding_line(file=str(test_file)),
+            stderr="panic: scanner aborted",
+            returncode=2,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+
+
+def test_check_genuine_scan_error_with_findings_still_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Genuine scan errors fail the run even when another target had findings.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text("AWS_KEY = 'AKIA...'\n")
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["open /etc/shadow: permission denied"]}'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout=sample_finding_line(file=str(test_file)),
+            stderr=stderr,
+            returncode=0,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+
+
+def test_check_skips_missing_targets_and_scans_the_rest(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """One vanished target must not fail a run that still has live files.
+
+    A committed symlink to a build artifact resolves to an absent path;
+    TruffleHog ``lstat``s every source path and fails the whole scan on it
+    (#1716, #1726). The absent path is dropped, the live file still scanned.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    live = tmp_path / "module.py"
+    live.write_text('"""Module."""\n')
+    vanished = tmp_path / "coverage"
+    prepared = ExecutionContext(
+        files=[str(live), str(vanished)],
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        """Capture the argv and return a clean scan.
+
+        Args:
+            cmd: The command TruffleHog would have been invoked with.
+            **_kwargs: Ignored subprocess keyword arguments.
+
+        Returns:
+            A clean-scan subprocess result.
+        """
+        captured["cmd"] = cmd
+        return make_subprocess_result(stdout="", returncode=0)
+
+    with (
+        patch.object(trufflehog_plugin, "_prepare_execution", return_value=prepared),
+        patch.object(
+            trufflehog_plugin,
+            "_run_subprocess_result",
+            side_effect=fake_run,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cmd"]).contains(str(live.resolve()))
+    assert_that(captured["cmd"]).does_not_contain(str(vanished.resolve()))
+
+
+def test_check_does_not_scan_dangling_symlink_targets(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Discovery must not route a dangling symlink into the scan argv.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    project = tmp_path / "proj"
+    (project / "reports").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    live = project / "module.py"
+    live.write_text('"""Module."""\n')
+    absent_target = project / "coverage"
+    (project / "reports" / "coverage").symlink_to(absent_target)
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        """Capture the argv and return a clean scan.
+
+        Args:
+            cmd: The command TruffleHog would have been invoked with.
+            **_kwargs: Ignored subprocess keyword arguments.
+
+        Returns:
+            A clean-scan subprocess result.
+        """
+        captured["cmd"] = cmd
+        return make_subprocess_result(stdout="", returncode=0)
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        side_effect=fake_run,
+    ):
+        result = trufflehog_plugin.check([str(project)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cmd"]).contains(str(live.resolve()))
+    assert_that(captured["cmd"]).does_not_contain(str(absent_target))

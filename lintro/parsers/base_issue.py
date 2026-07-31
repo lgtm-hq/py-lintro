@@ -83,6 +83,21 @@ class BaseIssue:
         except ValueError:
             return self.DEFAULT_SEVERITY
 
+    def get_code(self) -> str:
+        """Return the canonical rule code for this issue.
+
+        Resolves the native code attribute via ``DISPLAY_FIELD_MAP`` (handling
+        tools that store it as ``rule``, ``check_id``, ``test_id``, etc.) so
+        every formatter and writer renders the same identifier regardless of
+        the underlying dataclass field name.
+
+        Returns:
+            The rule code as a string, or an empty string when unavailable.
+        """
+        attr_name = self.DISPLAY_FIELD_MAP.get("code", "code")
+        raw = getattr(self, attr_name, None)
+        return str(raw) if raw else ""
+
     def to_display_row(self) -> dict[str, str]:
         """Convert issue to unified display format.
 
@@ -100,11 +115,9 @@ class BaseIssue:
         field_map = self.DISPLAY_FIELD_MAP
 
         # Resolve each mapped field
-        code_attr = field_map.get("code", "code")
         fixable_attr = field_map.get("fixable", "fixable")
         message_attr = field_map.get("message", "message")
 
-        code_val = getattr(self, code_attr, None) or ""
         fixable_val = getattr(self, fixable_attr, False)
         message_val = getattr(self, message_attr, "") or ""
 
@@ -112,7 +125,7 @@ class BaseIssue:
             "file": self.file,
             "line": str(self.line) if self.line else "-",
             "column": str(self.column) if self.column else "-",
-            "code": str(code_val) if code_val else "",
+            "code": self.get_code(),
             "message": message_val,
             "severity": str(self.get_severity()),
             "fixable": "Yes" if fixable_val else "",

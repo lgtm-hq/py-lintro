@@ -5,14 +5,19 @@ set -euo pipefail
 
 # compute-new-manifest-tools.sh
 #
-# Print the comma-separated set of tool names a PR *introduces* into
-# lintro/tools/manifest.json, computed as the git diff of tool names between
-# the current manifest and the manifest at the merge-base with the PR base
-# branch. The manifest-vs-image gate (verify-image-manifest-tools.sh) feeds
-# this to verify-manifest-tools.py via --allow-missing so a newly-added tool's
-# (necessarily) absent binary in the digest-pinned base image downgrades to a
-# warning instead of structurally failing the required check (#1565). The
-# post-merge tools-image republish + digest bump restores full coverage.
+# Print the comma-separated set of tool names a PR changes in
+# lintro/tools/manifest.json, computed as a git diff against the merge-base
+# with the PR base branch. The manifest-vs-image gate
+# (verify-image-manifest-tools.sh) feeds this to verify-manifest-tools.py:
+#
+#   EMIT=added (default) → --allow-missing: a newly-added tool's absent binary
+#     in the digest-pinned base image downgrades to a warning (#1565).
+#   EMIT=version-changed → --allow-version-lag: a baked tool whose manifest
+#     version the PR bumps may still be older in the digest-pinned base image;
+#     a version mismatch (image older than manifest) downgrades to a warning
+#     (#1582). Missing binaries and image-newer-than-manifest still hard-fail.
+#
+# The post-merge tools-image republish + digest bump restores full coverage.
 #
 # Fail CLOSED: any trouble resolving the base ref, merge-base, the old manifest
 # blob, or the name diff prints an EMPTY set. An empty allowlist means full
@@ -38,12 +43,14 @@ the merge-base with the base branch. Fails closed (empty output) on any error.
 
 Environment:
   BASE_REF   Optional. PR base branch (github.base_ref), e.g. main. When unset
-             or empty (main / nightly runs), the added set is empty.
+             or empty (main / nightly runs), the emitted set is empty.
   MANIFEST   Optional. Manifest path relative to the repo root
              (default: lintro/tools/manifest.json).
+  EMIT       Optional. ``added`` (default) or ``version-changed``. Selects
+             which name set the Python helper prints.
 
 Output:
-  A single line on stdout: comma-separated added tool names (possibly empty).
+  A single line on stdout: comma-separated tool names (possibly empty).
 
 Exit codes:
   0  always (fail-closed: errors print an empty set and still exit 0)
@@ -57,6 +64,7 @@ fi
 
 : "${BASE_REF:=}"
 : "${MANIFEST:=lintro/tools/manifest.json}"
+: "${EMIT:=added}"
 
 log_info() { echo "[INFO] $*" >&2; }
 log_warn() { echo "[WARN] $*" >&2; }
@@ -68,9 +76,17 @@ emit() {
 	exit 0
 }
 
+case "$EMIT" in
+added | version-changed) ;;
+*)
+	log_warn "Invalid EMIT='${EMIT}' (expected added|version-changed); failing closed"
+	emit ""
+	;;
+esac
+
 # No PR context (main push / nightly): full enforcement, empty allowlist.
 if [[ -z "$BASE_REF" ]]; then
-	log_info "No BASE_REF (not a PR context); empty allow-missing set"
+	log_info "No BASE_REF (not a PR context); empty ${EMIT} set"
 	emit ""
 fi
 
@@ -106,16 +122,16 @@ if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
 	rm -f "$old_manifest"
 fi
 
-added=""
-if ! added="$(python3 "${script_dir}/compute-new-manifest-tools.py" \
-	--old "$old_manifest" --new "$MANIFEST")"; then
+names=""
+if ! names="$(python3 "${script_dir}/compute-new-manifest-tools.py" \
+	--old "$old_manifest" --new "$MANIFEST" --emit "$EMIT")"; then
 	log_warn "Name diff failed; failing closed (empty set)"
 	emit ""
 fi
 
-if [[ -n "$added" ]]; then
-	log_info "Tools newly added by this PR: ${added}"
+if [[ -n "$names" ]]; then
+	log_info "Tools ${EMIT} by this PR: ${names}"
 else
-	log_info "No tools newly added by this PR"
+	log_info "No tools ${EMIT} by this PR"
 fi
-emit "$added"
+emit "$names"

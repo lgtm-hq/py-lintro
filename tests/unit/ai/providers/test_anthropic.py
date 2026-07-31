@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from collections.abc import Generator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -10,9 +12,77 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
+    AIProviderError,
+    AIRateLimitError,
 )
 from lintro.ai.providers import anthropic as mod
 from lintro.ai.providers.anthropic import AnthropicProvider
+
+
+class _FakeAnthropicError(Exception):
+    """Stand-in for the SDK base ``anthropic.AnthropicError``."""
+
+
+class _FakeAuthError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.AuthenticationError``."""
+
+
+class _FakeRateLimitError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.RateLimitError``."""
+
+
+class _FakeTimeoutError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.APITimeoutError``."""
+
+
+@pytest.fixture
+def fake_anthropic_sdk() -> Generator[SimpleNamespace]:
+    """Patch the module's ``anthropic`` reference with fake error classes."""
+    fake = SimpleNamespace(
+        AnthropicError=_FakeAnthropicError,
+        AuthenticationError=_FakeAuthError,
+        RateLimitError=_FakeRateLimitError,
+        APITimeoutError=_FakeTimeoutError,
+    )
+    with patch.object(mod, "anthropic", fake, create=True):
+        yield fake
+
+
+def test_map_errors_authentication(fake_anthropic_sdk: SimpleNamespace) -> None:
+    """SDK AuthenticationError maps to AIAuthenticationError."""
+    with pytest.raises(AIAuthenticationError):
+        with AnthropicProvider._map_errors():
+            raise _FakeAuthError("bad key")
+
+
+def test_map_errors_rate_limit(fake_anthropic_sdk: SimpleNamespace) -> None:
+    """SDK RateLimitError maps to AIRateLimitError."""
+    with pytest.raises(AIRateLimitError):
+        with AnthropicProvider._map_errors():
+            raise _FakeRateLimitError("slow down")
+
+
+def test_map_errors_timeout(fake_anthropic_sdk: SimpleNamespace) -> None:
+    """SDK APITimeoutError maps to the generic AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with AnthropicProvider._map_errors():
+            raise _FakeTimeoutError("timed out")
+
+
+def test_map_errors_generic_api_error(fake_anthropic_sdk: SimpleNamespace) -> None:
+    """A generic SDK AnthropicError maps to AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with AnthropicProvider._map_errors():
+            raise _FakeAnthropicError("boom")
+
+
+def test_map_errors_passes_through_on_success(
+    fake_anthropic_sdk: SimpleNamespace,
+) -> None:
+    """The context manager is transparent when no error is raised."""
+    with AnthropicProvider._map_errors():
+        value = 21 * 2
+    assert_that(value).is_equal_to(42)
 
 
 def test_anthropic_provider_raises_when_sdk_missing():
@@ -68,7 +138,7 @@ def test_anthropic_provider_get_client_no_key_raises():
             provider._get_client()
 
 
-def test_anthropic_complete_parses_response():
+async def test_anthropic_complete_parses_response():
     """complete() extracts content, tokens, and cost from SDK response."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider()
@@ -86,11 +156,11 @@ def test_anthropic_complete_parses_response():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"TEST_KEY": "sk-test"}):
-            result = provider.complete("test prompt", system="be helpful")
+            result = await provider.complete("test prompt", system="be helpful")
 
         assert_that(result.content).is_equal_to("Hello, world!")
         assert_that(result.input_tokens).is_equal_to(100)
@@ -105,7 +175,7 @@ def test_anthropic_complete_parses_response():
         )
 
 
-def test_anthropic_complete_multiple_text_blocks():
+async def test_anthropic_complete_multiple_text_blocks():
     """complete() concatenates multiple text blocks."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider()
@@ -124,16 +194,16 @@ def test_anthropic_complete_multiple_text_blocks():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            result = provider.complete("prompt")
+            result = await provider.complete("prompt")
 
         assert_that(result.content).is_equal_to("Hello, world!")
 
 
-def test_anthropic_complete_respects_max_tokens_cap():
+async def test_anthropic_complete_respects_max_tokens_cap():
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider(max_tokens=2048)
@@ -147,11 +217,11 @@ def test_anthropic_complete_respects_max_tokens_cap():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            provider.complete("prompt", max_tokens=4096)
+            await provider.complete("prompt", max_tokens=4096)
 
         call_kwargs = mock_client.messages.create.call_args[1]
         assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)

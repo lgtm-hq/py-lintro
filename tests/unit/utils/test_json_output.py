@@ -173,7 +173,7 @@ def test_check_mode_total_remaining_mirrors_total_issues(
 def test_create_json_output_includes_summary_and_fix_suggestions_together() -> None:
     """Verify JSON output includes both AI summary and fix suggestions."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.ai_metadata = {
+    result.metadata = {
         "summary": {
             "overview": "Summary text",
             "key_patterns": [],
@@ -210,8 +210,8 @@ def test_create_json_output_includes_summary_and_fix_suggestions_together() -> N
 
     assert_that(data).contains_key("ai_summary")
     assert_that(data["ai_summary"]["overview"]).is_equal_to("Summary text")
-    assert_that(data["results"][0]["ai_metadata"]).contains_key("summary")
-    assert_that(data["results"][0]["ai_metadata"]).contains_key(
+    assert_that(data["results"][0]["metadata"]).contains_key("summary")
+    assert_that(data["results"][0]["metadata"]).contains_key(
         "fix_suggestions",
     )
 
@@ -219,7 +219,7 @@ def test_create_json_output_includes_summary_and_fix_suggestions_together() -> N
 def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
     """Test that legacy suggestions key is normalized correctly."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.ai_metadata = {
+    result.metadata = {
         "summary": {"overview": "Legacy"},
         "suggestions": [{"file": "a.py", "line": 1}],
         "type": "fix_suggestions",
@@ -234,10 +234,10 @@ def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
         exit_code=1,
     )
 
-    assert_that(data["results"][0]["ai_metadata"]).contains_key(
+    assert_that(data["results"][0]["metadata"]).contains_key(
         "fix_suggestions",
     )
-    assert_that(data["results"][0]["ai_metadata"]).does_not_contain_key(
+    assert_that(data["results"][0]["metadata"]).does_not_contain_key(
         "suggestions",
     )
 
@@ -245,7 +245,7 @@ def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
 def test_create_json_output_includes_ai_count_fields() -> None:
     """Verify AI count fields are serialized into JSON output."""
     result = ToolResult(name="ruff", success=False, issues_count=3)
-    result.ai_metadata = {
+    result.metadata = {
         "fixed_count": 2,
         "verified_count": 1,
         "unverified_count": 1,
@@ -260,7 +260,7 @@ def test_create_json_output_includes_ai_count_fields() -> None:
         exit_code=1,
     )
 
-    ai_meta = data["results"][0]["ai_metadata"]
+    ai_meta = data["results"][0]["metadata"]
     assert_that(ai_meta["fixed_count"]).is_equal_to(2)
     assert_that(ai_meta["applied_count"]).is_equal_to(2)
     assert_that(ai_meta["verified_count"]).is_equal_to(1)
@@ -270,7 +270,7 @@ def test_create_json_output_includes_ai_count_fields() -> None:
 def test_create_json_output_includes_ai_metrics() -> None:
     """Verify AI telemetry metrics are preserved through normalization."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.ai_metadata = {
+    result.metadata = {
         "ai_metrics": {
             "total_api_calls": 5,
             "total_input_tokens": 1000,
@@ -288,7 +288,7 @@ def test_create_json_output_includes_ai_metrics() -> None:
         exit_code=1,
     )
 
-    ai_meta = data["results"][0]["ai_metadata"]
+    ai_meta = data["results"][0]["metadata"]
     assert_that(ai_meta).contains_key("ai_metrics")
     assert_that(ai_meta["ai_metrics"]["total_api_calls"]).is_equal_to(5)
     assert_that(ai_meta["ai_metrics"]["total_cost_usd"]).is_equal_to(0.01)
@@ -297,7 +297,7 @@ def test_create_json_output_includes_ai_metrics() -> None:
 def test_create_json_output_counts_survive_legacy_normalization() -> None:
     """Verify counts and metrics survive alongside legacy key normalization."""
     result = ToolResult(name="ruff", success=False, issues_count=1)
-    result.ai_metadata = {
+    result.metadata = {
         "summary": {"overview": "Legacy with counts"},
         "suggestions": [{"file": "a.py", "line": 1}],
         "type": "fix_suggestions",
@@ -319,7 +319,7 @@ def test_create_json_output_counts_survive_legacy_normalization() -> None:
         exit_code=1,
     )
 
-    ai_meta = data["results"][0]["ai_metadata"]
+    ai_meta = data["results"][0]["metadata"]
     assert_that(ai_meta).contains_key("fix_suggestions")
     assert_that(ai_meta).does_not_contain_key("suggestions")
     assert_that(ai_meta["fixed_count"]).is_equal_to(1)
@@ -327,3 +327,70 @@ def test_create_json_output_counts_survive_legacy_normalization() -> None:
     assert_that(ai_meta["unverified_count"]).is_equal_to(0)
     assert_that(ai_meta).contains_key("ai_metrics")
     assert_that(ai_meta["ai_metrics"]["total_api_calls"]).is_equal_to(2)
+
+
+def test_json_output_emits_metadata_only() -> None:
+    """Only ``metadata`` is emitted; the ``ai_metadata`` duplicate is gone.
+
+    The deprecated duplicate was removed in issue #1831 after its one-release
+    deprecation cycle.
+    """
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        metadata={"fixed_count": 3},
+    )
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=1,
+        total_fixed=0,
+        total_remaining=1,
+        exit_code=1,
+    )
+
+    tool_data = data["results"][0]
+    assert_that(tool_data).contains_key("metadata")
+    assert_that(tool_data["metadata"]["fixed_count"]).is_equal_to(3)
+    assert_that(tool_data).does_not_contain_key("ai_metadata")
+
+
+def test_json_output_omits_metadata_key_when_absent() -> None:
+    """A result without metadata emits no metadata key."""
+    result = ToolResult(name="ruff", success=True, issues_count=0)
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=0,
+        total_fixed=0,
+        total_remaining=0,
+        exit_code=0,
+    )
+
+    tool_data = data["results"][0]
+    assert_that(tool_data).does_not_contain_key("metadata")
+    assert_that(tool_data).does_not_contain_key("ai_metadata")
+
+
+def test_json_output_promotes_ai_summary_from_renamed_field() -> None:
+    """Top-level ``ai_summary`` promotion reads the renamed field."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        metadata={"summary": {"overview": "Promoted"}},
+    )
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=1,
+        total_fixed=0,
+        total_remaining=1,
+        exit_code=1,
+    )
+
+    assert_that(data["ai_summary"]["overview"]).is_equal_to("Promoted")

@@ -20,14 +20,12 @@ from __future__ import annotations
 from identify.identify import ALL_TAGS
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
-from lintro.ai.review.enums.file_domain import FileDomain
-from lintro.ai.review.enums.review_category import ReviewCategory
-from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.enums.checklist_display import ChecklistDisplay
+from lintro.enums.file_domain import FileDomain
+from lintro.enums.review_category import ReviewCategory
+from lintro.enums.review_strictness import ReviewStrictness
 
 __all__ = [
-    "CUSTOM_CHECKLIST_ID_START",
     "ReviewChecklistConfig",
     "ReviewChecklistItemConfig",
     "ReviewConfig",

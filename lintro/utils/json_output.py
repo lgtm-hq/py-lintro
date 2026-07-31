@@ -13,12 +13,13 @@ Both build each per-tool object via :func:`serialize_tool_result` so their
 schemas cannot silently drift.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from lintro.ai.metadata import normalize_ai_metadata
 from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
@@ -37,13 +38,37 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
     data: dict[str, Any] = {
         "file": getattr(issue, "file", "") or "",
         "line": getattr(issue, "line", None) or 0,
-        "code": getattr(issue, "code", "") or "",
+        "code": issue.get_code(),
         "message": getattr(issue, "message", "") or "",
     }
     doc_url = getattr(issue, "doc_url", "") or ""
     if doc_url:
         data["doc_url"] = doc_url
     return data
+
+
+def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
+    """Collect the names of tools whose execution timed out.
+
+    Used to populate ``summary.timed_out_tools`` in every JSON payload so a
+    consumer can classify "the only failure was a timeout" without walking
+    ``results`` or regex-matching the human-readable ``output`` string.
+
+    Args:
+        results: Tool results from the run, in execution order.
+
+    Returns:
+        Tool names that timed out, in execution order and de-duplicated.
+        Empty when nothing timed out.
+    """
+    names: list[str] = []
+    for result in results:
+        if not getattr(result, "timed_out", False):
+            continue
+        name = result.name
+        if name not in names:
+            names.append(name)
+    return names
 
 
 def serialize_tool_result(
@@ -63,15 +88,23 @@ def serialize_tool_result(
     ``issues`` array in fix mode, where ``merge_detected_and_remaining``
     collapses duplicate detected/remaining entries.
 
+    ``timed_out`` reports whether the tool's subprocess exceeded its deadline.
+    Per the timeout accounting model in
+    :mod:`lintro.tools.core.timeout_utils`, a timeout is an execution failure
+    rather than a lint finding, so a timed-out tool serializes
+    ``timed_out: true``, ``success: false`` and contributes nothing to
+    ``issues_count``.
+
     Args:
         result: The tool result to serialize.
         action: The action being performed (check, fmt, test).
 
     Returns:
         The per-tool JSON object: always ``tool``, ``success``,
-        ``issues_count``, ``skipped``, ``skip_reason`` and ``output``; plus
-        ``parse_failures_count`` when set, ``fixed``/``remaining`` in FIX mode,
-        normalized ``ai_metadata`` when present, and ``issues`` when any exist.
+        ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
+        ``output``; plus ``parse_failures_count`` when set,
+        ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
+        present, and ``issues`` when any exist.
     """
     merged_issues = merge_detected_and_remaining(
         getattr(result, "initial_issues", None),
@@ -83,6 +116,7 @@ def serialize_tool_result(
         "issues_count": len(merged_issues),
         "skipped": getattr(result, "skipped", False),
         "skip_reason": getattr(result, "skip_reason", None),
+        "timed_out": bool(getattr(result, "timed_out", False)),
         "output": getattr(result, "output", ""),
     }
     if result.parse_failures_count is not None:
@@ -92,11 +126,11 @@ def serialize_tool_result(
         remaining = getattr(result, "remaining_issues_count", None)
         data["fixed"] = fixed if fixed is not None else 0
         data["remaining"] = remaining if remaining is not None else 0
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if isinstance(ai_metadata, dict) and ai_metadata:
-        normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
-        if normalized_ai_metadata:
-            data["ai_metadata"] = normalized_ai_metadata
+    metadata = getattr(result, "metadata", None)
+    if isinstance(metadata, dict) and metadata:
+        normalized_metadata = normalize_tool_metadata(metadata)
+        if normalized_metadata:
+            data["metadata"] = normalized_metadata
     if merged_issues:
         data["issues"] = [serialize_issue(issue) for issue in merged_issues]
     return data
@@ -142,6 +176,10 @@ def create_json_output(
             "total_remaining": (
                 total_remaining if action_enum == Action.FIX else total_issues
             ),
+            # Names of tools whose execution timed out. Timeouts are execution
+            # failures, not findings, so they never appear in ``total_issues``;
+            # this list is where a consumer reads them instead.
+            "timed_out_tools": timed_out_tool_names(results),
         },
     }
     # Additive: include the health score under summary when supplied so the
@@ -151,13 +189,13 @@ def create_json_output(
     for result in results:
         result_data = serialize_tool_result(result, action=action_enum)
         # Extract AI summary from the first result that has one.
-        ai_metadata = result_data.get("ai_metadata")
+        metadata = result_data.get("metadata")
         if (
-            isinstance(ai_metadata, dict)
-            and "summary" in ai_metadata
+            isinstance(metadata, dict)
+            and "summary" in metadata
             and "ai_summary" not in json_data
         ):
-            json_data["ai_summary"] = ai_metadata["summary"]
+            json_data["ai_summary"] = metadata["summary"]
         json_data["results"].append(result_data)
 
     return json_data

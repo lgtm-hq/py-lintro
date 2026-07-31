@@ -89,6 +89,14 @@ def get_provider(
         from lintro.ai.providers.anthropic import AnthropicProvider
 
         provider_cls = AnthropicProvider
+        return provider_cls(
+            model=config.model,
+            api_key_env=config.api_key_env,
+            max_tokens=config.max_tokens,
+            base_url=config.api_base_url,
+            transport=config.transport or AITransport.API,
+            cli_bare=config.cli_bare,
+        )
     elif provider_enum is AIProvider.OPENAI:
         from lintro.ai.providers.openai import OpenAIProvider
 

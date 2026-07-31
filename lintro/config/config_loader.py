@@ -18,7 +18,6 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.config import AIConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -280,32 +279,6 @@ def _parse_defaults(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return defaults
 
 
-def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
-    """Parse AI configuration section.
-
-    Passes only recognized keys through to AIConfig so the model's
-    own defaults apply for any omitted fields.
-
-    Args:
-        data: Raw 'ai' section from config.
-
-    Returns:
-        AIConfig: Parsed AI configuration.
-    """
-    if not data:
-        return AIConfig()
-
-    known_fields = set(AIConfig.model_fields)
-    unknown = set(data) - known_fields
-    if unknown:
-        logger.warning(
-            "Unknown AI config keys ignored: {}",
-            ", ".join(sorted(unknown)),
-        )
-    filtered = {k: v for k, v in data.items() if k in known_fields}
-    return AIConfig(**filtered)
-
-
 def _parse_review_checklist_item_config(data: Any) -> dict[str, Any]:
     """Filter unknown keys from a single custom checklist item mapping.
 
@@ -487,17 +460,17 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "output": {},
     }
 
-    # Inline import: ToolName is a static StrEnum that does not trigger
-    # the plugin registry. Imported here to avoid a circular dependency
-    # between config_loader and the tool subsystem.
+    # Inline imports: ToolName is a static StrEnum that does not trigger
+    # the plugin registry. Both are imported here to avoid a circular
+    # dependency between config_loader and the tool subsystem.
     from lintro.enums.tool_name import ToolName
+    from lintro.plugins.discovery import get_known_plugin_tool_names
 
     known_tools = {t.value for t in ToolName} | {
         t.value.replace("_", "-") for t in ToolName
     }
     # Add common aliases for tools
     tool_aliases = {"markdownlint-cli2": "markdownlint"}
-    known_tools.update(tool_aliases.keys())
 
     # Known execution settings
     execution_keys = {
@@ -514,6 +487,59 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     # Known enforce settings (formerly global)
     enforce_keys = {"line_length", "target_python"}
 
+    # Keys and sections that are valid under [tool.lintro] but are parsed by
+    # other loaders, not by this converter: ``module_size`` and ``post_checks``
+    # by lintro.utils.config, ``licenses`` by lintro.config.licenses_config,
+    # ``plugins`` by lintro.plugins.discovery, and the ordering keys by
+    # ``get_tool_order_config``. Listing them keeps the unknown-key warning
+    # below from crying wolf about legitimate config.
+    externally_handled_sections = {
+        "licenses",
+        "module_size",
+        "plugins",
+        "tool_order_custom",
+        "tool_priorities",
+    }
+
+    # Names this converter interprets as config rather than as a tool section.
+    # A plugin must not be able to shadow them by advertising a colliding
+    # entry-point name.
+    reserved_keys = (
+        execution_keys
+        | enforce_keys
+        | externally_handled_sections
+        | {
+            "ai",
+            "defaults",
+            "output",
+            "review",
+            "score",
+            "tool",
+            "tools",
+            ConfigKey.POST_CHECKS.value.lower(),
+            ConfigKey.VERSIONS.value.lower(),
+        }
+    )
+    reserved_keys |= {name.replace("_", "-") for name in reserved_keys}
+
+    # ToolName never sees entry-point-discovered tools, so config for an
+    # externally installed plugin used to be dropped on the floor (#1757).
+    # ``get_known_plugin_tool_names`` reads cached entry-point metadata and
+    # the already-populated registry; it never triggers a discovery pass.
+    for plugin_name in get_known_plugin_tool_names():
+        variants = {
+            plugin_name,
+            plugin_name.replace("_", "-"),
+            plugin_name.replace("-", "_"),
+        }
+        for variant in variants:
+            if variant not in known_tools and variant not in reserved_keys:
+                tool_aliases.setdefault(variant, plugin_name)
+
+    known_tools.update(tool_aliases.keys())
+
+    unknown_keys: list[str] = []
+
     for key, value in data.items():
         key_lower = key.lower()
 
@@ -521,6 +547,19 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # Tool-specific config - normalize aliases to canonical names
             canonical_name = tool_aliases.get(key_lower, key_lower)
             result["tools"][canonical_name] = value
+        elif key_lower in ("tool", "tools") and isinstance(value, dict):
+            # Nested per-tool table, mirroring the ``tools:`` section of
+            # .lintro-config.yaml: ``[tool.lintro.tool.trufflehog]`` /
+            # ``[tool.lintro.tools.trufflehog]``. Without this the whole table
+            # was dropped, so ``enabled = false`` silently did nothing and the
+            # tool kept running (#1716).
+            for nested_key, nested_value in value.items():
+                nested_lower = str(nested_key).lower()
+                if nested_lower not in known_tools:
+                    unknown_keys.append(f"{key_lower}.{nested_key}")
+                    continue
+                nested_canonical = tool_aliases.get(nested_lower, nested_lower)
+                result["tools"].setdefault(nested_canonical, nested_value)
         elif key in execution_keys or key.replace("-", "_") in execution_keys:
             # Execution config
             result["execution"][key.replace("-", "_")] = value
@@ -545,6 +584,19 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
+        elif key_lower in externally_handled_sections:
+            # Parsed elsewhere; nothing to convert here.
+            pass
+        else:
+            unknown_keys.append(key)
+
+    if unknown_keys:
+        # Silent discard is what kept this bug and #1716 invisible.
+        logger.warning(
+            "Ignoring unrecognized [tool.lintro] config key(s): {}. They match "
+            "no known tool, execution setting, or config section.",
+            ", ".join(sorted(unknown_keys)),
+        )
 
     return result
 
@@ -609,7 +661,8 @@ def load_config(
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
-    ai_config = _parse_ai_config(data.get("ai", {}))
+    # Stored verbatim: parsing belongs to the AI layer (issue #724).
+    ai_config = data.get("ai") or {}
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))

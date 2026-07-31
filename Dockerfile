@@ -6,6 +6,7 @@
 # Stage `full` (default): Python application layer on top of tools
 #
 # Minimal image (no bundled tools): ghcr.io/lgtm-hq/py-lintro-base (--target base)
+# AI variant (bundled agent CLIs):  ghcr.io/lgtm-hq/py-lintro-ai   (--target ai)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -14,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:ff07b5f356126d8d5c8701db95fba7e248d7db7c41da6ec662b5b34137da7672 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:8ad3e3037e31e0a94f962e361ed89525adc391ff8533325922391aaad6ef4219 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -135,3 +136,48 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # gosu (installed above). See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
+
+# -----------------------------------------------------------------------------
+# Stage: aitools — published lintro-ai-tools base image (digest-pinned)
+# -----------------------------------------------------------------------------
+# Built from docker/ai-tools.Dockerfile and published by
+# docker-ai-tools-publish.yml (cosign-signed, SBOM + provenance). Renovate
+# manages the digest bump. Only the `ai` target below depends on this stage, so
+# `--target base` / `--target full` builds never pull it.
+# yamllint / hadolint: pin is immutable by digest; tag is informational.
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:8daf68214ca1f8e5af4a20f166284c444f5ba36dff0858426731d66185934478 AS aitools
+
+# -----------------------------------------------------------------------------
+# Stage: ai — full image plus the agent CLIs `--transport cli` drives
+# -----------------------------------------------------------------------------
+FROM full AS ai
+
+LABEL org.opencontainers.image.description="Lintro with bundled AI agent CLIs; GHCR package py-lintro-ai"
+
+# One directory holds the bundled Node.js runtime, the npm-global claude/codex
+# trees, the Cursor agent release and the launcher shims — see
+# scripts/utils/install-ai-tools.sh for the layout. Only /opt/ai-tools/bin goes
+# on PATH, so `node` keeps resolving to bun for the lint toolchain.
+COPY --from=aitools /opt/ai-tools /opt/ai-tools
+
+ENV PATH="/opt/ai-tools/bin:${PATH}"
+
+# The `full` stage syncs without the `ai` extra so the lint-only image does not
+# carry the provider SDKs; add them here for the API transports. The chown
+# mirrors `full`'s, which runs before these newly written .venv files exist.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --dev --extra full --extra tools --extra ai --no-progress && \
+    (uv cache clean || true) && \
+    chown -R lintro:lintro /app
+
+# Mirrors the non-root smoke in `full`: the entrypoint drops privileges to the
+# UID owning the mounted volume, so a root-only-readable CLI tree would break
+# every real review while passing a root-run check.
+RUN echo "Smoke-testing AI agent CLIs..." && \
+    claude --version && codex --version && agent --version && \
+    gosu lintro claude --version && \
+    gosu lintro codex --version && \
+    gosu lintro agent --version && \
+    echo "AI CLI smoke check passed."
+
+# ENTRYPOINT, CMD and HEALTHCHECK are inherited from `full`.

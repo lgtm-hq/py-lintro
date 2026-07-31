@@ -70,6 +70,22 @@ def test_get_tool_config_case_insensitive() -> None:
     assert_that(result.enabled).is_false()
 
 
+def test_get_tool_config_matches_hyphen_config_for_underscore_tool() -> None:
+    """get_tool_config accepts hyphenated config for underscored tools."""
+    tool_config = LintroToolConfig(enabled=False)
+    config = LintroConfig(tools={"html-validate": tool_config})
+    result = config.get_tool_config("html_validate")
+    assert_that(result.enabled).is_false()
+
+
+def test_get_tool_config_matches_underscore_config_for_hyphen_tool() -> None:
+    """get_tool_config accepts underscored config for hyphenated tools."""
+    tool_config = LintroToolConfig(enabled=False)
+    config = LintroConfig(tools={"astro_check": tool_config})
+    result = config.get_tool_config("astro-check")
+    assert_that(result.enabled).is_false()
+
+
 def test_is_tool_enabled_default_true() -> None:
     """is_tool_enabled returns True for unconfigured tool."""
     config = LintroConfig()
@@ -105,6 +121,22 @@ def test_is_tool_enabled_case_insensitive() -> None:
     config = LintroConfig(execution=execution)
     assert_that(config.is_tool_enabled("ruff")).is_true()
     assert_that(config.is_tool_enabled("Ruff")).is_true()
+
+
+def test_is_tool_enabled_matches_enabled_tools_aliases() -> None:
+    """execution.enabled_tools accepts hyphen/underscore spelling aliases."""
+    execution = ExecutionConfig(enabled_tools=["html-validate"])
+    config = LintroConfig(execution=execution)
+    assert_that(config.is_tool_enabled("html_validate")).is_true()
+    assert_that(config.is_tool_enabled("ruff")).is_false()
+
+
+def test_is_tool_enabled_matches_tool_config_aliases() -> None:
+    """tools.<name>.enabled applies across hyphen/underscore aliases."""
+    config = LintroConfig(
+        tools={"html-validate": LintroToolConfig(enabled=False)},
+    )
+    assert_that(config.is_tool_enabled("html_validate")).is_false()
 
 
 def test_get_tool_defaults_returns_configured_defaults() -> None:

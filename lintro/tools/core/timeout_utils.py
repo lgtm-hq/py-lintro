@@ -2,6 +2,23 @@
 
 This module provides standardized timeout handling across different tools,
 ensuring consistent behavior and error messages for subprocess timeouts.
+
+Timeout accounting model (single source of truth for every tool):
+
+    A tool timeout is an **execution failure**, never a lint finding.
+
+Concretely, a timed-out tool reports:
+
+- ``success=False`` — the run failed, so the process exit code is non-zero.
+- ``timed_out=True`` — the machine-readable marker consumers classify on.
+- **zero** issues of its own. ``issues_count`` only ever counts genuine
+  findings parsed out of the tool's output. Issues that were legitimately
+  detected *before* the timeout (for example the pre-fix check in a fix run)
+  are still reported; no synthetic pseudo-issue is ever invented.
+
+This keeps ``summary.total_issues`` and the per-tool ``issues_count`` in
+agreement, and makes "at least one tool timed out and the run found zero
+issues" an expressible — and therefore usable — classification downstream.
 """
 
 import subprocess  # nosec B404 - used safely with shell disabled
@@ -116,6 +133,10 @@ def create_timeout_result(
 ) -> TimeoutResult:
     """Create a standardized timeout result.
 
+    Follows the module's timeout accounting model: the result carries
+    ``timed_out=True`` and ``issues_count=0`` so a timeout never masquerades
+    as a lint finding.
+
     Args:
         tool: Tool instance.
         timeout: Timeout value that was exceeded.
@@ -136,7 +157,9 @@ def create_timeout_result(
             "  - Need to increase timeout via --tool-options timeout=N\n"
             "  - Command hanging due to external dependencies\n"
         ),
-        issues_count=1,  # Count timeout as execution failure
+        # A timeout is an execution failure, not a lint finding: it must not
+        # inflate issue counts (see the module docstring's accounting model).
+        issues_count=0,
         issues=[],
         timed_out=True,
         timeout_seconds=timeout,
