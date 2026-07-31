@@ -33,7 +33,7 @@ def test_diff_flag_without_value_passes_sentinel() -> None:
     """``chk --diff`` forwards the default sentinel to the runner."""
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         runner.invoke(cli, ["chk", "--diff", "--tools", "ruff"])
@@ -47,7 +47,7 @@ def test_diff_flag_with_explicit_base_passes_ref() -> None:
     """``chk --diff main`` forwards the explicit base ref."""
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         runner.invoke(cli, ["chk", "--diff", "main", "--tools", "ruff"])
@@ -59,7 +59,7 @@ def test_no_diff_flag_passes_none() -> None:
     """Omitting ``--diff`` forwards ``None`` (full scan)."""
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         runner.invoke(cli, ["chk", "--tools", "ruff"])
@@ -71,7 +71,7 @@ def test_format_diff_flag_passes_sentinel() -> None:
     """``fmt --diff`` forwards the default sentinel to the runner."""
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.format.run_lint_tools_simple",
+        "lintro.cli_utils.commands.format.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         runner.invoke(cli, ["fmt", "--diff", "--tools", "ruff"])
@@ -85,7 +85,7 @@ def test_diff_equals_syntax_passes_ref() -> None:
     """``chk --diff=main`` forwards the explicit base ref."""
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         result = runner.invoke(cli, ["chk", "--diff=main", "--tools", "ruff"])
@@ -100,7 +100,7 @@ def test_diff_rejects_existing_path_as_base(tmp_path: Path) -> None:
     scan_dir.mkdir()
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         result = runner.invoke(
@@ -120,7 +120,7 @@ def test_diff_with_separator_treats_path_as_scan_target(tmp_path: Path) -> None:
     scan_dir.mkdir()
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         result = runner.invoke(
@@ -173,7 +173,7 @@ def test_diff_equals_syntax_allows_ref_when_path_exists(
 
     runner = CliRunner()
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         result = runner.invoke(cli, ["chk", "--diff=main", "--tools", "ruff"])

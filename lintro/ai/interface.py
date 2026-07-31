@@ -1,10 +1,12 @@
 """The single integration point between the core runner and the AI layer.
 
-Core modules must not import :mod:`lintro.ai` internals. Callers that want
-AI enhancement (the ``chk``/``fmt`` CLI handlers and the public Python API)
-inject the callables from this module into
-:func:`lintro.utils.tool_executor.run_lint_tools_simple`, which consumes the
-core-owned :class:`~lintro.models.core.ai_seam.AIOutcome` they return.
+Core modules must not import :mod:`lintro.ai` internals. Since the executor
+was split into an execute phase and a render phase (issue #1823), callers that
+want AI enhancement — the ``chk``/``fmt`` CLI handlers and the public Python
+API — simply call :func:`enhance_artifact` *between* the two phases. Nothing is
+injected into core any more: the three optional callables the executor used to
+accept (``ai_runner``, ``ai_status_renderer``, ``ai_sarif_enricher``) are gone,
+along with the seam protocols that described them.
 
 The surface here is deliberately small — the goal of issue #724 is fewer
 import edges, not a plugin system. All heavy AI imports are function-local so
@@ -14,25 +16,42 @@ that importing this module stays cheap on the no-AI path.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action
-from lintro.models.core.ai_seam import AIOutcome, AISarifEnrichment
+from lintro.models.core.sarif_enrichment import AISarifEnrichment
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.models import AIResult
     from lintro.config.lintro_config import LintroConfig
+    from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
+    from lintro.utils.execution.run_context import RunContext
 
 __all__ = [
-    "ai_exit_code_override",
+    "enhance_artifact",
     "render_ai_status",
     "resolve_ai_config",
-    "run_ai_layer",
     "sarif_enrichment_from_results",
 ]
+
+
+@dataclass(frozen=True)
+class AIOutcome:
+    """Result of an AI layer invocation, expressed in exit-code terms.
+
+    Attributes:
+        ran: Whether the AI layer actually executed for this action. When
+            True the caller re-aggregates tool results, because the AI layer
+            may have mutated them in place.
+        force_failure: Whether AI outcomes force a non-zero exit code.
+    """
+
+    ran: bool = False
+    force_failure: bool = False
 
 
 def sarif_enrichment_from_results(
@@ -41,9 +60,8 @@ def sarif_enrichment_from_results(
 ) -> AISarifEnrichment:
     """Reconstruct SARIF AI enrichment from the metadata on tool results.
 
-    Satisfies :class:`~lintro.models.core.ai_seam.AISarifEnricher`. Core SARIF
-    emitters call the injected seam rather than importing
-    :mod:`lintro.ai.sarif_bridge`, which is what keeps
+    The render phase accepts the returned value as plain data rather than
+    importing :mod:`lintro.ai.sarif_bridge` itself, which is what keeps
     :mod:`lintro.utils.tool_executor` and :mod:`lintro.utils.output` free of
     AI imports (issue #724).
 
@@ -245,3 +263,60 @@ def render_ai_status(
     from lintro.ai.display.status import render_ai_status as _render_ai_status
 
     return _render_ai_status(ai_config=ai_config, is_ci=is_ci)
+
+
+def enhance_artifact(
+    artifact: RunArtifact,
+    *,
+    ctx: RunContext,
+    output_format: str,
+    ai_fix: bool = False,
+    transport: str | None = None,
+    fail_under: float | None = None,
+) -> RunArtifact:
+    """Run the AI layer over a completed execute phase and refresh the result.
+
+    This is the whole AI story for a lint run since issue #1823: the CLI
+    handlers and the public API call :func:`lintro.utils.tool_executor.
+    execute_run`, hand the artifact here, then render whatever comes back. The
+    executor no longer accepts an ``ai_runner`` and never imports the AI layer.
+
+    Args:
+        artifact: The artifact produced by the execute phase. Its
+            ``tool_results`` may be mutated in place by the AI layer.
+        ctx: Shared run context; supplies the console logger and config.
+        output_format: Output format string.
+        ai_fix: Whether AI fix suggestions were requested via CLI.
+        transport: Optional CLI override for ``ai.transport``.
+        fail_under: Health-score gate to re-apply after AI changed the results.
+
+    Returns:
+        RunArtifact: The original artifact when AI did not run or the run
+        exited early, otherwise a refreshed artifact whose totals, health
+        score, and exit code account for the AI layer's effect.
+    """
+    if artifact.early_exit:
+        return artifact
+
+    outcome = run_ai_layer(
+        action=ctx.action,
+        all_results=artifact.tool_results,
+        lintro_config=ctx.lintro_config,
+        console_logger=ctx.logger,
+        output_format=output_format,
+        ai_fix=ai_fix,
+        transport=transport,
+    )
+    # ``run_ai_layer`` never forces a failure without having run, so a
+    # non-running outcome leaves the artifact exactly as the executor built it.
+    if not outcome.ran:
+        return artifact
+
+    from lintro.utils.tool_executor import refresh_artifact
+
+    return refresh_artifact(
+        artifact,
+        ctx=ctx,
+        fail_under=fail_under,
+        force_failure=outcome.force_failure,
+    )

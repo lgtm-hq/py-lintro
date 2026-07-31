@@ -12,9 +12,9 @@ import sys
 import click
 
 from lintro.api import core as api
+from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -240,14 +240,8 @@ def check_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    from lintro.ai.interface import (
-        render_ai_status,
-        run_ai_layer,
-        sarif_enrichment_from_results,
-    )
-
-    # Run with simplified approach
-    exit_code: int = run_lint_tools_simple(
+    # Run the AI-aware pipeline: execute, AI-enhance, render.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=path_list,
         tools=tools,
@@ -271,9 +265,6 @@ def check_command(
         transport=transport,
         score=score,
         fail_under=fail_under,
-        ai_runner=run_ai_layer,
-        ai_status_renderer=render_ai_status,
-        ai_sarif_enricher=sarif_enrichment_from_results,
         no_art=no_art,
     )
 

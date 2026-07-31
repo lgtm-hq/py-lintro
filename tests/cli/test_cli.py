@@ -207,8 +207,8 @@ def test_command_chaining_basic() -> None:
     runner = CliRunner()
     # Patch both format and check commands to prevent real tools from executing
     with (
-        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_chk,
+        patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_chk,
     ):
         mock_fmt.return_value = 0
         mock_chk.return_value = 0

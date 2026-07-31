@@ -400,13 +400,17 @@ def test_render_ai_status_delegates_to_display_module():
 
 
 def test_interface_public_surface_stays_small():
-    """The facade exposes exactly five public names."""
+    """The facade exposes exactly four public names.
+
+    Down from five: collapsing the executor's three AI seams (issue #1823)
+    made ``run_ai_layer`` an implementation detail of
+    :func:`~lintro.ai.interface.enhance_artifact`.
+    """
     assert_that(sorted(interface.__all__)).is_equal_to(
         [
-            "ai_exit_code_override",
+            "enhance_artifact",
             "render_ai_status",
             "resolve_ai_config",
-            "run_ai_layer",
             "sarif_enrichment_from_results",
         ],
     )

@@ -29,7 +29,7 @@ from lintro.formatters.formatter import (
     format_issues_with_sections,
     merge_detected_and_remaining,
 )
-from lintro.models.core.ai_seam import AISarifEnrichment
+from lintro.models.core.sarif_enrichment import AISarifEnrichment
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import sanitize_csv_value

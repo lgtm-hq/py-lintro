@@ -15,7 +15,7 @@ from lintro.api import LintroResult, check, fmt
 def test_api_check_propagates_exceptions() -> None:
     """A failure inside the executor surfaces to the caller unchanged."""
     with patch(
-        "lintro.api.core.run_lint_tools_simple",
+        "lintro.api.core.run_lint_with_ai",
         side_effect=RuntimeError("boom"),
     ):
         assert_that(check).raises(RuntimeError).when_called_with(
@@ -29,7 +29,7 @@ def test_api_check_returns_result(tmp_path: Path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text("x = 1\n", encoding="utf-8")
 
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         result = check(paths=[str(tmp_path)], tools="ruff")
 
     assert_that(result).is_instance_of(LintroResult)
@@ -42,7 +42,7 @@ def test_api_check_returns_result(tmp_path: Path) -> None:
 
 def test_api_check_result_reports_failure() -> None:
     """A non-zero exit code produces an unsuccessful result (no raise)."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
+    with patch("lintro.api.core.run_lint_with_ai", return_value=1):
         result = check(paths=["."], tools="ruff")
 
     assert_that(result.exit_code).is_equal_to(1)
@@ -56,7 +56,7 @@ def test_api_fmt_is_alias_of_format() -> None:
 
 def test_api_format_returns_result() -> None:
     """format() returns a LintroResult tagged with the ``fmt`` action."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
+    with patch("lintro.api.core.run_lint_with_ai", return_value=0) as mock_run:
         result = fmt(paths=["."], tools="ruff")
 
     assert_that(result.action).is_equal_to("fmt")

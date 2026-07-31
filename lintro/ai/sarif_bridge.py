@@ -6,7 +6,7 @@
 AI layer leaves on :attr:`ToolResult.metadata`. They live in the AI layer
 because they genuinely need :mod:`lintro.ai.models`; core reaches them only
 through the injected
-:class:`~lintro.models.core.ai_seam.AISarifEnricher` seam, which keeps
+``ai_enrichment`` value the CLI layer passes to the renderer, which keeps
 :mod:`lintro.utils.tool_executor` and :mod:`lintro.utils.output` free of AI
 imports (issue #724).
 
