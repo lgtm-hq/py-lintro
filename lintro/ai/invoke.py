@@ -10,10 +10,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
+
+# Rough chars-per-token heuristic for pre-call budget reservations. Real
+# tokenizers vary, but a conservative (i.e. slightly high) estimate is what
+# keeps concurrent CostBudget reservations meaningful — see
+# ``CostBudget.execute``'s overspend-bound note.
+_CHARS_PER_TOKEN_ESTIMATE = 4
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -83,9 +90,16 @@ async def call_ai(
             The provider response.
         """
         if budget is not None and budget.max_cost_usd is not None:
+            input_chars = len(user_prompt) + len(system_prompt or "")
+            estimate = estimate_cost_with_floor(
+                provider.model_name,
+                input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
+                output_tokens=tokens,
+            )
             return await budget.execute(
                 _call_once,
                 cost_of=lambda response: response.cost_estimate,
+                estimate=estimate,
             )
         response = await _call_once()
         if budget is not None:
