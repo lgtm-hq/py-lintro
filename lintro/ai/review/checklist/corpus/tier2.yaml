@@ -1,8 +1,13 @@
 # yamllint disable rule:line-length
+# yaml-language-server: $schema=../corpus.schema.json
+# $schema: ../corpus.schema.json
 ---
 # Tier 2 built-in review checklist corpus.
 # Domain/language-triggered items (IDs 100+).
 # One row per ChecklistItem; loaded by lintro.ai.review.checklist.loader.
+# Valid category/domains/languages values come from ../corpus.schema.json, a
+# GENERATED artifact; regenerate it with
+# `uv run python scripts/generate-checklist-corpus-schema.py` after enum changes.
 - id: 100
   tier: 2
   category: logic-bug

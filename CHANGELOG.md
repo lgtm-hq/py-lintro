@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.98.0] - 2026-07-31
+
+### Added
+
+- **ai**: add generated JSON Schema authoring support for checklist corpus (#1877)
+  (0057f6b)
+
+### Changed
+
+- **design**: format checklist-yaml-authoring-evaluation with prettier (#1880) (fa008e5)
+- **design**: evaluate authoring-time validation for checklist YAML corpus (#1574)
+  (afbf251)
+
 ## [0.97.1] - 2026-07-31
 
 ### Fixed

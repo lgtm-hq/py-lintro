@@ -8,3 +8,7 @@ node_modules
 
 # AI prompt templates (not human docs; keep verbatim)
 lintro/ai/prompts/templates/**
+
+# Generated artifact (scripts/generate-checklist-corpus-schema.py owns its formatting;
+# reformatting it here would fight the --check drift gate)
+lintro/ai/review/checklist/corpus.schema.json

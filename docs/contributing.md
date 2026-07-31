@@ -190,6 +190,28 @@ direct CLI behavior.
 
 ---
 
+## Review Checklist Corpus
+
+The built-in AI review checklist lives in YAML at
+`lintro/ai/review/checklist/corpus/tier1.yaml` and `tier2.yaml`. Its vocabulary is owned
+by Python (`ReviewCategory`, `FileDomain`, `identify.identify.ALL_TAGS`, and the tier/id
+bounds in `lintro/ai/review/constants.py`) and projected into a generated JSON Schema at
+`lintro/ai/review/checklist/corpus.schema.json`. Both corpus files carry
+`# yaml-language-server:` / `# $schema:` modelines, so editors with YAML schema support
+(VS Code/Cursor via the Red Hat YAML extension, JetBrains IDEs) offer completion and
+inline validation for `category`, `domains`, and `languages` while you edit.
+
+The schema is a **generated artifact — never hand-edit it**. After changing any of those
+enums or bounds, regenerate with
+`uv run python scripts/generate-checklist-corpus-schema.py`; use `--check` for a
+non-writing unified diff (exit 1 on drift).
+`tests/unit/ai/review/test_checklist_corpus_schema.py` fails if the committed schema
+drifts from the generator or from the Python enums. The loader's fail-fast validation
+(unique ids, unique normalized questions) stays authoritative at runtime — the schema is
+an authoring aid, not a replacement.
+
+---
+
 ## Code Review Process
 
 All contributions go through code review:
