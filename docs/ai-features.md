@@ -125,7 +125,8 @@ and cost-budget controls.
 > # before
 > lintro chk --tools idiom-review
 >
-> # now
+> # now (both forms still require the tool's own `enabled` opt-in, from
+> # `tools.idiom-review` config or `--tool-options`)
 > lintro review --advisory-only --advisory-tools idiom-review
 > ```
 >

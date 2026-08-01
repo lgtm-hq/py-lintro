@@ -1080,3 +1080,68 @@ def test_merge_advisory_into_json_without_advisory_results() -> None:
     )
 
     assert_that(json.loads(str(merged))).does_not_contain_key("advisory")
+
+
+def test_full_review_renders_advisory_block_after_review_output() -> None:
+    """Terminal output shows advisory findings under the diff review."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value="REVIEW BODY",
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("REVIEW BODY")
+    assert_that(result.output.index("REVIEW BODY")).is_less_than(
+        result.output.index("Advisory: idiom-review"),
+    )
+
+
+def test_full_review_json_merges_advisory_key() -> None:
+    """JSON output carries advisory findings under an additive key."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "ok"}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--output", "json"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("ok")
+    assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")

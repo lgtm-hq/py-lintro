@@ -109,7 +109,7 @@ lintro review --advisory-only \
 - Caching is automatic; clear `.lintro-cache/idiom` to force a full re-analysis.
 
 See [AI Configuration](../configuration.md#idiom-review-tool-idiom-review) and
-[AI Features Guide](../ai-features.md#ai-idiom-review-idiom-review-tool) for full
+[AI Features Guide](../ai-features.md#advisory-ai-finders-idiom-review) for full
 configuration reference.
 
 ## Recommendations

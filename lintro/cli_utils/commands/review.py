@@ -67,6 +67,8 @@ from lintro.utils.execution.advisory import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from lintro.models.core.tool_result import ToolResult
 
 #: Default paths scanned by ``--advisory-only`` when no ``--path`` is given.
@@ -442,9 +444,10 @@ def review_command(
     advisory_results = _execute_advisory(
         advisory_tools=advisory_tools,
         tool_options=tool_options,
-        paths=[
-            file.path for file in context.changed_files if Path(file.path).is_file()
-        ],
+        paths=_existing_changed_files(
+            changed_files=context.changed_files,
+            workspace_root=workspace_root,
+        ),
     )
 
     output = render_review_output(
@@ -484,6 +487,37 @@ def review_command(
     raise SystemExit(exit_code)
 
 
+def _existing_changed_files(
+    *,
+    changed_files: Sequence[object],
+    workspace_root: Path,
+) -> list[str]:
+    """Resolve a review context's changed files to on-disk absolute paths.
+
+    Paths are resolved against the workspace root rather than the process cwd,
+    and deleted or renamed-away files are dropped: an advisory tool must never
+    be handed a path it cannot open.
+
+    Args:
+        changed_files: Changed-file entries carrying a ``path`` attribute.
+        workspace_root: Absolute workspace root the paths are relative to.
+
+    Returns:
+        Absolute paths of the changed files that still exist.
+    """
+    paths: list[str] = []
+    for changed in changed_files:
+        raw = getattr(changed, "path", None)
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = workspace_root / candidate
+        if candidate.is_file():
+            paths.append(str(candidate))
+    return paths
+
+
 def _execute_advisory(
     *,
     advisory_tools: str | None,
@@ -510,7 +544,11 @@ def _execute_advisory(
         raise click.UsageError(str(exc)) from exc
     # Only report explicitly named tools; the default 'all' selection skipping
     # a config-disabled tool is the normal, quiet case.
-    if advisory_tools not in (None, AdvisoryToolsValue.ALL):
+    explicit_selection = (advisory_tools or "").strip().lower() not in (
+        "",
+        AdvisoryToolsValue.ALL,
+    )
+    if explicit_selection:
         for skipped in selection.skipped:
             logger.info(
                 "Skipping advisory tool {}: {}",

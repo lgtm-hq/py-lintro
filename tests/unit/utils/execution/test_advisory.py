@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 from assertpy import assert_that
 
+from lintro.config.lintro_config import LintroConfig, LintroToolConfig
 from lintro.enums.execution_class import (
     ExecutionClass,
     normalize_execution_class,
@@ -192,3 +193,50 @@ def test_advisory_results_to_payload_is_json_shaped() -> None:
     assert_that(payload[0]["issues_count"]).is_equal_to(1)
     issues = cast("list[dict[str, str]]", payload[0]["issues"])
     assert_that(issues[0]["file"]).is_equal_to("a.py")
+
+
+def test_run_advisory_tools_survives_configuration_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool that raises during configuration does not abort the run."""
+
+    def _explode(**_kwargs: object) -> object:
+        raise RuntimeError("config exploded")
+
+    monkeypatch.setattr(
+        advisory_module,
+        "configure_tool_for_execution",
+        _explode,
+    )
+    results = run_advisory_tools(
+        paths=[str(tmp_path)],
+        tool_names=["idiom-review"],
+    )
+
+    assert_that(results).is_length(1)
+    assert_that(results[0].success).is_false()
+    assert_that(results[0].output).contains("config exploded")
+
+
+def test_resolve_advisory_tools_honors_config_disabled_tool() -> None:
+    """A config-disabled advisory tool is skipped in the default selection."""
+    config = LintroConfig(tools={"idiom-review": LintroToolConfig(enabled=False)})
+
+    selection = resolve_advisory_tools(requested=None, lintro_config=config)
+
+    assert_that(selection.to_run).does_not_contain("idiom-review")
+    assert_that([tool.name for tool in selection.skipped]).contains("idiom-review")
+
+
+def test_resolve_advisory_tools_honors_config_disabled_explicit_request() -> None:
+    """An explicitly named but config-disabled tool is skipped, not run."""
+    config = LintroConfig(tools={"idiom-review": LintroToolConfig(enabled=False)})
+
+    selection = resolve_advisory_tools(
+        requested="idiom-review",
+        lintro_config=config,
+    )
+
+    assert_that(selection.to_run).is_empty()
+    assert_that(selection.skipped[0].reason).contains("disabled in config")

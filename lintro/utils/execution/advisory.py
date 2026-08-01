@@ -187,19 +187,22 @@ def run_advisory_tools(
     tool_option_dict = parse_tool_options(tool_options)
     results: list[ToolResult] = []
     for tool_name in tool_names:
-        tool = configure_tool_for_execution(
-            tool=tool_manager.get_tool(tool_name),
-            tool_name=tool_name,
-            config_manager=config_manager,
-            tool_option_dict=tool_option_dict,
-            exclude=None,
-            include_venv=False,
-            incremental=False,
-            action=Action.CHECK,
-            post_tools=set(),
-            lintro_config=config,
-        )
+        # Lookup and configuration are inside the guard too: a plugin that
+        # raises while building its option state must not abort the whole
+        # review any more than one that raises inside check().
         try:
+            tool = configure_tool_for_execution(
+                tool=tool_manager.get_tool(tool_name),
+                tool_name=tool_name,
+                config_manager=config_manager,
+                tool_option_dict=tool_option_dict,
+                exclude=None,
+                include_venv=False,
+                incremental=False,
+                action=Action.CHECK,
+                post_tools=set(),
+                lintro_config=config,
+            )
             results.append(tool.check(paths, {}))
         except Exception as exc:  # noqa: BLE001 - advisory runs never abort review
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)

@@ -41,6 +41,11 @@ def _resolve_conflicts(
     return conflict_names
 
 
+#: Capability label reported for advisory AI finders, which run under
+#: ``lintro review`` instead of ``chk``/``fmt`` (#1308).
+ADVISORY_CAPABILITY: str = "review"
+
+
 def _tool_capabilities(
     *,
     tool_name: str,
@@ -64,12 +69,12 @@ def _tool_capabilities(
         Capability labels in display order.
     """
     if plugin.definition.is_advisory:
-        return ["review"]
+        return [ADVISORY_CAPABILITY]
     capabilities: list[str] = []
     if tool_name in check_tools:
-        capabilities.append("check")
+        capabilities.append(Action.CHECK.value)
     if tool_name in fix_tools:
-        capabilities.append("fix")
+        capabilities.append(Action.FIX.value)
     return capabilities
 
 
@@ -312,11 +317,12 @@ def _generate_plain_text_output(
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
 
-        capabilities: list[str] = []
-        if tool_name in check_tools:
-            capabilities.append(Action.CHECK.value)
-        if tool_name in fix_tools:
-            capabilities.append(Action.FIX.value)
+        capabilities = _tool_capabilities(
+            tool_name=tool_name,
+            plugin=plugin,
+            check_tools=check_tools,
+            fix_tools=fix_tools,
+        )
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
 
@@ -336,9 +342,19 @@ def _generate_plain_text_output(
 
     summary_border = "-" * 70
     output_lines.append(summary_border)
+    # Advisory finders never run under chk/fmt, so they are counted on their
+    # own line rather than inflating the check-tool total (#1308).
+    advisory_names = {
+        name
+        for name, plugin in available_tools.items()
+        if plugin.definition.is_advisory
+    }
     output_lines.append(f"Total tools: {len(available_tools)}")
-    output_lines.append(f"Check tools: {len(check_tools)}")
-    output_lines.append(f"Fix tools: {len(fix_tools)}")
+    output_lines.append(
+        f"Check tools: {len(set(check_tools) - advisory_names)}",
+    )
+    output_lines.append(f"Fix tools: {len(set(fix_tools) - advisory_names)}")
+    output_lines.append(f"Advisory tools: {len(advisory_names)}")
     output_lines.append(summary_border)
 
     return output_lines
