@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.104.1] - 2026-08-01
+
+### Changed
+
+- **ai**: run the AI review dogfood on the CLI transport (fd1ad37)
+
+### Fixed
+
+- **ci**: stop binary-build jobs from syncing the dev group (cfafdc9)
+
 ## [0.104.0] - 2026-08-01
 
 ### Added
