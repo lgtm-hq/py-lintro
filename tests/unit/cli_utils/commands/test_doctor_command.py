@@ -18,6 +18,7 @@ from lintro.cli_utils.commands.doctor import (
     _check_tool,
     _compare_versions,
     _generate_markdown_report,
+    _mcp_extra_status,
     _output_json,
     doctor_command,
 )
@@ -588,3 +589,48 @@ def test_doctor_resolves_ai_checks_from_a_raw_ai_mapping() -> None:
     assert_that("".join(messages)).contains(
         "Unknown AI config keys ignored: provdier",
     )
+
+
+# ── optional MCP extra ───────────────────────────────────────────────
+
+
+def test_mcp_extra_status_reports_installed() -> None:
+    """The MCP extra is reported OK when the SDK imports."""
+    with patch("lintro.mcp.is_mcp_available", return_value=True):
+        info = _mcp_extra_status()
+
+    assert_that(info["name"]).is_equal_to("mcp")
+    assert_that(info["status"]).is_equal_to(ToolStatus.OK.value)
+    assert_that(info["hint"]).contains("lintro mcp")
+
+
+def test_mcp_extra_status_reports_missing_without_failing() -> None:
+    """A missing MCP extra is DISABLED (informational), never an error."""
+    with patch("lintro.mcp.is_mcp_available", return_value=False):
+        info = _mcp_extra_status()
+
+    assert_that(info["status"]).is_equal_to(ToolStatus.DISABLED.value)
+    assert_that(info["hint"]).contains("lintro[mcp]")
+
+
+def test_output_json_includes_optional_extras() -> None:
+    """JSON output carries the optional-extras block for machine consumers."""
+    tool = _make_tool()
+    result = ToolCheckResult(
+        tool=tool,
+        status=ToolStatus.OK,
+        installed_version="0.14.4",
+        install_hint="uv pip install ruff>=0.14.0",
+        upgrade_hint="uv pip install --upgrade ruff>=0.14.0",
+    )
+    ctx = _make_context()
+
+    from io import StringIO
+
+    output = StringIO()
+    with patch("click.echo", side_effect=output.write):
+        _output_json([result], ctx, None, 1, 0, 0, 0, 0)
+
+    data = json.loads(output.getvalue())
+    extras = {entry["name"]: entry for entry in data["optional_extras"]}
+    assert_that(extras).contains_key("mcp")
