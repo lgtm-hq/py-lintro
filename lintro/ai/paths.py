@@ -96,6 +96,7 @@ def atomic_write_bytes(
     path: Path,
     data: bytes,
     *,
+    mode: int | None = None,
     fallback_mode: int = 0o644,
 ) -> None:
     """Replace ``path`` with ``data`` atomically, preserving its mode.
@@ -107,16 +108,22 @@ def atomic_write_bytes(
     Args:
         path: Destination file. Its parent must already exist.
         data: Bytes to write.
-        fallback_mode: Permission bits to apply when ``path`` does not exist
-            yet and the caller has no better information.
+        mode: Permission bits to force. Callers restoring a snapshot pass the
+            bits the file had *then*, so a mode the run itself changed is
+            rolled back too. ``None`` keeps whatever ``path`` currently has.
+        fallback_mode: Permission bits to apply when ``mode`` is ``None`` and
+            ``path`` does not exist yet.
 
     Raises:
         BaseException: Re-raised after the partial temporary file is removed,
             so a failed write never leaves debris beside the target.
     """
-    mode = fallback_mode
-    if path.is_file():
-        mode = path.stat().st_mode & 0o7777
+    if mode is None:
+        mode = (
+            path.stat().st_mode & 0o7777
+            if path.is_file() and not path.is_symlink()
+            else fallback_mode
+        )
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".lintro-tmp")
     try:
         try:

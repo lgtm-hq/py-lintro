@@ -12,6 +12,8 @@ from assertpy import assert_that
 
 from lintro.ai.checkpoints import (
     CHECKPOINT_REF_PREFIX,
+    Checkpoint,
+    CheckpointError,
     capture_checkpoint,
     diff_checkpoint,
     git_checkpoints_available,
@@ -579,3 +581,36 @@ def test_symlink_to_directory_is_left_alone(tmp_path: Path) -> None:
     assert_that(list(checkpoint.paths)).does_not_contain("pkg-link")  # type: ignore[union-attr]
     restore_checkpoint(checkpoint)  # type: ignore[arg-type]
     assert_that(link.is_symlink()).is_true()
+
+
+def test_restore_aborts_when_the_tree_is_unreadable(tmp_path: Path) -> None:
+    """An unreadable checkpoint tree fails loudly instead of deleting targets."""
+    repo = _init_git_repo(tmp_path)
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    broken = Checkpoint(
+        ref=checkpoint.ref,  # type: ignore[union-attr]
+        run_id=checkpoint.run_id,  # type: ignore[union-attr]
+        root=repo,
+        paths=checkpoint.paths,  # type: ignore[union-attr]
+        tree_sha="0" * 40,
+    )
+
+    assert_that(restore_checkpoint).raises(CheckpointError).when_called_with(broken)
+    assert_that((repo / "tracked.py").exists()).is_true()
+
+
+def test_restore_reverts_a_mode_the_run_changed(tmp_path: Path) -> None:
+    """The checkpoint's mode wins over whatever the file drifted to."""
+    repo = _init_git_repo(tmp_path)
+    script = repo / "script.sh"
+    script.write_text("#!/bin/sh\necho one\n", encoding="utf-8")
+    script.chmod(0o644)
+
+    checkpoint = capture_checkpoint(["script.sh"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    script.write_text("#!/bin/sh\necho two\n", encoding="utf-8")
+    script.chmod(0o755)
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(script.stat().st_mode & 0o777).is_equal_to(0o644)

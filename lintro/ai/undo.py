@@ -206,14 +206,7 @@ def _restore_file_snapshot(
                 resolved.unlink()
             continue
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        recorded_mode = snapshot.modes.get(path)
-        if recorded_mode is not None and resolved.is_file():
-            resolved.chmod(recorded_mode)
-        atomic_write_bytes(
-            resolved,
-            data,
-            fallback_mode=recorded_mode if recorded_mode is not None else 0o644,
-        )
+        atomic_write_bytes(resolved, data, mode=snapshot.modes.get(path))
 
 
 def _try_save_undo_patch(

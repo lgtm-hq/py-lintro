@@ -416,8 +416,10 @@ def _blob_for_path(
     entry = _run_git(
         ["ls-tree", "-z", "--", treeish, rel_path],
         cwd=str(root),
+        check=True,
     )
-    if entry.returncode != 0 or not entry.stdout.strip():
+    if not entry.stdout.strip():
+        # Genuinely absent from the tree: the path was created after capture.
         return None
     git_mode = entry.stdout.split(" ", 1)[0]
     if git_mode in (_GITLINK_MODE, _TREE_MODE):
@@ -442,9 +444,10 @@ def restore_checkpoint(
 
     Every target blob is read before anything is written, so a tree that
     cannot be read fails the whole rollback without having touched the working
-    tree. Each individual file is then replaced atomically and with its
-    recorded mode; the write phase itself is sequential, so a failure part way
-    through leaves the earlier files already restored. Paths present on disk
+    tree. Each individual file is then replaced atomically and with the mode
+    the checkpoint recorded, so a mode the run changed is rolled back too. The
+    write phase itself is sequential, so a failure part way through leaves the
+    earlier files already restored. Paths present on disk
     but absent from the checkpoint tree are removed (they were created after
     capture). Paths that remain at the checkpoint content are rewritten from
     the tree — including when the user edited them between capture and
@@ -462,6 +465,13 @@ def restore_checkpoint(
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
+    # Fail before the read phase if the tree object itself is gone: every
+    # subsequent lookup would report "absent", and absent means delete.
+    _run_git(
+        ["rev-parse", "--verify", "--quiet", f"{treeish}^{{tree}}"],
+        cwd=str(root),
+        check=True,
+    )
     known = set(checkpoint.paths)
     if paths is None:
         target_rels = list(checkpoint.paths)
@@ -502,7 +512,7 @@ def restore_checkpoint(
         atomic_write_bytes(
             abs_path,
             contents,
-            fallback_mode=0o755 if git_mode.endswith("755") else 0o644,
+            mode=0o755 if git_mode.endswith("755") else 0o644,
         )
 
 
