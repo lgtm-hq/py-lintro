@@ -155,3 +155,22 @@ def test_resolve_path_arguments_skips_absent_optional_path(tmp_path: Path) -> No
     )
 
     assert_that(resolved).does_not_contain_key("targets")
+
+
+def test_resolve_path_arguments_rejects_symlink_escape(tmp_path: Path) -> None:
+    """A symlink inside the workspace cannot be used to reach outside it."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "secret.txt").write_text("secret\n", encoding="utf-8")
+    (workspace / "escape").symlink_to(outside_dir)
+
+    with pytest.raises(McpError) as exc_info:
+        resolve_path_arguments(
+            spec=_path_spec(),
+            arguments={"target": "escape/secret.txt"},
+            workspace=workspace,
+        )
+
+    assert_that(exc_info.value.code).is_equal_to(McpErrorCode.WORKSPACE_VIOLATION)

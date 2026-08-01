@@ -100,11 +100,13 @@ def test_path_guard_anchors_relative_paths_to_workspace_not_cwd(
 
 def test_path_guard_rejects_path_outside_workspace(tmp_path: Path) -> None:
     """Absolute paths outside the workspace raise WORKSPACE_VIOLATION."""
-    outside = tmp_path.parent / "outside.txt"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
     outside.write_text("nope\n", encoding="utf-8")
 
     with pytest.raises(McpError) as exc_info:
-        ensure_within_workspace(path=outside, workspace=tmp_path)
+        ensure_within_workspace(path=outside, workspace=workspace)
 
     assert_that(exc_info.value.code).is_equal_to(McpErrorCode.WORKSPACE_VIOLATION)
     assert_that(exc_info.value.to_dict()["code"]).is_equal_to("workspace_violation")

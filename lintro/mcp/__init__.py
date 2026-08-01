@@ -8,6 +8,8 @@ Only starting the stdio server imports the SDK.
 
 from __future__ import annotations
 
+import importlib.util
+
 from lintro.mcp.annotations import annotations_from_spec, tool_annotations_dict
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import (
@@ -32,16 +34,20 @@ __all__ = [
 
 
 def is_mcp_available() -> bool:
-    """Return True when the optional ``mcp`` Python SDK is importable.
+    """Return True when the optional ``mcp`` Python SDK is installed.
+
+    The check uses :func:`importlib.util.find_spec` rather than an ``import``
+    so a mere availability probe — which ``lintro doctor`` runs on every
+    invocation — never executes the SDK, never leaves it in ``sys.modules``,
+    and cannot be turned into a crash by a half-installed package.
 
     Returns:
-        True when ``import mcp`` succeeds.
+        True when a module spec for ``mcp`` can be located.
     """
     try:
-        import mcp  # noqa: F401
-    except ImportError:
+        return importlib.util.find_spec("mcp") is not None
+    except (ImportError, ValueError):
         return False
-    return True
 
 
 def require_mcp() -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from assertpy import assert_that
 
@@ -90,3 +92,73 @@ def test_spec_rejects_path_argument_missing_from_schema() -> None:
         )
 
     assert_that(str(exc_info.value)).contains("target")
+
+
+def test_spec_accepts_declared_string_and_array_path_arguments() -> None:
+    """String and array-of-string path arguments are both accepted."""
+    spec = McpToolSpec(
+        name="good_paths",
+        description="d",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "targets": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        handler=lambda _arguments: {},
+        path_arguments=("target", "targets"),
+    )
+
+    assert_that(spec.path_arguments).is_equal_to(("target", "targets"))
+
+
+def test_spec_rejects_non_string_path_argument_schema() -> None:
+    """A path argument typed as something other than a string is rejected."""
+    with pytest.raises(ValueError) as exc_info:
+        McpToolSpec(
+            name="numeric_path",
+            description="d",
+            input_schema={
+                "type": "object",
+                "properties": {"target": {"type": "integer"}},
+            },
+            handler=lambda _arguments: {},
+            path_arguments=("target",),
+        )
+
+    assert_that(str(exc_info.value)).contains("string")
+
+
+def test_spec_deep_copies_input_schema() -> None:
+    """Mutating the caller's schema dict cannot weaken the stored schema."""
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {"target": {"type": "string"}},
+        "required": ["target"],
+    }
+    spec = McpToolSpec(
+        name="copied",
+        description="d",
+        input_schema=schema,
+        handler=lambda _arguments: {},
+        path_arguments=("target",),
+    )
+
+    schema["required"] = []
+    schema["properties"].clear()
+
+    assert_that(spec.input_schema["required"]).is_equal_to(["target"])
+    assert_that(spec.input_schema["properties"]).contains_key("target")
+
+
+def test_register_toolkit_is_atomic_on_duplicate() -> None:
+    """A duplicate inside a toolkit registers none of that toolkit's tools."""
+    registry = McpToolRegistry()
+    registry.register(spec=_spec("existing"))
+
+    with pytest.raises(ValueError):
+        registry.register_toolkit(specs=[_spec("fresh"), _spec("existing")])
+
+    assert_that(registry.get(name="fresh")).is_none()
+    assert_that(len(registry)).is_equal_to(1)

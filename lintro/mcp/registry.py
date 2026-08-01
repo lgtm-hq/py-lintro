@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,26 @@ __all__ = [
 ]
 
 
+def _is_path_schema(*, schema: Any) -> bool:
+    """Return whether a property schema can only hold path strings.
+
+    Args:
+        schema: The JSON Schema fragment describing a single property.
+
+    Returns:
+        True for ``{"type": "string"}`` or an array whose ``items`` schema is
+        itself a string schema.
+    """
+    if not isinstance(schema, dict):
+        return False
+    schema_type = schema.get("type")
+    if schema_type == "string":
+        return True
+    if schema_type == "array":
+        return _is_path_schema(schema=schema.get("items"))
+    return False
+
+
 @dataclass(frozen=True)
 class McpToolSpec:
     """Specification for a single MCP tool.
@@ -23,7 +44,9 @@ class McpToolSpec:
         name: Unique tool name (e.g. ``lintro_ping``).
         description: Human-readable tool description.
         input_schema: JSON Schema object for tool arguments. Must be an object
-            schema so the server can validate arguments before dispatch.
+            schema so the server can validate arguments before dispatch. The
+            dict is deep-copied at construction, so a caller mutating the dict
+            it passed in cannot retroactively weaken the validated schema.
         handler: Callable taking an arguments dict and returning a result. May
             be a coroutine function.
         read_only: Maps to MCP ``readOnlyHint``.
@@ -46,12 +69,13 @@ class McpToolSpec:
     path_arguments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Validate the specification at construction time.
+        """Validate the specification and freeze its schema.
 
         Raises:
             ValueError: If the name is empty, the input schema is not a JSON
                 Schema object, or a declared path argument is absent from the
-                schema properties.
+                schema properties or not typed as a string (or array of
+                strings).
         """
         if not self.name.strip():
             raise ValueError("MCP tool name must be a non-empty string")
@@ -60,13 +84,20 @@ class McpToolSpec:
                 f"MCP tool {self.name!r} input_schema must be a JSON Schema "
                 'object (\'"type": "object"\')',
             )
+        object.__setattr__(self, "input_schema", copy.deepcopy(self.input_schema))
+
         properties = self.input_schema.get("properties") or {}
-        unknown = [key for key in self.path_arguments if key not in properties]
-        if unknown:
-            raise ValueError(
-                f"MCP tool {self.name!r} declares path_arguments not present in "
-                f"input_schema properties: {sorted(unknown)}",
-            )
+        for key in self.path_arguments:
+            if key not in properties:
+                raise ValueError(
+                    f"MCP tool {self.name!r} declares path argument {key!r} "
+                    "which is not present in input_schema properties",
+                )
+            if not _is_path_schema(schema=properties[key]):
+                raise ValueError(
+                    f"MCP tool {self.name!r} path argument {key!r} must be "
+                    'typed as "string" or an array of "string" items',
+                )
 
     def to_annotations(self) -> dict[str, bool]:
         """Return MCP annotation hints for this tool.
@@ -98,12 +129,25 @@ class McpToolRegistry:
         self._tools[spec.name] = spec
 
     def register_toolkit(self, *, specs: Iterable[McpToolSpec]) -> None:
-        """Register multiple tools from a toolkit.
+        """Register multiple tools from a toolkit, atomically.
+
+        Names are checked up front so a toolkit with one bad entry does not
+        leave the registry half-populated.
 
         Args:
             specs: Tool specifications to register.
+
+        Raises:
+            ValueError: If any name is already registered or repeated within
+                ``specs``. No tool from ``specs`` is registered in that case.
         """
-        for spec in specs:
+        pending = tuple(specs)
+        seen: set[str] = set()
+        for spec in pending:
+            if spec.name in self._tools or spec.name in seen:
+                raise ValueError(f"MCP tool already registered: {spec.name}")
+            seen.add(spec.name)
+        for spec in pending:
             self.register(spec=spec)
 
     def get(self, *, name: str) -> McpToolSpec | None:

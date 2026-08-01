@@ -17,8 +17,11 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
+
+from loguru import logger
 
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError, McpErrorEnvelope
@@ -112,6 +115,32 @@ def _error_result(*, envelope: McpErrorEnvelope) -> Any:
     )
 
 
+async def _dispatch(*, spec: McpToolSpec, arguments: dict[str, Any]) -> Any:
+    """Invoke a tool handler without blocking the event loop.
+
+    Coroutine handlers are awaited directly. Synchronous handlers are run in a
+    worker thread: toolkit handlers shell out to linters, and a blocking call
+    on the event loop would stall every other in-flight tool call and the
+    JSON-RPC stream itself.
+
+    Args:
+        spec: The tool whose handler should run.
+        arguments: Validated, path-resolved arguments.
+
+    Returns:
+        The handler's result.
+    """
+    if inspect.iscoroutinefunction(spec.handler):
+        return await spec.handler(arguments)
+
+    import anyio.to_thread
+
+    result = await anyio.to_thread.run_sync(partial(spec.handler, arguments))
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
 def create_mcp_server(
     *,
     workspace: Path,
@@ -176,13 +205,11 @@ def create_mcp_server(
                 arguments=raw_arguments,
                 workspace=workspace_root,
             )
-            result = spec.handler(safe_arguments)
-            if inspect.isawaitable(result):
-                result = await result
-            return result
+            return await _dispatch(spec=spec, arguments=safe_arguments)
         except McpError as exc:
             return _error_result(envelope=exc.envelope)
         except Exception as exc:
+            logger.exception(f"Unhandled error in MCP tool {name!r}")
             return _error_result(
                 envelope=McpErrorEnvelope(
                     code=McpErrorCode.EXECUTION_ERROR,
