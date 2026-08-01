@@ -80,7 +80,7 @@ _LIST_TOOLS_DESCRIPTION: Final[str] = (
 _VERSIONS_DESCRIPTION: Final[str] = (
     "Report the installed version of every external tool against the minimum "
     "and recommended versions lintro expects, flagging each as ok, outdated, "
-    "or missing. Read-only."
+    "incompatible, or missing. Read-only."
 )
 
 _DOCTOR_DESCRIPTION: Final[str] = (
@@ -282,6 +282,10 @@ def _list_tools_payload() -> dict[str, Any]:
 def _version_status(*, info: Any) -> str:
     """Classify one tool's version check.
 
+    The vocabulary is deliberately the same one ``lintro_list_tools`` reports,
+    so an agent that branches on ``status`` cannot get two different labels for
+    one environment from two tools in the same toolkit.
+
     Args:
         info: A ``ToolVersionInfo`` from the version-checking machinery.
 
@@ -289,14 +293,18 @@ def _version_status(*, info: Any) -> str:
         str: ``missing`` when nothing usable answered the probe (the binary is
         absent, exited non-zero, or printed output no parser recognized — in
         every case the version is unknown and the tool cannot be relied on, and
-        ``error`` carries the reason), ``outdated`` when the installed version
-        is below the minimum lintro requires, ``ok`` otherwise.
+        ``error`` carries the reason), ``incompatible`` when the installed
+        version is below the minimum lintro requires, ``outdated`` when it
+        clears the minimum but trails the recommended version, ``ok``
+        otherwise.
     """
     from lintro.enums.tool_status import ToolStatus
 
     if info.current_version is None:
         return ToolStatus.MISSING.value
     if not info.version_check_passed:
+        return ToolStatus.INCOMPATIBLE.value
+    if info.below_recommended:
         return ToolStatus.OUTDATED.value
     return ToolStatus.OK.value
 

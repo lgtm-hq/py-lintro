@@ -304,10 +304,11 @@ what lintro requires.
 }
 ```
 
-`status` is `ok`, `outdated`, or `missing`. `missing` covers every way a probe fails to
-yield a version — absent binary, non-zero exit, unparseable output — with `error`
-carrying the reason. A version below the minimum is data, not an error: the call
-succeeds.
+`status` uses the same vocabulary as `lintro_list_tools`: `ok`, `outdated` (clears the
+minimum, trails the recommended version), `incompatible` (below the minimum lintro
+requires), or `missing` — which covers every way a probe fails to yield a version
+(absent binary, non-zero exit, unparseable output), with `error` carrying the reason. A
+version below the minimum is data, not an error: the call succeeds.
 
 ### `lintro_doctor`
 

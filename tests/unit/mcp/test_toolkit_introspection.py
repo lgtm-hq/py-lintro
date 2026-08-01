@@ -23,6 +23,7 @@ from assertpy import assert_that
 from mcp import ClientSession, types
 from mcp.shared.memory import create_connected_server_and_client_session
 
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.tool_status import ToolStatus
 from lintro.mcp.registry import DEFAULT_TOOL_TIMEOUT_SECONDS
 from lintro.mcp.server import create_mcp_server
@@ -123,6 +124,28 @@ def stub_probes(monkeypatch: pytest.MonkeyPatch) -> None:
             installed_version=tool.version,
             path=f"/usr/local/bin/{tool.name}",
         ),
+    )
+
+
+@pytest.fixture
+def stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the doctor report's config and AI inputs.
+
+    The workspace session anchors cwd at a throwaway directory, but config
+    discovery searches upward from there, so an inherited ``.lintro-config.yaml``
+    could add consistency warnings or enable AI checks that report missing
+    credentials — and turn a healthy report degraded on someone else's machine.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.config.config_loader.get_config",
+        lambda reload=False: LintroConfig(),
+    )
+    monkeypatch.setattr(
+        "lintro.ai.doctor_checks.check_ai_configuration",
+        lambda _config: [],
     )
 
 
@@ -275,7 +298,7 @@ def test_versions_reports_installed_against_expected(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A version below the minimum is reported as outdated, not as a failure."""
+    """A version below the minimum is reported as data, not as a failure."""
     monkeypatch.setattr(
         "lintro.tools.core.version_requirements.get_all_tool_versions",
         lambda: {
@@ -303,13 +326,22 @@ def test_versions_reports_installed_against_expected(
                 current_version="26.1.0",
                 version_check_passed=True,
             ),
+            "yamllint": ToolVersionInfo(
+                name="yamllint",
+                min_version="1.40.0",
+                recommended_version="1.42.0",
+                install_hint="uv pip install yamllint",
+                current_version="1.41.0",
+                version_check_passed=True,
+                below_recommended=True,
+            ),
         },
     )
 
     payload = _call(workspace=workspace, tool="lintro_versions")
 
     entries = {entry["name"]: entry for entry in payload["tools"]}
-    assert_that(entries["ruff"]["status"]).is_equal_to("outdated")
+    assert_that(entries["ruff"]["status"]).is_equal_to("incompatible")
     assert_that(entries["ruff"]["installed_version"]).is_equal_to("0.9.0")
     assert_that(entries["ruff"]["minimum_version"]).is_equal_to("0.15.9")
     assert_that(entries["ruff"]["satisfies_minimum"]).is_false()
@@ -319,11 +351,16 @@ def test_versions_reports_installed_against_expected(
         "brew install hadolint",
     )
     assert_that(entries["black"]["status"]).is_equal_to("ok")
+    # Clears the minimum but trails the recommended version: the milder band,
+    # and the same label lintro_list_tools would report for it.
+    assert_that(entries["yamllint"]["status"]).is_equal_to("outdated")
+    assert_that(entries["yamllint"]["satisfies_minimum"]).is_true()
     assert_that(payload["summary"]).is_equal_to(
-        {"outdated": 1, "missing": 1, "ok": 1, "total": 3},
+        {"incompatible": 1, "missing": 1, "ok": 1, "outdated": 1, "total": 4},
     )
 
 
+@pytest.mark.usefixtures("stub_environment")
 def test_doctor_reports_a_healthy_environment(
     workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
