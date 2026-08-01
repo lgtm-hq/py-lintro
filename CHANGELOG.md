@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.103.0] - 2026-08-01
+
+### Added
+
+- **mcp**: add review toolkit exposing AI diff review (#1891) (c4d69ab)
+
 ## [0.102.0] - 2026-08-01
 
 ### Added
