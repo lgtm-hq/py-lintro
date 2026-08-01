@@ -55,6 +55,9 @@ class Checkpoint:
         root: Absolute repository root path.
         paths: Repo-relative paths included in the snapshot.
         tree_sha: Object name of the written tree.
+        base: Directory that relative caller paths are resolved against —
+            the ``workspace_root`` passed at capture, which for a CLI run is
+            the invocation directory, not the repository root.
     """
 
     ref: str
@@ -62,6 +65,7 @@ class Checkpoint:
     root: Path
     paths: tuple[str, ...] = field(default_factory=tuple)
     tree_sha: str = ""
+    base: Path | None = None
 
 
 class CheckpointError(Exception):
@@ -232,6 +236,7 @@ def _normalize_paths(
     paths: list[str] | tuple[str, ...],
     *,
     root: Path,
+    base: Path | None = None,
 ) -> list[str]:
     """Convert paths to unique repo-relative POSIX strings.
 
@@ -241,18 +246,23 @@ def _normalize_paths(
 
     Args:
         paths: Absolute or relative path strings (files or directories).
-        root: Repository root.
+        root: Repository root; results are relative to it.
+        base: Directory relative inputs are resolved against. Defaults to
+            ``root``, but a CLI run passes its invocation directory — running
+            ``lintro fmt src/app.py`` from a subdirectory must not snapshot
+            ``<repo>/src/app.py``.
 
     Returns:
         Sorted unique repo-relative POSIX paths.
     """
     root_resolved = root.resolve()
+    base_resolved = base.resolve() if base is not None else root_resolved
     rels: set[str] = set()
     for raw in paths:
         if not raw:
             continue
         candidate = Path(raw)
-        raw_abs = candidate if candidate.is_absolute() else root_resolved / candidate
+        raw_abs = candidate if candidate.is_absolute() else base_resolved / candidate
         raw_abs = Path(os.path.normpath(raw_abs))
         # Resolve the parent, never the leaf: resolving the whole path would
         # rewrite a symlinked target to whatever it points at, and the
@@ -308,7 +318,8 @@ def capture_checkpoint(
     root = _repo_root(workspace_root)
     if root is None:
         return None
-    rel_paths = _normalize_paths(paths, root=root)
+    base = workspace_root.resolve()
+    rel_paths = _normalize_paths(paths, root=root, base=base)
     if not rel_paths:
         return None
 
@@ -391,6 +402,7 @@ def capture_checkpoint(
         root=root,
         paths=tuple(rel_paths),
         tree_sha=tree_sha,
+        base=base,
     )
 
 
@@ -476,7 +488,7 @@ def restore_checkpoint(
     if paths is None:
         target_rels = list(checkpoint.paths)
     else:
-        requested = _normalize_paths(list(paths), root=root)
+        requested = _normalize_paths(list(paths), root=root, base=checkpoint.base)
         target_rels = [rel for rel in requested if rel in known]
         skipped = sorted(set(requested) - known)
         if skipped:
@@ -542,7 +554,11 @@ def diff_checkpoint(
     if paths is None:
         rels = list(checkpoint.paths)
     else:
-        rels = [rel for rel in _normalize_paths(list(paths), root=root) if rel in known]
+        rels = [
+            rel
+            for rel in _normalize_paths(list(paths), root=root, base=checkpoint.base)
+            if rel in known
+        ]
     if not rels:
         return ""
     treeish = checkpoint.tree_sha or checkpoint.ref

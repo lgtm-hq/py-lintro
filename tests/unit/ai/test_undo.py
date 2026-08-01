@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.models import AIFixSuggestion
@@ -82,7 +83,10 @@ def test_patch_content_is_valid_unified_diff(tmp_path: Path) -> None:
     assert_that(content).contains("@@")
 
 
-def test_file_fallback_never_writes_outside_the_workspace(tmp_path: Path) -> None:
+def test_file_fallback_never_writes_outside_the_workspace(
+    tmp_path: Path,
+    no_git_checkpoints: None,
+) -> None:
     """An escaping path is dropped at capture and never restored."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -108,7 +112,10 @@ def test_file_fallback_never_writes_outside_the_workspace(tmp_path: Path) -> Non
     assert_that(outsider.read_text(encoding="utf-8")).is_equal_to("secret = 999\n")
 
 
-def test_file_fallback_restore_preserves_mode(tmp_path: Path) -> None:
+def test_file_fallback_restore_preserves_mode(
+    tmp_path: Path,
+    no_git_checkpoints: None,
+) -> None:
     """The non-git fallback keeps the executable bit on restore."""
     script = tmp_path / "run.sh"
     script.write_text("#!/bin/sh\necho one\n", encoding="utf-8")
@@ -130,3 +137,20 @@ def test_file_fallback_restore_preserves_mode(tmp_path: Path) -> None:
 
     assert_that(script.read_text(encoding="utf-8")).contains("echo one")
     assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)
+
+
+@pytest.fixture
+def no_git_checkpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the file-snapshot backend regardless of where tmp_path lives.
+
+    ``prepare_fix_batch`` prefers git whenever the workspace is inside a work
+    tree, so a ``TMPDIR`` under one would silently skip the fallback these
+    tests exist to cover.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.undo.git_checkpoints_available",
+        lambda _workspace_root: False,
+    )

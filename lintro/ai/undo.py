@@ -143,6 +143,22 @@ def _suggestion_paths(suggestions: list[AIFixSuggestion]) -> list[str]:
     return ordered
 
 
+def _snapshot_key(path: str, workspace_root: Path) -> str | None:
+    """Return the workspace-relative POSIX key for ``path``.
+
+    Args:
+        path: Absolute or relative target path.
+        workspace_root: Root directory the path must stay inside.
+
+    Returns:
+        The normalised key, or None when the path escapes the workspace.
+    """
+    resolved = resolve_workspace_file(path, workspace_root)
+    if resolved is None:
+        return None
+    return resolved.relative_to(workspace_root.resolve()).as_posix()
+
+
 def _capture_file_snapshot(
     paths: list[str],
     *,
@@ -150,9 +166,13 @@ def _capture_file_snapshot(
 ) -> FileSnapshot:
     """Read current file bytes for fallback rollback.
 
-    Paths that do not resolve inside ``workspace_root`` are dropped rather
-    than recorded, so ``None`` unambiguously means "did not exist at capture
-    time" and a restore can never write outside the workspace.
+    Entries are keyed by workspace-relative POSIX path, not by the raw
+    suggestion string, so a caller that later spells a target differently
+    (absolute vs relative, ``./x.py`` vs ``x.py``) still matches — the git
+    backend normalises the same way. Paths that do not resolve inside
+    ``workspace_root`` are dropped rather than recorded, so ``None``
+    unambiguously means "did not exist at capture time" and a restore can
+    never write outside the workspace.
 
     Args:
         paths: Target file paths.
@@ -164,16 +184,42 @@ def _capture_file_snapshot(
     contents: dict[str, bytes | None] = {}
     modes: dict[str, int] = {}
     for path in paths:
-        resolved = resolve_workspace_file(path, workspace_root)
-        if resolved is None:
+        key = _snapshot_key(path, workspace_root)
+        if key is None:
             logger.debug("Skipping snapshot of out-of-workspace path: {}", path)
             continue
+        resolved = workspace_root.resolve() / key
         if resolved.is_file():
-            contents[path] = resolved.read_bytes()
-            modes[path] = resolved.stat().st_mode & 0o7777
+            contents[key] = resolved.read_bytes()
+            modes[key] = resolved.stat().st_mode & 0o7777
         else:
-            contents[path] = None
+            contents[key] = None
     return FileSnapshot(root=workspace_root, contents=contents, modes=modes)
+
+
+def _select_keys(
+    paths: list[str] | tuple[str, ...],
+    *,
+    snapshot: FileSnapshot,
+) -> list[str]:
+    """Map requested paths onto the snapshot's normalised keys.
+
+    Args:
+        paths: Caller-supplied subset, in any spelling.
+        snapshot: Snapshot to match against.
+
+    Returns:
+        Recorded keys the request selects, in request order.
+    """
+    selected: list[str] = []
+    for path in paths:
+        key = _snapshot_key(path, snapshot.root)
+        if key is None or key not in snapshot.contents:
+            logger.debug("Skipping path absent from file snapshot: {}", path)
+            continue
+        if key not in selected:
+            selected.append(key)
+    return selected
 
 
 def _restore_file_snapshot(
@@ -191,16 +237,14 @@ def _restore_file_snapshot(
         snapshot: Snapshot captured before the batch.
         paths: Optional subset to restore; defaults to every recorded path.
     """
-    items = (
-        snapshot.contents.items()
+    keys = (
+        list(snapshot.contents)
         if paths is None
-        else ((p, snapshot.contents[p]) for p in paths if p in snapshot.contents)
+        else _select_keys(paths, snapshot=snapshot)
     )
-    for path, data in items:
-        resolved = resolve_workspace_file(path, snapshot.root)
-        if resolved is None:
-            logger.debug("Skipping restore of out-of-workspace path: {}", path)
-            continue
+    for path in keys:
+        data = snapshot.contents[path]
+        resolved = snapshot.root.resolve() / path
         if data is None:
             if resolved.is_file():
                 resolved.unlink()

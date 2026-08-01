@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - subprocess drives git in temp test repos; shell=False
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,10 +9,15 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.checkpoints import CHECKPOINT_REF_PREFIX, list_checkpoint_refs
+from lintro.ai.checkpoints import (
+    CHECKPOINT_REF_PREFIX,
+    capture_checkpoint,
+    list_checkpoint_refs,
+)
 from lintro.api.pipeline import _capture_fmt_checkpoint
 from lintro.enums.action import Action
 from lintro.utils.execution.run_context import RunContext
+from tests.unit.conftest import init_git_repo
 
 
 @dataclass
@@ -88,32 +92,7 @@ def _init_git_repo(tmp_path: Path) -> Path:
     Returns:
         The repository root.
     """
-    for cmd in (
-        ["git", "init"],
-        ["git", "config", "user.email", "test@example.com"],
-        ["git", "config", "user.name", "Test User"],
-        ["git", "checkout", "-b", "main"],
-    ):
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-            cmd,
-            cwd=str(tmp_path),
-            capture_output=True,
-            check=True,
-        )
-    (tmp_path / "tracked.py").write_text("alpha = 1\n", encoding="utf-8")
-    subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-        ["git", "add", "tracked.py"],
-        cwd=str(tmp_path),
-        capture_output=True,
-        check=True,
-    )
-    subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-        ["git", "commit", "-m", "init"],
-        cwd=str(tmp_path),
-        capture_output=True,
-        check=True,
-    )
-    return tmp_path
+    return init_git_repo(tmp_path, files={"tracked.py": "alpha = 1\n"})
 
 
 def test_fmt_checkpoint_captured_and_announced(
@@ -206,3 +185,26 @@ def test_fmt_checkpoint_quiet_for_score_only_output(
 
     assert_that(list_checkpoint_refs(workspace_root=repo)).is_length(1)
     assert_that(ctx.logger.lines).is_empty()
+
+
+def test_fmt_checkpoint_resolves_paths_from_the_invocation_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative target is read from the cwd, not from the repository root."""
+    repo = init_git_repo(
+        tmp_path,
+        files={"tracked.py": "alpha = 1\n", "pkg/tracked.py": "beta = 1\n"},
+    )
+    monkeypatch.chdir(repo / "pkg")
+    ctx = _make_ctx()
+
+    _capture_fmt_checkpoint(ctx=ctx, paths=["tracked.py"])
+
+    checkpoint = capture_checkpoint(
+        ["tracked.py"],
+        workspace_root=repo / "pkg",
+        keep=10,
+    )
+    assert_that(checkpoint).is_not_none()
+    assert_that(list(checkpoint.paths)).is_equal_to(["pkg/tracked.py"])  # type: ignore[union-attr]

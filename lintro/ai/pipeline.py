@@ -318,6 +318,7 @@ def _apply_or_review(
             validate_after_group=ai_config.validate_after_group,
             workspace_root=workspace_root,
             search_radius=ai_config.fix_search_radius,
+            undo_state=undo_state,
         )
         applied += accepted_count
         rejected += rejected_count + safe_failed

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import os
-import subprocess  # nosec B404 - subprocess drives git in temp test repos; shell=False
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -21,72 +20,38 @@ from lintro.ai.checkpoints import (
     prune_checkpoints,
     restore_checkpoint,
 )
+from lintro.ai.config import AIConfig
 from lintro.ai.models import AIFixSuggestion
-from lintro.ai.pipeline import _report_checkpoints
+from lintro.ai.pipeline import _apply_or_review, _report_checkpoints
 from lintro.ai.undo import prepare_fix_batch, restore_undo
-
-
-def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Run a git command in a temp repo, isolated from developer git config.
-
-    A global ``commit.gpgsign``, ``core.hooksPath`` or ``init.templateDir``
-    would otherwise change how these fixtures behave from machine to machine.
-
-    Args:
-        cmd: Full argv.
-        cwd: Working directory.
-
-    Returns:
-        The completed process.
-    """
-    env = os.environ.copy()
-    env["GIT_CONFIG_GLOBAL"] = os.devnull
-    env["GIT_CONFIG_SYSTEM"] = os.devnull
-    env.pop("GIT_INDEX_FILE", None)
-    return (
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-            cmd,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-    )
+from tests.unit.conftest import init_git_repo, run_git
 
 
 def _init_git_repo(tmp_path: Path) -> Path:
-    """Create a temp git repo with an initial commit."""
-    _run(["git", "init"], cwd=tmp_path)
-    _run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
-    _run(["git", "config", "user.name", "Test User"], cwd=tmp_path)
-    # Avoid depending on system default branch name.
-    _run(["git", "checkout", "-b", "main"], cwd=tmp_path)
-    tracked = tmp_path / "tracked.py"
-    tracked.write_text("alpha = 1\n", encoding="utf-8")
-    other = tmp_path / "other.py"
-    other.write_text("keep = True\n", encoding="utf-8")
-    _run(["git", "add", "tracked.py", "other.py"], cwd=tmp_path)
-    _run(["git", "commit", "-m", "init"], cwd=tmp_path)
-    return tmp_path
+    """Create a temp git repo with two committed files.
+
+    Args:
+        tmp_path: Pytest temp directory.
+
+    Returns:
+        The repository root.
+    """
+    return init_git_repo(
+        tmp_path,
+        files={"tracked.py": "alpha = 1\n", "other.py": "keep = True\n"},
+    )
 
 
 def _index_sha(*, cwd: Path) -> str:
-    """Return the sha of the real index tree (user index must stay stable)."""
-    env = os.environ.copy()
-    # Force using the real index (clear any leaked GIT_INDEX_FILE).
-    env.pop("GIT_INDEX_FILE", None)
-    result = (
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-            ["git", "write-tree"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-    )
-    return result.stdout.strip()
+    """Return the sha of the real index tree (the user index must stay stable).
+
+    Args:
+        cwd: Repository directory.
+
+    Returns:
+        Object name of the tree written from the real index.
+    """
+    return run_git(["git", "write-tree"], cwd=cwd).stdout.strip()
 
 
 def _staged_diff(*, cwd: Path) -> str:
@@ -98,7 +63,7 @@ def _staged_diff(*, cwd: Path) -> str:
     Returns:
         Output of ``git diff --cached``.
     """
-    return _run(["git", "diff", "--cached"], cwd=cwd).stdout
+    return run_git(["git", "diff", "--cached"], cwd=cwd).stdout
 
 
 def _make_suggestion(file: str, original: str, suggested: str) -> AIFixSuggestion:
@@ -156,10 +121,10 @@ def test_capture_does_not_touch_dirty_user_index(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path)
     tracked = repo / "tracked.py"
     tracked.write_text("alpha = 2\n", encoding="utf-8")
-    _run(["git", "add", "tracked.py"], cwd=repo)
+    run_git(["git", "add", "tracked.py"], cwd=repo)
     staged_before = _staged_diff(cwd=repo)
     index_before = _index_sha(cwd=repo)
-    head_before = _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    head_before = run_git(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
 
     # Also leave an unstaged edit on another file.
     other = repo / "other.py"
@@ -175,7 +140,7 @@ def test_capture_does_not_touch_dirty_user_index(tmp_path: Path) -> None:
     assert_that(_staged_diff(cwd=repo)).is_equal_to(staged_before)
     assert_that(_index_sha(cwd=repo)).is_equal_to(index_before)
     assert_that(
-        _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip(),
+        run_git(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip(),
     ).is_equal_to(
         head_before,
     )
@@ -188,7 +153,7 @@ def test_restore_does_not_touch_dirty_user_index(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path)
     tracked = repo / "tracked.py"
     tracked.write_text("alpha = 2\n", encoding="utf-8")
-    _run(["git", "add", "tracked.py"], cwd=repo)
+    run_git(["git", "add", "tracked.py"], cwd=repo)
     staged_before = _staged_diff(cwd=repo)
     index_before = _index_sha(cwd=repo)
 
@@ -550,7 +515,7 @@ def test_restore_preserves_symlink_targets(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path)
     link = repo / "link.py"
     link.symlink_to("tracked.py")
-    _run(["git", "add", "link.py"], cwd=repo)
+    run_git(["git", "add", "link.py"], cwd=repo)
 
     checkpoint = capture_checkpoint(["link.py"], workspace_root=repo, keep=10)
     assert_that(checkpoint).is_not_none()
@@ -614,3 +579,32 @@ def test_restore_reverts_a_mode_the_run_changed(tmp_path: Path) -> None:
     restore_checkpoint(checkpoint)  # type: ignore[arg-type]
 
     assert_that(script.stat().st_mode & 0o777).is_equal_to(0o644)
+
+
+def test_interactive_review_receives_the_prepared_undo_state(tmp_path: Path) -> None:
+    """The interactive branch must hand its checkpoint to the review loop.
+
+    Without it, rejecting a group silently skips rollback in production even
+    though the unit tests that pass ``undo_state`` directly still pass.
+    """
+    repo = _init_git_repo(tmp_path)
+    config = AIConfig(auto_apply=False, auto_apply_safe_fixes=False)
+    suggestion = _make_suggestion("tracked.py", "alpha = 1\n", "alpha = 2\n")
+
+    with (
+        patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=True),
+        patch("lintro.ai.pipeline.review_fixes_interactive") as mock_review,
+    ):
+        mock_review.return_value = (0, 0, [])
+        _apply_or_review(
+            [suggestion],
+            config,
+            MagicMock(),
+            is_json=False,
+            workspace_root=repo,
+        )
+
+    assert_that(mock_review.call_count).is_equal_to(1)
+    passed = mock_review.call_args.kwargs.get("undo_state")
+    assert_that(passed).is_not_none()
+    assert_that(passed.kind).is_equal_to("git")  # type: ignore[union-attr]
