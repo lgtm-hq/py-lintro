@@ -24,28 +24,36 @@ set -euo pipefail
 # lintro's own machine-readable error envelope — the failure taxonomy is not
 # re-implemented in shell.
 #
+# Transport: the review runs on the `cli` transport (pinned in
+# enable_review_config.py), so the credential is CLAUDE_CODE_OAUTH_TOKEN — the
+# `claude` binary's OAuth session — not ANTHROPIC_API_KEY, whose account has no
+# balance (#1894). The missing-credential guard below checks that variable
+# accordingly; checking the API key would report "no credential" on a perfectly
+# authenticated run, and vice versa.
+#
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
-# invoking this script, so the lintro that runs with ANTHROPIC_API_KEY is
+# invoking this script, so the lintro that runs with CLAUDE_CODE_OAUTH_TOKEN is
 # trusted code — never the PR head. The PR diff is fetched independently by
 # `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
-# as data and never executed with the key.
+# as data and never executed with the token.
 #
 # Fork PRs never reach this script: the workflow's job guard requires the head
-# repo to be the base repo, so an empty ANTHROPIC_API_KEY means the secret is
-# genuinely missing — a visible failure, not a skip.
+# repo to be the base repo, so an empty CLAUDE_CODE_OAUTH_TOKEN means the secret
+# is genuinely missing — a visible failure, not a skip.
 #
 # Usage:
-#   PR_NUMBER=<n> ANTHROPIC_API_KEY=<key> GH_TOKEN=<token> \
+#   PR_NUMBER=<n> CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
 #     scripts/ci/run-ai-review.sh
 #   scripts/ci/run-ai-review.sh <pr-number>
 #
 # Environment:
-#   ANTHROPIC_API_KEY       Anthropic API key. Empty => visible failure.
+#   CLAUDE_CODE_OAUTH_TOKEN Claude Code OAuth token used by the `claude` CLI.
+#                           Empty => visible failure.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
-#   AI_REVIEW_MAX_COST_USD  Optional spend cap (defaults handled downstream).
+#   AI_REVIEW_MAX_COST_USD  Optional spend cap (advisory under CLI transport).
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -85,7 +93,7 @@ report_not_invoked() {
 
 pr_number="${1:-${PR_NUMBER:-}}"
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NO_CREDENTIAL_STATUS"
 fi

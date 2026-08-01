@@ -142,7 +142,7 @@ def test_missing_credential_never_reports_success(classifier: ModuleType) -> Non
 
     assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.NO_CREDENTIAL)
     assert_that(report.exit_code).is_equal_to(1)
-    assert_that(report.detail).contains("ANTHROPIC_API_KEY")
+    assert_that(report.detail).contains("CLAUDE_CODE_OAUTH_TOKEN")
 
 
 def test_lintro_side_failure_is_not_blamed_on_the_provider(

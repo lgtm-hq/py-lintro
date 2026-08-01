@@ -5,9 +5,15 @@
 exposes no CLI flag or environment override for ``ai.enabled`` or
 ``ai.max_cost_usd``. The dogfood workflow therefore patches the checked-out
 (ephemeral) config in place before invoking the review command: it turns AI on,
-pins the API transport and the Anthropic provider, and bounds spend with
+pins the CLI transport and the Anthropic provider, and bounds spend with
 ``ai.max_cost_usd``. The checkout is the PR's trusted base ref (main), not the
 PR head, so the patched config is trusted and a PR cannot raise the cost cap.
+
+The transport is ``cli``, not ``api`` (#1894): CI authenticates through the
+``claude`` binary's OAuth session (``CLAUDE_CODE_OAUTH_TOKEN``), because the
+``ANTHROPIC_API_KEY`` account the API transport would bill has no balance left.
+``ai.max_cost_usd`` is kept regardless — it is API-path accounting, so under the
+CLI transport it is an advisory bound rather than enforced spend control.
 
 Only ``ai.enabled``, ``ai.transport``, ``ai.provider``, and ``ai.max_cost_usd``
 are touched; every other configured value is preserved. This script never edits
@@ -26,6 +32,8 @@ import yaml
 
 DEFAULT_CONFIG_FILENAME = ".lintro-config.yaml"
 DEFAULT_MAX_COST_USD = 0.50
+TRANSPORT = "cli"
+PROVIDER = "anthropic"
 MAX_COST_ENV_VAR = "AI_REVIEW_MAX_COST_USD"
 
 
@@ -66,8 +74,8 @@ def patch_config(*, data: dict[str, Any], max_cost_usd: float) -> dict[str, Any]
         data["ai"] = ai_section
 
     ai_section["enabled"] = True
-    ai_section["transport"] = "api"
-    ai_section["provider"] = "anthropic"
+    ai_section["transport"] = TRANSPORT
+    ai_section["provider"] = PROVIDER
     ai_section["max_cost_usd"] = max_cost_usd
     return data
 
@@ -125,8 +133,8 @@ def main(*, argv: list[str] | None = None) -> int:
     _write_config(config_path=config_path, data=data)
 
     print(
-        "Enabled AI review: ai.enabled=true, ai.transport=api, "
-        f"ai.provider=anthropic, ai.max_cost_usd={max_cost_usd}",
+        f"Enabled AI review: ai.enabled=true, ai.transport={TRANSPORT}, "
+        f"ai.provider={PROVIDER}, ai.max_cost_usd={max_cost_usd}",
     )
     return 0
 
