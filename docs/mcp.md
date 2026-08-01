@@ -29,12 +29,15 @@ process.
 
 ## Tools
 
-| Tool            | Annotations                 | Result                                           |
-| --------------- | --------------------------- | ------------------------------------------------ |
-| `lintro_ping`   | read-only, idempotent       | `{status, lintro_version, workspace}`            |
-| `lintro_check`  | read-only, idempotent       | Structured findings plus a per-tool summary      |
-| `lintro_format` | destructive, not idempotent | Unified diffs, changed files, remaining findings |
-| `lintro_review` | read-only, not idempotent   | AI review findings plus run and budget metadata  |
+| Tool                | Annotations                 | Result                                                       |
+| ------------------- | --------------------------- | ------------------------------------------------------------ |
+| `lintro_ping`       | read-only, idempotent       | `{status, lintro_version, workspace}`                        |
+| `lintro_check`      | read-only, idempotent       | Structured findings plus a per-tool summary                  |
+| `lintro_format`     | destructive, not idempotent | Unified diffs, changed files, remaining findings             |
+| `lintro_review`     | read-only, not idempotent   | AI review findings plus run and budget metadata              |
+| `lintro_list_tools` | read-only, idempotent       | Every tool with type, languages, install state               |
+| `lintro_versions`   | read-only, idempotent       | Installed versus expected tool versions                      |
+| `lintro_doctor`     | read-only, idempotent       | Environment health as `{check, status, detail, remediation}` |
 
 Further toolkits register through the internal `McpToolRegistry` and ship in follow-up
 issues.
@@ -220,6 +223,125 @@ Notes and limits:
   the call's `timeout_seconds` is 1800s instead of the 300s default, and the review
   holds the server's run lock for its whole duration, so `lintro_check` calls queue
   behind it.
+
+### `lintro_list_tools`
+
+Takes no arguments. Answers "what can lintro do in this workspace, and what is actually
+installed" in one call, so an agent does not have to discover a missing binary by
+failing a `lintro_check`.
+
+```json
+{
+  "tools": [
+    {
+      "name": "ruff",
+      "description": "Fast Python linter and formatter replacing multiple tools",
+      "types": ["linter", "formatter"],
+      "languages": ["python"],
+      "installed": true,
+      "version": "0.16.0",
+      "expected_version": "0.15.9",
+      "minimum_version": "0.15.9",
+      "status": "ok",
+      "can_fix": true,
+      "capabilities": ["check", "fix"],
+      "execution_class": "deterministic",
+      "origin": "builtin",
+      "profile_membership": ["complete", "full", "minimal", "python"],
+      "install_hint": "uv pip install 'ruff>=0.15.9'"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "minimal",
+      "description": "Core Python linting only (fast CI)",
+      "strategy": "explicit",
+      "resolution": "static"
+    }
+  ],
+  "summary": { "total": 38, "installed": 36, "missing": 2 }
+}
+```
+
+- A tool that is not installed is listed with `installed: false`, `version: null`, its
+  `status` (`missing`, `outdated`, `incompatible`, `unknown`) and an `install_hint` —
+  never omitted. An absent entry would be indistinguishable from a tool lintro does not
+  support.
+- `types` is a list, not a scalar: `ToolType` is a bitmask and tools such as `ruff` and
+  `oxlint` are genuinely both a linter and a formatter.
+- `capabilities` is what you may call the tool with: `check`, `fix`, or `review` for
+  advisory AI finders, which are unreachable from `lintro_check` by design.
+- `profile_membership` lists only the install profiles whose membership is fixed by the
+  manifest. Profiles resolved against the languages detected in a tree (`recommended`,
+  `ci`) are reported in `profiles` with `resolution: "workspace"` instead, because
+  membership in them is a property of the workspace rather than of the tool.
+
+### `lintro_versions`
+
+Takes no arguments. The compatibility view of the same data: what is installed against
+what lintro requires.
+
+```json
+{
+  "tools": [
+    {
+      "name": "ruff",
+      "installed_version": "0.9.0",
+      "minimum_version": "0.15.9",
+      "recommended_version": "0.15.9",
+      "satisfies_minimum": false,
+      "below_recommended": false,
+      "status": "outdated",
+      "error": "Version 0.9.0 is below minimum requirement 0.15.9",
+      "install_hint": "uv pip install 'ruff>=0.15.9'"
+    }
+  ],
+  "summary": { "ok": 28, "outdated": 7, "missing": 2, "total": 37 }
+}
+```
+
+`status` is `ok`, `outdated`, `missing`, or `unknown` (the tool ran but its output could
+not be parsed). A version below the minimum is data, not an error: the call succeeds.
+
+### `lintro_doctor`
+
+Takes no arguments. The same probes `lintro doctor` renders, as records an agent or a
+host UI can act on.
+
+```json
+{
+  "health": "degraded",
+  "checks": [
+    {
+      "check": "config.load",
+      "status": "ok",
+      "detail": "Configuration loaded from /path/to/repo/.lintro-config.yaml",
+      "remediation": "",
+      "category": "config"
+    },
+    {
+      "check": "tools.missing",
+      "status": "error",
+      "detail": "1 enabled tool(s) not installed: hadolint",
+      "remediation": "lintro install hadolint",
+      "category": "tools"
+    }
+  ],
+  "summary": { "ok": 4, "warning": 1, "error": 1, "skipped": 1, "total": 7 }
+}
+```
+
+- `status` is `ok`, `warning`, `error`, or `skipped`. `health` is `healthy` when nothing
+  warned or errored, `degraded` otherwise; `skipped` never counts against it.
+- Categories: `config` (loading and consistency), `tools` (`tools.missing`,
+  `tools.versions`), `ai` (one check per provider/auth probe), `extras` (`extras.mcp` —
+  an uninstalled optional extra is a fact, never a failure).
+- Per-tool installation detail deliberately lives in `lintro_list_tools`; the doctor
+  report answers "is anything wrong, and what fixes it".
+- No provider call is made: AI checks are presence checks only, the same set
+  `lintro doctor` runs without `--ai-liveness`.
+- A malformed config degrades the report (`config.load` with `status: "error"`) instead
+  of failing the call.
 
 ## Tool contract
 

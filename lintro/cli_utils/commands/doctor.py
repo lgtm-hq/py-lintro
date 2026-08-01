@@ -2,15 +2,18 @@
 
 Provides a Flutter doctor-style diagnostic that checks ALL tools, grouped by
 install category, with context-aware install hints.
+
+Only presentation lives here. The probes themselves — and the
+``{check, status, detail, remediation}`` health report the MCP ``lintro_doctor``
+tool serves — live in :mod:`lintro.utils.doctor_report`, so the same data backs
+the terminal output, ``--json``, and an agent (issue #1240).
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 
 import click
 from rich.console import Console
@@ -24,185 +27,24 @@ from lintro.ai.doctor_checks import (
 from lintro.ai.interface import resolve_ai_config
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
-from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
-    ManifestTool,
-)
-from lintro.tools.core.version_parsing import (
-    compare_versions,
-    extract_version_from_output,
 )
 from lintro.tools.definitions.oxlint_doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
+)
+from lintro.utils.doctor_report import (
+    ToolCheckResult,
+    collect_tool_checks,
+    mcp_extra_status,
 )
 from lintro.utils.environment import (
     EnvironmentReport,
     collect_full_environment,
     render_environment_report,
 )
-
-
-@dataclass
-class ToolCheckResult:
-    """Result of a tool health check.
-
-    Attributes:
-        tool: The manifest tool entry.
-        status: ToolStatus value (OK, MISSING, OUTDATED, UNKNOWN).
-        installed_version: Detected version string, or None.
-        error: Error type if check failed.
-        details: Additional error details.
-        path: Filesystem path where the tool was found.
-        install_hint: Context-aware install command.
-        upgrade_hint: Context-aware upgrade command for outdated tools.
-    """
-
-    tool: ManifestTool
-    status: ToolStatus
-    installed_version: str | None = None
-    error: str | None = None
-    details: str | None = None
-    path: str | None = None
-    install_hint: str = ""
-    upgrade_hint: str = ""
-
-
-def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
-    """Check a single tool's installation status and version.
-
-    Args:
-        tool: Manifest tool entry.
-        context: Runtime context for install hints.
-
-    Returns:
-        ToolCheckResult with status and details.
-    """
-    strategy = get_strategy(tool.install_type)
-    env = context.environment
-    if strategy:
-        _args = (
-            env,
-            tool.name,
-            tool.version,
-            tool.install_package,
-            tool.install_component,
-        )
-        hint = strategy.install_hint(*_args)
-        upgrade_hint = strategy.upgrade_hint(*_args)
-    else:
-        hint = f"Install {tool.name} manually"
-        upgrade_hint = f"Upgrade {tool.name} manually"
-
-    if not tool.version_command:
-        return ToolCheckResult(
-            tool=tool,
-            status=ToolStatus.MISSING,
-            error="no_command",
-            details="No version command defined",
-            install_hint=hint,
-            upgrade_hint=upgrade_hint,
-        )
-
-    # Find the main executable (may be a wrapper like "sh", "cargo", etc.)
-    main_cmd = tool.version_command[0]
-    tool_path = shutil.which(main_cmd)
-
-    if not tool_path:
-        return ToolCheckResult(
-            tool=tool,
-            status=ToolStatus.MISSING,
-            error="not_in_path",
-            details=main_cmd,
-            install_hint=hint,
-            upgrade_hint=upgrade_hint,
-        )
-
-    try:
-        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-            tool.version_command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        output = result.stdout + result.stderr
-
-        if result.returncode != 0:
-            return ToolCheckResult(
-                tool=tool,
-                status=ToolStatus.MISSING,
-                error="command_failed",
-                details=f"Exit {result.returncode}: {output[:100]}",
-                path=tool_path,
-                install_hint=hint,
-            )
-
-        version = extract_version_from_output(output, tool.name)
-        if not version:
-            return ToolCheckResult(
-                tool=tool,
-                status=ToolStatus.UNKNOWN,
-                error="no_version",
-                details=f"Output: {output[:100]}",
-                path=tool_path,
-                install_hint=hint,
-            )
-
-        status = _compare_versions(version, tool.version, tool.min_version)
-        return ToolCheckResult(
-            tool=tool,
-            status=status,
-            installed_version=version,
-            path=tool_path,
-            install_hint=hint,
-            upgrade_hint=upgrade_hint,
-        )
-    except subprocess.TimeoutExpired:
-        return ToolCheckResult(
-            tool=tool,
-            status=ToolStatus.MISSING,
-            error="timeout",
-            path=tool_path,
-            install_hint=hint,
-            upgrade_hint=upgrade_hint,
-        )
-    except (FileNotFoundError, OSError) as e:
-        return ToolCheckResult(
-            tool=tool,
-            status=ToolStatus.MISSING,
-            error="os_error",
-            details=str(e),
-            install_hint=hint,
-            upgrade_hint=upgrade_hint,
-        )
-
-
-def _compare_versions(
-    installed: str,
-    recommended: str,
-    minimum: str,
-) -> ToolStatus:
-    """Compare installed version against recommended and minimum versions.
-
-    Args:
-        installed: Installed version string.
-        recommended: Recommended/tested version from manifest.
-        minimum: Hard minimum compatible version from manifest.
-
-    Returns:
-        ToolStatus.OK, OUTDATED, INCOMPATIBLE, or UNKNOWN.
-    """
-    try:
-        if compare_versions(installed, minimum) < 0:
-            return ToolStatus.INCOMPATIBLE
-        if compare_versions(installed, recommended) < 0:
-            return ToolStatus.OUTDATED
-        return ToolStatus.OK
-    except ValueError:
-        return ToolStatus.UNKNOWN
 
 
 def _render_category(
@@ -350,34 +192,9 @@ def _render_ai_checks(console: Console, checks: list[AICheckResult]) -> None:
             console.print(f"         [dim]{check.hint}[/dim]")
 
 
-def _mcp_extra_status() -> dict[str, str]:
-    """Return informational status for the optional ``lintro[mcp]`` extra.
-
-    Missing MCP is reported but never treated as a doctor failure.
-
-    Returns:
-        Dict with ``name``, ``status``, ``message``, and ``hint`` keys.
-    """
-    from lintro.mcp import is_mcp_available
-
-    if is_mcp_available():
-        return {
-            "name": "mcp",
-            "status": ToolStatus.OK.value,
-            "message": "Python mcp SDK installed (lintro[mcp])",
-            "hint": "Start with: lintro mcp",
-        }
-    return {
-        "name": "mcp",
-        "status": ToolStatus.DISABLED.value,
-        "message": "optional extra not installed",
-        "hint": "uv pip install 'lintro[mcp]'",
-    }
-
-
 def _render_mcp_extra(console: Console) -> None:
     """Render optional MCP extra availability (informational only)."""
-    info = _mcp_extra_status()
+    info = mcp_extra_status()
     console.print()
     console.print("  [bold]Optional extras[/bold]")
     line = Text("    ")
@@ -646,30 +463,13 @@ def doctor_command(
     )
 
     # Determine which tools to check (names were validated above)
-    if tools:
-        tools_to_check = [registry.get(n) for n in tool_names]
-        disabled_results: list[ToolCheckResult] = []
-    else:
-        all_tools = list(registry.all_tools(include_dev=True))
-        if check_all:
-            tools_to_check = all_tools
-            disabled_results = []
-        else:
-            tools_to_check = [t for t in all_tools if config.is_tool_enabled(t.name)]
-            disabled_results = [
-                ToolCheckResult(
-                    tool=t,
-                    status=ToolStatus.DISABLED,
-                    install_hint="",
-                    upgrade_hint="",
-                )
-                for t in all_tools
-                if not config.is_tool_enabled(t.name)
-            ]
-
-    # Check enabled tools
-    all_results = [_check_tool(tool, context) for tool in tools_to_check]
-    all_results.extend(disabled_results)
+    all_results = collect_tool_checks(
+        registry=registry,
+        context=context,
+        config=config,
+        tool_names=tool_names or None,
+        check_all=check_all,
+    )
 
     # Split into production and dev
     prod_results = [
@@ -831,7 +631,13 @@ def doctor_command(
 
     if fix and has_fixable:
         _run_fix(display_console, prod_results, context, registry)
-        rechecked = [_check_tool(tool, context) for tool in tools_to_check]
+        rechecked = collect_tool_checks(
+            registry=registry,
+            context=context,
+            config=config,
+            tool_names=tool_names or None,
+            check_all=check_all,
+        )
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
         outdated_count = sum(
@@ -982,7 +788,7 @@ def _output_json(
         "issues": issues,
         "ai": ai_json,
         "oxlint": oxlint_json,
-        "optional_extras": [_mcp_extra_status()],
+        "optional_extras": [mcp_extra_status()],
         "summary": {
             "total": (
                 ok_count

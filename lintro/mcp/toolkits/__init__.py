@@ -9,7 +9,12 @@ all.
 
 from __future__ import annotations
 
+from lintro.mcp.toolkits.introspection import build_introspection_toolkit
 from lintro.mcp.toolkits.lint import build_lint_toolkit
 from lintro.mcp.toolkits.review import build_review_toolkit
 
-__all__ = ["build_lint_toolkit", "build_review_toolkit"]
+__all__ = [
+    "build_introspection_toolkit",
+    "build_lint_toolkit",
+    "build_review_toolkit",
+]

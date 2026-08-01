@@ -72,12 +72,14 @@ def build_default_registry(*, workspace: Path) -> McpToolRegistry:
 
     Returns:
         Registry containing ``lintro_ping``, ``lintro_check``,
-        ``lintro_format``, and ``lintro_review``.
+        ``lintro_format``, ``lintro_review``, ``lintro_list_tools``,
+        ``lintro_versions``, and ``lintro_doctor``.
     """
     # Deferred deliberately, in the same spirit as this module's other lazy
     # imports: the lint toolkit pulls the plugin registry, the parsers, and the
     # formatters, and nothing that merely imports this module (``lintro
     # doctor``, the CLI's command table) should pay for that.
+    from lintro.mcp.toolkits.introspection import build_introspection_toolkit
     from lintro.mcp.toolkits.lint import build_lint_toolkit
     from lintro.mcp.toolkits.review import build_review_toolkit
 
@@ -100,6 +102,7 @@ def build_default_registry(*, workspace: Path) -> McpToolRegistry:
     # when the ``[ai]`` extra or the provider is missing, which tells an agent
     # why it cannot review instead of silently omitting the capability.
     registry.register_toolkit(specs=build_review_toolkit(workspace=workspace))
+    registry.register_toolkit(specs=build_introspection_toolkit(workspace=workspace))
     return registry
 
 
