@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.100.0] - 2026-08-01
+
+### Added
+
+- **ai**: add git-checkpoint rollback for fix application (#1576) (41e41df)
+- **cli**: move advisory AI finders out of chk into lintro review (ade6658)
+
 ## [0.99.0] - 2026-07-31
 
 ### Added
