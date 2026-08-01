@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.100.x | :white_check_mark: |
-| < 0.100 | :x:                |
+| 0.101.x | :white_check_mark: |
+| < 0.101 | :x:                |
 
 ## Reporting a Vulnerability
 

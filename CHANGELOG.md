@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.101.0] - 2026-08-01
+
+### Added
+
+- **mcp**: add core MCP server command with tool registry (3978bfb)
+
 ## [0.100.0] - 2026-08-01
 
 ### Added
