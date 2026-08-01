@@ -49,7 +49,7 @@ class FileSnapshot:
 
 @dataclass
 class UndoState:
-    """Rollback handle for one AI fix (or fmt) mutation batch.
+    """Rollback handle for one AI fix mutation batch.
 
     Attributes:
         kind: ``git`` when a checkpoint ref was captured, else ``file``.
@@ -248,47 +248,6 @@ def prepare_fix_batch(
     )
 
 
-def prepare_path_batch(
-    paths: list[str] | tuple[str, ...],
-    workspace_root: Path,
-    *,
-    retention: int = DEFAULT_CHECKPOINT_RETENTION,
-) -> UndoState | None:
-    """Capture rollback state for arbitrary paths (e.g. ``lintro fmt``).
-
-    Args:
-        paths: Files or directories about to be mutated.
-        workspace_root: Project root directory.
-        retention: Max git checkpoint refs to keep.
-
-    Returns:
-        Undo state handle, or None when capture is not possible / empty.
-    """
-    path_list = [p for p in paths if p]
-    if not path_list:
-        return None
-    if git_checkpoints_available(workspace_root):
-        checkpoint = capture_checkpoint(
-            path_list,
-            workspace_root=workspace_root,
-            keep=retention,
-        )
-        if checkpoint is not None:
-            return UndoState(
-                kind="git",
-                checkpoint=checkpoint,
-                paths=checkpoint.paths,
-            )
-    snapshot = _capture_file_snapshot(path_list, workspace_root=workspace_root)
-    if not snapshot.contents:
-        return None
-    return UndoState(
-        kind="file",
-        file_snapshot=snapshot,
-        paths=tuple(snapshot.contents.keys()),
-    )
-
-
 def restore_undo(
     state: UndoState,
     paths: list[str] | tuple[str, ...] | None = None,
@@ -296,8 +255,7 @@ def restore_undo(
     """Restore paths from a previously prepared :class:`UndoState`.
 
     Args:
-        state: Handle from :func:`prepare_fix_batch` or
-            :func:`prepare_path_batch`.
+        state: Handle from :func:`prepare_fix_batch`.
         paths: Optional subset to restore; defaults to all recorded paths.
     """
     path_list = list(paths) if paths is not None else None
@@ -318,7 +276,7 @@ def diff_undo(
     snapshots a simple unified diff per path is produced.
 
     Args:
-        state: Handle from prepare helpers.
+        state: Handle from :func:`prepare_fix_batch`.
         paths: Optional path subset.
 
     Returns:
@@ -370,7 +328,6 @@ __all__ = [
     "UndoState",
     "diff_undo",
     "prepare_fix_batch",
-    "prepare_path_batch",
     "restore_undo",
     "save_undo_patch",
 ]

@@ -24,6 +24,8 @@ from loguru import logger
 CHECKPOINT_REF_PREFIX = "refs/lintro/checkpoints/"
 DEFAULT_CHECKPOINT_RETENTION = 10
 _GIT_TIMEOUT_SECONDS = 60.0
+# Keep each ``git add`` argv comfortably under platform ARG_MAX limits.
+_GIT_ADD_CHUNK = 500
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,32 @@ def _repo_root(workspace_root: Path) -> Path | None:
     return Path(top) if top else None
 
 
+def _expand_directory(*, root: Path, rel_dir: str) -> list[str]:
+    """List candidate files under ``rel_dir`` using git's own path filters.
+
+    ``git ls-files -co --exclude-standard`` returns tracked plus untracked
+    files while honouring ``.gitignore``. Walking the directory manually
+    instead would drag ``.git/``, ``.venv/`` and every other ignored tree into
+    the snapshot.
+
+    Args:
+        root: Repository root.
+        rel_dir: Repo-relative directory (``""`` for the root itself).
+
+    Returns:
+        Repo-relative POSIX file paths, or an empty list when git fails.
+    """
+    args = ["ls-files", "-co", "--exclude-standard", "-z", "--"]
+    args.append(rel_dir or ".")
+    try:
+        result = _run_git(args, cwd=str(root))
+    except CheckpointError:
+        return []
+    if result.returncode != 0:
+        return []
+    return [entry for entry in result.stdout.split("\0") if entry]
+
+
 def _normalize_paths(
     paths: list[str] | tuple[str, ...],
     *,
@@ -160,13 +188,16 @@ def _normalize_paths(
 ) -> list[str]:
     """Convert paths to unique repo-relative POSIX strings.
 
+    Directories are expanded through :func:`_expand_directory` so ignored
+    trees never enter a snapshot. Files that do not exist are kept so that a
+    restore can delete paths lintro created after capture.
+
     Args:
         paths: Absolute or relative path strings (files or directories).
         root: Repository root.
 
     Returns:
-        Sorted unique relative paths that exist on disk (files only expanded
-        from directories via a shallow walk of existing files).
+        Sorted unique repo-relative POSIX paths.
     """
     root_resolved = root.resolve()
     rels: set[str] = set()
@@ -185,14 +216,7 @@ def _normalize_paths(
             logger.debug("Skipping path outside repo for checkpoint: {}", raw)
             continue
         if abs_path.is_dir():
-            for file_path in abs_path.rglob("*"):
-                if file_path.is_file():
-                    try:
-                        rels.add(
-                            file_path.resolve().relative_to(root_resolved).as_posix(),
-                        )
-                    except ValueError:
-                        continue
+            rels.update(_expand_directory(root=root_resolved, rel_dir=rel.as_posix()))
         else:
             # Include missing paths so restore can delete files created later;
             # capture only adds existing files to the temp index.
@@ -254,10 +278,11 @@ def capture_checkpoint(
             _run_git(["read-tree", "--empty"], cwd=cwd, env=env, check=True)
 
         existing = [p for p in rel_paths if (root / p).is_file()]
-        if existing:
-            # ``git add --`` updates only the temp index (via GIT_INDEX_FILE).
+        # ``git add --`` updates only the temp index (via GIT_INDEX_FILE).
+        # Chunked so a large target set cannot overflow the platform argv limit.
+        for start in range(0, len(existing), _GIT_ADD_CHUNK):
             _run_git(
-                ["add", "-f", "--", *existing],
+                ["add", "-f", "--", *existing[start : start + _GIT_ADD_CHUNK]],
                 cwd=cwd,
                 env=env,
                 check=True,
@@ -340,6 +365,10 @@ def restore_checkpoint(
     from the tree — including when the user edited them between capture and
     rollback (lintro targets always return to the pre-batch snapshot).
 
+    Only paths recorded on the checkpoint are eligible. Anything else is
+    ignored rather than deleted, so a caller passing an unrelated (or
+    unresolvable) path can never destroy a file that was never snapshotted.
+
     Args:
         checkpoint: Checkpoint produced by :func:`capture_checkpoint`.
         paths: Optional subset of paths to restore; defaults to all paths
@@ -350,14 +379,19 @@ def restore_checkpoint(
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
+    known = set(checkpoint.paths)
     if paths is None:
         target_rels = list(checkpoint.paths)
     else:
-        target_rels = _normalize_paths(list(paths), root=root)
-        # Also accept already-relative paths that were in the checkpoint list.
-        for raw in paths:
-            if raw and raw not in target_rels:
-                target_rels.append(Path(raw).as_posix())
+        requested = _normalize_paths(list(paths), root=root)
+        target_rels = [rel for rel in requested if rel in known]
+        skipped = sorted(set(requested) - known)
+        if skipped:
+            logger.debug(
+                "Skipping restore for paths absent from checkpoint {}: {}",
+                checkpoint.ref,
+                skipped,
+            )
 
     planned: list[tuple[Path, bytes | None]] = []
     for rel in target_rels:
@@ -404,17 +438,18 @@ def diff_checkpoint(
         Unified diff text (may be empty when nothing changed).
     """
     root = checkpoint.root
-    rels = (
-        list(checkpoint.paths)
-        if paths is None
-        else _normalize_paths(list(paths), root=root)
-    )
+    known = set(checkpoint.paths)
+    if paths is None:
+        rels = list(checkpoint.paths)
+    else:
+        rels = [rel for rel in _normalize_paths(list(paths), root=root) if rel in known]
     if not rels:
         return ""
     treeish = checkpoint.tree_sha or checkpoint.ref
     # Compare checkpoint tree to the working tree for the given paths.
+    # ``--no-color`` defends against a user's ``color.ui = always``.
     result = _run_git(
-        ["diff", "--no-ext-diff", treeish, "--", *rels],
+        ["diff", "--no-ext-diff", "--no-color", treeish, "--", *rels],
         cwd=str(root),
         check=True,
     )
@@ -475,8 +510,13 @@ def prune_checkpoints(
         return 0
     deleted = 0
     for ref in to_delete:
-        _run_git(["update-ref", "-d", ref], cwd=str(root), check=True)
-        deleted += 1
+        # Tolerate a ref another lintro process already removed; pruning is
+        # best-effort housekeeping and must never fail a fix run.
+        result = _run_git(["update-ref", "-d", ref], cwd=str(root))
+        if result.returncode == 0:
+            deleted += 1
+        else:
+            logger.debug("Could not prune checkpoint ref {}", ref)
     return deleted
 
 

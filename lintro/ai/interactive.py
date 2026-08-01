@@ -248,7 +248,8 @@ def review_fixes_interactive(
     When ``undo_state`` is provided, rejecting a group restores that group's
     target files from the pre-batch git checkpoint (or file-snapshot
     fallback) rather than from in-memory suggestion copies. Restore is
-    idempotent when the files were never mutated.
+    idempotent when the files were never mutated, and files already changed
+    by an earlier accepted group are skipped so accepted work survives.
 
     Args:
         suggestions: Fix suggestions to review.
@@ -392,16 +393,15 @@ def review_fixes_interactive(
                 console.print("  [dim]Will accept all remaining groups.[/dim]")
         elif choice == ReviewKey.REJECT:
             if undo_state is not None:
-                # Per-file rejection restores from the checkpoint tree (or
-                # file-snapshot fallback), not from in-memory originals.
-                rollback_applied_paths(undo_state, fixes)
-                # Drop any earlier accepts that touched the same paths.
-                rejected_files = {f.file for f in fixes if f.file}
-                before = len(all_applied)
-                all_applied[:] = [
-                    s for s in all_applied if s.file not in rejected_files
-                ]
-                accepted = max(0, accepted - (before - len(all_applied)))
+                # Rejection restores from the checkpoint tree (or file-snapshot
+                # fallback), not from in-memory originals. Files an earlier
+                # accepted group already changed are left alone: restoring them
+                # would silently discard fixes the user just accepted.
+                accepted_files = {s.file for s in all_applied if s.file}
+                rollback_applied_paths(
+                    undo_state,
+                    [fix for fix in fixes if fix.file not in accepted_files],
+                )
             rejected += len(fixes)
             console.print(
                 f"  [yellow]✗ Rejected {len(fixes)} "

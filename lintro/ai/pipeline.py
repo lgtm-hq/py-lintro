@@ -27,7 +27,7 @@ from lintro.ai.refinement import refine_unverified_fixes
 from lintro.ai.risk import is_safe_style_fix
 from lintro.ai.summary import generate_post_fix_summary
 from lintro.ai.telemetry import AITelemetry
-from lintro.ai.undo import prepare_fix_batch
+from lintro.ai.undo import UndoState, diff_undo, prepare_fix_batch
 from lintro.ai.validation import ValidationResult, validate_applied_fixes, verify_fixes
 from lintro.enums.output_format import OutputFormat
 
@@ -189,6 +189,41 @@ def _filter_by_confidence(
     return filtered
 
 
+def _report_checkpoints(
+    undo_states: list[UndoState | None],
+    logger: ThreadSafeConsoleLogger,
+    is_json: bool,
+) -> None:
+    """Print how to inspect or undo what this run changed.
+
+    Only git-backed checkpoints are reported: they outlive the process, so
+    ``git diff <ref>`` and ``git checkout <ref> -- <path>`` remain usable after
+    lintro exits. A checkpoint whose diff is empty changed nothing and is
+    silently skipped.
+
+    Args:
+        undo_states: Rollback handles captured during this run, in order.
+        logger: Console logger.
+        is_json: Whether stdout is reserved for a machine-readable document.
+    """
+    if is_json:
+        return
+    for state in undo_states:
+        if state is None or state.kind != "git" or state.checkpoint is None:
+            continue
+        try:
+            changed = diff_undo(state)
+        except Exception as exc:  # noqa: BLE001 - reporting must never fail a run
+            loguru_logger.debug(f"Checkpoint diff unavailable: {exc}")
+            continue
+        if not changed.strip():
+            continue
+        logger.console_output(
+            f"  AI: checkpoint {state.checkpoint.ref} "
+            "(git diff <ref> to review, git checkout <ref> -- <path> to undo)",
+        )
+
+
 def _apply_or_review(
     all_suggestions: list[AIFixSuggestion],
     ai_config: AIConfig,
@@ -208,6 +243,7 @@ def _apply_or_review(
     safe_failed = 0
     safe_fast_path_applied = False
     retention = ai_config.checkpoint_retention
+    undo_states: list[UndoState | None] = []
 
     # Fast path: auto-apply deterministic style-only fixes when non-interactive.
     if (
@@ -221,6 +257,7 @@ def _apply_or_review(
             workspace_root,
             retention=retention,
         )
+        undo_states.append(undo_state)
         applied_safe = apply_fixes(
             safe_suggestions,
             workspace_root=workspace_root,
@@ -249,6 +286,7 @@ def _apply_or_review(
             workspace_root,
             retention=retention,
         )
+        undo_states.append(undo_state)
         auto_applied = apply_fixes(
             auto_apply_candidates,
             workspace_root=workspace_root,
@@ -272,6 +310,7 @@ def _apply_or_review(
             workspace_root,
             retention=retention,
         )
+        undo_states.append(undo_state)
         accepted_count, rejected_count, interactive_applied = review_fixes_interactive(
             review_candidates,
             validate_after_group=ai_config.validate_after_group,
@@ -283,6 +322,7 @@ def _apply_or_review(
         rejected += rejected_count + safe_failed
         applied_suggestions.extend(interactive_applied)
 
+    _report_checkpoints(undo_states, logger, is_json)
     return applied, rejected, applied_suggestions
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess  # nosec B404 - subprocess drives git in temp test repos; shell=False
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
@@ -18,6 +19,7 @@ from lintro.ai.checkpoints import (
     restore_checkpoint,
 )
 from lintro.ai.models import AIFixSuggestion
+from lintro.ai.pipeline import _report_checkpoints
 from lintro.ai.undo import prepare_fix_batch, restore_undo
 
 
@@ -269,6 +271,75 @@ def test_prune_keeps_last_n_refs(tmp_path: Path) -> None:
     assert_that(remaining).is_equal_to(refs[-2:])
 
 
+def test_restore_ignores_paths_absent_from_checkpoint(tmp_path: Path) -> None:
+    """A path that was never snapshotted must never be deleted by a restore."""
+    repo = _init_git_repo(tmp_path)
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+
+    bystander = repo / "other.py"
+    restore_checkpoint(checkpoint, [str(bystander)])  # type: ignore[arg-type]
+
+    assert_that(bystander.exists()).is_true()
+    assert_that(bystander.read_text(encoding="utf-8")).is_equal_to("keep = True\n")
+
+
+def test_restore_accepts_absolute_target_paths(tmp_path: Path) -> None:
+    """Absolute paths resolve to checkpoint entries instead of being dropped."""
+    repo = _init_git_repo(tmp_path)
+    tracked = repo / "tracked.py"
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    tracked.write_text("alpha = 7\n", encoding="utf-8")
+
+    restore_checkpoint(checkpoint, [str(tracked)])  # type: ignore[arg-type]
+
+    assert_that(tracked.exists()).is_true()
+    assert_that(tracked.read_text(encoding="utf-8")).is_equal_to("alpha = 1\n")
+
+
+def test_restore_deletes_files_created_after_capture(tmp_path: Path) -> None:
+    """Targets that did not exist at capture time are removed on restore."""
+    repo = _init_git_repo(tmp_path)
+    created = repo / "created.py"
+    checkpoint = capture_checkpoint(["created.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    created.write_text("made = True\n", encoding="utf-8")
+
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(created.exists()).is_false()
+
+
+def test_directory_targets_skip_ignored_and_git_internals(tmp_path: Path) -> None:
+    """Directory expansion honours .gitignore and never walks into .git/."""
+    repo = _init_git_repo(tmp_path)
+    (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+    ignored_dir = repo / "ignored"
+    ignored_dir.mkdir()
+    (ignored_dir / "junk.py").write_text("junk = 1\n", encoding="utf-8")
+
+    checkpoint = capture_checkpoint(["."], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+
+    paths = list(checkpoint.paths)  # type: ignore[union-attr]
+    assert_that(paths).contains("tracked.py")
+    assert_that([p for p in paths if p.startswith(".git/")]).is_empty()
+    assert_that([p for p in paths if p.startswith("ignored/")]).is_empty()
+
+
+def test_diff_ignores_paths_absent_from_checkpoint(tmp_path: Path) -> None:
+    """Diffing an unsnapshotted path yields nothing rather than noise."""
+    repo = _init_git_repo(tmp_path)
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    (repo / "other.py").write_text("keep = 'changed'\n", encoding="utf-8")
+
+    diff = diff_checkpoint(checkpoint, ["other.py"])  # type: ignore[arg-type]
+
+    assert_that(diff).is_empty()
+
+
 def test_prepare_fix_batch_uses_git_in_repo(tmp_path: Path) -> None:
     """prepare_fix_batch prefers git checkpoints inside a repository."""
     repo = _init_git_repo(tmp_path)
@@ -283,3 +354,35 @@ def test_prepare_fix_batch_uses_git_in_repo(tmp_path: Path) -> None:
     assert_that((repo / "tracked.py").read_text(encoding="utf-8")).is_equal_to(
         "alpha = 1\n",
     )
+
+
+def test_report_checkpoints_announces_ref_when_files_changed(tmp_path: Path) -> None:
+    """The post-run report names the ref only when the run changed something."""
+    repo = _init_git_repo(tmp_path)
+    suggestion = _make_suggestion("tracked.py", "alpha = 1\n", "alpha = 2\n")
+    state = prepare_fix_batch([suggestion], repo, retention=10)
+    assert_that(state).is_not_none()
+
+    logger = MagicMock()
+    _report_checkpoints([state], logger, is_json=False)
+    assert_that(logger.console_output.call_count).is_equal_to(0)
+
+    (repo / "tracked.py").write_text("alpha = 2\n", encoding="utf-8")
+    _report_checkpoints([state], logger, is_json=False)
+    assert_that(logger.console_output.call_count).is_equal_to(1)
+    assert_that(logger.console_output.call_args.args[0]).contains(
+        state.checkpoint.ref,  # type: ignore[union-attr]
+    )
+
+
+def test_report_checkpoints_silent_for_json(tmp_path: Path) -> None:
+    """Machine-readable stdout never gains a checkpoint line."""
+    repo = _init_git_repo(tmp_path)
+    suggestion = _make_suggestion("tracked.py", "alpha = 1\n", "alpha = 2\n")
+    state = prepare_fix_batch([suggestion], repo, retention=10)
+    (repo / "tracked.py").write_text("alpha = 2\n", encoding="utf-8")
+
+    logger = MagicMock()
+    _report_checkpoints([state], logger, is_json=True)
+
+    assert_that(logger.console_output.call_count).is_equal_to(0)
