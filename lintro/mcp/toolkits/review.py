@@ -11,6 +11,12 @@ Three things are deliberately different from the CLI:
 * **No side effects.** ``--post`` (GitHub commenting) is not exposed. The
   calling agent owns whatever it does with the findings, which is why the tool
   can be annotated read-only. It is *not* idempotent: every call spends money.
+  The one thing a review can put on disk is an AI transcript, and only when the
+  *operator* opted in with ``ai.transcript_logging`` or
+  ``LINTRO_AI_TRANSCRIPT=1``: it lands in the gitignored ``.lintro-cache/``
+  rather than the reviewed tree, in the same class as the run-log directory
+  :mod:`lintro.mcp.toolkits.runner` redirects. No tool argument can turn it on,
+  so an agent cannot make the server write anything.
 * **Cost is capped from the server side.** ``ai.max_cost_usd`` in the
   workspace's ``.lintro-config.yaml`` is the ceiling. The ``max_cost_usd``
   argument can only *lower* it — a larger value is clamped, never honored — so

@@ -206,6 +206,10 @@ Notes and limits:
 
 - `--post` (GitHub commenting) is deliberately not exposed. The calling agent owns
   outward side effects.
+- Read-only covers the reviewed tree. The one file a review can create is an AI
+  transcript, and only when the operator enabled `ai.transcript_logging` (or
+  `LINTRO_AI_TRANSCRIPT=1`); it is written under the gitignored `.lintro-cache/`, and no
+  tool argument can turn it on.
 - An empty diff is a result, not an error: `findings: []` with zero-valued run metadata.
 - Without the `[ai]` extra, without a usable provider, or with `ai.review: false`, the
   tool is still listed and returns `tool_unavailable` with `detail.reason` so an agent
