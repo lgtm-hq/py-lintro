@@ -117,6 +117,9 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      # This job (unlike the binary builds below) does need the dev group:
+      # `click-man` lives there. It runs on Linux, where every dev-group
+      # dependency has a wheel, so the source-build trap in #1897 can't bite.
       - name: Install dependencies
         run: uv sync --group dev
 
@@ -206,9 +209,14 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      # #1897: binary builds install the runtime deps plus the `build` group and
+      # nothing else. The default `dev` group drags in `mcp` -> `pyjwt[crypto]`
+      # -> `cryptography`, which ships no macOS x86_64 wheel from 49.0.0 on, so
+      # uv would build it from source via maturin/cargo and hit the (correctly)
+      # blocked crates.io egress. A Nuitka binary needs none of that stack.
       - name: Install dependencies
         run: |
-          uv sync --group build --group dev
+          uv sync --group build --no-default-groups
 
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
@@ -216,8 +224,10 @@ jobs:
 
       - name: Build binary
         timeout-minutes: 25
+        # `--no-default-groups` is required here too: `uv run` re-syncs the
+        # environment with the default groups and would reinstall `dev`.
         run: |
-          uv run python scripts/build/build_macos.py \
+          uv run --no-default-groups python scripts/build/build_macos.py \
             --arch "$BUILD_ARCH" \
             --skip-verify
         env:
@@ -356,9 +366,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
+      # #1897: kept in lockstep with the macOS job above - binary builds never
+      # install the dev test stack.
       - name: Install dependencies
         run: |
-          uv sync --group build --group dev
+          uv sync --group build --no-default-groups
 
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
@@ -368,7 +380,7 @@ jobs:
         timeout-minutes: 25
         run: |
           HOST_ARCH="${{ matrix.arch == 'x64' && 'x86_64' || 'arm64' }}"
-          uv run python scripts/build/build_linux.py \
+          uv run --no-default-groups python scripts/build/build_linux.py \
             --arch "$HOST_ARCH" \
             --skip-verify
         env:

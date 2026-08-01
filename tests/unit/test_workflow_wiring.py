@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from collections import Counter
 from pathlib import Path
@@ -1213,6 +1214,71 @@ def test_build_binary_retries_setup_uv_on_failure() -> None:
         assert_that(first.get("continue-on-error")).is_true()
         retry = next(step for step in steps if step.get("name") == "Install uv (retry)")
         assert_that(retry.get("if")).contains("steps.setup-uv.outcome == 'failure'")
+
+
+def _uv_commands(script: str) -> list[list[str]]:
+    """Extract the ``uv`` invocations from a workflow ``run:`` script.
+
+    Backslash continuations are folded first so a multi-line invocation is seen
+    as one command, and each command is tokenised with ``shlex`` so quoted
+    values (``--group "dev"``) parse the same as bare ones. Leading
+    ``NAME=value`` environment prefixes are stripped before matching.
+
+    Args:
+        script: The raw text of a step's ``run:`` block.
+
+    Returns:
+        One token list per ``uv sync`` / ``uv run`` invocation found.
+    """
+    folded = re.sub(r"\\\s*\n", " ", script)
+    commands: list[list[str]] = []
+    for segment in re.split(r"[\n;]|\|\||&&|(?<!\|)\|(?!\|)", folded):
+        try:
+            tokens = shlex.split(segment, comments=True)
+        except ValueError:  # unbalanced quotes in a non-command fragment
+            continue
+        while tokens and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[0]):
+            tokens = tokens[1:]
+        if tokens[:2] in (["uv", "sync"], ["uv", "run"]):
+            commands.append(tokens)
+    return commands
+
+
+def test_binary_jobs_never_install_the_dev_group() -> None:
+    """Binary builds must opt out of the default dependency groups (#1897).
+
+    The default ``dev`` group pulls ``mcp`` -> ``pyjwt[crypto]`` ->
+    ``cryptography``, which ships no macOS x86_64 wheel from 49.0.0 on. Syncing
+    it makes uv build that package from source via maturin/cargo, which then
+    dies on the (deliberately) blocked crates.io egress. Every ``uv`` command in
+    the binary jobs therefore has to carry ``--no-default-groups`` -- including
+    ``uv run``, which otherwise re-syncs the default groups back in.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    binary_jobs = ("build-macos", "build-linux")
+
+    for job_id in binary_jobs:
+        steps = workflow["jobs"][job_id]["steps"]
+        uv_commands = [
+            command
+            for step in steps
+            for command in _uv_commands(script=step.get("run") or "")
+        ]
+        assert_that(uv_commands).described_as(f"{job_id} uv commands").is_not_empty()
+
+        for tokens in uv_commands:
+            rendered = " ".join(tokens)
+            groups = [
+                value
+                for flag, value in zip(tokens, tokens[1:], strict=False)
+                if flag == "--group"
+            ]
+            assert_that(groups).described_as(
+                f"{job_id}: {rendered!r} must not sync the dev group",
+            ).does_not_contain("dev")
+            assert_that(tokens).described_as(
+                f"{job_id}: {rendered!r} must pass --no-default-groups",
+            ).contains("--no-default-groups")
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
