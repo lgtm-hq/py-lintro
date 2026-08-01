@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -136,6 +137,20 @@ def _failing_registry(workspace: Path) -> McpToolRegistry:
                 "additionalProperties": False,
             },
             handler=_async_echo,
+        ),
+    )
+
+    def _sleep_forever(_arguments: dict[str, Any]) -> dict[str, Any]:
+        time.sleep(30)
+        return {"never": "returned"}
+
+    registry.register(
+        spec=McpToolSpec(
+            name="demo_slow",
+            description="sync handler that outlives its budget",
+            input_schema={"type": "object", "properties": {}},
+            handler=_sleep_forever,
+            timeout_seconds=0.05,
         ),
     )
 
@@ -302,6 +317,24 @@ def test_session_supports_async_handlers(tmp_path: Path) -> None:
         assert_that(result.isError).is_false()
         payload = _payload(result)
         assert_that(payload["echo"]).is_equal_to("hi")
+
+    _run_session(
+        workspace=tmp_path,
+        registry=_failing_registry(tmp_path),
+        check=_check,
+    )
+
+
+def test_session_slow_handler_times_out(tmp_path: Path) -> None:
+    """A handler that outlives its budget returns a timeout execution_error."""
+
+    async def _check(session: ClientSession) -> None:
+        result = await session.call_tool("demo_slow", {})
+        assert_that(result.isError).is_true()
+        envelope = _payload(result)["error"]
+        assert_that(envelope["code"]).is_equal_to("execution_error")
+        assert_that(envelope["detail"]["reason"]).is_equal_to("timeout")
+        assert_that(envelope["detail"]["timeout_seconds"]).is_equal_to(0.05)
 
     _run_session(
         workspace=tmp_path,

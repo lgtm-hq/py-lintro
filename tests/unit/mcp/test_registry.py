@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
-from lintro.mcp.registry import McpToolRegistry, McpToolSpec
+from lintro.mcp.registry import (
+    DEFAULT_TOOL_TIMEOUT_SECONDS,
+    McpToolRegistry,
+    McpToolSpec,
+)
 
 
 def _spec(name: str, *, read_only: bool = True) -> McpToolSpec:
@@ -162,3 +166,24 @@ def test_register_toolkit_is_atomic_on_duplicate() -> None:
 
     assert_that(registry.get(name="fresh")).is_none()
     assert_that(len(registry)).is_equal_to(1)
+
+
+def test_spec_rejects_non_positive_timeout() -> None:
+    """A zero or negative timeout is rejected at construction time."""
+    with pytest.raises(ValueError) as exc_info:
+        McpToolSpec(
+            name="no_budget",
+            description="d",
+            input_schema={"type": "object", "properties": {}},
+            handler=lambda _arguments: {},
+            timeout_seconds=0,
+        )
+
+    assert_that(str(exc_info.value)).contains("positive")
+
+
+def test_spec_defaults_to_the_shared_timeout_budget() -> None:
+    """Tools inherit the default wall-clock budget unless they override it."""
+    assert_that(_spec("budgeted").timeout_seconds).is_equal_to(
+        DEFAULT_TOOL_TIMEOUT_SECONDS,
+    )

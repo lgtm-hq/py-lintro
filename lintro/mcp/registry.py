@@ -5,15 +5,21 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from lintro.mcp.annotations import annotations_from_spec, tool_annotations_dict
 
 __all__ = [
+    "DEFAULT_TOOL_TIMEOUT_SECONDS",
     "McpToolRegistry",
     "McpToolSpec",
     "tool_annotations_dict",
 ]
+
+# Default wall-clock budget for a single tool call. Toolkit handlers shell out
+# to linters, and a hung subprocess would otherwise block that call forever with
+# no recovery for the client short of dropping the connection.
+DEFAULT_TOOL_TIMEOUT_SECONDS: Final[float] = 300.0
 
 
 def _is_path_schema(*, schema: Any) -> bool:
@@ -52,6 +58,9 @@ class McpToolSpec:
         read_only: Maps to MCP ``readOnlyHint``.
         destructive: Maps to MCP ``destructiveHint``.
         idempotent: Maps to MCP ``idempotentHint``.
+        timeout_seconds: Wall-clock budget for a single call to ``handler``.
+            Exceeding it aborts the call with an ``execution_error`` envelope
+            carrying ``detail.reason == "timeout"``.
         path_arguments: Names of ``input_schema`` properties whose values are
             filesystem paths. The server resolves each one against the
             workspace root and rejects escapes *before* the handler runs, so a
@@ -66,19 +75,24 @@ class McpToolSpec:
     read_only: bool = False
     destructive: bool = False
     idempotent: bool = False
+    timeout_seconds: float = DEFAULT_TOOL_TIMEOUT_SECONDS
     path_arguments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate the specification and freeze its schema.
 
         Raises:
-            ValueError: If the name is empty, the input schema is not a JSON
-                Schema object, or a declared path argument is absent from the
-                schema properties or not typed as a string (or array of
-                strings).
+            ValueError: If the name is empty, the timeout is not positive, the
+                input schema is not a JSON Schema object, or a declared path
+                argument is absent from the schema properties or not typed as a
+                string (or array of strings).
         """
         if not self.name.strip():
             raise ValueError("MCP tool name must be a non-empty string")
+        if self.timeout_seconds <= 0:
+            raise ValueError(
+                f"MCP tool {self.name!r} timeout_seconds must be positive",
+            )
         if self.input_schema.get("type") != "object":
             raise ValueError(
                 f"MCP tool {self.name!r} input_schema must be a JSON Schema "

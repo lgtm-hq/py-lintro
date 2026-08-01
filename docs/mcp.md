@@ -9,8 +9,6 @@ the CLI stays light:
 
 ```bash
 uv pip install 'lintro[mcp]'
-# or
-pip install 'lintro[mcp]'
 ```
 
 `lintro doctor` reports whether the `mcp` extra is available under **Optional extras**
@@ -25,7 +23,9 @@ lintro mcp --workspace /path/to/repo
 ```
 
 `--workspace` defaults to the current working directory and is resolved once at startup.
-It is the only root the server will read or write under.
+It is the root that every declared path argument is required to stay within (see
+[Tool contract](#tool-contract)); it is not an OS-level sandbox around the handler
+process.
 
 ## Built-in tool
 
@@ -57,14 +57,19 @@ Before any handler runs, the server:
    rather than the server's cwd.
 
 Handlers therefore only ever see validated arguments with absolute, in-workspace paths.
+The guard covers the arguments a tool declares; it does not sandbox whatever else a
+handler chooses to touch, so toolkits must declare every path they accept.
+
+Synchronous handlers run in a worker thread, and every call is bounded by the spec's
+`timeout_seconds`, so one wedged linter cannot stall the JSON-RPC stream.
 
 ## Errors
 
-Every failure — unknown tool, bad arguments, workspace escape, handler crash — comes
-back as `isError: true` with the same envelope in both `structuredContent` and the JSON
-text content. The envelope is nested under `error` to match the machine-readable error
-contract `lintro review --output json` emits, and so it can never be confused with a
-tool's own successful payload:
+Every tool-call failure — unknown tool, bad arguments, workspace escape, handler crash
+or timeout — comes back as `isError: true` with the same envelope in both
+`structuredContent` and the JSON text content. The envelope is nested under `error`, the
+same outer key `lintro review --output json` uses for its (differently shaped)
+provider-failure body, so it can never be confused with a tool's own successful payload:
 
 ```json
 {
@@ -81,7 +86,12 @@ tool's own successful payload:
 ```
 
 Codes: `workspace_violation`, `tool_unavailable`, `invalid_input`, `execution_error`.
-`detail` is optional and may be `null`.
+`detail` is optional and may be `null`. A handler that exceeds its time budget
+(`timeout_seconds`, 300s by default) reports `execution_error` with
+`detail.reason == "timeout"`.
+
+Failures outside a tool call — a missing `lintro[mcp]` extra, a transport or session
+error — surface through the CLI or the MCP protocol itself rather than this envelope.
 
 ## Agent configuration example
 

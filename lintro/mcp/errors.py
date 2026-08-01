@@ -1,9 +1,10 @@
 """Structured MCP error envelopes and workspace path guards.
 
-The envelope is nested under an ``error`` key so it mirrors the machine-readable
-JSON error contract the ``review`` command emits
-(:mod:`lintro.ai.review.error_contract`) and can never be confused with a
-successful tool payload, which is an arbitrary tool-defined object::
+The MCP envelope is its own contract — ``{code, message, detail}`` — distinct
+from the provider-failure body :mod:`lintro.ai.review.error_contract` emits for
+``review --output json`` (``{kind, provider, status, ...}``). What the two share
+is the outer ``error`` key, so both are recognisable as failures at a glance and
+neither can be confused with a successful payload::
 
     {"error": {"code": "workspace_violation", "message": "...", "detail": {...}}}
 """

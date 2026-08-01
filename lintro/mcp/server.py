@@ -116,29 +116,41 @@ def _error_result(*, envelope: McpErrorEnvelope) -> Any:
 
 
 async def _dispatch(*, spec: McpToolSpec, arguments: dict[str, Any]) -> Any:
-    """Invoke a tool handler without blocking the event loop.
+    """Invoke a tool handler off the event loop, under a time budget.
 
-    Coroutine handlers are awaited directly. Synchronous handlers are run in a
+    Coroutine handlers are awaited directly. Synchronous handlers run in a
     worker thread: toolkit handlers shell out to linters, and a blocking call
     on the event loop would stall every other in-flight tool call and the
-    JSON-RPC stream itself.
+    JSON-RPC stream itself. The worker thread is abandoned on timeout — a
+    wedged subprocess cannot be interrupted from here, but the client gets its
+    answer instead of hanging forever.
 
     Args:
         spec: The tool whose handler should run.
         arguments: Validated, path-resolved arguments.
 
+    Note:
+        Raises ``TimeoutError`` (from ``anyio.fail_after``) when the handler
+        exceeds ``spec.timeout_seconds``; the caller shapes it into an
+        ``execution_error`` envelope.
+
     Returns:
         The handler's result.
     """
-    if inspect.iscoroutinefunction(spec.handler):
-        return await spec.handler(arguments)
-
+    import anyio
     import anyio.to_thread
 
-    result = await anyio.to_thread.run_sync(partial(spec.handler, arguments))
-    if inspect.isawaitable(result):
-        return await result
-    return result
+    with anyio.fail_after(spec.timeout_seconds):
+        if inspect.iscoroutinefunction(spec.handler):
+            return await spec.handler(arguments)
+
+        result = await anyio.to_thread.run_sync(
+            partial(spec.handler, arguments),
+            abandon_on_cancel=True,
+        )
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
 
 def create_mcp_server(
@@ -208,6 +220,23 @@ def create_mcp_server(
             return await _dispatch(spec=spec, arguments=safe_arguments)
         except McpError as exc:
             return _error_result(envelope=exc.envelope)
+        except TimeoutError:
+            logger.warning(
+                f"MCP tool {name!r} timed out after {spec.timeout_seconds}s",
+            )
+            return _error_result(
+                envelope=McpErrorEnvelope(
+                    code=McpErrorCode.EXECUTION_ERROR,
+                    message=(
+                        f"Tool {name} exceeded its {spec.timeout_seconds}s budget"
+                    ),
+                    detail={
+                        "tool": name,
+                        "reason": "timeout",
+                        "timeout_seconds": spec.timeout_seconds,
+                    },
+                ),
+            )
         except Exception as exc:
             logger.exception(f"Unhandled error in MCP tool {name!r}")
             return _error_result(
