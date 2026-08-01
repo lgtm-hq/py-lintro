@@ -12,6 +12,7 @@ from loguru import logger as loguru_logger
 from lintro.ai.apply import apply_fixes
 from lintro.ai.audit import write_audit_log
 from lintro.ai.budget import CostBudget
+from lintro.ai.checkpoints import checkpoint_ref_exists
 from lintro.ai.display import render_fixes, render_summary, render_validation
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.fix import generate_fixes_from_params
@@ -210,6 +211,8 @@ def _report_checkpoints(
         return
     for state in undo_states:
         if state is None or state.kind != "git" or state.checkpoint is None:
+            continue
+        if not checkpoint_ref_exists(state.checkpoint):
             continue
         try:
             changed = diff_undo(state)

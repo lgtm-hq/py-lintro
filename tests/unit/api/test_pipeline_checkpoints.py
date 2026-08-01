@@ -53,6 +53,7 @@ def _make_ctx(
     dry_run_preview: bool = False,
     checkpoint_fmt: bool = True,
     clean_stdout_output: bool = False,
+    score_only: bool = False,
 ) -> RunContext:
     """Build a RunContext wired to a recording logger and a stub config.
 
@@ -61,6 +62,7 @@ def _make_ctx(
         dry_run_preview: Whether this is a ``fmt --dry-run`` preview.
         checkpoint_fmt: Value of the ``ai.checkpoint_fmt`` toggle.
         clean_stdout_output: Whether stdout carries a machine document.
+        score_only: Whether stdout carries only the numeric health score.
 
     Returns:
         RunContext: A context suitable for the checkpoint hook under test.
@@ -73,7 +75,7 @@ def _make_ctx(
         logger=_RecordingLogger(),
         lintro_config=_ConfigStub(ai=_AIConfigStub(checkpoint_fmt=checkpoint_fmt)),
         clean_stdout_output=clean_stdout_output,
-        score_only=False,
+        score_only=score_only,
     )
 
 
@@ -184,6 +186,21 @@ def test_fmt_checkpoint_quiet_for_machine_output(
     repo = _init_git_repo(tmp_path)
     monkeypatch.chdir(repo)
     ctx = _make_ctx(clean_stdout_output=True)
+
+    _capture_fmt_checkpoint(ctx=ctx, paths=["tracked.py"])
+
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_length(1)
+    assert_that(ctx.logger.lines).is_empty()
+
+
+def test_fmt_checkpoint_quiet_for_score_only_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A score-only run captures a ref without polluting the score line."""
+    repo = _init_git_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    ctx = _make_ctx(score_only=True)
 
     _capture_fmt_checkpoint(ctx=ctx, paths=["tracked.py"])
 

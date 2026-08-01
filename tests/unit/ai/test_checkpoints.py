@@ -7,6 +7,7 @@ import subprocess  # nosec B404 - subprocess drives git in temp test repos; shel
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.checkpoints import (
@@ -24,6 +25,22 @@ from lintro.ai.undo import prepare_fix_batch, restore_undo
 
 
 def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run a git command in a temp repo, isolated from developer git config.
+
+    A global ``commit.gpgsign``, ``core.hooksPath`` or ``init.templateDir``
+    would otherwise change how these fixtures behave from machine to machine.
+
+    Args:
+        cmd: Full argv.
+        cwd: Working directory.
+
+    Returns:
+        The completed process.
+    """
+    env = os.environ.copy()
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    env.pop("GIT_INDEX_FILE", None)
     return (
         subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
             cmd,
@@ -31,6 +48,7 @@ def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
             capture_output=True,
             text=True,
             check=True,
+            env=env,
         )
     )
 
@@ -386,3 +404,109 @@ def test_report_checkpoints_silent_for_json(tmp_path: Path) -> None:
     _report_checkpoints([state], logger, is_json=True)
 
     assert_that(logger.console_output.call_count).is_equal_to(0)
+
+
+def test_restore_preserves_file_mode(tmp_path: Path) -> None:
+    """A restored file keeps its permission bits, including the exec bit."""
+    repo = _init_git_repo(tmp_path)
+    script = repo / "script.sh"
+    script.write_text("#!/bin/sh\necho one\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    checkpoint = capture_checkpoint(["script.sh"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    script.write_text("#!/bin/sh\necho two\n", encoding="utf-8")
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(script.read_text(encoding="utf-8")).contains("echo one")
+    assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)
+
+
+def test_restore_recreates_deleted_file_with_tree_mode(tmp_path: Path) -> None:
+    """A target deleted after capture comes back with the checkpoint's mode."""
+    repo = _init_git_repo(tmp_path)
+    script = repo / "script.sh"
+    script.write_text("#!/bin/sh\necho one\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    checkpoint = capture_checkpoint(["script.sh"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    script.unlink()
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(script.exists()).is_true()
+    assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)
+
+
+def test_diff_reports_edits_to_untracked_targets(tmp_path: Path) -> None:
+    """An untracked target reads as modified, not deleted, in the diff."""
+    repo = _init_git_repo(tmp_path)
+    scratch = repo / "scratch.py"
+    scratch.write_text("scratch = 1\n", encoding="utf-8")
+    checkpoint = capture_checkpoint(["scratch.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    scratch.write_text("scratch = 2\n", encoding="utf-8")
+
+    diff = diff_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(diff).contains("-scratch = 1")
+    assert_that(diff).contains("+scratch = 2")
+    assert_that(diff).does_not_contain("/dev/null")
+
+
+def test_capture_prunes_before_writing_its_own_ref(tmp_path: Path) -> None:
+    """With retention 1 the newest ref survives and older ones are gone."""
+    repo = _init_git_repo(tmp_path)
+    first = capture_checkpoint(
+        ["tracked.py"],
+        workspace_root=repo,
+        run_id="1000-aaaaaaaa",
+        keep=10,
+    )
+    second = capture_checkpoint(
+        ["tracked.py"],
+        workspace_root=repo,
+        run_id="1001-bbbbbbbb",
+        keep=1,
+    )
+
+    refs = list_checkpoint_refs(workspace_root=repo)
+    assert_that(refs).is_equal_to([second.ref])  # type: ignore[union-attr]
+    assert_that(refs).does_not_contain(first.ref)  # type: ignore[union-attr]
+
+
+def test_capture_with_zero_retention_keeps_current_ref(tmp_path: Path) -> None:
+    """``keep=0`` prunes history but never the ref the caller just got back."""
+    repo = _init_git_repo(tmp_path)
+    capture_checkpoint(
+        ["tracked.py"],
+        workspace_root=repo,
+        run_id="1000-aaaaaaaa",
+        keep=10,
+    )
+    current = capture_checkpoint(
+        ["tracked.py"],
+        workspace_root=repo,
+        run_id="1001-bbbbbbbb",
+        keep=0,
+    )
+
+    assert_that(current).is_not_none()
+    assert_that(list_checkpoint_refs(workspace_root=repo)).is_equal_to(
+        [current.ref],  # type: ignore[union-attr]
+    )
+
+
+def test_capture_ignores_ambient_git_index_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A GIT_INDEX_FILE inherited from a git hook must not be honoured."""
+    repo = _init_git_repo(tmp_path)
+    hook_index = tmp_path / "hook-index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(hook_index))
+
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+
+    assert_that(checkpoint).is_not_none()
+    assert_that(hook_index.exists()).is_false()

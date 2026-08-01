@@ -24,7 +24,7 @@ from lintro.ai.checkpoints import (
     git_checkpoints_available,
     restore_checkpoint,
 )
-from lintro.ai.paths import resolve_workspace_file
+from lintro.ai.paths import atomic_write_bytes, resolve_workspace_file
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
@@ -144,17 +144,26 @@ def _capture_file_snapshot(
     *,
     workspace_root: Path,
 ) -> FileSnapshot:
-    """Read current file bytes for fallback rollback."""
+    """Read current file bytes for fallback rollback.
+
+    Paths that do not resolve inside ``workspace_root`` are dropped rather
+    than recorded, so ``None`` unambiguously means "did not exist at capture
+    time" and a restore can never write outside the workspace.
+
+    Args:
+        paths: Target file paths.
+        workspace_root: Root directory that restores must stay inside.
+
+    Returns:
+        Snapshot of the in-workspace target files.
+    """
     contents: dict[str, bytes | None] = {}
     for path in paths:
         resolved = resolve_workspace_file(path, workspace_root)
         if resolved is None:
-            contents[path] = None
+            logger.debug("Skipping snapshot of out-of-workspace path: {}", path)
             continue
-        if resolved.is_file():
-            contents[path] = resolved.read_bytes()
-        else:
-            contents[path] = None
+        contents[path] = resolved.read_bytes() if resolved.is_file() else None
     return FileSnapshot(root=workspace_root, contents=contents)
 
 
@@ -162,38 +171,33 @@ def _restore_file_snapshot(
     snapshot: FileSnapshot,
     paths: list[str] | None = None,
 ) -> None:
-    """Restore files from a :class:`FileSnapshot`."""
+    """Restore files from a :class:`FileSnapshot`.
+
+    Only paths the snapshot recorded — which are by construction inside the
+    workspace — are written or deleted, matching the containment guarantee
+    :func:`~lintro.ai.apply._apply_fix` and
+    :func:`~lintro.ai.checkpoints.restore_checkpoint` already enforce.
+
+    Args:
+        snapshot: Snapshot captured before the batch.
+        paths: Optional subset to restore; defaults to every recorded path.
+    """
     items = (
         snapshot.contents.items()
         if paths is None
-        else ((p, snapshot.contents.get(p)) for p in paths)
+        else ((p, snapshot.contents[p]) for p in paths if p in snapshot.contents)
     )
     for path, data in items:
         resolved = resolve_workspace_file(path, snapshot.root)
         if resolved is None:
-            # Fall back to joining under root when the path was relative.
-            candidate = Path(path)
-            resolved = (
-                candidate if candidate.is_absolute() else snapshot.root / candidate
-            )
+            logger.debug("Skipping restore of out-of-workspace path: {}", path)
+            continue
         if data is None:
             if resolved.is_file():
                 resolved.unlink()
             continue
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(resolved.parent), suffix=".tmp")
-        try:
-            try:
-                fobj = os.fdopen(fd, "wb")
-            except BaseException:
-                os.close(fd)
-                raise
-            with fobj:
-                fobj.write(data)
-            Path(tmp).replace(resolved)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        atomic_write_bytes(resolved, data)
 
 
 def prepare_fix_batch(

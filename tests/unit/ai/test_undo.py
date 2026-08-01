@@ -7,7 +7,13 @@ from pathlib import Path
 from assertpy import assert_that
 
 from lintro.ai.models import AIFixSuggestion
-from lintro.ai.undo import UNDO_DIR, UNDO_FILE, save_undo_patch
+from lintro.ai.undo import (
+    UNDO_DIR,
+    UNDO_FILE,
+    prepare_fix_batch,
+    restore_undo,
+    save_undo_patch,
+)
 
 
 def _make_suggestion(
@@ -74,3 +80,50 @@ def test_patch_content_is_valid_unified_diff(tmp_path: Path) -> None:
     assert_that(content).contains("---")
     assert_that(content).contains("+++")
     assert_that(content).contains("@@")
+
+
+def test_file_fallback_never_writes_outside_the_workspace(tmp_path: Path) -> None:
+    """An escaping path is dropped at capture and never restored."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outsider = tmp_path / "outside.py"
+    outsider.write_text("secret = 1\n", encoding="utf-8")
+    suggestion = AIFixSuggestion(
+        file="../outside.py",
+        line=1,
+        code="E001",
+        original_code="secret = 1\n",
+        suggested_code="secret = 2\n",
+    )
+
+    state = prepare_fix_batch([suggestion], workspace)
+
+    assert_that(state).is_not_none()
+    assert_that(state.file_snapshot.contents).is_empty()  # type: ignore[union-attr]
+
+    outsider.write_text("secret = 999\n", encoding="utf-8")
+    restore_undo(state)  # type: ignore[arg-type]
+
+    assert_that(outsider.exists()).is_true()
+    assert_that(outsider.read_text(encoding="utf-8")).is_equal_to("secret = 999\n")
+
+
+def test_file_fallback_restore_preserves_mode(tmp_path: Path) -> None:
+    """The non-git fallback keeps the executable bit on restore."""
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\necho one\n", encoding="utf-8")
+    script.chmod(0o755)
+    suggestion = AIFixSuggestion(
+        file="run.sh",
+        line=1,
+        code="E001",
+        original_code="echo one\n",
+        suggested_code="echo two\n",
+    )
+
+    state = prepare_fix_batch([suggestion], tmp_path)
+    script.write_text("#!/bin/sh\necho two\n", encoding="utf-8")
+    restore_undo(state)  # type: ignore[arg-type]
+
+    assert_that(script.read_text(encoding="utf-8")).contains("echo one")
+    assert_that(script.stat().st_mode & 0o777).is_equal_to(0o755)

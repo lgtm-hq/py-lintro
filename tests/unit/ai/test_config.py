@@ -343,3 +343,15 @@ def test_checkpoint_overrides() -> None:
     config = AIConfig(checkpoint_retention=3, checkpoint_fmt=True)
     assert_that(config.checkpoint_retention).is_equal_to(3)
     assert_that(config.checkpoint_fmt).is_true()
+
+
+def test_checkpoint_retention_accepts_zero() -> None:
+    """Zero retention is valid and means "keep only the current run"."""
+    assert_that(AIConfig(checkpoint_retention=0).checkpoint_retention).is_equal_to(0)
+
+
+def test_checkpoint_retention_rejects_negative() -> None:
+    """Negative retention is rejected by the ge=0 bound."""
+    assert_that(AIConfig).raises(ValidationError).when_called_with(
+        checkpoint_retention=-1,
+    )

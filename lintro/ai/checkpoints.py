@@ -18,14 +18,27 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
+
+from lintro.ai.paths import atomic_write_bytes
 
 CHECKPOINT_REF_PREFIX = "refs/lintro/checkpoints/"
 DEFAULT_CHECKPOINT_RETENTION = 10
 _GIT_TIMEOUT_SECONDS = 60.0
 # Keep each ``git add`` argv comfortably under platform ARG_MAX limits.
 _GIT_ADD_CHUNK = 500
+# Ambient git state that must never leak into these plumbing calls.
+_INHERITED_GIT_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+)
 
 
 @dataclass(frozen=True)
@@ -56,13 +69,43 @@ def _git_bin() -> str | None:
     return shutil.which("git")
 
 
+def _git_env(overlay: dict[str, str] | None) -> dict[str, str]:
+    """Build a hardened environment for a git plumbing call.
+
+    Ambient ``GIT_*`` variables are stripped first. When lintro runs inside a
+    git hook, git exports ``GIT_DIR``, ``GIT_INDEX_FILE`` and friends; a
+    plumbing call that inherited them would target the hook's repository and
+    index instead of the one at ``cwd``, breaking this module's promise never
+    to touch the user's index.
+
+    Args:
+        overlay: Variables to set after sanitising (e.g. the temp index).
+
+    Returns:
+        The environment to pass to :func:`subprocess.run`.
+    """
+    full_env = os.environ.copy()
+    for leaked in _INHERITED_GIT_VARS:
+        full_env.pop(leaked, None)
+    if overlay:
+        full_env.update(overlay)
+    # Avoid locale/pager interference and never open an editor.
+    full_env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    full_env.setdefault("GIT_OPTIONAL_LOCKS", "0")
+    # Target paths are literal filenames; ``*``, ``?``, ``[`` and a leading
+    # ``:`` in a filename must not be read as pathspec magic.
+    full_env.setdefault("GIT_LITERAL_PATHSPECS", "1")
+    return full_env
+
+
 def _run_git(
     args: list[str],
     *,
     cwd: str,
     env: dict[str, str] | None = None,
     check: bool = False,
-) -> subprocess.CompletedProcess[str]:
+    binary: bool = False,
+) -> subprocess.CompletedProcess[Any]:
     """Run a git command with optional temp-index environment.
 
     Args:
@@ -70,9 +113,12 @@ def _run_git(
         cwd: Working directory.
         env: Optional environment overlay (e.g. ``GIT_INDEX_FILE``).
         check: When True, raise :class:`CheckpointError` on non-zero exit.
+        binary: When True, return raw ``bytes`` streams instead of decoded
+            text. Required for blob contents, which are not always UTF-8.
 
     Returns:
-        Completed process with text stdout/stderr.
+        Completed process whose stdout/stderr are ``str`` (or ``bytes`` when
+        ``binary`` is set).
 
     Raises:
         CheckpointError: When git is missing, times out, or ``check`` fails.
@@ -80,21 +126,15 @@ def _run_git(
     git_bin = _git_bin()
     if git_bin is None:
         raise CheckpointError("git is not installed or not on PATH")
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
-    # Avoid locale/pager interference and never open an editor.
-    full_env.setdefault("GIT_TERMINAL_PROMPT", "0")
-    full_env.setdefault("GIT_OPTIONAL_LOCKS", "0")
     try:
         result = subprocess.run(  # nosec B603 - argv is [resolved git binary, *args]; shell=False; plumbing args only
             [git_bin, *args],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=not binary,
             timeout=_GIT_TIMEOUT_SECONDS,
             check=False,
-            env=full_env,
+            env=_git_env(env),
         )
     except subprocess.TimeoutExpired as exc:
         raise CheckpointError(
@@ -103,7 +143,10 @@ def _run_git(
     except OSError as exc:
         raise CheckpointError(f"Failed to run git {' '.join(args)}: {exc}") from exc
     if check and result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip() or "unknown git error"
+        streams = [result.stderr, result.stdout]
+        if binary:
+            streams = [s.decode("utf-8", errors="replace") for s in streams]
+        stderr = streams[0].strip() or streams[1].strip() or "unknown git error"
         raise CheckpointError(f"git {' '.join(args)} failed: {stderr}")
     return result
 
@@ -246,7 +289,10 @@ def capture_checkpoint(
         paths: Files (and/or directories) to include in the snapshot.
         workspace_root: Directory inside the repository.
         run_id: Optional run identifier; generated when omitted.
-        keep: Maximum checkpoint refs to retain after capture (default 10).
+        keep: Total checkpoint refs to retain, this run's included (default
+            10). Older refs are pruned *before* the new one is written, so
+            the checkpoint a run depends on is never the one pruned — even at
+            ``keep=0``, which keeps only the current run's ref.
 
     Returns:
         The created :class:`Checkpoint`, or None when git checkpoints are
@@ -264,6 +310,13 @@ def capture_checkpoint(
     rid = run_id or _new_run_id()
     ref = f"{CHECKPOINT_REF_PREFIX}{rid}"
     cwd = str(root)
+
+    # Prune first: pruning after the write could delete the ref this very run
+    # is about to hand back to the caller.
+    try:
+        prune_checkpoints(workspace_root=root, keep=max(keep - 1, 0))
+    except CheckpointError as exc:
+        logger.debug("Checkpoint prune skipped: {}", exc)
 
     fd, index_path = tempfile.mkstemp(prefix="lintro-git-index-")
     os.close(fd)
@@ -306,11 +359,6 @@ def capture_checkpoint(
     finally:
         index_file.unlink(missing_ok=True)
 
-    try:
-        prune_checkpoints(workspace_root=root, keep=keep)
-    except CheckpointError as exc:
-        logger.debug("Checkpoint prune skipped: {}", exc)
-
     return Checkpoint(
         ref=ref,
         run_id=rid,
@@ -325,44 +373,52 @@ def _blob_for_path(
     root: Path,
     treeish: str,
     rel_path: str,
-) -> bytes | None:
-    """Return blob bytes for ``rel_path`` at ``treeish``, or None if absent."""
-    exists = _run_git(
-        ["cat-file", "-e", f"{treeish}:{rel_path}"],
+) -> tuple[bytes, int] | None:
+    """Return blob bytes and file mode for ``rel_path`` at ``treeish``.
+
+    Args:
+        root: Repository root.
+        treeish: Tree object (or ref) to read from.
+        rel_path: Repo-relative path inside that tree.
+
+    Returns:
+        ``(contents, permission bits)``, or None when the path is absent from
+        the tree. Git records only ``100644``/``100755`` for regular files, so
+        the mode collapses to ``0o644`` or ``0o755``. A tree entry that git
+        then refuses to read raises :class:`CheckpointError` from
+        :func:`_run_git`.
+    """
+    entry = _run_git(
+        ["ls-tree", "-z", "--", treeish, rel_path],
         cwd=str(root),
     )
-    if exists.returncode != 0:
+    if entry.returncode != 0 or not entry.stdout.strip():
         return None
-    git_bin = _git_bin()
-    if git_bin is None:
-        raise CheckpointError("git is not installed or not on PATH")
-    # Binary-safe read (avoid text-mode decoding).
-    raw = subprocess.run(  # nosec B603 - argv is [git, cat-file, -p, tree:path]; shell=False
-        [git_bin, "cat-file", "-p", f"{treeish}:{rel_path}"],
+    git_mode = entry.stdout.split(" ", 1)[0]
+    mode = 0o755 if git_mode.endswith("755") else 0o644
+    raw = _run_git(
+        ["cat-file", "-p", f"{treeish}:{rel_path}"],
         cwd=str(root),
-        capture_output=True,
-        timeout=_GIT_TIMEOUT_SECONDS,
-        check=False,
+        check=True,
+        binary=True,
     )
-    if raw.returncode != 0:
-        raise CheckpointError(
-            f"cat-file -p failed for {rel_path}: "
-            f"{raw.stderr.decode('utf-8', errors='replace')}",
-        )
-    return raw.stdout
+    return raw.stdout, mode
 
 
 def restore_checkpoint(
     checkpoint: Checkpoint,
     paths: list[str] | tuple[str, ...] | None = None,
 ) -> None:
-    """Restore files from a checkpoint tree (atomic across the batch).
+    """Restore files from a checkpoint tree.
 
-    Reads all target blobs first, then writes them with atomic replace so a
-    mid-batch failure does not leave a half-restored set. Paths present on
-    disk but absent from the checkpoint tree are removed (they were created
-    after capture). Paths that remain at the checkpoint content are rewritten
-    from the tree — including when the user edited them between capture and
+    Every target blob is read before anything is written, so a tree that
+    cannot be read fails the whole rollback without having touched the working
+    tree. Each individual file is then replaced atomically and with its
+    recorded mode; the write phase itself is sequential, so a failure part way
+    through leaves the earlier files already restored. Paths present on disk
+    but absent from the checkpoint tree are removed (they were created after
+    capture). Paths that remain at the checkpoint content are rewritten from
+    the tree — including when the user edited them between capture and
     rollback (lintro targets always return to the pre-batch snapshot).
 
     Only paths recorded on the checkpoint are eligible. Anything else is
@@ -372,10 +428,8 @@ def restore_checkpoint(
     Args:
         checkpoint: Checkpoint produced by :func:`capture_checkpoint`.
         paths: Optional subset of paths to restore; defaults to all paths
-            recorded on the checkpoint.
-
-    Raises:
-        BaseException: Re-raised after cleanup when an atomic write fails.
+            recorded on the checkpoint. A failed write propagates to the
+            caller after the partial temporary file is cleaned up.
     """
     root = checkpoint.root
     treeish = checkpoint.tree_sha or checkpoint.ref
@@ -393,32 +447,21 @@ def restore_checkpoint(
                 skipped,
             )
 
-    planned: list[tuple[Path, bytes | None]] = []
+    planned: list[tuple[Path, tuple[bytes, int] | None]] = []
     for rel in target_rels:
-        abs_path = root / rel
-        blob = _blob_for_path(root=root, treeish=treeish, rel_path=rel)
-        planned.append((abs_path, blob))
+        planned.append(
+            (root / rel, _blob_for_path(root=root, treeish=treeish, rel_path=rel)),
+        )
 
-    # Phase 1 complete — apply all writes/deletes.
+    # Read phase complete — apply all writes/deletes.
     for abs_path, blob in planned:
         if blob is None:
             if abs_path.is_file():
                 abs_path.unlink()
             continue
+        contents, mode = blob
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(abs_path.parent), suffix=".lintro-restore")
-        try:
-            try:
-                fobj = os.fdopen(fd, "wb")
-            except BaseException:
-                os.close(fd)
-                raise
-            with fobj:
-                fobj.write(blob)
-            Path(tmp).replace(abs_path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        atomic_write_bytes(abs_path, contents, fallback_mode=mode)
 
 
 def diff_checkpoint(
@@ -429,6 +472,11 @@ def diff_checkpoint(
 
     This is the accurate post-run "what lintro changed" report for files that
     were included in the checkpoint.
+
+    The diff runs against a throwaway index loaded from the checkpoint tree.
+    A plain ``git diff <tree>`` would consult the *real* index for the
+    working-tree side and so report every untracked target as a deletion,
+    which is precisely backwards for the files this feature exists to protect.
 
     Args:
         checkpoint: Checkpoint to diff against.
@@ -446,14 +494,47 @@ def diff_checkpoint(
     if not rels:
         return ""
     treeish = checkpoint.tree_sha or checkpoint.ref
-    # Compare checkpoint tree to the working tree for the given paths.
-    # ``--no-color`` defends against a user's ``color.ui = always``.
-    result = _run_git(
-        ["diff", "--no-ext-diff", "--no-color", treeish, "--", *rels],
-        cwd=str(root),
-        check=True,
-    )
-    return result.stdout
+
+    fd, index_path = tempfile.mkstemp(prefix="lintro-git-diff-index-")
+    os.close(fd)
+    index_file = Path(index_path)
+    env = {"GIT_INDEX_FILE": str(index_file)}
+    try:
+        _run_git(["read-tree", treeish], cwd=str(root), env=env, check=True)
+        # ``--no-color`` defends against a user's ``color.ui = always``.
+        result = _run_git(
+            ["diff", "--no-ext-diff", "--no-color", "--", *rels],
+            cwd=str(root),
+            env=env,
+            check=True,
+        )
+    finally:
+        index_file.unlink(missing_ok=True)
+    diff_text: str = result.stdout
+    return diff_text
+
+
+def checkpoint_ref_exists(checkpoint: Checkpoint) -> bool:
+    """Return whether a checkpoint's ref is still present.
+
+    A later capture in the same run can prune an earlier ref under a tight
+    retention setting, which would make a printed ``git diff <ref>`` hint fail
+    even though the tree object itself is still reachable.
+
+    Args:
+        checkpoint: Checkpoint to probe.
+
+    Returns:
+        True when the ref still resolves.
+    """
+    try:
+        result = _run_git(
+            ["show-ref", "--verify", "--quiet", checkpoint.ref],
+            cwd=str(checkpoint.root),
+        )
+    except CheckpointError:
+        return False
+    return result.returncode == 0
 
 
 def list_checkpoint_refs(*, workspace_root: Path) -> list[str]:
@@ -526,6 +607,7 @@ __all__ = [
     "Checkpoint",
     "CheckpointError",
     "capture_checkpoint",
+    "checkpoint_ref_exists",
     "diff_checkpoint",
     "git_checkpoints_available",
     "list_checkpoint_refs",

@@ -106,16 +106,18 @@ Before an AI fix batch mutates files, lintro captures a snapshot under
 `refs/lintro/checkpoints/<run-id>` using git plumbing on a temporary index
 (`GIT_INDEX_FILE`). This does **not** touch your index, stash, or `HEAD`.
 
-- **Rollback** restores only the files lintro targeted from that checkpoint tree, atomic
-  across the batch. Paths that were not part of the snapshot are never touched.
+- **Rollback** restores only the files lintro targeted from that checkpoint tree. Every
+  blob is read before anything is written, each file is replaced atomically and keeps
+  its mode, and paths that were not part of the snapshot are never touched.
 - **Diff** against the checkpoint shows exactly what lintro changed in the run. When a
   run changed anything, lintro prints the ref so you can run `git diff <ref>` or
   `git checkout <ref> -- <path>` after it exits.
 - **Interactive reject** restores rejected files from the checkpoint tree, not from
   in-memory copies. Files an earlier accepted group already changed are left alone, so
   rejecting one group never discards fixes you just accepted.
-- **Retention** keeps the last N checkpoint refs (default 10) and prunes older ones via
-  `git update-ref -d`.
+- **Retention** keeps the last N checkpoint refs (default 10), pruning older ones via
+  `git update-ref -d` before the new ref is written. `0` keeps only the current run's
+  checkpoint.
 - **Fallback:** outside a git work tree (or in a bare repo), lintro falls back to
   file-content snapshots / the legacy reverse patch under `.lintro-cache/ai`.
 
@@ -475,8 +477,8 @@ ai:
   fix_search_radius: 5
 
   # ── Git checkpoints ───────────────────────────────────────────
-  # Max refs kept under refs/lintro/checkpoints/; 0 prunes all.
-  # (int >= 0, default: 10)
+  # Refs kept under refs/lintro/checkpoints/, this run included.
+  # 0 keeps only the current run. (int >= 0, default: 10)
   checkpoint_retention: 10
 
   # Also checkpoint before `lintro format` mutates files.

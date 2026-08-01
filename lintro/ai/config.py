@@ -249,17 +249,18 @@ class AIConfig(BaseModel):
         default=10,
         ge=0,
         description=(
-            "Maximum number of git checkpoint refs to retain under "
-            "refs/lintro/checkpoints/ (oldest pruned). Default 10. "
-            "Used when capturing snapshots before AI fix batches."
+            "Total git checkpoint refs to retain under "
+            "refs/lintro/checkpoints/, this run's included; older refs are "
+            "pruned first. Default 10; 0 keeps only the current run's ref."
         ),
     )
     checkpoint_fmt: bool = Field(
         default=False,
         description=(
-            "When True, capture a git checkpoint (or file-snapshot fallback) "
-            "before `lintro fmt` mutates files, enabling the same rollback "
-            "semantics as AI fix batches."
+            "When True, capture a git checkpoint before `lintro fmt` mutates "
+            "files, so `git diff <ref>` and `git checkout <ref> -- <path>` "
+            "can review or undo the run. Git-only: nothing is captured "
+            "outside a git work tree."
         ),
     )
 
