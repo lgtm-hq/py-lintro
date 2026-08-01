@@ -66,7 +66,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
     ToolName.GOLANGCI_LINT: "2.12.2",
-    ToolName.HADOLINT: "2.14.0",
+    ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.4.0",
     ToolName.RUSTC: "1.97.1",
     ToolName.RUSTFMT: "1.9.0",
@@ -74,7 +74,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
     ToolName.TRUFFLEHOG: "3.96.0",
-    ToolName.VALE: "3.15.2",
+    ToolName.VALE: "3.17.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
