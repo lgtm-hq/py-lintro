@@ -93,6 +93,40 @@ def _unknown_tool_error_message(*, name: str, available_names: list[str]) -> str
     return message
 
 
+def _is_advisory_tool(*, name: str) -> bool:
+    """Report whether a registered tool is an advisory AI finder.
+
+    Args:
+        name: Registered tool name.
+
+    Returns:
+        True when the tool declares ``ExecutionClass.ADVISORY``. Tools that
+        cannot be resolved are treated as deterministic so selection never
+        fails on a lookup problem.
+    """
+    try:
+        return bool(tool_manager.get_tool(name).definition.is_advisory)
+    except (AttributeError, KeyError, ValueError):
+        return False
+
+
+def _advisory_tool_error_message(*, name: str) -> str:
+    """Build the error shown when an advisory tool is requested from chk/fmt.
+
+    Args:
+        name: The registered advisory tool name the user asked for.
+
+    Returns:
+        Error message string pointing the user at ``lintro review``.
+    """
+    return (
+        f"Tool '{name}' is an advisory AI finder and does not run under "
+        f"'lintro chk' or 'lintro fmt': its findings are nondeterministic, so "
+        f"they must not gate deterministic checks or the health score. "
+        f"Run 'lintro review --advisory-tools {name}' instead."
+    )
+
+
 @dataclass(frozen=True)
 class SkippedTool:
     """A tool that was skipped during tool selection."""
@@ -377,6 +411,11 @@ def get_tools_to_run(
         for name in available_tools:
             if name.lower() == "pytest":
                 continue
+            # Advisory AI finders belong to 'lintro review'. Excluded silently
+            # (not reported as skipped) because they were never part of this
+            # verb's tool set (#1308).
+            if _is_advisory_tool(name=name):
+                continue
             if not config.is_tool_enabled(name):
                 reason = _get_disabled_reason(config, name)
                 skipped.append(SkippedTool(name=name, reason=reason))
@@ -415,6 +454,11 @@ def get_tools_to_run(
                     available_names=available_names,
                 ),
             )
+        # Advisory AI finders are never runnable from chk/fmt, even when named
+        # explicitly: point the user at 'lintro review' instead of silently
+        # dropping the tool they asked for (#1308).
+        if _is_advisory_tool(name=resolved_name):
+            raise ValueError(_advisory_tool_error_message(name=resolved_name))
         # Explicit --tools bypasses execution.enabled_tools (that allowlist
         # scopes default / --tools all runs only). Still honor per-tool
         # tools.<name>.enabled: false.

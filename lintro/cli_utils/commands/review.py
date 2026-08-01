@@ -1,10 +1,26 @@
-"""CLI command for AI diff-based code review."""
+"""CLI command for AI code review.
+
+``lintro review`` owns both AI review surfaces:
+
+* the diff-based checklist review (epic #1609), and
+* **advisory AI-finder tools** — plugins classified
+  :attr:`~lintro.enums.execution_class.ExecutionClass.ADVISORY`, such as
+  ``idiom-review``. Those used to run under ``lintro chk``; because their
+  findings are nondeterministic opinions rather than rule violations they
+  moved here, so ``chk`` stays deterministic and its health score stays
+  stable across identical runs (#1308).
+
+Advisory findings are scoped to the review's changed files (or ``--path``)
+and never change the exit code unless ``--fail-on-findings`` is passed.
+"""
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import suppress
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from loguru import logger
@@ -41,6 +57,21 @@ from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.transport import apply_transport_override
 from lintro.config.config_loader import get_config
+from lintro.utils.execution.advisory import (
+    ADVISORY_TOOLS_ALL,
+    ADVISORY_TOOLS_NONE,
+    advisory_findings_count,
+    advisory_results_to_payload,
+    render_advisory_results,
+    resolve_advisory_tools,
+    run_advisory_tools,
+)
+
+if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
+
+#: Default paths scanned by ``--advisory-only`` when no ``--path`` is given.
+ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
 
 
 @click.command("review")
@@ -156,6 +187,41 @@ from lintro.config.config_loader import get_config
         ".lintro/review-agents/*.md and exit."
     ),
 )
+@click.option(
+    "--advisory-tools",
+    default=None,
+    metavar="TOOLS",
+    help=(
+        "Advisory AI-finder tools to run (comma-separated), 'all' for every "
+        "enabled advisory tool (default), or 'none' to skip them. Advisory "
+        "tools do not run under 'lintro chk'."
+    ),
+)
+@click.option(
+    "--tool-options",
+    "tool_options",
+    default=None,
+    help=(
+        "Options for advisory tools, as tool:option=value[,tool:option=value] "
+        "(e.g. idiom-review:enabled=true)."
+    ),
+)
+@click.option(
+    "--advisory-only",
+    is_flag=True,
+    help=(
+        "Run only the advisory AI-finder tools and skip the diff-based "
+        "review. Scans --path values, or the current directory."
+    ),
+)
+@click.option(
+    "--fail-on-findings",
+    is_flag=True,
+    help=(
+        "Exit 1 when advisory tools report findings "
+        "(default: advisory findings exit 0)."
+    ),
+)
 def review_command(
     *,
     base: str | None,
@@ -174,8 +240,12 @@ def review_command(
     path_filter: tuple[str, ...],
     transport: str | None,
     list_agents: bool,
+    advisory_tools: str | None,
+    tool_options: str | None,
+    advisory_only: bool,
+    fail_on_findings: bool,
 ) -> None:
-    """Run AI-powered diff-based code review."""
+    """Run AI-powered diff-based code review, plus advisory AI finders."""
     lintro_config = get_config()
     workspace_root = resolve_workspace_root(lintro_config.config_path)
     if list_agents:
@@ -189,7 +259,26 @@ def review_command(
         )
         raise SystemExit(0)
 
+    if advisory_only and (post or pr is not None or uncommitted or base):
+        raise click.UsageError(
+            "--advisory-only runs advisory tools over paths and produces no "
+            "diff review, so it cannot be combined with --base, "
+            "--uncommitted, --pr or --post.",
+        )
+
     require_ai()
+    if advisory_only:
+        # Advisory-only needs no diff context and no review checklist, so it
+        # deliberately bypasses the ai.review gate: the user asked for the
+        # finder tools, not the diff review (#1308).
+        _run_advisory_only(
+            advisory_tools=advisory_tools,
+            tool_options=tool_options,
+            path_filter=path_filter,
+            output_format=output_format,
+            fail_on_findings=fail_on_findings,
+        )
+
     ai_config = resolve_ai_config(lintro_config)
     if not ai_config.review_enabled:
         raise click.UsageError(
@@ -351,14 +440,31 @@ def review_command(
 
     result = enrich_review_result(result=result, question_map=question_map)
 
+    advisory_results = _execute_advisory(
+        advisory_tools=advisory_tools,
+        tool_options=tool_options,
+        paths=[
+            file.path for file in context.changed_files if Path(file.path).is_file()
+        ],
+    )
+
     output = render_review_output(
         result=result,
         output_format=output_format,
         checklist_display=checklist_display,
         question_map=question_map,
     )
+    if output_format == "json":
+        output = _merge_advisory_into_json(
+            review_output=output,
+            advisory_results=advisory_results,
+        )
     if output is not None:
         click.echo(output)
+    if output_format != "json":
+        advisory_text = render_advisory_results(results=advisory_results)
+        if advisory_text:
+            click.echo(f"\n{advisory_text}")
 
     if post:
         from lintro.ai.review.github import post_review_to_github
@@ -374,7 +480,125 @@ def review_command(
             logger.warning("GitHub review posting skipped or failed")
 
     exit_code = 1 if result.has_p1_findings else 0
+    if fail_on_findings and advisory_findings_count(advisory_results):
+        exit_code = 1
     raise SystemExit(exit_code)
+
+
+def _execute_advisory(
+    *,
+    advisory_tools: str | None,
+    tool_options: str | None,
+    paths: list[str],
+) -> list[ToolResult]:
+    """Resolve and run the advisory tools requested for this review.
+
+    Args:
+        advisory_tools: Raw ``--advisory-tools`` value.
+        tool_options: Raw ``--tool-options`` value for advisory tools.
+        paths: Paths to scan (typically the review's changed files).
+
+    Returns:
+        One result per advisory tool that ran; empty when none were selected.
+
+    Raises:
+        click.UsageError: If a requested advisory tool is unknown or is not
+            an advisory tool.
+    """
+    try:
+        selection = resolve_advisory_tools(requested=advisory_tools)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    for skipped in selection.skipped:
+        # Only mention explicitly named tools; the default 'all' selection
+        # skipping an opt-in tool is the normal, quiet case.
+        if advisory_tools not in (None, ADVISORY_TOOLS_ALL):
+            logger.info(
+                "Skipping advisory tool {}: {}",
+                skipped.name,
+                skipped.reason,
+            )
+    return run_advisory_tools(
+        paths=paths,
+        tool_names=selection.to_run,
+        tool_options=tool_options,
+    )
+
+
+def _run_advisory_only(
+    *,
+    advisory_tools: str | None,
+    tool_options: str | None,
+    path_filter: tuple[str, ...],
+    output_format: str,
+    fail_on_findings: bool,
+) -> None:
+    """Run only the advisory tools, render their findings, and exit.
+
+    Args:
+        advisory_tools: Raw ``--advisory-tools`` value.
+        tool_options: Raw ``--tool-options`` value for advisory tools.
+        path_filter: ``--path`` values; defaults to the current directory.
+        output_format: ``terminal`` or ``json``.
+        fail_on_findings: Whether findings should produce exit code 1.
+
+    Raises:
+        SystemExit: Always; carries the resolved exit code.
+        click.UsageError: If the selection resolves to no tools at all.
+    """
+    if (advisory_tools or "").strip().lower() == ADVISORY_TOOLS_NONE:
+        raise click.UsageError(
+            "--advisory-only with --advisory-tools none would run nothing.",
+        )
+    paths = list(path_filter) if path_filter else list(ADVISORY_DEFAULT_PATHS)
+    results = _execute_advisory(
+        advisory_tools=advisory_tools,
+        tool_options=tool_options,
+        paths=paths,
+    )
+    if output_format == "json":
+        click.echo(
+            json.dumps(
+                {"advisory": advisory_results_to_payload(results)},
+                indent=2,
+            ),
+        )
+    else:
+        click.echo(
+            render_advisory_results(results=results) or "No advisory tools ran.",
+        )
+    findings = advisory_findings_count(results)
+    raise SystemExit(1 if (fail_on_findings and findings) else 0)
+
+
+def _merge_advisory_into_json(
+    *,
+    review_output: str | None,
+    advisory_results: list[ToolResult],
+) -> str | None:
+    """Add an ``advisory`` key to the review's JSON document.
+
+    The key is purely additive so existing consumers of the review JSON
+    contract keep parsing unchanged documents.
+
+    Args:
+        review_output: Rendered review JSON, or ``None``.
+        advisory_results: Advisory tool results to attach.
+
+    Returns:
+        The JSON document with an ``advisory`` key, or the original output
+        when it is absent or not a JSON object.
+    """
+    if not advisory_results or not isinstance(review_output, str):
+        return review_output
+    try:
+        document = json.loads(review_output)
+    except json.JSONDecodeError:
+        return review_output
+    if not isinstance(document, dict):
+        return review_output
+    document["advisory"] = advisory_results_to_payload(advisory_results)
+    return json.dumps(document, indent=2)
 
 
 def _resolve_custom_agents(
@@ -425,8 +649,6 @@ def _detect_pr_number_from_env() -> int | None:
     if not event_path:
         return None
     try:
-        import json
-
         payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
         number = payload.get("pull_request", {}).get("number")
         return int(number) if isinstance(number, int) else None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,9 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.cli import cli
+from lintro.cli_utils.commands.review import _merge_advisory_into_json
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
 
 def _empty_result() -> ReviewResult:
@@ -882,3 +886,197 @@ def test_review_custom_agents_only_with_no_valid_agents_errors(
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(str(result.output)).contains("no valid agents were found")
     assert_that(run_review.called).is_false()
+
+
+# =============================================================================
+# Advisory AI finders (#1308)
+# =============================================================================
+
+
+def _advisory_finding_result() -> ToolResult:
+    """Build an advisory tool result carrying a single finding."""
+    return ToolResult(
+        name="idiom-review",
+        success=False,
+        issues_count=1,
+        issues=[
+            IdiomReviewIssue(
+                file="a.py",
+                line=3,
+                message="prefer any()",
+                code="idiom/python/prefer-any",
+            ),
+        ],
+    )
+
+
+def test_review_help_shows_advisory_flags() -> None:
+    """Review help documents the advisory finder flags."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("--advisory-tools")
+    assert_that(result.output).contains("--advisory-only")
+    assert_that(result.output).contains("--fail-on-findings")
+
+
+def test_advisory_only_exits_zero_with_findings() -> None:
+    """Advisory findings are advisory: exit 0 by default."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--advisory-only"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("idiom-review")
+
+
+def test_advisory_only_fail_on_findings_exits_one() -> None:
+    """--fail-on-findings turns advisory findings into a failure."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--fail-on-findings"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(1)
+
+
+def test_advisory_only_json_output() -> None:
+    """--advisory-only --output json emits an advisory document."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["advisory"]).is_length(1)
+    assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+
+
+def test_advisory_only_rejects_diff_flags() -> None:
+    """--advisory-only cannot be combined with diff-review flags."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", "--advisory-only", "--uncommitted"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("--advisory-only")
+
+
+def test_advisory_only_with_no_tools_errors() -> None:
+    """Asking for advisory-only while disabling every tool is a usage error."""
+    runner = CliRunner()
+    with patch("lintro.cli_utils.commands.review.require_ai"):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--advisory-tools", "none"],
+        )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("would run nothing")
+
+
+def test_advisory_tools_none_skips_advisory_in_full_review() -> None:
+    """--advisory-tools none runs the diff review without advisory tools."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+        ) as run_advisory,
+    ):
+        result = runner.invoke(cli, ["review", "--advisory-tools", "none"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(run_advisory.call_args.kwargs["tool_names"]).is_empty()
+
+
+def test_unknown_advisory_tool_is_a_usage_error() -> None:
+    """An unknown advisory tool name fails as a usage error."""
+    runner = CliRunner()
+    with patch("lintro.cli_utils.commands.review.require_ai"):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--advisory-tools", "nope"],
+        )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("Unknown advisory tool")
+
+
+def test_deterministic_tool_rejected_by_review() -> None:
+    """Naming a deterministic tool on review points back at chk."""
+    runner = CliRunner()
+    with patch("lintro.cli_utils.commands.review.require_ai"):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--advisory-tools", "ruff"],
+        )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("lintro chk --tools ruff")
+
+
+def test_merge_advisory_into_json_adds_key() -> None:
+    """Advisory results are added to the review JSON as an additive key."""
+    merged = _merge_advisory_into_json(
+        review_output=json.dumps({"summary": "ok"}),
+        advisory_results=[_advisory_finding_result()],
+    )
+
+    document = json.loads(str(merged))
+    assert_that(document["summary"]).is_equal_to("ok")
+    assert_that(document["advisory"][0]["issues_count"]).is_equal_to(1)
+
+
+def test_merge_advisory_into_json_leaves_non_json_untouched() -> None:
+    """A non-JSON payload is returned verbatim rather than corrupted."""
+    merged = _merge_advisory_into_json(
+        review_output="not json",
+        advisory_results=[_advisory_finding_result()],
+    )
+
+    assert_that(merged).is_equal_to("not json")
+
+
+def test_merge_advisory_into_json_without_advisory_results() -> None:
+    """No advisory results means the review document is unchanged."""
+    merged = _merge_advisory_into_json(
+        review_output=json.dumps({"summary": "ok"}),
+        advisory_results=[],
+    )
+
+    assert_that(json.loads(str(merged))).does_not_contain_key("advisory")

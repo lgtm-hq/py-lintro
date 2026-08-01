@@ -9,6 +9,10 @@ detected by a syntax-matching linter. Two modes are offered:
 * **duplication** (Mode 2) — flag the same utility logic reimplemented
   across files, invisible to any per-file linter.
 
+The tool is classified :attr:`~lintro.enums.execution_class.ExecutionClass.ADVISORY`,
+so it never runs under ``lintro chk`` (and never feeds the health score).
+``lintro review`` is its home verb; see :mod:`lintro.utils.execution.advisory`.
+
 The tool ships disabled by default via the ``enabled: False`` option in
 ``default_options``: ``check()`` returns a skipped result immediately unless
 the caller opts in via ``tools.idiom-review`` config or
@@ -21,28 +25,26 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
-from lintro.ai.availability import is_ai_available
-from lintro.ai.budget import CostBudget
-from lintro.ai.exceptions import AIError
-from lintro.ai.interface import resolve_ai_config
-from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.providers import get_provider
 from lintro.enums.confidence_level import ConfidenceLevel
+from lintro.enums.execution_class import ExecutionClass
+from lintro.enums.idiom_review_mode import IdiomReviewMode
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.idiom_review.engine import IdiomReviewEngine, IdiomReviewMode
 from lintro.tools.idiom_review.signatures import (
     Signature,
     extract_python_signatures,
 )
+
+if TYPE_CHECKING:
+    from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
+    from lintro.tools.idiom_review.engine import IdiomReviewEngine
 
 IDIOM_REVIEW_TOOL_NAME = "idiom-review"
 # Late priority so idiom review runs after the fast syntax linters.
@@ -88,6 +90,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
             ),
             can_fix=False,
             tool_type=ToolType.LINTER,
+            # Advisory: nondeterministic AI findings never run under ``chk``
+            # and never feed the health score (#1308).
+            execution_class=ExecutionClass.ADVISORY,
             file_patterns=IDIOM_REVIEW_FILE_PATTERNS,
             priority=IDIOM_REVIEW_PRIORITY,
             conflicts_with=[],
@@ -135,6 +140,12 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 output="idiom-review is disabled (opt-in required).",
             )
 
+        # Imported here, not at module scope: plugin discovery imports every
+        # tool definition, so a top-level ``lintro.ai`` import would drag the
+        # AI stack into every ``chk`` invocation (#1305).
+        from lintro.ai.availability import is_ai_available
+        from lintro.ai.exceptions import AIError
+
         # Graceful no-credentials path — never require live API access.
         if not is_ai_available():
             return ToolResult(
@@ -178,6 +189,12 @@ class IdiomReviewPlugin(BaseToolPlugin):
         Returns:
             ToolResult with the aggregated, confidence-filtered findings.
         """
+        from lintro.ai.budget import CostBudget
+        from lintro.ai.interface import resolve_ai_config
+        from lintro.ai.paths import resolve_workspace_root
+        from lintro.ai.providers import get_provider
+        from lintro.tools.idiom_review.engine import IdiomReviewEngine
+
         lintro_config = self._get_lintro_config()
         ai_config = resolve_ai_config(lintro_config)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
@@ -335,6 +352,5 @@ class IdiomReviewPlugin(BaseToolPlugin):
             NotImplementedError: Always; the tool cannot fix issues.
         """
         raise NotImplementedError(
-            "idiom-review reports findings only. Use 'lintro chk --fix' to "
-            "generate AI fix suggestions for its findings.",
+            "idiom-review reports findings only; it runs under 'lintro review'.",
         )

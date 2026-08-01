@@ -13,7 +13,6 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,14 +36,6 @@ if TYPE_CHECKING:
     from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
 _CACHE_SUBDIR = ".lintro-cache/idiom"
-
-
-class IdiomReviewMode(StrEnum):
-    """Which review modes the tool should run."""
-
-    PER_FILE = "per-file"
-    DUPLICATION = "duplication"
-    BOTH = "both"
 
 
 def _cache_key(namespace: str, payload: str) -> str:

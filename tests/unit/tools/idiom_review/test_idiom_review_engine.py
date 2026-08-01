@@ -12,7 +12,8 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.providers.response import AIResponse
-from lintro.tools.idiom_review.engine import IdiomReviewEngine, IdiomReviewMode
+from lintro.enums.idiom_review_mode import IdiomReviewMode
+from lintro.tools.idiom_review.engine import IdiomReviewEngine
 from lintro.tools.idiom_review.signatures import extract_python_signatures
 
 

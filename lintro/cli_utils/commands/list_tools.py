@@ -41,6 +41,38 @@ def _resolve_conflicts(
     return conflict_names
 
 
+def _tool_capabilities(
+    *,
+    tool_name: str,
+    plugin: BaseToolPlugin,
+    check_tools: dict[str, BaseToolPlugin],
+    fix_tools: dict[str, BaseToolPlugin],
+) -> list[str]:
+    """Resolve the verbs a tool can be invoked with.
+
+    Advisory AI finders report ``review`` rather than ``check``: they are
+    excluded from ``lintro chk`` so their nondeterministic findings never
+    gate deterministic checks or the health score (#1308).
+
+    Args:
+        tool_name: Registered tool name.
+        plugin: The plugin instance.
+        check_tools: Tools that support checking.
+        fix_tools: Tools that support fixing.
+
+    Returns:
+        Capability labels in display order.
+    """
+    if plugin.definition.is_advisory:
+        return ["review"]
+    capabilities: list[str] = []
+    if tool_name in check_tools:
+        capabilities.append("check")
+    if tool_name in fix_tools:
+        capabilities.append("fix")
+    return capabilities
+
+
 @click.command("list-tools")
 @click.option(
     "--output",
@@ -110,15 +142,17 @@ def list_tools(
     if json_output:
         tools_data: dict[str, dict[str, object]] = {}
         for tool_name, plugin in available_tools.items():
-            capabilities: list[str] = []
-            if tool_name in check_tools:
-                capabilities.append("check")
-            if tool_name in fix_tools:
-                capabilities.append("fix")
+            capabilities = _tool_capabilities(
+                tool_name=tool_name,
+                plugin=plugin,
+                check_tools=check_tools,
+                fix_tools=fix_tools,
+            )
 
             tool_info: dict[str, object] = {
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
+                "execution_class": plugin.definition.execution_class.value,
                 "priority": get_tool_priority(tool_name),
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
@@ -171,11 +205,12 @@ def list_tools(
         emoji = get_tool_emoji(tool_name)
 
         # Capabilities
-        tool_capabilities: list[str] = []
-        if tool_name in check_tools:
-            tool_capabilities.append("check")
-        if tool_name in fix_tools:
-            tool_capabilities.append("fix")
+        tool_capabilities = _tool_capabilities(
+            tool_name=tool_name,
+            plugin=plugin,
+            check_tools=check_tools,
+            fix_tools=fix_tools,
+        )
         caps_display = ", ".join(tool_capabilities) if tool_capabilities else "-"
 
         # Priority and type

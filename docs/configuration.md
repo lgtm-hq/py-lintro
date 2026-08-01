@@ -2774,9 +2774,9 @@ ai:
 
 The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
 that is syntactically correct but non-idiomatic or redundantly duplicated across files.
-Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
-that runs as part of the normal `lintro check` pipeline — distinct from the
-`lintro review` diff-review command.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin. It
+is classified **advisory**, so it runs under `lintro review` — never under
+`lintro check` or `lintro format`, whose findings must stay deterministic (#1308).
 
 **Install:**
 
@@ -2828,7 +2828,7 @@ tools:
 Or enable ad hoc from the CLI without modifying config:
 
 ```bash
-lintro check --tools idiom-review --tool-options idiom-review:enabled=true
+lintro review --advisory-only --tool-options idiom-review:enabled=true
 ```
 
 ## Advanced Configuration
