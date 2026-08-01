@@ -237,12 +237,14 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             install_hint=hint,
             upgrade_hint=upgrade_hint,
         )
-    except (FileNotFoundError, OSError) as e:
+    except OSError as e:
+        # FileNotFoundError is an OSError subclass; naming both said nothing.
         return ToolCheckResult(
             tool=tool,
             status=ToolStatus.MISSING,
             error="os_error",
             details=str(e),
+            path=tool_path,
             install_hint=hint,
             upgrade_hint=upgrade_hint,
         )
@@ -286,22 +288,19 @@ def collect_tool_checks(
     if check_all or config is None:
         return [check_tool(tool=tool, context=context) for tool in all_tools]
 
-    results = [
-        check_tool(tool=tool, context=context)
-        for tool in all_tools
-        if config.is_tool_enabled(tool.name)
-    ]
-    results.extend(
-        ToolCheckResult(
-            tool=tool,
-            status=ToolStatus.DISABLED,
-            install_hint="",
-            upgrade_hint="",
+    return [
+        (
+            check_tool(tool=tool, context=context)
+            if config.is_tool_enabled(tool.name)
+            else ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.DISABLED,
+                install_hint="",
+                upgrade_hint="",
+            )
         )
         for tool in all_tools
-        if not config.is_tool_enabled(tool.name)
-    )
-    return results
+    ]
 
 
 def mcp_extra_status() -> dict[str, str]:
@@ -576,12 +575,12 @@ def _tool_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
         if result.tool.tier != "dev" and result.status is not ToolStatus.DISABLED
     ]
     missing = [r for r in production if r.status is ToolStatus.MISSING]
-    stale = [
-        r
-        for r in production
-        if r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
-    ]
+    incompatible = [r for r in production if r.status is ToolStatus.INCOMPATIBLE]
+    outdated = [r for r in production if r.status is ToolStatus.OUTDATED]
     unreadable = [r for r in production if r.status is ToolStatus.UNKNOWN]
+    # Enablement is only applied when a config was loaded; saying "enabled"
+    # after a failed load would claim a filter that never ran.
+    scope = "enabled tool(s)" if config is not None else "tool(s)"
 
     checks: list[DoctorCheck] = []
     if missing:
@@ -591,8 +590,7 @@ def _tool_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
                 category=DoctorCheckCategory.TOOLS,
                 check="tools.missing",
                 status=DoctorCheckStatus.ERROR,
-                detail=f"{len(names)} enabled tool(s) not installed: "
-                + ", ".join(names),
+                detail=f"{len(names)} {scope} not installed: " + ", ".join(names),
                 remediation=f"lintro install {' '.join(names)}",
             ),
         )
@@ -602,27 +600,43 @@ def _tool_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
                 category=DoctorCheckCategory.TOOLS,
                 check="tools.missing",
                 status=DoctorCheckStatus.OK,
-                detail=f"All {len(production)} enabled tool(s) are installed",
+                detail=f"All {len(production)} {scope} are installed",
             ),
         )
 
-    if stale or unreadable:
-        names = sorted(r.tool.name for r in stale)
-        unknown_names = sorted(r.tool.name for r in unreadable)
+    if incompatible or outdated or unreadable:
+        upgradable = sorted(r.tool.name for r in (*incompatible, *outdated))
         parts: list[str] = []
-        if names:
-            parts.append("outdated: " + ", ".join(names))
-        if unknown_names:
-            parts.append("version unreadable: " + ", ".join(unknown_names))
+        if incompatible:
+            parts.append(
+                "below the required minimum: "
+                + ", ".join(sorted(r.tool.name for r in incompatible)),
+            )
+        if outdated:
+            parts.append(
+                "outdated: " + ", ".join(sorted(r.tool.name for r in outdated)),
+            )
+        if unreadable:
+            parts.append(
+                "version unreadable: "
+                + ", ".join(sorted(r.tool.name for r in unreadable)),
+            )
         checks.append(
             DoctorCheck(
                 category=DoctorCheckCategory.TOOLS,
                 check="tools.versions",
-                status=DoctorCheckStatus.WARNING,
+                # A version below the hard minimum is not "a bit old": lintro
+                # skips such a tool outright, so it must not read as a warning
+                # when the same status is an error everywhere else.
+                status=(
+                    DoctorCheckStatus.ERROR
+                    if incompatible
+                    else DoctorCheckStatus.WARNING
+                ),
                 detail="; ".join(parts),
                 remediation=(
-                    f"lintro install --upgrade {' '.join(names)}"
-                    if names
+                    f"lintro install --upgrade {' '.join(upgradable)}"
+                    if upgradable
                     else "Run the tool manually to see what it reports"
                 ),
             ),

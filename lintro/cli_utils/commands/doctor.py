@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict
+from functools import partial
 
 import click
 from rich.console import Console
@@ -462,14 +463,17 @@ def doctor_command(
         1 for check in oxlint_checks if _oxlint_check_is_failure(check)
     )
 
-    # Determine which tools to check (names were validated above)
-    all_results = collect_tool_checks(
+    # Determine which tools to check (names were validated above). Bound once
+    # so the post-fix recheck below cannot drift from the initial selection.
+    probe_tools = partial(
+        collect_tool_checks,
         registry=registry,
         context=context,
         config=config,
         tool_names=tool_names or None,
         check_all=check_all,
     )
+    all_results = probe_tools()
 
     # Split into production and dev
     prod_results = [
@@ -631,13 +635,7 @@ def doctor_command(
 
     if fix and has_fixable:
         _run_fix(display_console, prod_results, context, registry)
-        rechecked = collect_tool_checks(
-            registry=registry,
-            context=context,
-            config=config,
-            tool_names=tool_names or None,
-            check_all=check_all,
-        )
+        rechecked = probe_tools()
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
         outdated_count = sum(

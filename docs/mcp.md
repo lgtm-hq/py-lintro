@@ -263,10 +263,14 @@ failing a `lintro_check`.
 }
 ```
 
-- A tool that is not installed is listed with `installed: false`, `version: null`, its
-  `status` (`missing`, `outdated`, `incompatible`, `unknown`) and an `install_hint` —
-  never omitted. An absent entry would be indistinguishable from a tool lintro does not
-  support.
+- A tool is listed whether or not it is usable — never omitted, because an absent entry
+  would be indistinguishable from a tool lintro does not support. `status` is `missing`
+  (absent from `PATH`, non-zero exit, or timeout — `installed: false`, `version: null`),
+  `outdated` or `incompatible` (the binary ran and reported a version below the
+  recommended or the minimum — `installed: true`), or `unknown` (it ran but printed
+  nothing a parser recognized — `installed: true`, `version: null`). A missing tool
+  carries an `install_hint`. Tools disabled in the workspace config are still listed and
+  probed here; `lintro doctor` is what reports enablement.
 - `types` is a list, not a scalar: `ToolType` is a bitmask and tools such as `ruff` and
   `oxlint` are genuinely both a linter and a formatter.
 - `capabilities` is what you may call the tool with: `check`, `fix`, or `review` for

@@ -374,6 +374,39 @@ def test_missing_binaries_are_folded_into_one_actionable_check(
 
 
 @pytest.mark.usefixtures("stub_environment")
+def test_a_version_below_the_minimum_is_an_error_not_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lintro skips an incompatible tool outright, so it cannot read as a nit."""
+    monkeypatch.setattr(
+        doctor_report,
+        "collect_tool_checks",
+        lambda **_kwargs: [
+            ToolCheckResult(
+                tool=_make_tool("stylelint"),
+                status=ToolStatus.INCOMPATIBLE,
+                installed_version="0.1.0",
+            ),
+            ToolCheckResult(
+                tool=_make_tool("ruff"),
+                status=ToolStatus.OUTDATED,
+                installed_version="0.13.0",
+            ),
+        ],
+    )
+
+    report = collect_doctor_report()
+
+    versions = next(check for check in report.checks if check.check == "tools.versions")
+    assert_that(versions.status).is_equal_to(DoctorCheckStatus.ERROR)
+    assert_that(versions.detail).contains("below the required minimum: stylelint")
+    assert_that(versions.detail).contains("outdated: ruff")
+    assert_that(versions.remediation).is_equal_to(
+        "lintro install --upgrade ruff stylelint",
+    )
+
+
+@pytest.mark.usefixtures("stub_environment")
 def test_healthy_tools_still_emit_their_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
