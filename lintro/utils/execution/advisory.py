@@ -22,6 +22,7 @@ from loguru import logger
 
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
+from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
@@ -34,8 +35,6 @@ if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
-    "ADVISORY_TOOLS_ALL",
-    "ADVISORY_TOOLS_NONE",
     "AdvisorySelection",
     "advisory_findings_count",
     "advisory_results_to_payload",
@@ -44,11 +43,6 @@ __all__ = [
     "resolve_advisory_tools",
     "run_advisory_tools",
 ]
-
-#: ``--advisory-tools`` value selecting every enabled advisory tool.
-ADVISORY_TOOLS_ALL = "all"
-#: ``--advisory-tools`` value disabling advisory execution entirely.
-ADVISORY_TOOLS_NONE = "none"
 
 
 @dataclass(frozen=True)
@@ -103,12 +97,12 @@ def resolve_advisory_tools(
     config = lintro_config or get_config()
     advisory_names = get_advisory_tool_names()
 
-    normalized = (requested or ADVISORY_TOOLS_ALL).strip().lower()
-    if normalized == ADVISORY_TOOLS_NONE:
+    normalized = (requested or AdvisoryToolsValue.ALL).strip().lower()
+    if normalized == AdvisoryToolsValue.NONE:
         return AdvisorySelection()
 
     skipped: list[SkippedTool] = []
-    if normalized == ADVISORY_TOOLS_ALL:
+    if normalized == AdvisoryToolsValue.ALL:
         to_run: list[str] = []
         for name in advisory_names:
             if config.is_tool_enabled(name):

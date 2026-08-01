@@ -57,9 +57,8 @@ from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.transport import apply_transport_override
 from lintro.config.config_loader import get_config
+from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
-    ADVISORY_TOOLS_ALL,
-    ADVISORY_TOOLS_NONE,
     advisory_findings_count,
     advisory_results_to_payload,
     render_advisory_results,
@@ -509,10 +508,10 @@ def _execute_advisory(
         selection = resolve_advisory_tools(requested=advisory_tools)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
-    for skipped in selection.skipped:
-        # Only mention explicitly named tools; the default 'all' selection
-        # skipping an opt-in tool is the normal, quiet case.
-        if advisory_tools not in (None, ADVISORY_TOOLS_ALL):
+    # Only report explicitly named tools; the default 'all' selection skipping
+    # a config-disabled tool is the normal, quiet case.
+    if advisory_tools not in (None, AdvisoryToolsValue.ALL):
+        for skipped in selection.skipped:
             logger.info(
                 "Skipping advisory tool {}: {}",
                 skipped.name,
@@ -546,7 +545,7 @@ def _run_advisory_only(
         SystemExit: Always; carries the resolved exit code.
         click.UsageError: If the selection resolves to no tools at all.
     """
-    if (advisory_tools or "").strip().lower() == ADVISORY_TOOLS_NONE:
+    if (advisory_tools or "").strip().lower() == AdvisoryToolsValue.NONE:
         raise click.UsageError(
             "--advisory-only with --advisory-tools none would run nothing.",
         )
