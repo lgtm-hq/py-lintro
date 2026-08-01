@@ -446,3 +446,74 @@ def test_review_fixes_interactive_quit_via_keyboard(
     assert_that(accepted).is_equal_to(0)
     # Only the first group was seen before quit
     assert_that(applied).is_empty()
+
+
+@patch("lintro.ai.interactive.sys.stdin.isatty", return_value=True)
+@patch("lintro.ai.interactive.click.getchar", side_effect=["r", "q"])
+def test_reject_restores_from_checkpoint(_mock_getchar, _mock_isatty, tmp_path):
+    """Reject restores target files from the pre-batch undo state."""
+    from lintro.ai.undo import prepare_fix_batch
+
+    f = tmp_path / "app.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=1,
+        code="E001",
+        original_code="x = 1\n",
+        suggested_code="x = 2\n",
+    )
+    undo_state = prepare_fix_batch([fix], tmp_path)
+    f.write_text("x = 99\n", encoding="utf-8")
+
+    accepted, rejected, applied = review_fixes_interactive(
+        [fix],
+        workspace_root=tmp_path,
+        undo_state=undo_state,
+    )
+    assert_that(rejected).is_equal_to(1)
+    assert_that(accepted).is_equal_to(0)
+    assert_that(applied).is_empty()
+    assert_that(f.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
+
+
+@patch("lintro.ai.interactive.sys.stdin.isatty", return_value=True)
+@patch("lintro.ai.interactive.click.getchar", side_effect=["y", "r"])
+def test_reject_preserves_accepted_fixes_in_shared_file(
+    _mock_getchar,
+    _mock_isatty,
+    tmp_path,
+):
+    """Rejecting a group must not roll back a file an earlier group changed."""
+    from lintro.ai.undo import prepare_fix_batch
+
+    target = tmp_path / "app.py"
+    target.write_text("x = 1\ny = 1\n", encoding="utf-8")
+    accepted_fix = AIFixSuggestion(
+        file=str(target),
+        line=1,
+        code="E001",
+        original_code="x = 1\n",
+        suggested_code="x = 2\n",
+    )
+    rejected_fix = AIFixSuggestion(
+        file=str(target),
+        line=2,
+        code="E002",
+        original_code="y = 1\n",
+        suggested_code="y = 2\n",
+    )
+    undo_state = prepare_fix_batch([accepted_fix, rejected_fix], tmp_path)
+
+    accepted, rejected, applied = review_fixes_interactive(
+        [accepted_fix, rejected_fix],
+        workspace_root=tmp_path,
+        undo_state=undo_state,
+    )
+
+    assert_that(accepted).is_equal_to(1)
+    assert_that(rejected).is_equal_to(1)
+    assert_that(applied).is_length(1)
+    contents = target.read_text(encoding="utf-8")
+    assert_that(contents).contains("x = 2")
+    assert_that(contents).contains("y = 1")

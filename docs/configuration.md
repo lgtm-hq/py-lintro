@@ -2764,6 +2764,8 @@ ai:
 | `show_cost_estimate`    | bool   | `true`      | Show token/cost info in output                   |
 | `context_lines`         | int    | `15`        | Lines of context sent for fix generation (1-100) |
 | `fix_search_radius`     | int    | `5`         | Line search radius for fix application (1-50)    |
+| `checkpoint_retention`  | int    | `10`        | Git checkpoint refs kept (>=0; 0 = current only) |
+| `checkpoint_fmt`        | bool   | `false`     | Git checkpoint before `lintro format` mutations  |
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |

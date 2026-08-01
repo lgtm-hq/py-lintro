@@ -1,5 +1,8 @@
 """Shared fixtures for unit tests."""
 
+import os
+import subprocess  # nosec B404 - drives git in temp test repos; shell=False
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -142,3 +145,58 @@ def fake_logger() -> FakeLogger:
         FakeLogger: Configured FakeLogger instance for unit testing.
     """
     return FakeLogger()
+
+
+def run_git(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run a git command in a temp repo, isolated from developer git config.
+
+    A global ``commit.gpgsign``, ``core.hooksPath`` or ``init.templateDir``
+    would otherwise change how these fixtures behave from machine to machine,
+    and an exported ``GIT_INDEX_FILE`` would point git at the wrong index.
+
+    Args:
+        cmd: Full argv, starting with ``git``.
+        cwd: Working directory.
+
+    Returns:
+        The completed process.
+    """
+    env = os.environ.copy()
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    for leaked in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(leaked, None)
+    return (
+        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+    )
+
+
+def init_git_repo(tmp_path: Path, *, files: dict[str, str]) -> Path:
+    """Create a temp git repo on ``main`` with ``files`` committed.
+
+    Args:
+        tmp_path: Directory to turn into a repository.
+        files: Repo-relative path to contents for the initial commit.
+
+    Returns:
+        The repository root.
+    """
+    run_git(["git", "init"], cwd=tmp_path)
+    run_git(["git", "config", "user.email", "test@example.com"], cwd=tmp_path)
+    run_git(["git", "config", "user.name", "Test User"], cwd=tmp_path)
+    # Pin the branch name rather than depending on the host's init.defaultBranch.
+    run_git(["git", "checkout", "-b", "main"], cwd=tmp_path)
+    for rel, contents in files.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(contents, encoding="utf-8")
+    run_git(["git", "add", *files], cwd=tmp_path)
+    run_git(["git", "commit", "-m", "init"], cwd=tmp_path)
+    return tmp_path

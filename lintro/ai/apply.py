@@ -12,8 +12,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.ai.checkpoints import CheckpointError
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import resolve_workspace_file
+from lintro.ai.undo import UndoState, restore_undo
 
 
 def _apply_fix(
@@ -143,7 +145,21 @@ def apply_fixes(
     auto_apply: bool = False,
     search_radius: int | None = None,
 ) -> list[AIFixSuggestion]:
-    """Apply suggestions and return only those successfully applied."""
+    """Apply suggestions and return only those successfully applied.
+
+    Rollback state is the caller's responsibility: capture it with
+    :func:`~lintro.ai.undo.prepare_fix_batch` *before* calling this, and undo
+    with :func:`rollback_applied_paths`.
+
+    Args:
+        suggestions: Fix suggestions to apply.
+        workspace_root: Root directory limiting writable paths.
+        auto_apply: Reserved for future use; kept for API compatibility.
+        search_radius: Max lines above/below the target line to search.
+
+    Returns:
+        Suggestions that were applied successfully.
+    """
     extra: dict[str, int] = {}
     if search_radius is not None:
         extra["search_radius"] = search_radius
@@ -157,3 +173,35 @@ def apply_fixes(
             **extra,
         )
     ]
+
+
+def rollback_applied_paths(
+    undo_state: UndoState,
+    suggestions: Sequence[AIFixSuggestion],
+) -> bool:
+    """Restore files for ``suggestions`` from ``undo_state``.
+
+    Used by interactive rejection and callers that need per-file rollback
+    from the checkpoint tree (or file-snapshot fallback), not from
+    in-memory suggestion ``original_code``.
+
+    A restore that fails is logged and swallowed: rollback runs inside an
+    interactive session, where crashing would cost the user their running
+    accept/reject state and every group still to review.
+
+    Args:
+        undo_state: Handle from :func:`~lintro.ai.undo.prepare_fix_batch`.
+        suggestions: Suggestions whose target files should be restored.
+
+    Returns:
+        True when every target was restored, False when the restore failed.
+    """
+    paths = [s.file for s in suggestions if s.file]
+    if not paths:
+        return True
+    try:
+        restore_undo(undo_state, paths)
+    except (OSError, CheckpointError) as exc:
+        logger.debug("Checkpoint restore failed for {}: {}", paths, exc)
+        return False
+    return True

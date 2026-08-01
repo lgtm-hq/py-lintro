@@ -245,6 +245,26 @@ class AIConfig(BaseModel):
         ),
     )
 
+    checkpoint_retention: int = Field(
+        default=10,
+        ge=0,
+        description=(
+            "Total git checkpoint refs to retain under "
+            "refs/lintro/checkpoints/, this run's included; older refs are "
+            "pruned first. Default 10; 0 keeps only the current run's ref."
+        ),
+    )
+    checkpoint_fmt: bool = Field(
+        default=False,
+        description=(
+            "When True, capture a git checkpoint before `lintro fmt` mutates "
+            "files, so `git diff <ref>` and "
+            "`git restore --source=<ref> --worktree -- <path>` can review or "
+            "undo the run. Git-only: nothing is captured outside a git work "
+            "tree."
+        ),
+    )
+
     review_allow_unredacted_git_native: bool = Field(
         default=False,
         description=(

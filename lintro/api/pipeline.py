@@ -94,6 +94,53 @@ def _sarif_enrichment(
     return sarif_enrichment_from_results(all_results=artifact.tool_results)
 
 
+def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
+    """Snapshot ``fmt`` targets when ``ai.checkpoint_fmt`` is enabled.
+
+    ``lintro fmt`` rewrites files in place, so the same pre-mutation git
+    checkpoint that guards AI fix batches is offered here behind an opt-in
+    flag. The ref is announced on the console because, unlike the AI fix path,
+    nothing else in a ``fmt`` run holds a handle to it — ``git diff <ref>`` and
+    ``git restore --source=<ref> --worktree -- <path>`` are the entry points.
+    Outside a git work tree nothing is captured: an in-memory snapshot would
+    not survive the process, so it would buy nothing for the price of reading
+    every target.
+
+    This lives in the API layer rather than the executor because the executor
+    may not import :mod:`lintro.ai` (issue #724).
+
+    Args:
+        ctx: The run context for this run.
+        paths: Paths the run will format.
+    """
+    from lintro.enums.action import Action as _Action
+
+    ai_config = getattr(ctx.lintro_config, "ai", None)
+    if (
+        ctx.action != _Action.FIX
+        or ctx.dry_run_preview
+        or ai_config is None
+        or not getattr(ai_config, "checkpoint_fmt", False)
+    ):
+        return
+
+    from pathlib import Path
+
+    from lintro.ai.checkpoints import capture_checkpoint
+
+    checkpoint = capture_checkpoint(
+        paths,
+        workspace_root=Path.cwd(),
+        keep=ai_config.checkpoint_retention,
+    )
+    if checkpoint is None or ctx.clean_stdout_output or ctx.score_only:
+        return
+    ctx.logger.console_output(
+        text=f"Captured fmt checkpoint {checkpoint.ref}",
+        color="cyan",
+    )
+
+
 def run_lint_artifact(
     *,
     action: str | Action,
@@ -175,6 +222,7 @@ def run_lint_artifact(
         no_art=no_art,
         dry_run=dry_run,
     )
+    _capture_fmt_checkpoint(ctx=ctx, paths=paths)
     artifact = execute_run(
         ctx=ctx,
         paths=paths,

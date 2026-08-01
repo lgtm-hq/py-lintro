@@ -18,7 +18,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from lintro.ai.apply import apply_fixes
+from lintro.ai.apply import apply_fixes, rollback_applied_paths
 from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
 from lintro.ai.display.validation import render_validation
 from lintro.ai.enums import RiskLevel
@@ -30,6 +30,7 @@ from lintro.ai.risk import (
     classify_fix_risk,
     is_safe_style_fix,
 )
+from lintro.ai.undo import UndoState
 from lintro.ai.validation import validate_applied_fixes
 
 __all__ = ["apply_fixes", "review_fixes_interactive"]
@@ -236,6 +237,7 @@ def review_fixes_interactive(
     validate_after_group: bool = False,
     workspace_root: Path,
     search_radius: int = 5,
+    undo_state: UndoState | None = None,
 ) -> tuple[int, int, list[AIFixSuggestion]]:
     """Present fix suggestions grouped by error code for review.
 
@@ -243,12 +245,20 @@ def review_fixes_interactive(
     ``[y]accept group / [a]accept group + remaining / [r]eject /
     [d]iffs / [s]kip / [v]toggle per-group validation / [q]uit``
 
+    When ``undo_state`` is provided, rejecting a group restores that group's
+    target files from the pre-batch git checkpoint (or file-snapshot
+    fallback) rather than from in-memory suggestion copies. Restore is
+    idempotent when the files were never mutated, and files already changed
+    by an earlier accepted group are skipped so accepted work survives.
+
     Args:
         suggestions: Fix suggestions to review.
         validate_after_group: Whether to validate immediately after
             each accepted group.
         workspace_root: Root directory limiting writable paths.
         search_radius: Max lines above/below the target line to search.
+        undo_state: Optional pre-batch checkpoint / snapshot for reject
+            rollback.
 
     Returns:
         Tuple of (accepted_count, rejected_count, applied_suggestions).
@@ -382,6 +392,21 @@ def review_fixes_interactive(
                 accept_all = True
                 console.print("  [dim]Will accept all remaining groups.[/dim]")
         elif choice == ReviewKey.REJECT:
+            if undo_state is not None:
+                # Rejection restores from the checkpoint tree (or file-snapshot
+                # fallback), not from in-memory originals. Files an earlier
+                # accepted group already changed are left alone: restoring them
+                # would silently discard fixes the user just accepted.
+                accepted_files = {s.file for s in all_applied if s.file}
+                restored = rollback_applied_paths(
+                    undo_state,
+                    [fix for fix in fixes if fix.file not in accepted_files],
+                )
+                if not restored:
+                    console.print(
+                        "  [red]⚠ Could not restore this group from the "
+                        "checkpoint; review it by hand.[/red]",
+                    )
             rejected += len(fixes)
             console.print(
                 f"  [yellow]✗ Rejected {len(fixes)} "

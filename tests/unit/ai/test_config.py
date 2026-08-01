@@ -329,3 +329,29 @@ def test_explicit_sub_toggle_suppresses_legacy_default(
     assert_that(config.review).is_true()
     deprecations = [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
     assert_that(deprecations).is_empty()
+
+
+def test_checkpoint_defaults() -> None:
+    """Git checkpoint retention defaults to 10; fmt checkpointing is off."""
+    config = AIConfig()
+    assert_that(config.checkpoint_retention).is_equal_to(10)
+    assert_that(config.checkpoint_fmt).is_false()
+
+
+def test_checkpoint_overrides() -> None:
+    """Checkpoint config keys can be overridden."""
+    config = AIConfig(checkpoint_retention=3, checkpoint_fmt=True)
+    assert_that(config.checkpoint_retention).is_equal_to(3)
+    assert_that(config.checkpoint_fmt).is_true()
+
+
+def test_checkpoint_retention_accepts_zero() -> None:
+    """Zero retention is valid and means "keep only the current run"."""
+    assert_that(AIConfig(checkpoint_retention=0).checkpoint_retention).is_equal_to(0)
+
+
+def test_checkpoint_retention_rejects_negative() -> None:
+    """Negative retention is rejected by the ge=0 bound."""
+    assert_that(AIConfig).raises(ValidationError).when_called_with(
+        checkpoint_retention=-1,
+    )

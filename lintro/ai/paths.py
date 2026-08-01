@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 OUTSIDE_WORKSPACE_SENTINEL = "<outside-workspace>"
@@ -89,3 +90,51 @@ def to_provider_path(file_path: str, workspace_root: Path) -> str:
     if resolved is None:
         return OUTSIDE_WORKSPACE_SENTINEL
     return resolved.relative_to(workspace_root.resolve()).as_posix()
+
+
+def atomic_write_bytes(
+    path: Path,
+    data: bytes,
+    *,
+    mode: int | None = None,
+    fallback_mode: int = 0o644,
+) -> None:
+    """Replace ``path`` with ``data`` atomically, preserving its mode.
+
+    ``tempfile.mkstemp`` creates files as ``0600`` and :meth:`Path.replace`
+    keeps that mode, so a naive write-then-rename silently strips the
+    executable bit and group/other read access from every file it restores.
+
+    Args:
+        path: Destination file. Its parent must already exist.
+        data: Bytes to write.
+        mode: Permission bits to force. Callers restoring a snapshot pass the
+            bits the file had *then*, so a mode the run itself changed is
+            rolled back too. ``None`` keeps whatever ``path`` currently has.
+        fallback_mode: Permission bits to apply when ``mode`` is ``None`` and
+            ``path`` does not exist yet.
+
+    Raises:
+        BaseException: Re-raised after the partial temporary file is removed,
+            so a failed write never leaves debris beside the target.
+    """
+    if mode is None:
+        mode = (
+            path.stat().st_mode & 0o7777
+            if path.is_file() and not path.is_symlink()
+            else fallback_mode
+        )
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".lintro-tmp")
+    try:
+        try:
+            handle = os.fdopen(fd, "wb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with handle:
+            handle.write(data)
+        os.chmod(tmp, mode)  # noqa: S103 - mirrors the replaced file's own mode
+        Path(tmp).replace(path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
