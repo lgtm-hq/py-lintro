@@ -37,7 +37,7 @@ SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "install": "Install or upgrade external tools used by lintro.",
     "licenses": "Check dependency licenses for policy compliance.",
     "list-tools": "List all available tools and their configurations.",
-    "review": "Run AI-powered diff-based code review.",
+    "review": "Run AI-powered diff-based code review, plus advisory AI finders.",
     "setup": "Set up lintro for your project.",
     "test": "Run tests using pytest.",
     "versions": "Display version information for all supported tools.",

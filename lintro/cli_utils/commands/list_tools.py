@@ -41,6 +41,43 @@ def _resolve_conflicts(
     return conflict_names
 
 
+#: Capability label reported for advisory AI finders, which run under
+#: ``lintro review`` instead of ``chk``/``fmt`` (#1308).
+ADVISORY_CAPABILITY: str = "review"
+
+
+def _tool_capabilities(
+    *,
+    tool_name: str,
+    plugin: BaseToolPlugin,
+    check_tools: dict[str, BaseToolPlugin],
+    fix_tools: dict[str, BaseToolPlugin],
+) -> list[str]:
+    """Resolve the verbs a tool can be invoked with.
+
+    Advisory AI finders report ``review`` rather than ``check``: they are
+    excluded from ``lintro chk`` so their nondeterministic findings never
+    gate deterministic checks or the health score (#1308).
+
+    Args:
+        tool_name: Registered tool name.
+        plugin: The plugin instance.
+        check_tools: Tools that support checking.
+        fix_tools: Tools that support fixing.
+
+    Returns:
+        Capability labels in display order.
+    """
+    if plugin.definition.is_advisory:
+        return [ADVISORY_CAPABILITY]
+    capabilities: list[str] = []
+    if tool_name in check_tools:
+        capabilities.append(Action.CHECK.value)
+    if tool_name in fix_tools:
+        capabilities.append(Action.FIX.value)
+    return capabilities
+
+
 @click.command("list-tools")
 @click.option(
     "--output",
@@ -110,15 +147,17 @@ def list_tools(
     if json_output:
         tools_data: dict[str, dict[str, object]] = {}
         for tool_name, plugin in available_tools.items():
-            capabilities: list[str] = []
-            if tool_name in check_tools:
-                capabilities.append("check")
-            if tool_name in fix_tools:
-                capabilities.append("fix")
+            capabilities = _tool_capabilities(
+                tool_name=tool_name,
+                plugin=plugin,
+                check_tools=check_tools,
+                fix_tools=fix_tools,
+            )
 
             tool_info: dict[str, object] = {
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
+                "execution_class": plugin.definition.execution_class.value,
                 "priority": get_tool_priority(tool_name),
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
@@ -171,11 +210,12 @@ def list_tools(
         emoji = get_tool_emoji(tool_name)
 
         # Capabilities
-        tool_capabilities: list[str] = []
-        if tool_name in check_tools:
-            tool_capabilities.append("check")
-        if tool_name in fix_tools:
-            tool_capabilities.append("fix")
+        tool_capabilities = _tool_capabilities(
+            tool_name=tool_name,
+            plugin=plugin,
+            check_tools=check_tools,
+            fix_tools=fix_tools,
+        )
         caps_display = ", ".join(tool_capabilities) if tool_capabilities else "-"
 
         # Priority and type
@@ -277,11 +317,12 @@ def _generate_plain_text_output(
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
 
-        capabilities: list[str] = []
-        if tool_name in check_tools:
-            capabilities.append(Action.CHECK.value)
-        if tool_name in fix_tools:
-            capabilities.append(Action.FIX.value)
+        capabilities = _tool_capabilities(
+            tool_name=tool_name,
+            plugin=plugin,
+            check_tools=check_tools,
+            fix_tools=fix_tools,
+        )
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
 
@@ -301,9 +342,19 @@ def _generate_plain_text_output(
 
     summary_border = "-" * 70
     output_lines.append(summary_border)
+    # Advisory finders never run under chk/fmt, so they are counted on their
+    # own line rather than inflating the check-tool total (#1308).
+    advisory_names = {
+        name
+        for name, plugin in available_tools.items()
+        if plugin.definition.is_advisory
+    }
     output_lines.append(f"Total tools: {len(available_tools)}")
-    output_lines.append(f"Check tools: {len(check_tools)}")
-    output_lines.append(f"Fix tools: {len(fix_tools)}")
+    output_lines.append(
+        f"Check tools: {len(set(check_tools) - advisory_names)}",
+    )
+    output_lines.append(f"Fix tools: {len(set(fix_tools) - advisory_names)}")
+    output_lines.append(f"Advisory tools: {len(advisory_names)}")
     output_lines.append(summary_border)
 
     return output_lines

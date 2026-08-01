@@ -38,6 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from lintro.enums.execution_class import ExecutionClass
 from lintro.enums.tool_type import ToolType
 
 if TYPE_CHECKING:
@@ -96,6 +97,9 @@ class ToolDefinition:
         description: Human-readable description of what the tool does.
         can_fix: Whether the tool can auto-fix issues.
         tool_type: Bitmask of ToolType flags describing capabilities.
+        execution_class: Whether the tool is deterministic (runs under ``chk``
+            and ``fmt``) or advisory (an AI finder; runs under
+            ``lintro review`` only).
         file_patterns: Glob patterns for files this tool operates on.
         priority: Execution priority (lower = runs first). Default is 50.
         conflicts_with: Names of tools that conflict with this one.
@@ -115,6 +119,7 @@ class ToolDefinition:
     # Capabilities
     can_fix: bool = False
     tool_type: ToolType = ToolType.LINTER
+    execution_class: ExecutionClass = ExecutionClass.DETERMINISTIC
 
     # File targeting
     file_patterns: list[str] = field(default_factory=list)
@@ -144,6 +149,15 @@ class ToolDefinition:
             raise ValueError("Tool name cannot be empty")
         if self.priority < 0:
             raise ValueError(f"Tool priority must be non-negative, got {self.priority}")
+
+    @property
+    def is_advisory(self) -> bool:
+        """Report whether this tool produces advisory (nondeterministic) findings.
+
+        Returns:
+            True when the tool is an AI finder routed to ``lintro review``.
+        """
+        return self.execution_class is ExecutionClass.ADVISORY
 
 
 @runtime_checkable

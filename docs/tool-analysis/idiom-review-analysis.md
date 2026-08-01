@@ -3,10 +3,12 @@
 ## Overview
 
 `idiom-review` is a first-class `ToolDefinition` plugin that uses the configured AI
-provider to find issues that syntax-matching linters structurally cannot. It is
-**distinct from the `lintro review` diff-review command** — it participates in the
-normal `lintro check` pipeline like any other tool and produces standard `ToolResult` /
-`Issue` objects.
+provider to find issues that syntax-matching linters structurally cannot. It produces
+standard `ToolResult` / `Issue` objects like any other plugin, but it is classified
+**advisory** rather than deterministic: it runs under `lintro review` (alongside, or
+instead of, the diff review) and never under `lintro check` / `lintro fmt`, so
+nondeterministic findings can never gate deterministic checks or the health score
+(#1308).
 
 It has no external binary; all work is done through the existing AI provider
 abstraction, respecting the same retry, fallback, and cost-budget controls used by other
@@ -77,7 +79,8 @@ orchestration, caching, retry logic, and result parsing.
 
 ```bash
 # Ad-hoc run (opt-in via CLI, no config change needed)
-lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
+# idiom-review is an advisory tool: it runs under `lintro review`, not `chk`.
+lintro review --advisory-only --tool-options idiom-review:enabled=true
 
 # Persistent opt-in via config
 # .lintro-config.yaml:
@@ -88,10 +91,10 @@ lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
 #       mode: per-file
 #       min_confidence: medium
 #       max_files: 25
-lintro chk --tools idiom-review
+lintro review --advisory-only
 
 # Duplication mode across the whole repo
-lintro chk --tools idiom-review \
+lintro review --advisory-only \
   --tool-options idiom-review:enabled=true,idiom-review:mode=duplication
 ```
 
@@ -100,19 +103,19 @@ lintro chk --tools idiom-review \
 - Requires `ai.enabled: true` and a valid API key in the environment before any analysis
   runs.
 - Tool-level `enabled` option (default `false`) acts as a second opt-in gate so that
-  `lintro chk` does not silently incur API costs.
+  `lintro review` does not silently incur API costs.
 - `max_files` (default 25) is the primary cost-control knob for large repos.
 - `min_confidence` (default `medium`) filters noisy low-confidence findings.
 - Caching is automatic; clear `.lintro-cache/idiom` to force a full re-analysis.
 
 See [AI Configuration](../configuration.md#idiom-review-tool-idiom-review) and
-[AI Features Guide](../ai-features.md#ai-idiom-review-idiom-review-tool) for full
+[AI Features Guide](../ai-features.md#advisory-ai-finders-idiom-review) for full
 configuration reference.
 
 ## Recommendations
 
-- Enable `idiom-review` selectively in CI on changed files only (combine with `--diff`)
-  to keep API costs bounded.
+- Enable `idiom-review` selectively in CI. A plain `lintro review` already scopes it to
+  the diff's changed files, which keeps API costs bounded.
 - Start with `mode: per-file` and a low `max_files` limit to evaluate finding quality
   before enabling `duplication` mode on large repos.
 - Use `min_confidence: high` in automated pipelines to reduce false positives; reserve

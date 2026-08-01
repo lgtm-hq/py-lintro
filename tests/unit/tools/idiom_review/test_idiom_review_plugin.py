@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
-import lintro.tools.definitions.idiom_review as plugin_module
+import lintro.ai.availability as availability_module
+import lintro.ai.providers as providers_module
+import lintro.tools.idiom_review.engine as engine_module
 from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIAuthenticationError
 from lintro.config.lintro_config import LintroConfig
@@ -43,6 +45,8 @@ def test_definition_metadata() -> None:
     assert_that(definition.version_command).is_none()
     assert_that(definition.file_patterns).contains("*.py")
     assert_that(definition.default_options["enabled"]).is_false()
+    # Advisory: runs under 'lintro review', never under 'chk' (#1308).
+    assert_that(definition.is_advisory).is_true()
 
 
 def test_disabled_by_default_skips(tmp_path: Path) -> None:
@@ -59,7 +63,7 @@ def test_no_ai_provider_degrades_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When no provider is available, the tool skips rather than fails."""
-    monkeypatch.setattr(plugin_module, "is_ai_available", lambda: False)
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: False)
 
     result = IdiomReviewPlugin().check([_write_py(tmp_path)], {"enabled": True})
 
@@ -125,9 +129,13 @@ class _FakeEngine:
 
 
 def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg, **_kwargs: object())
-    monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _FakeEngine)
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(
+        providers_module,
+        "get_provider",
+        lambda _cfg, **_kwargs: object(),
+    )
+    monkeypatch.setattr(engine_module, "IdiomReviewEngine", _FakeEngine)
 
 
 def test_enabled_with_mocked_engine_reports_issues(
@@ -167,9 +175,9 @@ def test_engine_is_built_from_the_raw_ai_mapping(
             recorded.update(kwargs)
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda cfg, **_kwargs: cfg)
-    monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RecordingEngine)
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(providers_module, "get_provider", lambda cfg, **_kwargs: cfg)
+    monkeypatch.setattr(engine_module, "IdiomReviewEngine", _RecordingEngine)
     monkeypatch.setattr(
         IdiomReviewPlugin,
         "_get_lintro_config",
@@ -211,8 +219,12 @@ def test_ai_error_degrades_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider errors (e.g. depleted credits) skip instead of crashing."""
-    monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
-    monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg, **_kwargs: object())
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(
+        providers_module,
+        "get_provider",
+        lambda _cfg, **_kwargs: object(),
+    )
 
     class _RaisingEngine(_FakeEngine):
         async def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:
@@ -229,7 +241,7 @@ def test_ai_error_degrades_gracefully(
             """
             raise AIAuthenticationError("no credits")
 
-    monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RaisingEngine)
+    monkeypatch.setattr(engine_module, "IdiomReviewEngine", _RaisingEngine)
 
     result = IdiomReviewPlugin().check(
         [_write_py(tmp_path)],

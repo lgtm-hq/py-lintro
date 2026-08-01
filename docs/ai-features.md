@@ -107,14 +107,50 @@ issues, the AI generates fix suggestions and presents them interactively (same U
 `--fix` in `check`). After the session, a post-fix summary wraps up what was
 accomplished.
 
-### AI Idiom Review (`idiom-review` tool)
+### Advisory AI finders (`idiom-review`)
 
 Unlike the AI summary and `--fix` flows (where AI _explains_ or _fixes_ issues that
-linters found), the `idiom-review` tool uses AI to _find_ issues that syntax-matching
-linters structurally cannot. It has no external binary — it runs through the existing AI
-provider abstraction, respecting the same retry, fallback, and cost-budget controls.
+linters found), an **AI finder** uses AI to _find_ issues that syntax-matching linters
+structurally cannot. `idiom-review` is the first one. It has no external binary — it
+runs through the existing AI provider abstraction, respecting the same retry, fallback,
+and cost-budget controls.
 
-It offers two modes:
+> **Migration (#1308).** AI finders used to run under `lintro chk`. They now run under
+> `lintro review` only. Every tool declares an execution class — `deterministic` (all
+> classic linters) or `advisory` (AI finders) — and `chk` runs deterministic tools
+> exclusively. Running `lintro chk --tools idiom-review` is now an error that points at
+> the review verb.
+>
+> ```bash
+> # before
+> lintro chk --tools idiom-review
+>
+> # now (both forms still require the tool's own `enabled` opt-in, from
+> # `tools.idiom-review` config or `--tool-options`)
+> lintro review --advisory-only --advisory-tools idiom-review
+> ```
+>
+> Why: advisory findings are opinions produced by a nondeterministic model. Letting them
+> share `chk` meant two identical runs could disagree, the `--fail-under` health-score
+> gate could move on model mood rather than on regressions, and every contributor paid
+> API latency and dollars on a command meant to be reflexive and offline. Your
+> `tools.idiom-review` config section is unchanged — only the invoking verb moved.
+
+Advisory tools under `lintro review`:
+
+| Flag                       | Meaning                                                              |
+| -------------------------- | -------------------------------------------------------------------- |
+| _(default)_                | Advisory tools run alongside the diff review, over the changed files |
+| `--advisory-tools <names>` | Comma-separated advisory tools, `all` (default), or `none`           |
+| `--advisory-only`          | Skip the diff review; scan `--path` values (default `.`)             |
+| `--fail-on-findings`       | Exit 1 when advisory tools report findings (default: exit 0)         |
+| `--tool-options`           | `tool:option=value` overrides, as in `chk`                           |
+
+Advisory findings never affect the exit code unless `--fail-on-findings` is passed, and
+they never contribute to the `chk` health score. With `--output json`, they appear under
+an additive `advisory` key so existing consumers of the review JSON keep working.
+
+`idiom-review` offers two modes:
 
 - **per-file** (Mode 1) — flags _idiomatic misses_: code that is correct but verbose,
   e.g. `found = False; for x in items: ...` instead of `any(cond for x in items)`.
@@ -144,7 +180,7 @@ tools:
 Or enable it ad hoc from the CLI:
 
 ```bash
-lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
+lintro review --advisory-only --tool-options idiom-review:enabled=true
 ```
 
 ### Custom Review Agents (`.lintro/review-agents/*.md`)

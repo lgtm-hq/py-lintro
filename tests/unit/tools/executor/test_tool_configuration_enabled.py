@@ -21,9 +21,15 @@ from lintro.utils.execution.tool_configuration import get_tools_to_run
 class _FakeToolDefinition:
     """Fake ToolDefinition for testing."""
 
-    def __init__(self, name: str, can_fix: bool = True) -> None:
+    def __init__(
+        self,
+        name: str,
+        can_fix: bool = True,
+        is_advisory: bool = False,
+    ) -> None:
         self.name = name
         self.can_fix = can_fix
+        self.is_advisory = is_advisory
         self.description = ""
         self.file_patterns: list[str] = []
         self.native_configs: list[str] = []
