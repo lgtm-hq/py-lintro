@@ -41,7 +41,7 @@ def test_annotations_from_spec_matches_flags() -> None:
         idempotent=False,
     )
 
-    assert_that(annotations_from_spec(spec)).is_equal_to(spec.to_annotations())
+    assert_that(annotations_from_spec(spec=spec)).is_equal_to(spec.to_annotations())
     assert_that(spec.to_annotations()).is_equal_to(
         {
             "readOnlyHint": False,

@@ -23,7 +23,6 @@ from lintro.ai.doctor_checks import (
 )
 from lintro.ai.interface import resolve_ai_config
 from lintro.enums.tool_status import ToolStatus
-from lintro.mcp import is_mcp_available
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.tool_registry import (
@@ -359,6 +358,8 @@ def _mcp_extra_status() -> dict[str, str]:
     Returns:
         Dict with ``name``, ``status``, ``message``, and ``hint`` keys.
     """
+    from lintro.mcp import is_mcp_available
+
     if is_mcp_available():
         return {
             "name": "mcp",

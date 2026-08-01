@@ -2,7 +2,12 @@
 
 Business logic lives in toolkit handlers registered on
 :class:`~lintro.mcp.registry.McpToolRegistry`. This module only wires
-transport, listing, dispatch, and error shaping.
+transport, listing, argument validation, workspace-boundary enforcement,
+dispatch, and error shaping.
+
+Heavy imports (the ``mcp`` SDK, ``anyio``) are deliberately deferred into the
+functions that need them so importing :mod:`lintro.mcp` — which the ``doctor``
+command and the CLI do — never pulls the optional stack.
 """
 
 # mypy: disable-error-code="untyped-decorator,no-untyped-call"
@@ -15,9 +20,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from lintro import __version__
-from lintro.mcp.errors import McpError, McpErrorCode, McpErrorEnvelope
+from lintro.mcp.enums.mcp_error_code import McpErrorCode
+from lintro.mcp.errors import McpError, McpErrorEnvelope
 from lintro.mcp.registry import McpToolRegistry, McpToolSpec
+from lintro.mcp.validation import resolve_path_arguments, validate_arguments
+
+__all__ = [
+    "build_default_registry",
+    "create_mcp_server",
+    "run_stdio_server",
+    "run_stdio_server_async",
+]
 
 _EMPTY_OBJECT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -26,10 +39,19 @@ _EMPTY_OBJECT_SCHEMA: dict[str, Any] = {
 }
 
 
-def _ping_handler(workspace: Path) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    """Build the built-in ``lintro_ping`` handler bound to ``workspace``."""
+def _ping_handler(*, workspace: Path) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Build the built-in ``lintro_ping`` handler bound to ``workspace``.
+
+    Args:
+        workspace: Workspace root reported back to the caller.
+
+    Returns:
+        A handler callable accepting an arguments dict.
+    """
 
     def handler(_arguments: dict[str, Any]) -> dict[str, Any]:
+        from lintro import __version__
+
         return {
             "status": "ok",
             "lintro_version": __version__,
@@ -39,7 +61,7 @@ def _ping_handler(workspace: Path) -> Callable[[dict[str, Any]], dict[str, Any]]
     return handler
 
 
-def build_default_registry(workspace: Path) -> McpToolRegistry:
+def build_default_registry(*, workspace: Path) -> McpToolRegistry:
     """Create a registry with the built-in smoke tool.
 
     Args:
@@ -50,13 +72,13 @@ def build_default_registry(workspace: Path) -> McpToolRegistry:
     """
     registry = McpToolRegistry()
     registry.register(
-        McpToolSpec(
+        spec=McpToolSpec(
             name="lintro_ping",
             description=(
                 "Return lintro MCP server health, package version, and workspace root."
             ),
             input_schema=dict(_EMPTY_OBJECT_SCHEMA),
-            handler=_ping_handler(workspace),
+            handler=_ping_handler(workspace=workspace),
             read_only=True,
             destructive=False,
             idempotent=True,
@@ -65,22 +87,33 @@ def build_default_registry(workspace: Path) -> McpToolRegistry:
     return registry
 
 
-def _error_result(envelope: McpErrorEnvelope) -> Any:
-    """Build an MCP ``CallToolResult`` marking a structured error."""
+def _error_result(*, envelope: McpErrorEnvelope) -> Any:
+    """Build an MCP ``CallToolResult`` marking a structured error.
+
+    Args:
+        envelope: The structured error to report.
+
+    Returns:
+        A ``mcp.types.CallToolResult`` with ``isError`` set, carrying the
+        envelope as both structured content and JSON text.
+    """
     import mcp.types as types
 
+    payload = envelope.to_payload()
     return types.CallToolResult(
         isError=True,
+        structuredContent=payload,
         content=[
             types.TextContent(
                 type="text",
-                text=json.dumps(envelope.to_dict()),
+                text=json.dumps(payload, indent=2),
             ),
         ],
     )
 
 
 def create_mcp_server(
+    *,
     workspace: Path,
     registry: McpToolRegistry | None = None,
 ) -> Any:
@@ -97,7 +130,7 @@ def create_mcp_server(
     from mcp.server import Server
 
     workspace_root = workspace.resolve()
-    tool_registry = registry or build_default_registry(workspace_root)
+    tool_registry = registry or build_default_registry(workspace=workspace_root)
     server = Server("lintro")
 
     @server.list_tools()
@@ -119,12 +152,16 @@ def create_mcp_server(
             )
         return tools
 
-    @server.call_tool()
+    # validate_input=False: the SDK's built-in schema check reports failures as
+    # opaque prose, which would bypass the structured envelope this server
+    # promises. Validation happens below so every failure mode — unknown tool,
+    # bad arguments, workspace escape, handler crash — shares one shape.
+    @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> Any:
-        spec = tool_registry.get(name)
+        spec = tool_registry.get(name=name)
         if spec is None:
             return _error_result(
-                McpErrorEnvelope(
+                envelope=McpErrorEnvelope(
                     code=McpErrorCode.TOOL_UNAVAILABLE,
                     message=f"Unknown MCP tool: {name}",
                     detail={"tool": name},
@@ -132,24 +169,28 @@ def create_mcp_server(
             )
 
         try:
-            result = spec.handler(arguments or {})
+            raw_arguments = arguments or {}
+            validate_arguments(spec=spec, arguments=raw_arguments)
+            safe_arguments = resolve_path_arguments(
+                spec=spec,
+                arguments=raw_arguments,
+                workspace=workspace_root,
+            )
+            result = spec.handler(safe_arguments)
             if inspect.isawaitable(result):
                 result = await result
             return result
         except McpError as exc:
-            return _error_result(exc.envelope)
+            return _error_result(envelope=exc.envelope)
         except Exception as exc:
             return _error_result(
-                McpErrorEnvelope(
+                envelope=McpErrorEnvelope(
                     code=McpErrorCode.EXECUTION_ERROR,
                     message=str(exc) or exc.__class__.__name__,
                     detail={"tool": name},
                 ),
             )
 
-    # Attach for tests / introspection without using private MCP internals.
-    server.lintro_workspace = workspace_root  # type: ignore[attr-defined]
-    server.lintro_registry = tool_registry  # type: ignore[attr-defined]
     return server
 
 
@@ -158,6 +199,9 @@ async def run_stdio_server_async(
     registry: McpToolRegistry | None = None,
 ) -> None:
     """Run the lintro MCP server over stdio (async).
+
+    Positional parameters are required by ``anyio.run``, which passes task
+    arguments positionally.
 
     Args:
         workspace: Workspace root directory.
@@ -172,6 +216,7 @@ async def run_stdio_server_async(
 
 
 def run_stdio_server(
+    *,
     workspace: Path,
     registry: McpToolRegistry | None = None,
 ) -> None:

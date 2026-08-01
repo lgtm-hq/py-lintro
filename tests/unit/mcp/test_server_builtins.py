@@ -12,8 +12,8 @@ from lintro.mcp.server import build_default_registry
 
 def test_default_registry_includes_read_only_ping(tmp_path: Path) -> None:
     """Default registry registers lintro_ping with read-only hints."""
-    registry = build_default_registry(tmp_path)
-    ping = registry.get("lintro_ping")
+    registry = build_default_registry(workspace=tmp_path)
+    ping = registry.get(name="lintro_ping")
     assert_that(ping).is_not_none()
     assert ping is not None
 

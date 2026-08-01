@@ -1,15 +1,17 @@
 """MCP server foundation for lintro.
 
 The Python ``mcp`` SDK is an optional dependency (``lintro[mcp]``). Importing
-this package does not require the SDK; only starting the stdio server does.
+this package pulls only stdlib-backed modules — enums, dataclasses, and path
+guards — so the CLI and ``lintro doctor`` can reference it unconditionally.
+Only starting the stdio server imports the SDK.
 """
 
 from __future__ import annotations
 
-from lintro.mcp.annotations import tool_annotations_dict
+from lintro.mcp.annotations import annotations_from_spec, tool_annotations_dict
+from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import (
     McpError,
-    McpErrorCode,
     McpErrorEnvelope,
     ensure_within_workspace,
 )
@@ -21,6 +23,7 @@ __all__ = [
     "McpErrorEnvelope",
     "McpToolRegistry",
     "McpToolSpec",
+    "annotations_from_spec",
     "ensure_within_workspace",
     "is_mcp_available",
     "require_mcp",

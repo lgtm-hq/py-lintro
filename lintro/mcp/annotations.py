@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lintro.mcp.registry import McpToolSpec
 
+__all__ = ["annotations_from_spec", "tool_annotations_dict"]
+
 
 def tool_annotations_dict(
     *,
@@ -32,8 +34,8 @@ def tool_annotations_dict(
     }
 
 
-def annotations_from_spec(spec: McpToolSpec) -> dict[str, bool]:
-    """Map a :class:`McpToolSpec` to MCP annotation hints.
+def annotations_from_spec(*, spec: McpToolSpec) -> dict[str, bool]:
+    """Map a :class:`~lintro.mcp.registry.McpToolSpec` to annotation hints.
 
     Args:
         spec: Registered tool specification.

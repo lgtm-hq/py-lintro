@@ -6,8 +6,6 @@ from pathlib import Path
 
 import click
 
-from lintro.mcp import require_mcp
-
 
 @click.command("mcp")
 @click.option(
@@ -30,6 +28,8 @@ def mcp_command(workspace: Path | None) -> None:
         lintro mcp
         lintro mcp --workspace /path/to/repo
     """
+    from lintro.mcp import require_mcp
+
     require_mcp()
     from lintro.mcp.server import run_stdio_server
 
