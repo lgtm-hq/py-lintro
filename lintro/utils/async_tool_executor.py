@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -102,6 +103,7 @@ class AsyncToolExecutor:
 
         loop = asyncio.get_running_loop()
         opts = options or {}
+        started = time.monotonic()
 
         if action == Action.FIX:
             from lintro.utils.tool_executor import _run_fix_with_retry
@@ -124,6 +126,7 @@ class AsyncToolExecutor:
                 opts,
             )
         logger.debug(f"Completed async execution of {tool.definition.name}")
+        result.duration_seconds = time.monotonic() - started
 
         return result
 

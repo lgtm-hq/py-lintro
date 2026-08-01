@@ -17,6 +17,7 @@ enhancement run it between the two phases; see
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -317,6 +318,7 @@ def _execute_tools_sequential(
             )
 
             # Execute the tool
+            started = time.monotonic()
             if ctx.action == Action.FIX:
                 result = _run_fix_with_retry(
                     tool=tool,
@@ -326,6 +328,7 @@ def _execute_tools_sequential(
                 )
             else:
                 result = tool.check(paths, {})
+            result.duration_seconds = time.monotonic() - started
 
             # Populate doc_url on each issue from the plugin
             _enrich_issues_with_doc_urls(tool, result)
