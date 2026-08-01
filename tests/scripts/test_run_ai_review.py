@@ -26,6 +26,10 @@ CONFIG_SCRIPT = REPO_ROOT / "scripts" / "ci" / "enable_review_config.py"
 SHELL_SCRIPT = REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ai-review.yml"
 
+#: The guarded provider credential. The dogfood runs the ``cli`` transport, so
+#: the secret in scope is the ``claude`` CLI's OAuth token, never an API key.
+CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+
 
 def _load_config_module() -> ModuleType:
     """Load enable_review_config.py as an importable module.
@@ -109,7 +113,7 @@ def test_patch_config_enables_ai_and_bounds_cost() -> None:
     patched = module.patch_config(data=data, max_cost_usd=0.5)
 
     assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(patched["ai"]["transport"]).is_equal_to("api")
+    assert_that(patched["ai"]["transport"]).is_equal_to("cli")
     assert_that(patched["ai"]["provider"]).is_equal_to("anthropic")
     assert_that(patched["ai"]["max_cost_usd"]).is_equal_to(0.5)
     # Unrelated values are preserved.
@@ -138,7 +142,7 @@ def test_main_patches_config_file(tmp_path: Path) -> None:
     assert_that(exit_code).is_equal_to(0)
     reloaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
     assert_that(reloaded["ai"]["enabled"]).is_true()
-    assert_that(reloaded["ai"]["transport"]).is_equal_to("api")
+    assert_that(reloaded["ai"]["transport"]).is_equal_to("cli")
 
 
 def test_main_returns_error_when_config_missing(tmp_path: Path) -> None:
@@ -158,15 +162,16 @@ def test_shell_help_exits_zero() -> None:
     assert_that(result.stdout).contains("Usage:")
 
 
-def test_shell_fails_visibly_without_api_key() -> None:
+def test_shell_fails_visibly_without_oauth_token() -> None:
     """A missing credential is a visible failure, never a silent green pass.
 
     This is the #1826 regression guard: the script used to exit 0 here, so a PR
-    whose review never ran still showed ``AI Review ✓``.
+    whose review never ran still showed ``AI Review ✓``. The credential checked
+    is the CLI transport's OAuth token (#1894), not an API key.
     """
     result = _run_shell(
         args=[],
-        env_overrides={"ANTHROPIC_API_KEY": "", "PR_NUMBER": "123"},
+        env_overrides={CREDENTIAL_ENV: "", "PR_NUMBER": "123"},
     )
 
     assert_that(result.returncode).is_equal_to(1)
@@ -176,14 +181,14 @@ def test_shell_fails_visibly_without_api_key() -> None:
 
 
 def test_shell_fails_visibly_without_pr_number() -> None:
-    """A configured key but no PR number fails *through the classifier*.
+    """A configured credential but no PR number fails *through the classifier*.
 
     Exiting directly would redden the check without emitting an annotation or a
     summary, which is a red check that cannot explain itself.
     """
     result = _run_shell(
         args=[],
-        env_overrides={"ANTHROPIC_API_KEY": "dummy-key", "PR_NUMBER": ""},
+        env_overrides={CREDENTIAL_ENV: "dummy-token", "PR_NUMBER": ""},
     )
 
     assert_that(result.returncode).is_equal_to(1)
@@ -202,7 +207,7 @@ def test_shell_writes_outcome_to_step_summary(tmp_path: Path) -> None:
     result = _run_shell(
         args=[],
         env_overrides={
-            "ANTHROPIC_API_KEY": "",
+            CREDENTIAL_ENV: "",
             "PR_NUMBER": "123",
             "GITHUB_STEP_SUMMARY": str(summary),
         },
@@ -286,7 +291,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     """Lintro is installed from the trusted base ref, never the PR head.
 
     The checkout used for the keyed install must pin ``ref`` to the PR's base
-    SHA so PR-controlled code never executes with the ANTHROPIC_API_KEY in
+    SHA so PR-controlled code never executes with the provider credential in
     scope. The PR itself is still reviewed via ``gh`` (diff fetched over the
     API), independent of the checked-out tree.
     """
@@ -312,32 +317,42 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """ANTHROPIC_API_KEY is injected only into the final review step env.
+    """CLAUDE_CODE_OAUTH_TOKEN is injected only into the final review step env.
 
     The secret must not appear in workflow- or job-level env maps, nor in
-    earlier steps (checkout, uv sync, etc.), so PR-controlled code paths never
-    receive the key before the trusted base-ref install completes. This is the
-    ordering control audited in #1317.
+    earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
+    paths never receive the token before the trusted base-ref install completes.
+    This is the ordering control audited in #1317.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
     if workflow_env is not None:
-        assert_that(workflow_env).does_not_contain_key("ANTHROPIC_API_KEY")
+        assert_that(workflow_env).does_not_contain_key(CREDENTIAL_ENV)
 
     job_env = loaded["jobs"]["ai-review"].get("env")
     if job_env is not None:
-        assert_that(job_env).does_not_contain_key("ANTHROPIC_API_KEY")
+        assert_that(job_env).does_not_contain_key(CREDENTIAL_ENV)
 
     steps = loaded["jobs"]["ai-review"]["steps"]
-    steps_with_key = [
-        step["name"]
-        for step in steps
-        if "ANTHROPIC_API_KEY" in yaml.dump(step, default_flow_style=False)
+    review_steps = [
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
     ]
+    assert_that(review_steps).is_length(1)
 
-    assert_that(steps_with_key).is_length(1)
-    assert_that(steps_with_key[0]).starts_with("Run AI review")
+    # Assert on the parsed env map, not on a dump of the whole step: a mention
+    # in a `run:` line or a comment would satisfy a text search while the step
+    # never actually received the secret.
+    review_step = review_steps[0]
+    assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
+        "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+    )
+    for step in steps:
+        if step is review_step:
+            continue
+        assert_that(step.get("env") or {}).described_as(
+            f"step {step.get('name')!r}",
+        ).does_not_contain_key(CREDENTIAL_ENV)
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
@@ -370,6 +385,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9",
+        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -381,3 +397,93 @@ def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
     content = WORKFLOW.read_text(encoding="utf-8")
 
     assert_that(content).contains(action_ref)
+
+
+def test_workflow_never_puts_an_api_key_in_scope() -> None:
+    """ANTHROPIC_API_KEY appears nowhere in the review workflow.
+
+    Two reasons, both load-bearing. Its account balance is depleted, so an API
+    key in scope buys nothing; and lintro's bare-mode detection treats a
+    reachable ``ANTHROPIC_API_KEY`` as proof that a bare ``claude`` invocation
+    can authenticate, which is exactly the wrong conclusion here (#1838/#1894).
+    """
+    content = WORKFLOW.read_text(encoding="utf-8")
+    loaded = yaml.safe_load(content)
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    for step in steps:
+        assert_that(step.get("env") or {}).described_as(
+            f"step {step.get('name')!r}",
+        ).does_not_contain_key("ANTHROPIC_API_KEY")
+
+    assert_that(loaded.get("env") or {}).does_not_contain_key("ANTHROPIC_API_KEY")
+    assert_that(loaded["jobs"]["ai-review"].get("env") or {}).does_not_contain_key(
+        "ANTHROPIC_API_KEY",
+    )
+
+
+def test_workflow_forbids_bare_mode_for_the_cli_transport() -> None:
+    """The review step pins ``LINTRO_CLI_BARE`` to ``never``.
+
+    ``claude --bare`` disables OAuth session login and authenticates only
+    against an API key, so sending it would break the very credential this job
+    runs on. AUTO would resolve the same way with no API key in scope; pinning
+    it makes CI independent of that detection.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    review_steps = [
+        step
+        for step in loaded["jobs"]["ai-review"]["steps"]
+        if str(step.get("name", "")).startswith("Run AI review")
+    ]
+    assert_that(review_steps).is_length(1)
+    assert_that(review_steps[0]["env"]["LINTRO_CLI_BARE"]).is_equal_to("never")
+
+
+def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
+    """The claude CLI version is resolved, not hard-coded in the workflow.
+
+    A second pin site would drift from ``docker/ai-tools.Dockerfile``, and the
+    dogfood would then review with a CLI version the contract tests never
+    checked.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    resolve_steps = [
+        step for step in steps if "ai_tools_arg_pin.py" in str(step.get("run", ""))
+    ]
+    assert_that(resolve_steps).is_length(1)
+    assert_that(resolve_steps[0]["id"]).is_equal_to("pins")
+
+    install_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).strip() == "scripts/ci/install-claude-cli.sh"
+    ]
+    assert_that(install_steps).is_length(1)
+    assert_that(install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
+        "${{ steps.pins.outputs.claude-code-version }}",
+    )
+
+
+def test_workflow_allows_the_npm_registry_egress() -> None:
+    """Harden-runner permits the endpoints the pinned CLI install needs.
+
+    The runner blocks egress by default, so a missing endpoint turns the CLI
+    install — not the review — into the failure, which reads as an unrelated
+    outage.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    harden_steps = [
+        step
+        for step in loaded["jobs"]["ai-review"]["steps"]
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("step-security/harden-runner@")
+    ]
+    assert_that(harden_steps).is_length(1)
+
+    endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
+    assert_that(endpoints).contains("registry.npmjs.org:443", "nodejs.org:443")

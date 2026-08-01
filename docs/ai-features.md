@@ -700,8 +700,20 @@ developer's login.
   report a visible skip naming the missing credential; substituting a placeholder turns
   it into a false pass.
 - **Trusted install.** Lintro installs itself from the PR's _base_ ref before the step
-  that holds `ANTHROPIC_API_KEY`, so PR-controlled code never executes with the secret
-  in scope. The PR is reviewed as data (the diff is fetched through the GitHub API).
+  that holds the provider credential, so PR-controlled code never executes with the
+  secret in scope. The PR is reviewed as data (the diff is fetched through the GitHub
+  API).
+- **A subscription works in CI, on the `cli` transport.** Lintro's own `ai-review.yml`
+  runs `ai.transport: cli` against a version-pinned `claude` CLI
+  (`npm install -g @anthropic-ai/claude-code@<pin>`) authenticated by a
+  `CLAUDE_CODE_OAUTH_TOKEN` secret — no API key involved. Two things make that work:
+  keep `ANTHROPIC_API_KEY` **out** of the step env, and set `LINTRO_CLI_BARE: never`,
+  because `--bare` disables OAuth session login (see the `--bare` note above). Set
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
+  binary's egress and version predictable under an egress allowlist.
+- **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
+  itself, so under the `cli` transport the cap is advisory — the call bills the
+  subscription, not a metered key.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.

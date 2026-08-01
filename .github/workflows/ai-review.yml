@@ -6,10 +6,22 @@ name: AI Review - Dogfood
 # Dogfood `lintro review` on py-lintro's own pull requests.
 #
 # Trusted install: lintro is installed from the PR's BASE ref (main), never the
-# PR head, so PR-controlled code never executes with the ANTHROPIC_API_KEY in
-# scope. The PR is still reviewed — `lintro review --pr <N>` fetches the diff
+# PR head, so PR-controlled code never executes with the CLAUDE_CODE_OAUTH_TOKEN
+# in scope. The PR is still reviewed — `lintro review --pr <N>` fetches the diff
 # through `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data,
-# never run with the key. See the security note on the job below.
+# never run with the token. See the security note on the job below.
+#
+# TRANSPORT (#1894): the review runs on the `cli` transport — the pinned
+# `claude` binary, authenticated by the CLAUDE_CODE_OAUTH_TOKEN subscription
+# session — not on the `api` transport. The ANTHROPIC_API_KEY account's balance
+# is depleted, which is what turned this check red on every PR after #1826 made
+# a credential failure visible. The CLI is *not* sent `--bare` (LINTRO_CLI_BARE:
+# never): bare mode disables OAuth session login and authenticates only against
+# an API key, which is precisely the credential that does not work here (#1838).
+#
+# The AI_REVIEW_MAX_COST_USD cap below is API-path accounting: lintro can only
+# price tokens it billed itself. Under the CLI transport the call bills the
+# subscription, so the cap is advisory rather than enforced spend control.
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -26,12 +38,13 @@ name: AI Review - Dogfood
 # merge. P1 findings still pass: the review ran, and its findings are advisory.
 #
 # ACTIVATION PRECONDITION (audited #1317, follow-up to #1072/#1074):
-# Safe to add the ANTHROPIC_API_KEY repository secret only when all of the
+# Safe to expose the provider credential to this job only when all of the
 # following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
-#   3. Secret ordering: ANTHROPIC_API_KEY is injected only into the final
-#      review step env, after the trusted base-ref checkout and uv sync.
+#   3. Secret ordering: CLAUDE_CODE_OAUTH_TOKEN is injected only into the final
+#      review step env, after the trusted base-ref checkout, the pinned CLI
+#      install, and uv sync.
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
@@ -63,13 +76,14 @@ jobs:
     #
     # SECURITY: lintro is installed from the PR's trusted BASE ref
     # (pull_request.base.sha, i.e. main), never the PR head, so the code that
-    # runs with the ANTHROPIC_API_KEY secret is always trusted — a PR cannot
-    # substitute its own lintro/** to exfiltrate the key. The PR is reviewed as
-    # data: `lintro review --pr <N>` fetches the diff via `gh` (GitHub API), it
-    # does not execute the PR's working tree. Trade-off: a PR that breaks the
-    # review code itself won't be caught by this job (that is covered by the
-    # unit tests in tests/), which is the correct security posture. The
-    # ANTHROPIC_API_KEY secret is therefore safe to enable.
+    # runs with the CLAUDE_CODE_OAUTH_TOKEN secret is always trusted — a PR
+    # cannot substitute its own lintro/** to exfiltrate the token. The `claude`
+    # CLI is installed at a version pinned in the base ref's Dockerfile for the
+    # same reason. The PR is reviewed as data: `lintro review --pr <N>` fetches
+    # the diff via `gh` (GitHub API), it does not execute the PR's working tree.
+    # Trade-off: a PR that breaks the review code itself won't be caught by this
+    # job (that is covered by the unit tests in tests/), which is the correct
+    # security posture. The credential is therefore safe to enable.
     if: >-
       github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository
@@ -97,16 +111,41 @@ jobs:
             releases.astral.sh:443
             pypi.org:443
             files.pythonhosted.org:443
+            nodejs.org:443
+            registry.npmjs.org:443
 
       - name: Checkout base ref (trusted lintro install)
         # Install lintro from the PR's BASE ref (main), NOT the PR head. The
-        # code that runs with ANTHROPIC_API_KEY must be trusted; the PR diff is
+        # code that runs with the credential must be trusted; the PR diff is
         # fetched separately via `gh` in the review step. base.sha is the exact
         # commit the PR targets and is already merged into main, so it is safe.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
+          # Nothing after this step talks to git over the network — `gh` uses
+          # GH_TOKEN — so leaving the token in .git/config would only widen
+          # what a compromised review step could read.
+          persist-credentials: false
+
+      - name: Resolve pinned agent-CLI versions
+        id: pins
+        # Single pin site: the Node and claude-code versions live in
+        # docker/ai-tools.Dockerfile's Renovate-managed ARGs, so the CLI this
+        # job drives is the one lintro ships and the contract tests verify.
+        run: |
+          python3 scripts/ci/ai_tools_arg_pin.py NODE_VERSION CLAUDE_CODE_VERSION \
+            --exact --format github >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.pins.outputs.node-version }}
+
+      - name: Install pinned claude CLI
+        env:
+          CLAUDE_CODE_VERSION: ${{ steps.pins.outputs.claude-code-version }}
+        run: scripts/ci/install-claude-cli.sh
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -126,7 +165,20 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The guarded credential. ANTHROPIC_API_KEY is deliberately absent:
+          # its account has no balance, and its mere presence would make
+          # lintro's bare-mode detection think a bare `claude` call could
+          # authenticate (LINTRO_CLI_BARE pins the decision regardless).
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # `never` == do not send `--bare`, so the CLI uses its OAuth session
+          # (#1838/#1859). AUTO would resolve the same way with no API key in
+          # scope; pinning it keeps CI deterministic if that ever changes.
+          LINTRO_CLI_BARE: 'never'
+          # Keep the CLI's egress to api.anthropic.com only, and keep the
+          # pinned version pinned — an autoupdate would silently swap the
+          # binary the contract tests verified.
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_AUTOUPDATER: '1'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_REVIEW_MAX_COST_USD: '0.50'

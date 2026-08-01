@@ -160,8 +160,9 @@ def classify(*, status: int, output: str, reason: str = "") -> OutcomeReport:
             outcome=ReviewOutcome.NO_CREDENTIAL,
             headline="no provider credential — nothing was reviewed",
             detail=(
-                "Add the ANTHROPIC_API_KEY repository secret to activate AI "
-                "review on pull requests."
+                "Add the CLAUDE_CODE_OAUTH_TOKEN secret to activate AI review "
+                "on pull requests — the dogfood runs the `cli` transport, "
+                "which authenticates through the `claude` CLI's OAuth session."
             ),
             exit_code=1,
         )
