@@ -34,9 +34,10 @@ process.
 | `lintro_ping`   | read-only, idempotent       | `{status, lintro_version, workspace}`            |
 | `lintro_check`  | read-only, idempotent       | Structured findings plus a per-tool summary      |
 | `lintro_format` | destructive, not idempotent | Unified diffs, changed files, remaining findings |
+| `lintro_review` | read-only, not idempotent   | AI review findings plus run and budget metadata  |
 
-Further toolkits (review and so on) register through the internal `McpToolRegistry` and
-ship in follow-up issues.
+Further toolkits register through the internal `McpToolRegistry` and ship in follow-up
+issues.
 
 ### `lintro_check`
 
@@ -131,6 +132,91 @@ Notes and limits:
 - Runs are serialized: lintro resolves configuration relative to the process working
   directory, so one lint run happens at a time per server.
 
+### `lintro_review`
+
+Runs the same AI diff review as `lintro review` and returns its findings as data. The
+tool is read-only — nothing is written and nothing is posted — but **not idempotent**:
+every call issues provider calls and costs money.
+
+Arguments (all optional):
+
+| Argument       | Type       | Default             | Meaning                                                  |
+| -------------- | ---------- | ------------------- | -------------------------------------------------------- |
+| `base`         | `string`   | `origin/HEAD`       | Base git ref to diff against                             |
+| `uncommitted`  | `boolean`  | `false`             | Review working-tree changes instead of a branch diff     |
+| `depth`        | `1..3`     | `review.depth`      | 1 checklist, 2 + generated questions, 3 + adversarial    |
+| `strictness`   | `string`   | `review.strictness` | `focused`, `balanced`, or `thorough`                     |
+| `with_lint`    | `boolean`  | `false`             | Include a lint digest of the changed files in the prompt |
+| `paths`        | `string[]` | the whole diff      | Limit the review to these path prefixes                  |
+| `max_cost_usd` | `number`   | `ai.max_cost_usd`   | Spend ceiling for this call; can only lower the config   |
+
+```json
+{
+  "summary": "One blocking issue.",
+  "findings": [
+    {
+      "file": "app.py",
+      "line": 3,
+      "severity": "P1",
+      "category": "correctness",
+      "title": "Unbounded loop",
+      "body": "The loop never terminates.\n\nCause: ...\n\nFix: ...",
+      "confidence": "high",
+      "suggested_code": "i += 1",
+      "checklist_ids": [2],
+      "source": ""
+    }
+  ],
+  "run": {
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "depth": 1,
+    "strictness": "balanced",
+    "cost_usd": 0.25,
+    "duration_seconds": 12.5,
+    "chunks": { "total": 2, "reviewed": 2 },
+    "files": { "reviewed": 1, "total": 1 },
+    "token_usage": { "prompt": 10, "completion": 5, "total": 15 },
+    "partial": false,
+    "stopped_reason": ""
+  },
+  "budget": {
+    "requested_usd": null,
+    "configured_usd": 1.0,
+    "effective_usd": 1.0,
+    "clamped": false,
+    "exceeded": false
+  }
+}
+```
+
+Cost control:
+
+- `ai.max_cost_usd` in the workspace config is the ceiling. `max_cost_usd` can only
+  **lower** it; a larger value is clamped to the configured one and reported as
+  `budget.clamped: true`. If the operator sets no ceiling, the argument becomes the
+  ceiling — set `ai.max_cost_usd` if agents must never spend more than a fixed amount.
+- When the ceiling stops a run **after** some chunks were reviewed, the call succeeds
+  with what was found: `run.partial: true`, `run.stopped_reason`,
+  `budget.exceeded: true`.
+- When it stops the run **before any chunk** was reviewed, no review was produced, and
+  the call fails with `budget_exceeded` rather than an empty "clean" result.
+
+Notes and limits:
+
+- `--post` (GitHub commenting) is deliberately not exposed. The calling agent owns
+  outward side effects.
+- An empty diff is a result, not an error: `findings: []` with zero-valued run metadata.
+- Without the `[ai]` extra, without a usable provider, or with `ai.review: false`, the
+  tool is still listed and returns `tool_unavailable` with `detail.reason` so an agent
+  gets a reason rather than a missing capability.
+- A failed review carries the same taxonomy `lintro review --output json` prints, under
+  `detail.review_error` (`kind`, `provider`, `status`, `retryable`).
+- **Latency**: a depth-3 review runs for minutes. Progress notifications are not sent;
+  the call's `timeout_seconds` is 1800s instead of the 300s default, and the review
+  holds the server's run lock for its whole duration, so `lintro_check` calls queue
+  behind it.
+
 ## Tool contract
 
 Each tool is an `McpToolSpec` with a name, description, JSON Schema for its arguments, a
@@ -180,9 +266,9 @@ provider-failure body, so it can never be confused with a tool's own successful 
 }
 ```
 
-Codes: `workspace_violation`, `tool_unavailable`, `invalid_input`, `execution_error`.
-`detail` is optional and may be `null`. A handler that exceeds its time budget
-(`timeout_seconds`, 300s by default) reports `execution_error` with
+Codes: `workspace_violation`, `tool_unavailable`, `invalid_input`, `execution_error`,
+`budget_exceeded`. `detail` is optional and may be `null`. A handler that exceeds its
+time budget (`timeout_seconds`, 300s by default) reports `execution_error` with
 `detail.reason == "timeout"`.
 
 Failures outside a tool call — a missing `lintro[mcp]` extra, a transport or session

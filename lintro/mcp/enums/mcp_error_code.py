@@ -17,9 +17,12 @@ class McpErrorCode(StrEnum):
         TOOL_UNAVAILABLE: The requested tool is not registered on this server.
         INVALID_INPUT: Arguments failed JSON Schema or path validation.
         EXECUTION_ERROR: The tool handler raised an unexpected exception.
+        BUDGET_EXCEEDED: A cost-capped tool stopped on its AI spend ceiling
+            before producing any result.
     """
 
     WORKSPACE_VIOLATION = auto()
     TOOL_UNAVAILABLE = auto()
     INVALID_INPUT = auto()
     EXECUTION_ERROR = auto()
+    BUDGET_EXCEEDED = auto()
