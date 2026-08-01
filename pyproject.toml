@@ -154,6 +154,7 @@ packages = [
   "lintro.cli_utils.commands",
   "lintro.mcp",
   "lintro.mcp.enums",
+  "lintro.mcp.toolkits",
   "lintro.config",
   "lintro.enums",
   "lintro.exceptions",

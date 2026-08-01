@@ -65,14 +65,21 @@ def _ping_handler(*, workspace: Path) -> Callable[[dict[str, Any]], dict[str, An
 
 
 def build_default_registry(*, workspace: Path) -> McpToolRegistry:
-    """Create a registry with the built-in smoke tool.
+    """Create a registry with the built-in tools and the lint toolkit.
 
     Args:
-        workspace: Workspace root exposed by ``lintro_ping``.
+        workspace: Workspace root the tools are anchored to.
 
     Returns:
-        Registry containing ``lintro_ping``.
+        Registry containing ``lintro_ping``, ``lintro_check``, and
+        ``lintro_format``.
     """
+    # Deferred deliberately, in the same spirit as this module's other lazy
+    # imports: the lint toolkit pulls the plugin registry, the parsers, and the
+    # formatters, and nothing that merely imports this module (``lintro
+    # doctor``, the CLI's command table) should pay for that.
+    from lintro.mcp.toolkits.lint import build_lint_toolkit
+
     registry = McpToolRegistry()
     registry.register(
         spec=McpToolSpec(
@@ -87,6 +94,7 @@ def build_default_registry(*, workspace: Path) -> McpToolRegistry:
             idempotent=True,
         ),
     )
+    registry.register_toolkit(specs=build_lint_toolkit(workspace=workspace))
     return registry
 
 

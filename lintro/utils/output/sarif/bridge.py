@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lintro.enums.severity_level import SeverityLevel
+from lintro.utils.findings import Finding, finding_from_issue
 from lintro.utils.output.sarif.document import StandardIssue
 
 if TYPE_CHECKING:
@@ -55,6 +55,12 @@ def _to_standard_issue(
 ) -> StandardIssue:
     """Normalize a single ``BaseIssue`` into a ``StandardIssue``.
 
+    Delegates the extraction to :func:`lintro.utils.findings.finding_from_issue`
+    so SARIF and MCP read a ``BaseIssue`` by exactly the same rules;
+    ``StandardIssue`` is the SARIF-shaped projection of that canonical
+    :class:`~lintro.utils.findings.Finding` (it carries no ``fixable``, and
+    names the rule identifier ``code``).
+
     Args:
         issue: Parsed lint issue to normalize.
         tool_name: Name of the tool that produced the issue.
@@ -62,20 +68,27 @@ def _to_standard_issue(
     Returns:
         Normalized standard issue.
     """
-    row = issue.to_display_row()
-    try:
-        severity = issue.get_severity()
-    except (ValueError, AttributeError):
-        severity = SeverityLevel.WARNING
+    return _standard_issue_from_finding(
+        finding=finding_from_issue(issue=issue, tool_name=tool_name),
+    )
+
+
+def _standard_issue_from_finding(*, finding: Finding) -> StandardIssue:
+    """Project a canonical finding onto the SARIF-facing ``StandardIssue``.
+
+    Args:
+        finding: The canonical finding.
+
+    Returns:
+        Normalized standard issue.
+    """
     return StandardIssue(
-        tool_name=tool_name,
-        file=str(getattr(issue, "file", "") or ""),
-        line=int(getattr(issue, "line", 0) or 0),
-        column=int(getattr(issue, "column", 0) or 0),
-        code=str(row.get("code", "") or ""),
-        message=str(row.get("message", "") or ""),
-        severity=severity,
-        doc_url=str(
-            getattr(issue, "doc_url", "") or getattr(issue, "url", "") or "",
-        ),
+        tool_name=finding.tool,
+        file=finding.file,
+        line=finding.line,
+        column=finding.column,
+        code=finding.rule,
+        message=finding.message,
+        severity=finding.severity,
+        doc_url=finding.doc_url,
     )
