@@ -24,7 +24,12 @@ from mcp import ClientSession, types
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from lintro.enums.tool_status import ToolStatus
+from lintro.mcp.registry import DEFAULT_TOOL_TIMEOUT_SECONDS
 from lintro.mcp.server import create_mcp_server
+from lintro.mcp.toolkits.introspection import (
+    INTROSPECTION_TIMEOUT_SECONDS,
+    build_introspection_toolkit,
+)
 from lintro.tools.core.tool_registry import ManifestTool
 from lintro.tools.core.version_parsing import ToolVersionInfo
 from lintro.utils import doctor_report
@@ -145,6 +150,18 @@ def test_introspection_tools_are_advertised_as_read_only_and_idempotent(
         assert_that(annotations.idempotentHint).is_true()
 
 
+def test_introspection_tools_budget_for_probing_every_binary() -> None:
+    """The default 300s budget is short of a full manifest of slow probes."""
+    specs = build_introspection_toolkit(workspace=Path.cwd())
+
+    assert_that([spec.name for spec in specs]).is_length(3)
+    for spec in specs:
+        assert_that(spec.timeout_seconds).is_equal_to(INTROSPECTION_TIMEOUT_SECONDS)
+        assert_that(spec.timeout_seconds).is_greater_than(
+            DEFAULT_TOOL_TIMEOUT_SECONDS,
+        )
+
+
 @pytest.mark.usefixtures("stub_probes")
 def test_list_tools_reports_a_complete_entry_for_every_tool(
     workspace: Path,
@@ -184,6 +201,10 @@ def test_list_tools_describes_ruff_as_a_fixing_deterministic_linter(
     assert_that(ruff["capabilities"]).contains("check", "fix")
     assert_that(ruff["execution_class"]).is_equal_to("deterministic")
     assert_that(ruff["installed"]).is_true()
+    assert_that(ruff["status"]).is_equal_to("ok")
+    assert_that(ruff["origin"]).is_equal_to("builtin")
+    assert_that(ruff["version"]).is_equal_to(ruff["expected_version"])
+    assert_that(ruff["minimum_version"]).is_not_none()
 
 
 @pytest.mark.usefixtures("stub_probes")
@@ -345,6 +366,7 @@ def test_doctor_reports_a_healthy_environment(
             "status",
             "detail",
             "remediation",
+            "category",
         )
     assert_that(payload["summary"]["error"]).is_equal_to(0)
 

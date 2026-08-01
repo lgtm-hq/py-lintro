@@ -29,15 +29,15 @@ process.
 
 ## Tools
 
-| Tool                | Annotations                 | Result                                                       |
-| ------------------- | --------------------------- | ------------------------------------------------------------ |
-| `lintro_ping`       | read-only, idempotent       | `{status, lintro_version, workspace}`                        |
-| `lintro_check`      | read-only, idempotent       | Structured findings plus a per-tool summary                  |
-| `lintro_format`     | destructive, not idempotent | Unified diffs, changed files, remaining findings             |
-| `lintro_review`     | read-only, not idempotent   | AI review findings plus run and budget metadata              |
-| `lintro_list_tools` | read-only, idempotent       | Every tool with type, languages, install state               |
-| `lintro_versions`   | read-only, idempotent       | Installed versus expected tool versions                      |
-| `lintro_doctor`     | read-only, idempotent       | Environment health as `{check, status, detail, remediation}` |
+| Tool                | Annotations                 | Result                                                                         |
+| ------------------- | --------------------------- | ------------------------------------------------------------------------------ |
+| `lintro_ping`       | read-only, idempotent       | `{status, lintro_version, workspace}`                                          |
+| `lintro_check`      | read-only, idempotent       | Structured findings plus a per-tool summary                                    |
+| `lintro_format`     | destructive, not idempotent | Unified diffs, changed files, remaining findings                               |
+| `lintro_review`     | read-only, not idempotent   | AI review findings plus run and budget metadata                                |
+| `lintro_list_tools` | read-only, idempotent       | Every tool with type, languages, install state                                 |
+| `lintro_versions`   | read-only, idempotent       | Installed versus expected tool versions                                        |
+| `lintro_doctor`     | read-only, idempotent       | `{health, checks, summary}`; each check `{check, status, detail, remediation}` |
 
 Further toolkits register through the internal `McpToolRegistry` and ship in follow-up
 issues.
@@ -300,8 +300,10 @@ what lintro requires.
 }
 ```
 
-`status` is `ok`, `outdated`, `missing`, or `unknown` (the tool ran but its output could
-not be parsed). A version below the minimum is data, not an error: the call succeeds.
+`status` is `ok`, `outdated`, or `missing`. `missing` covers every way a probe fails to
+yield a version — absent binary, non-zero exit, unparseable output — with `error`
+carrying the reason. A version below the minimum is data, not an error: the call
+succeeds.
 
 ### `lintro_doctor`
 

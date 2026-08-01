@@ -200,6 +200,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 details=f"Exit {result.returncode}: {output[:100]}",
                 path=tool_path,
                 install_hint=hint,
+                upgrade_hint=upgrade_hint,
             )
 
         version = extract_version_from_output(output, tool.name)
@@ -211,6 +212,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 details=f"Output: {output[:100]}",
                 path=tool_path,
                 install_hint=hint,
+                upgrade_hint=upgrade_hint,
             )
 
         status = tool_status_for_versions(
@@ -647,13 +649,6 @@ def _ai_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
         list[DoctorCheck]: One check per AI probe, or a single skipped record
         when no AI feature is enabled or the ``[ai]`` extra is absent.
     """
-    skipped = DoctorCheck(
-        category=DoctorCheckCategory.AI,
-        check="ai.provider",
-        status=DoctorCheckStatus.SKIPPED,
-        detail="No AI feature is enabled (ai.lint / ai.review)",
-        remediation="Enable ai.review and set ai.transport in the workspace config",
-    )
     if config is None:
         return [
             DoctorCheck(
@@ -679,9 +674,34 @@ def _ai_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
             ),
         ]
 
-    results = check_ai_configuration(resolve_ai_config(config))
+    try:
+        results = check_ai_configuration(resolve_ai_config(config))
+    except Exception as exc:  # noqa: BLE001 - a probe that blew up is a report line
+        # A malformed ``ai:`` block or a provider whose presence check raises
+        # must not take the whole report down with it: the caller asked what is
+        # wrong with the environment, and this is an answer.
+        return [
+            DoctorCheck(
+                category=DoctorCheckCategory.AI,
+                check="ai.provider",
+                status=DoctorCheckStatus.WARNING,
+                detail=f"AI configuration could not be checked: {exc}",
+                remediation="Review the ai.* settings, then re-run lintro doctor",
+            ),
+        ]
+
     if not results:
-        return [skipped]
+        return [
+            DoctorCheck(
+                category=DoctorCheckCategory.AI,
+                check="ai.provider",
+                status=DoctorCheckStatus.SKIPPED,
+                detail="No AI feature is enabled (ai.lint / ai.review)",
+                remediation=(
+                    "Enable ai.review and set ai.transport in the workspace config"
+                ),
+            ),
+        ]
     return [
         DoctorCheck(
             category=DoctorCheckCategory.AI,

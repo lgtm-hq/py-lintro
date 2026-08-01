@@ -43,13 +43,20 @@ if TYPE_CHECKING:
     from lintro.plugins.protocol import ToolDefinition
     from lintro.tools.core.tool_registry import ManifestRegistry
 
-__all__ = ["build_introspection_toolkit"]
+__all__ = ["INTROSPECTION_TIMEOUT_SECONDS", "build_introspection_toolkit"]
 
 _EMPTY_INPUT_SCHEMA: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {},
     "additionalProperties": False,
 }
+
+# Every one of these tools probes each external binary for its version, and a
+# tool that hangs is allowed up to its own probe timeout, so the worst case
+# scales with the size of the manifest and blows past the foundation's 300s
+# default on a machine with slow or wedged binaries. The budget still exists:
+# a wedged probe must not hold the JSON-RPC stream open forever.
+INTROSPECTION_TIMEOUT_SECONDS: Final[float] = 900.0
 
 #: Capability label reported for advisory AI finders, which run under
 #: ``lintro review`` rather than ``chk``/``fmt``. Mirrors
@@ -158,7 +165,13 @@ def _tool_types(*, tool_type: ToolType) -> list[str]:
     ]
 
 
-def _capabilities(*, name: str, definition: ToolDefinition) -> list[str]:
+def _capabilities(
+    *,
+    name: str,
+    definition: ToolDefinition,
+    check_tools: frozenset[str],
+    fix_tools: frozenset[str],
+) -> list[str]:
     """Resolve the verbs a tool can be invoked with.
 
     Advisory AI finders report ``review``: they are excluded from ``chk`` and
@@ -168,19 +181,21 @@ def _capabilities(*, name: str, definition: ToolDefinition) -> list[str]:
     Args:
         name: Registered tool name.
         definition: The plugin's ``ToolDefinition``.
+        check_tools: Names of tools that support checking, resolved once for
+            the whole listing rather than per tool.
+        fix_tools: Names of tools that support fixing.
 
     Returns:
         list[str]: Capability labels in display order.
     """
     from lintro.enums.action import Action
-    from lintro.tools import tool_manager
 
     if definition.is_advisory:
         return [ADVISORY_CAPABILITY]
     capabilities: list[str] = []
-    if name in tool_manager.get_check_tools():
+    if name in check_tools:
         capabilities.append(Action.CHECK.value)
-    if name in tool_manager.get_fix_tools():
+    if name in fix_tools:
         capabilities.append(Action.FIX.value)
     return capabilities
 
@@ -205,6 +220,8 @@ def _list_tools_payload() -> dict[str, Any]:
     context = RuntimeContext.detect()
     membership = _profile_membership(manifest=manifest)
     plugins = tool_manager.get_all_tools()
+    check_tools = frozenset(tool_manager.get_check_tools())
+    fix_tools = frozenset(tool_manager.get_fix_tools())
 
     entries: list[dict[str, Any]] = []
     for name in sorted(plugins):
@@ -235,7 +252,12 @@ def _list_tools_payload() -> dict[str, Any]:
                 ),
                 "status": str(probe.status) if probe else "unknown",
                 "can_fix": definition.can_fix,
-                "capabilities": _capabilities(name=name, definition=definition),
+                "capabilities": _capabilities(
+                    name=name,
+                    definition=definition,
+                    check_tools=check_tools,
+                    fix_tools=fix_tools,
+                ),
                 "execution_class": definition.execution_class.value,
                 "origin": ToolRegistry.get_origin(name),
                 "profile_membership": list(
@@ -264,16 +286,15 @@ def _version_status(*, info: Any) -> str:
         info: A ``ToolVersionInfo`` from the version-checking machinery.
 
     Returns:
-        str: ``missing`` when nothing answered the probe, ``outdated`` when the
-        installed version is below the minimum lintro requires, ``ok``
-        otherwise. ``unknown`` covers a tool that ran but whose output could
-        not be parsed.
+        str: ``missing`` when nothing usable answered the probe (the binary is
+        absent, exited non-zero, or printed output no parser recognized — in
+        every case the version is unknown and the tool cannot be relied on, and
+        ``error`` carries the reason), ``outdated`` when the installed version
+        is below the minimum lintro requires, ``ok`` otherwise.
     """
     from lintro.enums.tool_status import ToolStatus
 
     if info.current_version is None:
-        if info.error_message and "parse" in info.error_message.lower():
-            return ToolStatus.UNKNOWN.value
         return ToolStatus.MISSING.value
     if not info.version_check_passed:
         return ToolStatus.OUTDATED.value
@@ -373,6 +394,7 @@ def build_introspection_toolkit(*, workspace: Path) -> tuple[McpToolSpec, ...]:
             read_only=True,
             destructive=False,
             idempotent=True,
+            timeout_seconds=INTROSPECTION_TIMEOUT_SECONDS,
         ),
         McpToolSpec(
             name="lintro_versions",
@@ -382,6 +404,7 @@ def build_introspection_toolkit(*, workspace: Path) -> tuple[McpToolSpec, ...]:
             read_only=True,
             destructive=False,
             idempotent=True,
+            timeout_seconds=INTROSPECTION_TIMEOUT_SECONDS,
         ),
         McpToolSpec(
             name="lintro_doctor",
@@ -391,5 +414,6 @@ def build_introspection_toolkit(*, workspace: Path) -> tuple[McpToolSpec, ...]:
             read_only=True,
             destructive=False,
             idempotent=True,
+            timeout_seconds=INTROSPECTION_TIMEOUT_SECONDS,
         ),
     )

@@ -151,24 +151,37 @@ def test_installed_follows_whether_the_binary_can_run(
 
 
 @pytest.mark.parametrize(
-    ("installed", "expected"),
+    ("installed", "recommended", "minimum", "expected"),
     [
-        ("1.2.3", ToolStatus.OK),
-        ("2.0.0", ToolStatus.OK),
-        ("1.1.0", ToolStatus.OUTDATED),
-        ("0.9.0", ToolStatus.INCOMPATIBLE),
-        ("not-a-version", ToolStatus.UNKNOWN),
+        ("1.2.3", "1.2.3", "1.0.0", ToolStatus.OK),
+        ("2.0.0", "1.2.3", "1.0.0", ToolStatus.OK),
+        ("1.1.0", "1.2.3", "1.0.0", ToolStatus.OUTDATED),
+        ("0.14.0", "0.15.0", "0.0.0", ToolStatus.OUTDATED),
+        ("0.9.0", "1.2.3", "1.0.0", ToolStatus.INCOMPATIBLE),
+        ("0.0.1", "2.0.0", "2.0.0", ToolStatus.INCOMPATIBLE),
+        ("not-a-version", "1.2.3", "1.0.0", ToolStatus.UNKNOWN),
+    ],
+    ids=[
+        "equal",
+        "above",
+        "below_recommended",
+        "minor_below_recommended",
+        "below_minimum",
+        "far_below_minimum",
+        "unparseable",
     ],
 )
 def test_version_comparison_classifies_each_band(
     installed: str,
+    recommended: str,
+    minimum: str,
     expected: ToolStatus,
 ) -> None:
     """Installed versions map onto the manifest's minimum/recommended bands."""
     status = tool_status_for_versions(
         installed=installed,
-        recommended="1.2.3",
-        minimum="1.0.0",
+        recommended=recommended,
+        minimum=minimum,
     )
 
     assert_that(status).is_equal_to(expected)
@@ -279,6 +292,27 @@ def test_named_tools_are_probed_even_when_disabled(
     assert_that(results[0].status).is_equal_to(ToolStatus.OK)
 
 
+@pytest.fixture
+def stub_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the report's inputs so a developer's own setup cannot change them.
+
+    ``collect_doctor_report`` reads the workspace config and probes the AI
+    provider; without this the assertions below would depend on whether the
+    machine running them happens to have AI enabled.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.config.config_loader.get_config",
+        lambda reload=False: LintroConfig(),
+    )
+    monkeypatch.setattr(
+        "lintro.ai.doctor_checks.check_ai_configuration",
+        lambda _config: [],
+    )
+
+
 def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -305,6 +339,7 @@ def test_unloadable_config_is_reported_as_a_check_not_an_exception(
     assert_that(checks["ai.provider"].status).is_equal_to(DoctorCheckStatus.SKIPPED)
 
 
+@pytest.mark.usefixtures("stub_environment")
 def test_missing_binaries_are_folded_into_one_actionable_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -338,6 +373,7 @@ def test_missing_binaries_are_folded_into_one_actionable_check(
     assert_that(checks["tools.versions"].detail).contains("ruff")
 
 
+@pytest.mark.usefixtures("stub_environment")
 def test_healthy_tools_still_emit_their_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -355,6 +391,7 @@ def test_healthy_tools_still_emit_their_checks(
     assert_that(checks["tools.versions"]).is_equal_to(DoctorCheckStatus.OK)
 
 
+@pytest.mark.usefixtures("stub_environment")
 def test_mcp_extra_is_never_a_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """An uninstalled optional extra is a fact about the install, not a fault."""
     monkeypatch.setattr("lintro.mcp.is_mcp_available", lambda: False)
@@ -372,6 +409,7 @@ def test_mcp_extra_is_never_a_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert_that(extras[0].remediation).contains("lintro[mcp]")
 
 
+@pytest.mark.usefixtures("stub_environment")
 def test_ai_checks_are_projected_onto_the_doctor_vocabulary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -406,33 +444,6 @@ def test_ai_checks_are_projected_onto_the_doctor_vocabulary(
         "Export ANTHROPIC_API_KEY",
     )
     assert_that(report.health).is_equal_to(DoctorHealth.DEGRADED)
-
-
-# ── tool_status_for_versions ─────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    ("installed", "expected", "want"),
-    [
-        ("1.2.3", "1.0.0", ToolStatus.OK),
-        ("1.0.0", "1.0.0", ToolStatus.OK),
-        ("1.0.0", "1.2.0", ToolStatus.OUTDATED),
-        ("0.14.0", "0.15.0", ToolStatus.OUTDATED),
-        ("0.0.1", "2.0.0", ToolStatus.INCOMPATIBLE),
-        ("invalid", "1.0.0", ToolStatus.UNKNOWN),
-    ],
-    ids=["above", "equal", "below", "minor_below", "incompatible", "invalid"],
-)
-def test_compare_versions(installed: str, expected: str, want: ToolStatus) -> None:
-    """Compare two version strings and return the correct ToolStatus."""
-    minimum = expected if want == ToolStatus.INCOMPATIBLE else "0.0.0"
-    assert_that(
-        tool_status_for_versions(
-            installed=installed,
-            recommended=expected,
-            minimum=minimum,
-        ),
-    ).is_equal_to(want)
 
 
 # ── check_tool ───────────────────────────────────────────────────────
