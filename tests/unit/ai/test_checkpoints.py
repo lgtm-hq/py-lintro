@@ -88,16 +88,15 @@ def _index_sha(*, cwd: Path) -> str:
 
 
 def _staged_diff(*, cwd: Path) -> str:
-    result = (
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-            ["git", "diff", "--cached"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    )
-    return result.stdout
+    """Return the staged diff of the real user index.
+
+    Args:
+        cwd: Repository directory.
+
+    Returns:
+        Output of ``git diff --cached``.
+    """
+    return _run(["git", "diff", "--cached"], cwd=cwd).stdout
 
 
 def _make_suggestion(file: str, original: str, suggested: str) -> AIFixSuggestion:
@@ -510,3 +509,52 @@ def test_capture_ignores_ambient_git_index_file(
 
     assert_that(checkpoint).is_not_none()
     assert_that(hook_index.exists()).is_false()
+
+
+def test_capture_and_restore_filename_with_glob_characters(tmp_path: Path) -> None:
+    """Glob characters in a filename stay literal instead of matching magic."""
+    repo = _init_git_repo(tmp_path)
+    tricky = repo / "weird[1].py"
+    tricky.write_text("value = 1\n", encoding="utf-8")
+
+    checkpoint = capture_checkpoint(["weird[1].py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    assert_that(list(checkpoint.paths)).contains("weird[1].py")  # type: ignore[union-attr]
+
+    tricky.write_text("value = 2\n", encoding="utf-8")
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(tricky.read_text(encoding="utf-8")).is_equal_to("value = 1\n")
+
+
+def test_target_deleted_before_capture_stays_deleted(tmp_path: Path) -> None:
+    """A tracked target already gone at capture is not resurrected."""
+    repo = _init_git_repo(tmp_path)
+    tracked = repo / "tracked.py"
+    tracked.unlink()
+
+    checkpoint = capture_checkpoint(["tracked.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    tracked.write_text("alpha = 5\n", encoding="utf-8")
+
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(tracked.exists()).is_false()
+
+
+def test_restore_preserves_symlink_targets(tmp_path: Path) -> None:
+    """A symlinked target is restored as a link, not flattened to a file."""
+    repo = _init_git_repo(tmp_path)
+    link = repo / "link.py"
+    link.symlink_to("tracked.py")
+    _run(["git", "add", "link.py"], cwd=repo)
+
+    checkpoint = capture_checkpoint(["link.py"], workspace_root=repo, keep=10)
+    assert_that(checkpoint).is_not_none()
+    link.unlink()
+    link.write_text("clobbered = True\n", encoding="utf-8")
+
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+
+    assert_that(link.is_symlink()).is_true()
+    assert_that(os.readlink(link)).is_equal_to("tracked.py")

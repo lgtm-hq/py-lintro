@@ -258,9 +258,10 @@ class AIConfig(BaseModel):
         default=False,
         description=(
             "When True, capture a git checkpoint before `lintro fmt` mutates "
-            "files, so `git diff <ref>` and `git checkout <ref> -- <path>` "
-            "can review or undo the run. Git-only: nothing is captured "
-            "outside a git work tree."
+            "files, so `git diff <ref>` and "
+            "`git restore --source=<ref> --worktree -- <path>` can review or "
+            "undo the run. Git-only: nothing is captured outside a git work "
+            "tree."
         ),
     )
 

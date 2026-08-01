@@ -111,7 +111,8 @@ Before an AI fix batch mutates files, lintro captures a snapshot under
   its mode, and paths that were not part of the snapshot are never touched.
 - **Diff** against the checkpoint shows exactly what lintro changed in the run. When a
   run changed anything, lintro prints the ref so you can run `git diff <ref>` or
-  `git checkout <ref> -- <path>` after it exits.
+  `git restore --source=<ref> --worktree -- <path>` after it exits. `restore --worktree`
+  is deliberate: `git checkout <ref> -- <path>` would also rewrite your index.
 - **Interactive reject** restores rejected files from the checkpoint tree, not from
   in-memory copies. Files an earlier accepted group already changed are left alone, so
   rejecting one group never discards fixes you just accepted.

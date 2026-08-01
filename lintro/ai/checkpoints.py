@@ -29,6 +29,9 @@ DEFAULT_CHECKPOINT_RETENTION = 10
 _GIT_TIMEOUT_SECONDS = 60.0
 # Keep each ``git add`` argv comfortably under platform ARG_MAX limits.
 _GIT_ADD_CHUNK = 500
+# Git tree entry modes that are not plain file content.
+_SYMLINK_MODE = "120000"
+_GITLINK_MODE = "160000"
 # Ambient git state that must never leak into these plumbing calls.
 _INHERITED_GIT_VARS = (
     "GIT_DIR",
@@ -94,7 +97,7 @@ def _git_env(overlay: dict[str, str] | None) -> dict[str, str]:
     full_env.setdefault("GIT_OPTIONAL_LOCKS", "0")
     # Target paths are literal filenames; ``*``, ``?``, ``[`` and a leading
     # ``:`` in a filename must not be read as pathspec magic.
-    full_env.setdefault("GIT_LITERAL_PATHSPECS", "1")
+    full_env["GIT_LITERAL_PATHSPECS"] = "1"
     return full_env
 
 
@@ -248,17 +251,18 @@ def _normalize_paths(
         if not raw:
             continue
         candidate = Path(raw)
-        abs_path = (
-            candidate.resolve()
-            if candidate.is_absolute()
-            else (root_resolved / candidate).resolve()
-        )
+        raw_abs = candidate if candidate.is_absolute() else root_resolved / candidate
+        raw_abs = Path(os.path.normpath(raw_abs))
+        # Resolve the parent, never the leaf: resolving the whole path would
+        # rewrite a symlinked target to whatever it points at, and the
+        # checkpoint would then snapshot (and restore) the wrong file.
+        abs_path = raw_abs.parent.resolve() / raw_abs.name
         try:
             rel = abs_path.relative_to(root_resolved)
         except ValueError:
             logger.debug("Skipping path outside repo for checkpoint: {}", raw)
             continue
-        if abs_path.is_dir():
+        if abs_path.is_dir() and not abs_path.is_symlink():
             rels.update(_expand_directory(root=root_resolved, rel_dir=rel.as_posix()))
         else:
             # Include missing paths so restore can delete files created later;
@@ -330,6 +334,22 @@ def capture_checkpoint(
         else:
             _run_git(["read-tree", "--empty"], cwd=cwd, env=env, check=True)
 
+        # A target tracked in HEAD but already gone from the working tree
+        # must be recorded as absent, or a rollback would resurrect it.
+        missing = [p for p in rel_paths if not (root / p).exists()]
+        for start in range(0, len(missing), _GIT_ADD_CHUNK):
+            _run_git(
+                [
+                    "update-index",
+                    "--force-remove",
+                    "--",
+                    *missing[start : start + _GIT_ADD_CHUNK],
+                ],
+                cwd=cwd,
+                env=env,
+                check=True,
+            )
+
         existing = [p for p in rel_paths if (root / p).is_file()]
         # ``git add --`` updates only the temp index (via GIT_INDEX_FILE).
         # Chunked so a large target set cannot overflow the platform argv limit.
@@ -373,8 +393,8 @@ def _blob_for_path(
     root: Path,
     treeish: str,
     rel_path: str,
-) -> tuple[bytes, int] | None:
-    """Return blob bytes and file mode for ``rel_path`` at ``treeish``.
+) -> tuple[bytes, str] | None:
+    """Return blob bytes and the git mode for ``rel_path`` at ``treeish``.
 
     Args:
         root: Repository root.
@@ -382,11 +402,10 @@ def _blob_for_path(
         rel_path: Repo-relative path inside that tree.
 
     Returns:
-        ``(contents, permission bits)``, or None when the path is absent from
-        the tree. Git records only ``100644``/``100755`` for regular files, so
-        the mode collapses to ``0o644`` or ``0o755``. A tree entry that git
-        then refuses to read raises :class:`CheckpointError` from
-        :func:`_run_git`.
+        ``(contents, git mode)``, or None when the path is absent from the
+        tree or is a submodule pointer, which cannot be restored from a blob.
+        A tree entry that git then refuses to read raises
+        :class:`CheckpointError` from :func:`_run_git`.
     """
     entry = _run_git(
         ["ls-tree", "-z", "--", treeish, rel_path],
@@ -395,14 +414,16 @@ def _blob_for_path(
     if entry.returncode != 0 or not entry.stdout.strip():
         return None
     git_mode = entry.stdout.split(" ", 1)[0]
-    mode = 0o755 if git_mode.endswith("755") else 0o644
+    if git_mode == _GITLINK_MODE:
+        logger.debug("Skipping submodule entry in checkpoint: {}", rel_path)
+        return None
     raw = _run_git(
         ["cat-file", "-p", f"{treeish}:{rel_path}"],
         cwd=str(root),
         check=True,
         binary=True,
     )
-    return raw.stdout, mode
+    return raw.stdout, git_mode
 
 
 def restore_checkpoint(
@@ -447,7 +468,7 @@ def restore_checkpoint(
                 skipped,
             )
 
-    planned: list[tuple[Path, tuple[bytes, int] | None]] = []
+    planned: list[tuple[Path, tuple[bytes, str] | None]] = []
     for rel in target_rels:
         planned.append(
             (root / rel, _blob_for_path(root=root, treeish=treeish, rel_path=rel)),
@@ -456,12 +477,25 @@ def restore_checkpoint(
     # Read phase complete — apply all writes/deletes.
     for abs_path, blob in planned:
         if blob is None:
-            if abs_path.is_file():
-                abs_path.unlink()
+            # ``missing_ok`` because a concurrent delete between the read and
+            # write phases must not abandon the rest of the rollback.
+            abs_path.unlink(missing_ok=True)
             continue
-        contents, mode = blob
+        contents, git_mode = blob
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_bytes(abs_path, contents, fallback_mode=mode)
+        if git_mode == _SYMLINK_MODE:
+            # The blob of a symlink entry is its target path, not file content.
+            abs_path.unlink(missing_ok=True)
+            abs_path.symlink_to(contents.decode("utf-8", errors="replace"))
+            continue
+        if abs_path.is_symlink():
+            # Never write through a link: that would rewrite its target.
+            abs_path.unlink()
+        atomic_write_bytes(
+            abs_path,
+            contents,
+            fallback_mode=0o755 if git_mode.endswith("755") else 0o644,
+        )
 
 
 def diff_checkpoint(
@@ -502,15 +536,27 @@ def diff_checkpoint(
     try:
         _run_git(["read-tree", treeish], cwd=str(root), env=env, check=True)
         # ``--no-color`` defends against a user's ``color.ui = always``.
+        # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
+        # ``diff.*.textconv`` would otherwise run an external program here.
         result = _run_git(
-            ["diff", "--no-ext-diff", "--no-color", "--", *rels],
+            [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+                "--",
+                *rels,
+            ],
             cwd=str(root),
             env=env,
             check=True,
+            binary=True,
         )
     finally:
         index_file.unlink(missing_ok=True)
-    diff_text: str = result.stdout
+    # Decoded leniently: a UTF-16 file with a ``diff`` attribute would make
+    # strict locale decoding raise outside this module's error contract.
+    diff_text: str = result.stdout.decode("utf-8", errors="replace")
     return diff_text
 
 

@@ -12,10 +12,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.ai.checkpoints import DEFAULT_CHECKPOINT_RETENTION
+from lintro.ai.checkpoints import CheckpointError
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import resolve_workspace_file
-from lintro.ai.undo import UndoState, prepare_fix_batch, restore_undo
+from lintro.ai.undo import UndoState, restore_undo
 
 
 def _apply_fix(
@@ -144,42 +144,22 @@ def apply_fixes(
     workspace_root: Path,
     auto_apply: bool = False,
     search_radius: int | None = None,
-    undo_state: UndoState | None = None,
-    capture_undo: bool = False,
-    checkpoint_retention: int = DEFAULT_CHECKPOINT_RETENTION,
 ) -> list[AIFixSuggestion]:
     """Apply suggestions and return only those successfully applied.
 
-    When ``capture_undo`` is True and ``undo_state`` is omitted, a git
-    checkpoint (or file-snapshot fallback) is captured before the first
-    mutation. Callers that already prepared an :class:`~lintro.ai.undo.UndoState`
-    should pass it via ``undo_state`` and leave ``capture_undo`` False.
+    Rollback state is the caller's responsibility: capture it with
+    :func:`~lintro.ai.undo.prepare_fix_batch` *before* calling this, and undo
+    with :func:`rollback_applied_paths`.
 
     Args:
         suggestions: Fix suggestions to apply.
         workspace_root: Root directory limiting writable paths.
         auto_apply: Reserved for future use; kept for API compatibility.
         search_radius: Max lines above/below the target line to search.
-        undo_state: Optional pre-captured rollback state for this batch.
-        capture_undo: When True, capture rollback state before mutating.
-        checkpoint_retention: Max git checkpoint refs to retain when capturing.
 
     Returns:
         Suggestions that were applied successfully.
     """
-    if capture_undo and undo_state is None and suggestions:
-        undo_state = prepare_fix_batch(
-            list(suggestions),
-            workspace_root,
-            retention=checkpoint_retention,
-        )
-        if undo_state is not None:
-            logger.debug(
-                "Captured fix-batch undo via {} backend ({} paths)",
-                undo_state.kind,
-                len(undo_state.paths),
-            )
-
     extra: dict[str, int] = {}
     if search_radius is not None:
         extra["search_radius"] = search_radius
@@ -198,18 +178,30 @@ def apply_fixes(
 def rollback_applied_paths(
     undo_state: UndoState,
     suggestions: Sequence[AIFixSuggestion],
-) -> None:
+) -> bool:
     """Restore files for ``suggestions`` from ``undo_state``.
 
     Used by interactive rejection and callers that need per-file rollback
     from the checkpoint tree (or file-snapshot fallback), not from
     in-memory suggestion ``original_code``.
 
+    A restore that fails is logged and swallowed: rollback runs inside an
+    interactive session, where crashing would cost the user their running
+    accept/reject state and every group still to review.
+
     Args:
         undo_state: Handle from :func:`~lintro.ai.undo.prepare_fix_batch`.
         suggestions: Suggestions whose target files should be restored.
+
+    Returns:
+        True when every target was restored, False when the restore failed.
     """
     paths = [s.file for s in suggestions if s.file]
     if not paths:
-        return
-    restore_undo(undo_state, paths)
+        return True
+    try:
+        restore_undo(undo_state, paths)
+    except (OSError, CheckpointError) as exc:
+        logger.debug("Checkpoint restore failed for {}: {}", paths, exc)
+        return False
+    return True

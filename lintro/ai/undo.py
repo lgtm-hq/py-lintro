@@ -292,7 +292,11 @@ def diff_undo(
     if state.file_snapshot is None:
         return ""
     snapshot = state.file_snapshot
-    targets = list(paths) if paths is not None else list(snapshot.contents)
+    targets = (
+        [p for p in paths if p in snapshot.contents]
+        if paths is not None
+        else list(snapshot.contents)
+    )
     chunks: list[str] = []
     for path in targets:
         original = snapshot.contents.get(path)

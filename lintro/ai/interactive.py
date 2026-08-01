@@ -398,10 +398,15 @@ def review_fixes_interactive(
                 # accepted group already changed are left alone: restoring them
                 # would silently discard fixes the user just accepted.
                 accepted_files = {s.file for s in all_applied if s.file}
-                rollback_applied_paths(
+                restored = rollback_applied_paths(
                     undo_state,
                     [fix for fix in fixes if fix.file not in accepted_files],
                 )
+                if not restored:
+                    console.print(
+                        "  [red]⚠ Could not restore this group from the "
+                        "checkpoint; review it by hand.[/red]",
+                    )
             rejected += len(fixes)
             console.print(
                 f"  [yellow]✗ Rejected {len(fixes)} "

@@ -101,9 +101,10 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
     checkpoint that guards AI fix batches is offered here behind an opt-in
     flag. The ref is announced on the console because, unlike the AI fix path,
     nothing else in a ``fmt`` run holds a handle to it — ``git diff <ref>`` and
-    ``git checkout <ref> -- <path>`` are the user's entry points. Outside a git
-    work tree nothing is captured: an in-memory snapshot would not survive the
-    process, so it would buy nothing for the price of reading every target.
+    ``git restore --source=<ref> --worktree -- <path>`` are the entry points.
+    Outside a git work tree nothing is captured: an in-memory snapshot would
+    not survive the process, so it would buy nothing for the price of reading
+    every target.
 
     This lives in the API layer rather than the executor because the executor
     may not import :mod:`lintro.ai` (issue #724).

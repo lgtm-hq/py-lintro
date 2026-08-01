@@ -198,9 +198,9 @@ def _report_checkpoints(
     """Print how to inspect or undo what this run changed.
 
     Only git-backed checkpoints are reported: they outlive the process, so
-    ``git diff <ref>`` and ``git checkout <ref> -- <path>`` remain usable after
-    lintro exits. A checkpoint whose diff is empty changed nothing and is
-    silently skipped.
+    ``git diff <ref>`` and ``git restore --source=<ref> --worktree -- <path>``
+    remain usable after lintro exits. A checkpoint whose diff is empty changed
+    nothing and is silently skipped.
 
     Args:
         undo_states: Rollback handles captured during this run, in order.
@@ -223,7 +223,8 @@ def _report_checkpoints(
             continue
         logger.console_output(
             f"  AI: checkpoint {state.checkpoint.ref} "
-            "(git diff <ref> to review, git checkout <ref> -- <path> to undo)",
+            "(git diff <ref> to review, "
+            "git restore --source=<ref> --worktree -- <path> to undo)",
         )
 
 
@@ -266,7 +267,6 @@ def _apply_or_review(
             workspace_root=workspace_root,
             auto_apply=True,
             search_radius=ai_config.fix_search_radius,
-            undo_state=undo_state,
         )
         applied_suggestions.extend(applied_safe)
         applied += len(applied_safe)
@@ -295,7 +295,6 @@ def _apply_or_review(
             workspace_root=workspace_root,
             auto_apply=True,
             search_radius=ai_config.fix_search_radius,
-            undo_state=undo_state,
         )
         applied_suggestions.extend(auto_applied)
         applied += len(auto_applied)
@@ -319,7 +318,6 @@ def _apply_or_review(
             validate_after_group=ai_config.validate_after_group,
             workspace_root=workspace_root,
             search_radius=ai_config.fix_search_radius,
-            undo_state=undo_state,
         )
         applied += accepted_count
         rejected += rejected_count + safe_failed
