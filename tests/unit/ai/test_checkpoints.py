@@ -397,6 +397,7 @@ def test_report_checkpoints_silent_for_json(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path)
     suggestion = _make_suggestion("tracked.py", "alpha = 1\n", "alpha = 2\n")
     state = prepare_fix_batch([suggestion], repo, retention=10)
+    assert_that(state).is_not_none()
     (repo / "tracked.py").write_text("alpha = 2\n", encoding="utf-8")
 
     logger = MagicMock()
@@ -558,3 +559,23 @@ def test_restore_preserves_symlink_targets(tmp_path: Path) -> None:
 
     assert_that(link.is_symlink()).is_true()
     assert_that(os.readlink(link)).is_equal_to("tracked.py")
+
+
+def test_symlink_to_directory_is_left_alone(tmp_path: Path) -> None:
+    """A symlink to a directory is not snapshotted and never deleted."""
+    repo = _init_git_repo(tmp_path)
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("mod = 1\n", encoding="utf-8")
+    link = repo / "pkg-link"
+    link.symlink_to("pkg")
+
+    checkpoint = capture_checkpoint(
+        ["tracked.py", "pkg-link"],
+        workspace_root=repo,
+        keep=10,
+    )
+
+    assert_that(checkpoint).is_not_none()
+    assert_that(list(checkpoint.paths)).does_not_contain("pkg-link")  # type: ignore[union-attr]
+    restore_checkpoint(checkpoint)  # type: ignore[arg-type]
+    assert_that(link.is_symlink()).is_true()

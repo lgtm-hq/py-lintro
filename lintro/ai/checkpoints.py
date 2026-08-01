@@ -32,6 +32,7 @@ _GIT_ADD_CHUNK = 500
 # Git tree entry modes that are not plain file content.
 _SYMLINK_MODE = "120000"
 _GITLINK_MODE = "160000"
+_TREE_MODE = "040000"
 # Ambient git state that must never leak into these plumbing calls.
 _INHERITED_GIT_VARS = (
     "GIT_DIR",
@@ -336,7 +337,12 @@ def capture_checkpoint(
 
         # A target tracked in HEAD but already gone from the working tree
         # must be recorded as absent, or a rollback would resurrect it.
-        missing = [p for p in rel_paths if not (root / p).exists()]
+        # Anything that exists but is not a regular file (a directory, a
+        # symlink to one, a FIFO) is dropped from the snapshot entirely: it
+        # cannot be captured as a blob, and leaving it in ``paths`` would let
+        # a restore delete a path lintro never touched.
+        missing = [p for p in rel_paths if not os.path.lexists(root / p)]
+        rel_paths = [p for p in rel_paths if p in set(missing) or (root / p).is_file()]
         for start in range(0, len(missing), _GIT_ADD_CHUNK):
             _run_git(
                 [
@@ -414,8 +420,10 @@ def _blob_for_path(
     if entry.returncode != 0 or not entry.stdout.strip():
         return None
     git_mode = entry.stdout.split(" ", 1)[0]
-    if git_mode == _GITLINK_MODE:
-        logger.debug("Skipping submodule entry in checkpoint: {}", rel_path)
+    if git_mode in (_GITLINK_MODE, _TREE_MODE):
+        # A submodule pointer has no blob, and ``cat-file -p`` on a tree
+        # prints a directory listing that must never be written as content.
+        logger.debug("Skipping non-blob entry in checkpoint: {}", rel_path)
         return None
     raw = _run_git(
         ["cat-file", "-p", f"{treeish}:{rel_path}"],
@@ -538,25 +546,29 @@ def diff_checkpoint(
         # ``--no-color`` defends against a user's ``color.ui = always``.
         # ``--no-textconv`` matters as much as ``--no-ext-diff``: a repo's
         # ``diff.*.textconv`` would otherwise run an external program here.
-        result = _run_git(
-            [
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-color",
-                "--",
-                *rels,
-            ],
-            cwd=str(root),
-            env=env,
-            check=True,
-            binary=True,
-        )
+        # Chunked for the same argv-limit reason capture chunks ``git add``.
+        chunks: list[bytes] = []
+        for start in range(0, len(rels), _GIT_ADD_CHUNK):
+            result = _run_git(
+                [
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--no-color",
+                    "--",
+                    *rels[start : start + _GIT_ADD_CHUNK],
+                ],
+                cwd=str(root),
+                env=env,
+                check=True,
+                binary=True,
+            )
+            chunks.append(result.stdout)
     finally:
         index_file.unlink(missing_ok=True)
     # Decoded leniently: a UTF-16 file with a ``diff`` attribute would make
     # strict locale decoding raise outside this module's error contract.
-    diff_text: str = result.stdout.decode("utf-8", errors="replace")
+    diff_text: str = b"".join(chunks).decode("utf-8", errors="replace")
     return diff_text
 
 

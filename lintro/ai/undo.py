@@ -41,10 +41,14 @@ class FileSnapshot:
         root: Workspace root used when the snapshot was taken.
         contents: Map of repo-/workspace-relative path to file bytes, or
             ``None`` when the path did not exist at capture time.
+        modes: Permission bits recorded per path, so a restore reinstates the
+            mode the file had before the batch rather than whatever it drifted
+            to (or the ``0600`` a fresh temp file would carry).
     """
 
     root: Path
     contents: dict[str, bytes | None] = field(default_factory=dict)
+    modes: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -158,13 +162,18 @@ def _capture_file_snapshot(
         Snapshot of the in-workspace target files.
     """
     contents: dict[str, bytes | None] = {}
+    modes: dict[str, int] = {}
     for path in paths:
         resolved = resolve_workspace_file(path, workspace_root)
         if resolved is None:
             logger.debug("Skipping snapshot of out-of-workspace path: {}", path)
             continue
-        contents[path] = resolved.read_bytes() if resolved.is_file() else None
-    return FileSnapshot(root=workspace_root, contents=contents)
+        if resolved.is_file():
+            contents[path] = resolved.read_bytes()
+            modes[path] = resolved.stat().st_mode & 0o7777
+        else:
+            contents[path] = None
+    return FileSnapshot(root=workspace_root, contents=contents, modes=modes)
 
 
 def _restore_file_snapshot(
@@ -197,7 +206,38 @@ def _restore_file_snapshot(
                 resolved.unlink()
             continue
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_bytes(resolved, data)
+        recorded_mode = snapshot.modes.get(path)
+        if recorded_mode is not None and resolved.is_file():
+            resolved.chmod(recorded_mode)
+        atomic_write_bytes(
+            resolved,
+            data,
+            fallback_mode=recorded_mode if recorded_mode is not None else 0o644,
+        )
+
+
+def _try_save_undo_patch(
+    suggestions: list[AIFixSuggestion],
+    workspace_root: Path,
+) -> Path | None:
+    """Write the legacy reverse patch, tolerating a failure.
+
+    The patch under ``.lintro-cache/ai`` is kept only for tooling that still
+    reads it. A failure to write it must not throw away the checkpoint or
+    snapshot that the fix batch actually depends on for rollback.
+
+    Args:
+        suggestions: Fixes about to be applied.
+        workspace_root: Project root directory.
+
+    Returns:
+        Path to the written patch, or None when it could not be written.
+    """
+    try:
+        return save_undo_patch(suggestions, workspace_root)
+    except OSError as exc:
+        logger.debug("Legacy undo patch not written: {}", exc)
+        return None
 
 
 def prepare_fix_batch(
@@ -232,18 +272,16 @@ def prepare_fix_batch(
             keep=retention,
         )
         if checkpoint is not None:
-            # Keep legacy patch for tooling that still reads it.
-            patch_path = save_undo_patch(suggestions, workspace_root)
             return UndoState(
                 kind="git",
                 checkpoint=checkpoint,
-                patch_path=patch_path,
+                patch_path=_try_save_undo_patch(suggestions, workspace_root),
                 paths=tuple(paths),
             )
         logger.debug("Git checkpoint unavailable; using file-snapshot fallback")
 
     snapshot = _capture_file_snapshot(paths, workspace_root=workspace_root)
-    patch_path = save_undo_patch(suggestions, workspace_root)
+    patch_path = _try_save_undo_patch(suggestions, workspace_root)
     return UndoState(
         kind="file",
         file_snapshot=snapshot,

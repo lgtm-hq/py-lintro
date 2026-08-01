@@ -122,7 +122,10 @@ def test_file_fallback_restore_preserves_mode(tmp_path: Path) -> None:
     )
 
     state = prepare_fix_batch([suggestion], tmp_path)
+    assert_that(state).is_not_none()
+    # Simulate a formatter that rewrites the file and drops the exec bit.
     script.write_text("#!/bin/sh\necho two\n", encoding="utf-8")
+    script.chmod(0o600)
     restore_undo(state)  # type: ignore[arg-type]
 
     assert_that(script.read_text(encoding="utf-8")).contains("echo one")
