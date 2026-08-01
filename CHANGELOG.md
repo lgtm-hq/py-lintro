@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.104.0] - 2026-08-01
+
+### Added
+
+- **mcp**: add introspection toolkit for tools, versions, and doctor (#1893) (2e882c6)
+
 ## [0.103.0] - 2026-08-01
 
 ### Added
