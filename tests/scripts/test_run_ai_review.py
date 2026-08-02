@@ -8,7 +8,9 @@ and that the ``ai-review.yml`` workflow parses as valid YAML.
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
+import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from pathlib import Path
@@ -502,3 +504,42 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
 
     endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
     assert_that(endpoints).contains("registry.npmjs.org:443", "nodejs.org:443")
+
+
+def test_review_timeout_fits_inside_the_job_timeout() -> None:
+    """The lintro ``--timeout`` fires before the runner's ``timeout-minutes``.
+
+    The two values are load-bearing together: when the job budget is exhausted
+    first, the Actions runner kills the review mid-flight, no JSON error
+    envelope is written, and ``classify_review_outcome.py`` reads a truncated
+    output file (how PR #1916's review died under 600 s / 15 min). The
+    invariant is ``ceil(--timeout / 60) + setup overhead + posting margin <=
+    timeout-minutes``, with ~7 minutes observed for harden-runner + checkout +
+    Node/claude install + uv sync, and a 1-minute posting margin. Bump the two
+    values together, in scripts/ci/run-ai-review.sh and ai-review.yml.
+    """
+    setup_overhead_minutes = 7
+    posting_margin_minutes = 1
+
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    timeout_matches = re.findall(
+        r"lintro review .*--timeout (\d+)",
+        shell_text,
+    )
+    assert_that(timeout_matches).described_as(
+        "run-ai-review.sh must pass exactly one --timeout to lintro review",
+    ).is_length(1)
+    review_timeout_minutes = math.ceil(int(timeout_matches[0]) / 60)
+
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
+
+    budget = review_timeout_minutes + setup_overhead_minutes
+    budget += posting_margin_minutes
+    assert_that(job_timeout_minutes).described_as(
+        f"timeout-minutes ({job_timeout_minutes}) must cover the review "
+        f"--timeout ({review_timeout_minutes} min) plus "
+        f"{setup_overhead_minutes} min setup and "
+        f"{posting_margin_minutes} min posting margin — bump it together "
+        "with --timeout in run-ai-review.sh",
+    ).is_greater_than_or_equal_to(budget)
