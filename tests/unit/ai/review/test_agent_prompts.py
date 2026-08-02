@@ -121,6 +121,14 @@ def test_single_finding_scope_is_restated_on_the_first_line() -> None:
     )
 
 
+def test_all_open_scope_sentence_uses_the_singular_form_for_one_finding() -> None:
+    """A single still-open finding reads as `the 1 finding`, not `ALL 1`."""
+    prompt = render_agent_prompt(findings=(_finding(),), scope=_ALL_OPEN)
+    assert_that(prompt.splitlines()[0]).starts_with(
+        "Scope: the 1 finding still open on this PR",
+    )
+
+
 def test_scope_lines_of_the_two_fix_all_variants_differ() -> None:
     """A copied fix-all prompt is never ambiguous about which set it covers."""
     findings = (_finding(),)
@@ -173,12 +181,18 @@ def test_single_open_finding_panel_title_uses_the_singular_form() -> None:
 
 def test_footers_cover_every_scope_kind() -> None:
     """Every scope kind renders a default footer instead of raising."""
+    expected_substrings = {
+        AgentPromptScopeKind.ALL_OPEN: "Regenerated every run",
+        AgentPromptScopeKind.THIS_REVIEW: "sticky comment's fix-all prompt",
+        AgentPromptScopeKind.SINGLE_FINDING: "Paste into Claude Code",
+    }
     for kind in AgentPromptScopeKind:
         panel = render_agent_prompt_panel(
             findings=(_finding(),),
             scope=AgentPromptScope(kind=kind),
         )
         assert_that(panel).contains("<sub>")
+        assert_that(panel).contains(expected_substrings[kind])
 
 
 def test_findings_are_grouped_by_file_in_first_seen_order() -> None:
@@ -221,10 +235,19 @@ def test_reasoning_and_fix_are_indented_continuation_lines() -> None:
     )
     lines = prompt.splitlines()
     bullet_index = next(i for i, line in enumerate(lines) if line.startswith("- Line"))
-    assert_that(lines[bullet_index + 1]).is_equal_to(
+    continuation_lines = [
+        line
+        for line in lines[bullet_index + 1 :]
+        if line.startswith("  ") and not line.startswith("- ")
+    ]
+    reasoning_line = next(
+        line for line in continuation_lines if not line.startswith("  Fix:")
+    )
+    fix_line = next(line for line in continuation_lines if line.startswith("  Fix:"))
+    assert_that(reasoning_line).is_equal_to(
         "  Secret in source. It was inlined for a demo.",
     )
-    assert_that(lines[bullet_index + 2]).is_equal_to(
+    assert_that(fix_line).is_equal_to(
         "  Fix: Read it from the environment.",
     )
 
