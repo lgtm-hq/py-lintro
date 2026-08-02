@@ -173,6 +173,20 @@ def test_unknown_version_starts_fresh(version: object) -> None:
     assert_that(decoded.runs).is_empty()
 
 
+def test_non_finite_version_starts_fresh_instead_of_raising() -> None:
+    """``json.loads`` accepts the non-standard ``Infinity`` token as a float.
+
+    ``int(float("inf"))`` raises ``OverflowError`` rather than failing the way
+    a plain type/value mismatch does; the decoder must catch that too instead
+    of ever raising out of a malformed sticky comment.
+    """
+    body = _wrap({"version": float("inf"), "runs": [{"model": "claude"}]})
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.runs).is_empty()
+
+
 def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
     """Findings without a fingerprint are skipped, keeping the rest usable."""
     body = _wrap(
@@ -201,12 +215,59 @@ def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
     assert_that(decoded.findings[0].resolved_sha).is_empty()
 
 
+def test_unparsable_inline_comment_id_decodes_as_none_not_zero() -> None:
+    """An unparsable comment id must not become a fake, valid-looking ``0``.
+
+    ``coerce_int``'s ``0`` default is a plausible-looking (but wrong) GitHub
+    comment id; downstream code treats ``inline_comment_id is not None`` as
+    "this finding has a posted inline comment", so a raw ``0`` would silently
+    misreport an unlinked finding as linked.
+    """
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [],
+            "findings": [
+                {
+                    "fingerprint": "d" * 16,
+                    "severity": "P2",
+                    "inline_comment_id": "not-a-number",
+                },
+            ],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.findings[0].inline_comment_id).is_none()
+
+
 def test_unrecognized_stored_verdict_does_not_fail_open() -> None:
     """A corrupted verdict never decodes as READY, which would fabricate a pass."""
     body = _wrap(
         {
             "version": 2,
             "runs": [{"model": "claude", "verdict": "totally-bogus"}],
+            "findings": [],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
+
+
+def test_absent_verdict_falls_back_without_logging_as_unrecognized() -> None:
+    """A v1 run (no ``verdict`` key at all) is a normal, expected shape.
+
+    It must resolve to the same neutral fallback as a corrupted value, but
+    without being logged as "unrecognized" — that phrasing is reserved for a
+    value that was actually present and unparsable.
+    """
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [{"model": "claude"}],
             "findings": [],
         },
     )

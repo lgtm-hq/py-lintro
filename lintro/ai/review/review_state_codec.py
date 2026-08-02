@@ -28,6 +28,7 @@ from lintro.ai.review.models.run_record import RunRecord
 __all__ = [
     "decode_state",
     "encode_state",
+    "migrate_v1_runs",
     "prune_state_to_fit",
     "render_state_block",
 ]
@@ -105,11 +106,14 @@ def _parse_findings(*, payload: dict[str, Any]) -> list[FindingRecord]:
     return [record for record in parsed if record is not None]
 
 
-def _migrate_v1(*, runs: list[RunRecord]) -> list[RunRecord]:
+def migrate_v1_runs(*, runs: list[RunRecord]) -> list[RunRecord]:
     """Stamp sequential round numbers onto migrated v1 run records.
 
     v1 stored no round number, so the position in the (chronological) run list
-    is the only available ordering signal.
+    is the only available ordering signal. Shared by every entry point that
+    can receive legacy v1 run data (the sticky comment path and the error
+    comment path) so a given set of legacy runs always renumbers the same way
+    regardless of which surface parsed them.
 
     Args:
         runs: Runs parsed from a v1 blob, oldest first.
@@ -137,13 +141,15 @@ def decode_state(*, body: str) -> ReviewState:
 
     try:
         version = int(payload.get("version", STATE_VERSION_V1))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: json.loads accepts the non-standard Infinity token as
+        # float("inf"), and int() of that raises rather than failing cleanly.
         return ReviewState()
 
     if version == STATE_VERSION_V1:
         return ReviewState(
             version=STATE_VERSION,
-            runs=tuple(_migrate_v1(runs=_parse_runs(payload=payload))),
+            runs=tuple(migrate_v1_runs(runs=_parse_runs(payload=payload))),
         )
     if version != STATE_VERSION:
         # Forward-incompatible blob written by a newer lintro: start fresh

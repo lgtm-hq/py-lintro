@@ -34,6 +34,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.review_state_codec import (
     decode_state,
+    migrate_v1_runs,
     prune_state_to_fit,
     render_state_block,
 )
@@ -99,7 +100,9 @@ def build_sticky_comment(
         auth_mode=auth_mode,
         verdict=derive_verdict(findings=match.records),
     )
-    all_runs = [*prior, current][-MAX_STORED_RUNS:]
+    combined_runs = [*prior, current]
+    all_runs = combined_runs[-MAX_STORED_RUNS:]
+    runs_dropped = len(all_runs) < len(combined_runs)
 
     def assemble(*, findings_char_budget: int | None) -> str:
         sections = [STICKY_MARKER, _format_cumulative_header(runs=all_runs)]
@@ -144,7 +147,7 @@ def build_sticky_comment(
     new_state = ReviewState(
         runs=tuple(all_runs),
         findings=match.records,
-        truncated=state.truncated,
+        truncated=state.truncated or runs_dropped,
     )
     return body + render_state_block(
         state=prune_state_to_fit(state=new_state, body=body),
@@ -164,10 +167,7 @@ def _state_from_runs(prior_runs: list[dict[str, Any]] | None) -> ReviewState:
     runs = tuple(RunRecord.from_dict(run) for run in prior_runs or [])
     if runs and all(run.round == 1 for run in runs):
         # Legacy v1 mappings carry no round number; number them positionally.
-        runs = tuple(
-            RunRecord.from_dict({**run.to_dict(), "round": index})
-            for index, run in enumerate(runs, start=1)
-        )
+        runs = tuple(migrate_v1_runs(runs=list(runs)))
     return ReviewState(runs=runs)
 
 

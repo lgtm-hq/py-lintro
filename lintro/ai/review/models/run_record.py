@@ -169,8 +169,13 @@ def _parse_verdict(value: Any) -> ReviewVerdict:
         value: Raw verdict value decoded from the state blob.
 
     Returns:
-        The parsed verdict, or ``CHANGES_REQUESTED`` when unrecognized.
+        The parsed verdict, or ``CHANGES_REQUESTED`` when unrecognized or
+        absent. A v1 record carries no verdict key at all, so that absence is
+        treated as the same neutral fallback without logging — it is expected
+        on every migrated legacy run, not an anomaly.
     """
+    if value is None:
+        return ReviewVerdict.CHANGES_REQUESTED
     try:
         return ReviewVerdict(str(value).lower())
     except ValueError:

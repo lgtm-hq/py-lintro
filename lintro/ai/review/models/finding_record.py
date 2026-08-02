@@ -124,7 +124,7 @@ class FindingRecord:
             resolved_sha=str(resolved_map.get("sha", "")),
             resolved_round=coerce_int(resolved_map.get("round")),
             inline_comment_id=(
-                coerce_int(comment_id) if comment_id is not None else None
+                coerce_int(comment_id) or None if comment_id is not None else None
             ),
             regressed=bool(payload.get("regressed", False)),
             checklist_ids=_parse_checklist_ids(payload.get("checklist_ids")),

@@ -11,8 +11,10 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
+    MAX_STORED_RUNS,
     STATE_MARKER_PREFIX,
     STATE_MARKER_SUFFIX,
+    STATE_VERSION,
 )
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_sticky import (
@@ -22,6 +24,8 @@ from lintro.ai.review.github_sticky import (
 )
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
 
 
 def _finding(
@@ -62,7 +66,7 @@ def test_sticky_state_block_is_version_two(
 
     state = parse_review_state_v2(body=body)
 
-    assert_that(state.version).is_equal_to(2)
+    assert_that(state.version).is_equal_to(STATE_VERSION)
     assert_that(state.runs).is_length(1)
     assert_that(state.runs[0].round).is_equal_to(1)
     assert_that(state.runs[0].sha).is_equal_to("abc123")
@@ -167,7 +171,7 @@ def test_sticky_migrates_a_v1_state_blob(
     )
 
     state = parse_review_state_v2(body=body)
-    assert_that(state.version).is_equal_to(2)
+    assert_that(state.version).is_equal_to(STATE_VERSION)
     assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
     assert_that(state.findings).is_not_empty()
 
@@ -186,6 +190,30 @@ def test_legacy_prior_runs_argument_still_works(
     state = parse_review_state_v2(body=body)
     assert_that(state.runs).is_length(2)
     assert_that([run.round for run in state.runs]).is_equal_to([1, 2])
+
+
+def test_legacy_prior_runs_with_multiple_raw_v1_dicts_renumbers_positionally(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Raw v1 dicts (no ``round`` key) trigger the positional-renumber branch.
+
+    ``test_legacy_prior_runs_argument_still_works`` passes ``prior_runs``
+    already carrying a ``round`` key (parsed from a v2 comment), so it never
+    exercises the heuristic that fires when every parsed run defaults to
+    round 1 — the actual shape of a genuine v1 blob's runs.
+    """
+    raw_v1_runs = [
+        {"model": "claude", "total": 100, "cost": 0.01},
+        {"model": "claude", "total": 200, "cost": 0.02},
+    ]
+
+    body = build_sticky_comment(
+        result=sample_review_result,
+        prior_runs=raw_v1_runs,
+    )
+
+    state = parse_review_state_v2(body=body)
+    assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
 
 
 def test_error_comment_preserves_finding_history(
@@ -232,3 +260,29 @@ def test_sticky_comment_never_exceeds_github_hard_limit(
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains(STATE_MARKER_PREFIX)
+
+
+def test_dropping_runs_past_max_stored_runs_marks_state_truncated(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The state is marked truncated when the run-count cap drops history.
+
+    ``prune_state_to_fit`` sets ``truncated`` when it prunes for size, but the
+    ``[-MAX_STORED_RUNS:]`` slice in ``build_sticky_comment`` is a second,
+    independent place history can be dropped. Both must set the flag.
+    """
+    prior_runs = tuple(
+        RunRecord(round=round_number, sha=f"sha{round_number}")
+        for round_number in range(1, MAX_STORED_RUNS + 1)
+    )
+    prior_state = ReviewState(runs=prior_runs, truncated=False)
+
+    body = build_sticky_comment(
+        result=sample_review_result,
+        prior_state=prior_state,
+        head_sha=f"sha{MAX_STORED_RUNS + 1}",
+    )
+
+    state = parse_review_state_v2(body=body)
+    assert_that(state.runs).is_length(MAX_STORED_RUNS)
+    assert_that(state.truncated).is_true()

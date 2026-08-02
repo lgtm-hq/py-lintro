@@ -24,7 +24,10 @@ def coerce_int(value: Any, *, default: int = 0) -> int:
     """
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: json.loads accepts the non-standard Infinity/-Infinity
+        # tokens as float("inf")/float("-inf"), and int() of either raises
+        # rather than returning a usable value.
         return default
 
 
