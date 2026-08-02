@@ -36,7 +36,9 @@ class ReviewFinding:
         category: Finding category label.
         file: Repository-relative file path.
         line: Line number in the file.
-        title: Short finding title.
+        title: Short finding title, always a single line. Titles render
+            inline in tables and headings, so embedded newlines are collapsed
+            at parse time and the constraint is stated in the output schema.
         description: What is wrong and why it matters.
         cause: Root cause explanation.
         fix: Concise fix suggestion.

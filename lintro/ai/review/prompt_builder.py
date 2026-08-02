@@ -11,6 +11,7 @@ from lintro.ai.prompts.review import (
     format_deferred_scope_section,
     format_external_review_section,
     format_lint_results_section,
+    format_output_rules,
 )
 from lintro.ai.review.checklist_selector import format_checklist_for_prompt
 from lintro.ai.review.models.checklist_item import ChecklistItem
@@ -78,5 +79,6 @@ def build_review_user_prompt(
         lint_results_section=format_lint_results_section(digest=lint_digest),
         strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
+        output_rules=format_output_rules(checklist_count=len(checklist_items)),
     )
     return prompt, prompt_mapping

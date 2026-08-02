@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.enums.readiness_verdict import ReadinessVerdict
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
+from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,17 +19,41 @@ class ReviewResult:
 
     Attributes:
         metadata: Run metadata (model, tokens, cost, etc.).
-        summary: High-level review summary text.
+        summary: High-level review summary text. Equal to
+            ``pr_summary.headline`` when a structured summary was returned.
         checklist: Checklist yes/no answers with evidence.
         findings: Actionable findings from the review.
+        pr_summary: Structured PR summary (headline plus walkthrough bullets).
+            ``None`` when the model returned only plain summary text.
+        verdict_reasoning: Model-written explanation of the readiness verdict.
+            ``None`` when the model omitted it.
+        file_assessments: One-sentence overview per reviewed file. Empty when
+            the model omitted them.
     """
 
     metadata: ReviewMetadata
     summary: str
     checklist: tuple[ChecklistAnswer, ...] = field(default_factory=tuple)
     findings: tuple[ReviewFinding, ...] = field(default_factory=tuple)
+    pr_summary: ReviewSummary | None = None
+    verdict_reasoning: VerdictReasoning | None = None
+    file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
 
     @property
     def has_p1_findings(self) -> bool:
         """Return True when any P1 finding exists."""
         return any(finding.severity == Severity.P1 for finding in self.findings)
+
+    @property
+    def readiness_verdict(self) -> ReadinessVerdict:
+        """Return the merge-readiness verdict derived from this run's findings.
+
+        The verdict is computed from finding severities, never taken from the
+        model. See :mod:`lintro.ai.review.verdict` for the rubric.
+
+        Returns:
+            The derived readiness verdict.
+        """
+        from lintro.ai.review.verdict import derive_readiness_verdict
+
+        return derive_readiness_verdict(findings=self.findings)

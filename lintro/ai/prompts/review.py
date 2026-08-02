@@ -21,6 +21,7 @@ __all__ = [
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
+    "REVIEW_OUTPUT_RULES_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SCHEMA_REMINDER_TEMPLATE",
     "REVIEW_SYSTEM",
@@ -30,6 +31,7 @@ __all__ = [
     "format_deferred_scope_section",
     "format_external_review_section",
     "format_lint_results_section",
+    "format_output_rules",
 ]
 
 REVIEW_SYSTEM = load_prompt_template("review", "system.md")
@@ -57,6 +59,8 @@ REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND = load_prompt_template(
 )
 
 REVIEW_OUTPUT_SCHEMA = load_prompt_template("review", "output_schema.json")
+
+REVIEW_OUTPUT_RULES_TEMPLATE = load_prompt_template("review", "output_rules.md")
 
 REVIEW_GENERATE_QUESTIONS_TEMPLATE = load_prompt_template(
     "review",
@@ -167,3 +171,19 @@ def format_lint_results_section(*, digest: str | None) -> str:
     if not digest or not digest.strip():
         return ""
     return f"<lint_results>\n{digest.strip()}\n</lint_results>"
+
+
+def format_output_rules(*, checklist_count: int) -> str:
+    """Render the shared output rules block for a review prompt.
+
+    Both the diff-embedded and git-native review prompts require the exact
+    same output rules; the block lives in one template so the two prompts can
+    never drift apart.
+
+    Args:
+        checklist_count: Number of checklist items the model must answer.
+
+    Returns:
+        The rendered rules block.
+    """
+    return REVIEW_OUTPUT_RULES_TEMPLATE.format(checklist_count=checklist_count).strip()

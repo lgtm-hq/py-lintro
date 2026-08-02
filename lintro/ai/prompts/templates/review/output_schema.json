@@ -1,5 +1,24 @@
 {
-  "summary": "2-3 sentence assessment (safe to merge / merge with fixes / needs rework)",
+  "summary": {
+    "headline": "ONE sentence — what this change does",
+    "walkthrough": [
+      {
+        "text": "One sentence about a coherent part of the change (3-6 bullets total)",
+        "finding_ref": "file:line of the related finding, or empty string"
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "One short paragraph — the single issue that decides mergeability, or why nothing blocks the merge",
+    "failure_mechanism": "One short paragraph — how that issue fails in production; empty string when nothing blocks",
+    "files_needing_attention": ["path/to/file"]
+  },
+  "file_assessments": [
+    {
+      "file": "path/to/file",
+      "overview": "One sentence — what changed in this file"
+    }
+  ],
   "checklist": [
     {
       "id": 1,
@@ -13,7 +32,7 @@
       "category": "logic-bug|silent-failure|integration|test-gap|contract-drift|security|breaking-change",
       "file": "path/to/file",
       "line": 123,
-      "title": "Short title (5-8 words)",
+      "title": "Short single-line title (5-8 words, no line breaks)",
       "description": "What is wrong and why it matters in production",
       "cause": "Root cause — trace the code path",
       "fix": "Concise fix suggestion",

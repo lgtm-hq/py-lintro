@@ -8,7 +8,7 @@ import os
 import shlex
 import time
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +37,7 @@ from lintro.ai.prompts.review import (
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
     format_lint_results_section,
+    format_output_rules,
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
@@ -57,10 +58,19 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.summary_bullet import SummaryBullet
+from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
+from lintro.ai.review.narrative_parser import (
+    MAX_WALKTHROUGH_BULLETS,
+    parse_narrative,
+    parse_summary_text,
+)
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.progress import (
     NullReviewProgress,
@@ -93,8 +103,11 @@ __all__ = [
     "build_git_native_review_prompt",
     "build_review_prompt",
     "merge_checklist_answers",
+    "merge_file_assessments",
     "merge_findings",
+    "merge_pr_summaries",
     "merge_review_results",
+    "merge_verdict_reasoning",
     "parse_review_response",
     "resolve_review_chunks",
     "run_review",
@@ -201,6 +214,9 @@ class _ChunkReviewPartial:
     input_tokens: int
     output_tokens: int
     cost_estimate: float
+    pr_summary: ReviewSummary | None = None
+    verdict_reasoning: VerdictReasoning | None = None
+    file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
 
 
 def resolve_review_chunks(
@@ -886,6 +902,9 @@ async def run_review_async(
         summary=summary,
         checklist=merged.checklist,
         findings=filtered_findings,
+        pr_summary=merged.pr_summary,
+        verdict_reasoning=merged.verdict_reasoning,
+        file_assessments=merged.file_assessments,
     )
 
 
@@ -990,6 +1009,7 @@ def build_review_prompt(
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
+        output_rules=format_output_rules(checklist_count=checklist_count),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -1082,6 +1102,7 @@ def build_git_native_review_prompt(
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
+        output_rules=format_output_rules(checklist_count=checklist_count),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -1186,7 +1207,100 @@ def merge_review_results(
         findings=merge_findings(
             findings_groups=[partial.findings for partial in partials],
         ),
+        pr_summary=merge_pr_summaries(partials=partials),
+        verdict_reasoning=merge_verdict_reasoning(partials=partials),
+        file_assessments=merge_file_assessments(partials=partials),
     )
+
+
+def merge_pr_summaries(
+    *,
+    partials: list[_ChunkReviewPartial],
+) -> ReviewSummary | None:
+    """Merge structured PR summaries across chunks.
+
+    Each chunk sees only part of the diff, so the headlines are joined and the
+    walkthrough bullets concatenated in chunk order, deduplicated by text and
+    capped at :data:`MAX_WALKTHROUGH_BULLETS` so a many-chunk review does not
+    produce an unreadable wall of bullets.
+
+    Args:
+        partials: Partial results from each chunk.
+
+    Returns:
+        The merged summary, or ``None`` when no chunk returned one.
+    """
+    summaries = [
+        partial.pr_summary for partial in partials if partial.pr_summary is not None
+    ]
+    if not summaries:
+        return None
+
+    headlines = [summary.headline for summary in summaries if summary.headline]
+    bullets: list[SummaryBullet] = []
+    seen: set[str] = set()
+    for summary in summaries:
+        for bullet in summary.walkthrough:
+            if bullet.text in seen:
+                continue
+            seen.add(bullet.text)
+            bullets.append(bullet)
+
+    return ReviewSummary(
+        headline=" ".join(headlines),
+        walkthrough=tuple(bullets[:MAX_WALKTHROUGH_BULLETS]),
+    )
+
+
+def merge_verdict_reasoning(
+    *,
+    partials: list[_ChunkReviewPartial],
+) -> VerdictReasoning | None:
+    """Merge verdict reasoning across chunks.
+
+    The reasoning must stay at most two short paragraphs, so the first chunk
+    that produced reasoning wins its prose; only the files-needing-attention
+    pointers are unioned across chunks, since a reviewer needs all of them.
+
+    Args:
+        partials: Partial results from each chunk.
+
+    Returns:
+        The merged reasoning, or ``None`` when no chunk returned any.
+    """
+    reasonings = [
+        partial.verdict_reasoning
+        for partial in partials
+        if partial.verdict_reasoning is not None
+    ]
+    if not reasonings:
+        return None
+
+    files: list[str] = []
+    for reasoning in reasonings:
+        files.extend(
+            path for path in reasoning.files_needing_attention if path not in files
+        )
+    return replace(reasonings[0], files_needing_attention=tuple(files))
+
+
+def merge_file_assessments(
+    *,
+    partials: list[_ChunkReviewPartial],
+) -> tuple[FileAssessment, ...]:
+    """Merge per-file assessments across chunks.
+
+    Args:
+        partials: Partial results from each chunk.
+
+    Returns:
+        One assessment per file, first chunk to assess a file winning.
+    """
+    by_path: dict[str, FileAssessment] = {}
+    for partial in partials:
+        for assessment in partial.file_assessments:
+            by_path.setdefault(assessment.file, assessment)
+    return tuple(by_path.values())
 
 
 async def _review_chunk(
@@ -1650,10 +1764,22 @@ def _payload_to_partial(
     response: AIResponse,
     payload: dict[str, Any],
 ) -> _ChunkReviewPartial:
-    """Convert parsed JSON payload to a chunk partial result."""
-    summary = payload.get("summary", "")
-    if not isinstance(summary, str):
-        summary = str(summary)
+    """Convert parsed JSON payload to a chunk partial result.
+
+    Accepts both the extended ``summary`` object (#1907) and the plain summary
+    string older models return; narrative fields degrade to ``None``/empty
+    rather than failing the chunk.
+
+    Args:
+        response: Provider response the payload was parsed from.
+        payload: Parsed model response for one chunk.
+
+    Returns:
+        The chunk partial result.
+    """
+    raw_summary = payload.get("summary", "")
+    summary = parse_summary_text(raw_summary=raw_summary)
+    pr_summary, verdict_reasoning, file_assessments = parse_narrative(payload=payload)
 
     checklist = _parse_checklist(raw_checklist=payload.get("checklist", []))
     findings = parse_findings(raw_findings=payload.get("findings", []))
@@ -1665,6 +1791,9 @@ def _payload_to_partial(
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
+        pr_summary=pr_summary,
+        verdict_reasoning=verdict_reasoning,
+        file_assessments=file_assessments,
     )
 
 
