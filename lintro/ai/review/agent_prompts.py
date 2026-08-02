@@ -69,6 +69,12 @@ _FOOTERS: dict[AgentPromptScopeKind, str] = {
     ),
 }
 
+_MISSING_FOOTERS = set(AgentPromptScopeKind) - set(_FOOTERS)
+if _MISSING_FOOTERS:  # pragma: no cover - guards a future scope kind
+    raise RuntimeError(
+        f"AgentPromptScopeKind members without a default footer: {_MISSING_FOOTERS}",
+    )
+
 
 def _plural(*, count: int, noun: str) -> str:
     """Format a count with a naively pluralized noun.

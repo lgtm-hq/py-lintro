@@ -141,6 +141,46 @@ def test_round_one_all_open_scope_omits_the_round_suffix() -> None:
     assert_that(prompt.splitlines()[0]).does_not_contain("after round")
 
 
+def test_round_less_this_review_scope_names_the_latest_round() -> None:
+    """Surfaces that do not track rounds still get an unambiguous scope line."""
+    prompt = render_agent_prompt(
+        findings=(_finding(),),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.THIS_REVIEW),
+    )
+    assert_that(" ".join(prompt.split())).contains(
+        "posted in the latest round of this PR's lintro review ONLY",
+    )
+
+
+def test_round_less_all_open_panel_title_omits_the_round_suffix() -> None:
+    """Without a round number the sticky title carries no rounds parenthetical."""
+    panel = render_agent_prompt_panel(
+        findings=(_finding(), _finding(line=8)),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN),
+    )
+    assert_that(panel.splitlines()[1]).is_equal_to(
+        "> ⚡ **Fix-all prompt — all 2 still-open findings**",
+    )
+
+
+def test_single_open_finding_panel_title_uses_the_singular_form() -> None:
+    """One still-open finding reads as `1 still-open finding`, not `all 1`."""
+    panel = render_agent_prompt_panel(findings=(_finding(),), scope=_ALL_OPEN)
+    assert_that(panel.splitlines()[1]).is_equal_to(
+        "> ⚡ **Fix-all prompt — 1 still-open finding (rounds 1–3)**",
+    )
+
+
+def test_footers_cover_every_scope_kind() -> None:
+    """Every scope kind renders a default footer instead of raising."""
+    for kind in AgentPromptScopeKind:
+        panel = render_agent_prompt_panel(
+            findings=(_finding(),),
+            scope=AgentPromptScope(kind=kind),
+        )
+        assert_that(panel).contains("<sub>")
+
+
 def test_findings_are_grouped_by_file_in_first_seen_order() -> None:
     """Each file gets one header and keeps the caller's ordering."""
     findings = (
@@ -324,13 +364,46 @@ def test_single_finding_prompt_matches_the_one_finding_fix_all_body() -> None:
     assert_that(prompt.count("- Line ")).is_equal_to(1)
 
 
-def test_prompt_text_is_sanitized_against_mentions() -> None:
-    """Untrusted model text cannot ping GitHub users from a prompt panel."""
+@pytest.mark.parametrize(
+    ("description", "broken", "preserved"),
+    [
+        ("Reported by @octocat.", "@octocat", ""),
+        ("Owned by @lgtm-hq/reviewers.", "@lgtm-hq", ""),
+        ("Ping @octocat and @hubot.", "@hubot", ""),
+        ("Raised by @octocat; mail dev@example.test.", "@octocat", "dev@example.test"),
+    ],
+    ids=[
+        "case=user_mention",
+        "case=team_mention",
+        "case=multiple_mentions",
+        "case=mention_with_email",
+    ],
+)
+def test_prompt_text_is_sanitized_against_mentions(
+    description: str,
+    broken: str,
+    preserved: str,
+) -> None:
+    """Untrusted model text cannot ping GitHub users from a prompt panel.
+
+    Args:
+        description: Finding description carrying the untrusted text.
+        broken: Mention that must not survive rendering verbatim.
+        preserved: Non-mention text that must survive untouched, if any.
+    """
     prompt = render_agent_prompt(
-        findings=(_finding(description="Reported by @octocat."),),
+        findings=(_finding(description=description),),
         scope=_ALL_OPEN,
     )
-    assert_that(prompt).does_not_contain("@octocat")
+    assert_that(prompt).does_not_contain(broken)
+    if preserved:
+        assert_that(prompt).contains(preserved)
+
+
+def test_negative_round_number_is_rejected() -> None:
+    """A scope cannot claim a round that no review could have produced."""
+    with pytest.raises(ValueError, match="round_number must be >= 1"):
+        AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN, round_number=0)
 
 
 def test_sticky_pointer_links_back_instead_of_duplicating_the_prompt() -> None:
