@@ -1767,8 +1767,10 @@ def _payload_to_partial(
     """Convert parsed JSON payload to a chunk partial result.
 
     Accepts both the extended ``summary`` object (#1907) and the plain summary
-    string older models return; narrative fields degrade to ``None``/empty
-    rather than failing the chunk.
+    string; narrative fields degrade to ``None``/empty rather than failing the
+    chunk. The string shape reaches here from transports that do not enforce
+    :data:`~lintro.ai.cli_schemas.REVIEW_CLI_SCHEMA` and from the prose
+    recovery payload, not from a schema-constrained CLI-transport reply.
 
     Args:
         response: Provider response the payload was parsed from.

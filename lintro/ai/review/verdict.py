@@ -31,12 +31,15 @@ VERDICT_LABELS: dict[ReadinessVerdict, str] = {
     ReadinessVerdict.READY: "Ready",
 }
 
-#: Fine-print rendered under the verdict reasoning. Mirrors
-#: :func:`derive_readiness_verdict` exactly; change both together.
+#: Fine-print rendered under the verdict reasoning. Built from
+#: :data:`VERDICT_LABELS` rather than restating them, so a relabelled verdict
+#: cannot leave the rendered rubric describing the old one.
 VERDICT_RUBRIC_FINE_PRINT: str = (
-    "Verdict is derived from open findings: any P1 -> Blocked; "
-    "else any P2 -> Changes requested; else any P3 -> Nits only; "
-    "else Ready."
+    "Verdict is derived from open findings: "
+    f"any P1 -> {VERDICT_LABELS[ReadinessVerdict.BLOCKED]}; "
+    f"else any P2 -> {VERDICT_LABELS[ReadinessVerdict.CHANGES_REQUESTED]}; "
+    f"else any P3 -> {VERDICT_LABELS[ReadinessVerdict.NITS_ONLY]}; "
+    f"else {VERDICT_LABELS[ReadinessVerdict.READY]}."
 )
 
 

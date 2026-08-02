@@ -87,7 +87,9 @@ def parse_summary_text(*, raw_summary: object) -> str:
     The pre-#1907 schema returned ``summary`` as a string. The extended schema
     returns an object; its ``headline`` is the equivalent plain text. Both are
     accepted so the flat ``ReviewResult.summary`` keeps its meaning for every
-    existing consumer.
+    existing consumer. The string branch stays reachable through transports
+    that do not enforce the strict CLI schema, through the prose recovery
+    payload, and through replayed responses recorded before #1907.
 
     Args:
         raw_summary: Raw ``summary`` value from a parsed model response.

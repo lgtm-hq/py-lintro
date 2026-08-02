@@ -24,6 +24,7 @@ from lintro.ai.review.orchestrator import (
     merge_review_results,
 )
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.verdict import VERDICT_LABELS, VERDICT_RUBRIC_FINE_PRINT
 
 _T = TypeVar("_T")
 
@@ -308,3 +309,12 @@ def test_output_rules_forbid_a_model_supplied_verdict() -> None:
     assert_that(rules).contains("computed by")
     assert_that(rules).contains("single line with no line breaks")
     assert_that(rules).contains("**3**")
+
+
+def test_prompt_rubric_names_the_same_verdicts_as_the_code_rubric() -> None:
+    """The rubric shown to the model and the rendered one cannot drift apart."""
+    rules = format_output_rules(checklist_count=1)
+
+    for label in VERDICT_LABELS.values():
+        assert_that(rules).contains(label)
+        assert_that(VERDICT_RUBRIC_FINE_PRINT).contains(label)
