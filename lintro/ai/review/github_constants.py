@@ -9,9 +9,15 @@ from lintro.ai.review.models.review_finding import Severity
 STICKY_MARKER = "<!-- lintro-ai-review -->"
 STATE_MARKER_PREFIX = "<!-- lintro-ai-review-state:"
 STATE_MARKER_SUFFIX = "-->"
-STATE_VERSION = 1
+# Current review-state schema version. v2 adds per-run statistics and
+# per-finding identity records on top of v1's run aggregates (issue #1906).
+STATE_VERSION = 2
+STATE_VERSION_V1 = 1
 
-# GitHub rejects comment bodies over 65,536 characters; stay well under.
+# GitHub rejects comment bodies over 65,536 characters.
+GITHUB_COMMENT_HARD_LIMIT = 65_536
+# Budget for the rendered body; stay well under the hard limit so the hidden
+# state block always has room.
 MAX_COMMENT_CHARS = 60_000
 # Cap how many run records are retained in the sticky state block.
 MAX_STORED_RUNS = 30

@@ -1,0 +1,347 @@
+"""Cross-run finding identity and matching for AI review state.
+
+Findings are identified by a stable fingerprint over ``file path``,
+``category``, and a normalized title — deliberately *not* the line number,
+which drifts as the PR evolves. Two findings can legitimately share a
+fingerprint within a single round (two hardcoded credentials in one file), so
+identity is the pair ``(fingerprint, ordinal)`` where the ordinal is assigned
+by first-seen line order.
+
+On later rounds ambiguous candidates are paired by nearest-line distance. When
+the pairing is still ambiguous the matcher biases toward *carrying over* an
+open finding rather than declaring it resolved: a stale open finding is a
+lesser failure than a false "Addressed" banner.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import unicodedata
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
+
+from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
+from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.models.finding_match_result import FindingMatchResult
+from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_state import ReviewState
+
+__all__ = [
+    "FINGERPRINT_LENGTH",
+    "derive_verdict",
+    "fingerprint_for",
+    "match_findings",
+    "normalize_file_path",
+    "normalize_title",
+]
+
+# Truncated sha256 hex digest length. 16 hex chars (64 bits) keeps the state
+# blob small while making a collision within one PR effectively impossible.
+FINGERPRINT_LENGTH = 16
+
+_PUNCTUATION_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_title(title: str) -> str:
+    """Normalize a finding title for fingerprinting.
+
+    Lowercases, strips backticks and all other punctuation, and collapses
+    whitespace runs so cosmetic rewordings of the same finding keep a stable
+    identity across rounds.
+
+    Args:
+        title: Raw finding title as reported by the model.
+
+    Returns:
+        The normalized title.
+    """
+    folded = unicodedata.normalize("NFKC", title).casefold()
+    stripped = _PUNCTUATION_RE.sub(" ", folded)
+    return _WHITESPACE_RE.sub(" ", stripped).strip()
+
+
+def normalize_file_path(path: str) -> str:
+    """Normalize a repository-relative file path for fingerprinting.
+
+    Args:
+        path: File path as reported by the model.
+
+    Returns:
+        Path with Windows separators converted and any leading ``./`` removed.
+    """
+    return path.replace("\\", "/").removeprefix("./").strip()
+
+
+def fingerprint_for(*, file: str, category: str, title: str) -> str:
+    """Compute the stable fingerprint for a finding.
+
+    Args:
+        file: Repository-relative file path.
+        category: Finding category label.
+        title: Raw finding title.
+
+    Returns:
+        Truncated sha256 hex digest identifying the finding independently of
+        its line number.
+    """
+    payload = "\x00".join(
+        (
+            normalize_file_path(file),
+            normalize_title(category),
+            normalize_title(title),
+        ),
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return digest[:FINGERPRINT_LENGTH]
+
+
+def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
+    """Derive the merge-readiness verdict from open findings.
+
+    Args:
+        findings: Tracked finding records; resolved records are ignored.
+
+    Returns:
+        The readiness verdict implied by the open findings' severities.
+    """
+    severities = {
+        record.severity for record in findings if record.status is FindingStatus.OPEN
+    }
+    if Severity.P1 in severities:
+        return ReviewVerdict.BLOCKED
+    if Severity.P2 in severities:
+        return ReviewVerdict.CHANGES_REQUESTED
+    if Severity.P3 in severities:
+        return ReviewVerdict.NITS_ONLY
+    return ReviewVerdict.READY
+
+
+def _current_records(
+    *,
+    findings: Sequence[ReviewFinding],
+    round_number: int,
+) -> list[FindingRecord]:
+    """Build fresh records for this round's findings with ordinals assigned.
+
+    Ordinals are 1-based and assigned by first-seen line order within each
+    fingerprint group, matching the ambiguity policy.
+
+    Args:
+        findings: Findings reported in the current round.
+        round_number: Round number being recorded.
+
+    Returns:
+        Records in reported order, each carrying its fingerprint and ordinal.
+    """
+    grouped: dict[str, list[int]] = defaultdict(list)
+    fingerprints: list[str] = []
+    for index, finding in enumerate(findings):
+        fingerprint = fingerprint_for(
+            file=finding.file,
+            category=finding.category,
+            title=finding.title,
+        )
+        fingerprints.append(fingerprint)
+        grouped[fingerprint].append(index)
+
+    ordinals: dict[int, int] = {}
+    for indices in grouped.values():
+        ordered = sorted(indices, key=lambda index: (findings[index].line, index))
+        for ordinal, index in enumerate(ordered, start=1):
+            ordinals[index] = ordinal
+
+    return [
+        FindingRecord(
+            fingerprint=fingerprints[index],
+            ordinal=ordinals[index],
+            severity=finding.severity,
+            category=finding.category,
+            title=finding.title,
+            file=normalize_file_path(finding.file),
+            line=finding.line,
+            status=FindingStatus.OPEN,
+            since_round=round_number,
+            checklist_ids=finding.checklist_ids,
+        )
+        for index, finding in enumerate(findings)
+    ]
+
+
+def _pair_group(
+    *,
+    prior: Sequence[FindingRecord],
+    current: Sequence[FindingRecord],
+) -> dict[int, int]:
+    """Pair current records to prior records within one fingerprint group.
+
+    Candidate pairs are ranked by absolute line distance; ties prefer a prior
+    record that is still open, so an ambiguous match carries a finding over
+    rather than declaring it resolved.
+
+    Args:
+        prior: Prior records sharing the fingerprint.
+        current: Current-round records sharing the fingerprint.
+
+    Returns:
+        Mapping of current index to prior index for the chosen pairs.
+    """
+    candidates = [
+        (
+            abs(current_record.line - prior_record.line),
+            0 if prior_record.status is FindingStatus.OPEN else 1,
+            abs(current_record.ordinal - prior_record.ordinal),
+            prior_index,
+            current_index,
+        )
+        for current_index, current_record in enumerate(current)
+        for prior_index, prior_record in enumerate(prior)
+    ]
+    candidates.sort()
+
+    pairs: dict[int, int] = {}
+    used_prior: set[int] = set()
+    for _distance, _open_first, _ordinal_gap, prior_index, current_index in candidates:
+        if current_index in pairs or prior_index in used_prior:
+            continue
+        pairs[current_index] = prior_index
+        used_prior.add(prior_index)
+    return pairs
+
+
+def _merge_pair(
+    *,
+    prior: FindingRecord,
+    current: FindingRecord,
+) -> tuple[FindingRecord, FindingMatchOutcome]:
+    """Merge a matched prior record with its current-round sighting.
+
+    Args:
+        prior: Previously tracked record.
+        current: Freshly built record for this round.
+
+    Returns:
+        Tuple of the merged record and the transition it represents.
+    """
+    regressed = prior.status is FindingStatus.RESOLVED
+    merged = FindingRecord(
+        fingerprint=prior.fingerprint,
+        ordinal=current.ordinal,
+        severity=current.severity,
+        category=current.category,
+        title=current.title,
+        file=current.file,
+        line=current.line,
+        status=FindingStatus.OPEN,
+        since_round=prior.since_round,
+        resolved_sha=prior.resolved_sha,
+        resolved_round=prior.resolved_round,
+        inline_comment_id=prior.inline_comment_id,
+        regressed=regressed or prior.regressed,
+        checklist_ids=current.checklist_ids or prior.checklist_ids,
+    )
+    if regressed:
+        return merged, FindingMatchOutcome.REGRESSED
+    return merged, FindingMatchOutcome.CARRIED
+
+
+def match_findings(
+    *,
+    previous: ReviewState | None,
+    findings: Sequence[ReviewFinding],
+    round_number: int,
+    head_sha: str = "",
+) -> FindingMatchResult:
+    """Match this round's findings against the previously persisted state.
+
+    Every current finding is classified as ``new``, ``carried``, or
+    ``regressed``; every prior open finding absent from this round is marked
+    ``resolved`` and stamped with the head sha and round that resolved it.
+
+    Args:
+        previous: State decoded from the prior sticky comment, or ``None`` for
+            the first round on a PR.
+        findings: Findings reported in the current round.
+        round_number: Round number being recorded (1-based).
+        head_sha: Head commit sha reviewed in this round; stamped onto findings
+            resolved by this round.
+
+    Returns:
+        The per-round transitions plus the merged record set to persist.
+    """
+    prior_records = list(previous.findings) if previous is not None else []
+    current_records = _current_records(findings=findings, round_number=round_number)
+
+    prior_by_fingerprint: dict[str, list[int]] = defaultdict(list)
+    for index, record in enumerate(prior_records):
+        prior_by_fingerprint[record.fingerprint].append(index)
+    current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
+    for record in current_records:
+        current_by_fingerprint[record.fingerprint].append(record)
+
+    merged: list[FindingRecord] = []
+    new: list[FindingRecord] = []
+    carried: list[FindingRecord] = []
+    regressed: list[FindingRecord] = []
+    resolved: list[FindingRecord] = []
+    outcomes: dict[str, FindingMatchOutcome] = {}
+    matched_prior: set[int] = set()
+
+    for fingerprint, group in current_by_fingerprint.items():
+        prior_indices = prior_by_fingerprint.get(fingerprint, [])
+        prior_group = [prior_records[index] for index in prior_indices]
+        pairs = _pair_group(prior=prior_group, current=group)
+        for current_index, record in enumerate(group):
+            group_index = pairs.get(current_index)
+            if group_index is None:
+                merged.append(record)
+                new.append(record)
+                outcomes[record.key] = FindingMatchOutcome.NEW
+                continue
+            prior_record = prior_group[group_index]
+            matched_prior.add(prior_indices[group_index])
+            updated, outcome = _merge_pair(prior=prior_record, current=record)
+            merged.append(updated)
+            outcomes[updated.key] = outcome
+            if outcome is FindingMatchOutcome.REGRESSED:
+                regressed.append(updated)
+            else:
+                carried.append(updated)
+
+    for index, record in enumerate(prior_records):
+        if index in matched_prior:
+            continue
+        if record.status is FindingStatus.RESOLVED:
+            merged.append(record)
+            continue
+        closed = FindingRecord(
+            fingerprint=record.fingerprint,
+            ordinal=record.ordinal,
+            severity=record.severity,
+            category=record.category,
+            title=record.title,
+            file=record.file,
+            line=record.line,
+            status=FindingStatus.RESOLVED,
+            since_round=record.since_round,
+            resolved_sha=head_sha,
+            resolved_round=round_number,
+            inline_comment_id=record.inline_comment_id,
+            regressed=record.regressed,
+            checklist_ids=record.checklist_ids,
+        )
+        merged.append(closed)
+        resolved.append(closed)
+        outcomes[closed.key] = FindingMatchOutcome.RESOLVED
+
+    return FindingMatchResult(
+        records=tuple(merged),
+        new=tuple(new),
+        carried=tuple(carried),
+        resolved=tuple(resolved),
+        regressed=tuple(regressed),
+        outcomes=outcomes,
+    )

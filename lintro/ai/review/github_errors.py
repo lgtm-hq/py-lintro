@@ -12,8 +12,10 @@ from lintro.ai.review.errors_taxonomy import (
 )
 from lintro.ai.review.github_constants import _FOOTER, STICKY_MARKER
 from lintro.ai.review.github_render import format_run_mechanics, sanitize_comment_text
-from lintro.ai.review.github_sticky import _render_state_block
 from lintro.ai.review.models.review_metadata import ReviewMetadata
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.review_state_codec import render_state_block
 
 
 def format_error_comment(
@@ -22,6 +24,7 @@ def format_error_comment(
     provider: str | None = None,
     metadata: ReviewMetadata | None = None,
     prior_runs: list[dict[str, Any]] | None = None,
+    prior_state: ReviewState | None = None,
 ) -> str:
     """Format a provider/API error as a clear PR comment.
 
@@ -37,8 +40,11 @@ def format_error_comment(
         provider: Provider identifier used for provider-aware classification.
             Falls back to ``metadata.provider`` when omitted.
         metadata: Optional review metadata for a mechanics footer.
-        prior_runs: Run records recovered from the previous sticky comment.
-            Re-emitted so a transient error does not reset cumulative telemetry.
+        prior_runs: Legacy run mappings recovered from the previous sticky
+            comment. Ignored when ``prior_state`` is given.
+        prior_state: Full state decoded from the previous sticky comment.
+            Re-emitted so a transient error does not reset cumulative telemetry
+            or the tracked finding history.
 
     Returns:
         Markdown comment body describing the failure and next steps.
@@ -62,8 +68,13 @@ def format_error_comment(
         lines.extend(["", "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"])
     lines.extend(["", _FOOTER])
     body = "\n".join(lines)
-    if prior_runs:
-        body += _render_state_block(runs=list(prior_runs))
+    state = prior_state
+    if state is None and prior_runs:
+        state = ReviewState(
+            runs=tuple(RunRecord.from_dict(run) for run in prior_runs),
+        )
+    if state is not None and (state.runs or state.findings):
+        body += render_state_block(state=state)
     return body
 
 
