@@ -126,10 +126,19 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-# --timeout 600: the default ai.api_timeout (60s) is sized for streaming API
+# --timeout 900: the default ai.api_timeout (60s) is sized for streaming API
 # chunks; a CLI-transport turn runs the whole review in one `claude` invocation
-# and needs minutes (#1900; the sandbox reference uses the same value).
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --timeout 600 --post --output json >"$output_file" 2>&1
+# and needs minutes (#1900). 600s proved too tight for large diffs — PR #1916's
+# review was killed at the boundary while smaller PRs completed — so the cap is
+# sized for the biggest diffs this repo reviews.
+#
+# COUPLED to ai-review.yml's `timeout-minutes`: this timeout must fire BEFORE
+# the Actions runner kills the job, or the review dies without a JSON envelope
+# and classify_review_outcome.py reads a truncated file. Invariant (enforced by
+# tests/scripts/test_run_ai_review.py): ceil(--timeout / 60) + setup overhead
+# (~7 min: harden-runner, checkout, Node+claude install, uv sync) + posting
+# margin < timeout-minutes. Bump both together.
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --timeout 900 --post --output json >"$output_file" 2>&1
 review_status=$?
 set -e
 
