@@ -15,7 +15,10 @@ from lintro.ai.review.github_render import format_run_mechanics, sanitize_commen
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import migrate_v1_runs, render_state_block
+from lintro.ai.review.review_state_codec import (
+    render_state_block,
+    renumber_if_legacy_v1,
+)
 
 
 def format_error_comment(
@@ -71,13 +74,7 @@ def format_error_comment(
     state = prior_state
     if state is None and prior_runs:
         runs = tuple(RunRecord.from_dict(run) for run in prior_runs)
-        if runs and all(run.round == 1 for run in runs):
-            # Legacy v1 mappings carry no round number; number them
-            # positionally, matching the sticky-comment path so the same
-            # legacy runs always renumber the same way regardless of which
-            # surface parsed them.
-            runs = tuple(migrate_v1_runs(runs=list(runs)))
-        state = ReviewState(runs=runs)
+        state = ReviewState(runs=renumber_if_legacy_v1(runs=runs))
     if state is not None and (state.runs or state.findings):
         body += render_state_block(state=state)
     return body

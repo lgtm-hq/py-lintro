@@ -30,6 +30,7 @@ __all__ = [
     "encode_state",
     "migrate_v1_runs",
     "prune_state_to_fit",
+    "renumber_if_legacy_v1",
     "render_state_block",
 ]
 
@@ -124,6 +125,30 @@ def migrate_v1_runs(*, runs: list[RunRecord]) -> list[RunRecord]:
     return [replace(run, round=index) for index, run in enumerate(runs, start=1)]
 
 
+def renumber_if_legacy_v1(*, runs: tuple[RunRecord, ...]) -> tuple[RunRecord, ...]:
+    """Detect and renumber runs that look like an unversioned v1 blob.
+
+    Callers that receive raw ``prior_runs`` mappings (rather than a full,
+    versioned state blob) have no explicit version tag to dispatch on. A v1
+    blob's runs all parse with the round-field default of ``1``, which is the
+    only signal available; a single real round-1 run is indistinguishable
+    from that and is left alone, since renumbering it would be a no-op. This
+    single detection rule is shared by every such entry point (the sticky
+    comment path and the error comment path) so a given set of legacy runs
+    always renumbers the same way regardless of which surface parsed them.
+
+    Args:
+        runs: Runs already parsed via ``RunRecord.from_dict``.
+
+    Returns:
+        The renumbered runs when the v1 heuristic matches, otherwise ``runs``
+        unchanged.
+    """
+    if runs and all(run.round == 1 for run in runs):
+        return tuple(migrate_v1_runs(runs=list(runs)))
+    return runs
+
+
 def decode_state(*, body: str) -> ReviewState:
     """Decode the review state embedded in a sticky comment body.
 
@@ -139,11 +164,11 @@ def decode_state(*, body: str) -> ReviewState:
     if payload is None:
         return ReviewState()
 
-    try:
-        version = int(payload.get("version", STATE_VERSION_V1))
-    except (TypeError, ValueError, OverflowError):
-        # OverflowError: json.loads accepts the non-standard Infinity token as
-        # float("inf"), and int() of that raises rather than failing cleanly.
+    # Require a genuine int: bool is an int subclass (True/False would
+    # otherwise silently decode as v1/v2), and a float like 2.9 would
+    # truncate to a version that was never actually written.
+    version = payload.get("version", STATE_VERSION_V1)
+    if isinstance(version, bool) or not isinstance(version, int):
         return ReviewState()
 
     if version == STATE_VERSION_V1:

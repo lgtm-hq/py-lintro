@@ -161,8 +161,8 @@ def test_unreadable_state_yields_empty_state(body: str) -> None:
 
 @pytest.mark.parametrize(
     "version",
-    [99, "banana", None],
-    ids=["future", "non-numeric", "null"],
+    [99, "banana", None, 2.9, True],
+    ids=["future", "non-numeric", "null", "fractional", "boolean"],
 )
 def test_unknown_version_starts_fresh(version: object) -> None:
     """An unknown schema version is discarded rather than guessed at."""
@@ -209,7 +209,9 @@ def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
     decoded = decode_state(body=body)
 
     assert_that(decoded.findings).is_length(1)
-    assert_that(decoded.findings[0].severity).is_equal_to(Severity.P3)
+    # Fails closed to P1 (maximally blocking), not P3 — see
+    # test_unrecognized_severity_fails_closed_to_p1_not_p3 for why.
+    assert_that(decoded.findings[0].severity).is_equal_to(Severity.P1)
     assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.OPEN)
     assert_that(decoded.findings[0].checklist_ids).is_empty()
     assert_that(decoded.findings[0].resolved_sha).is_empty()
@@ -240,6 +242,29 @@ def test_unparsable_inline_comment_id_decodes_as_none_not_zero() -> None:
     decoded = decode_state(body=body)
 
     assert_that(decoded.findings[0].inline_comment_id).is_none()
+
+
+def test_unrecognized_severity_fails_closed_to_p1_not_p3() -> None:
+    """A corrupted severity must stay maximally visible, not vanish into P3.
+
+    derive_verdict only escalates to BLOCKED on an open P1; silently
+    downgrading an unparsable severity to P3 (the least-blocking label) would
+    fabricate a clean verdict for a finding that may have originally been a
+    P1.
+    """
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [],
+            "findings": [
+                {"fingerprint": "e" * 16, "severity": "totally-bogus"},
+            ],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.findings[0].severity).is_equal_to(Severity.P1)
 
 
 def test_unrecognized_stored_verdict_does_not_fail_open() -> None:

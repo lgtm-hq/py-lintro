@@ -148,11 +148,17 @@ def _parse_checklist_ids(value: Any) -> tuple[int, ...]:
 
 
 def _parse_severity(value: Any) -> Severity:
-    """Parse a severity label, defaulting to P3 for unknown input."""
+    """Parse a severity label, failing closed to P1 for unknown input.
+
+    An unrecognizable severity must never quietly become the least-blocking
+    label: derive_verdict only escalates to BLOCKED on a P1, so downgrading a
+    corrupted or renamed severity to P3 would fabricate a clean verdict for a
+    finding that may have been a P1.
+    """
     try:
         return Severity(str(value).upper())
     except ValueError:
-        return Severity.P3
+        return Severity.P1
 
 
 def _parse_status(value: Any) -> FindingStatus:
