@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.checklist_item import ChecklistItem
@@ -15,6 +16,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 
 __all__ = [
+    "AgentPromptScope",
     "ChangedFile",
     "ChecklistAnswer",
     "ChecklistItem",
