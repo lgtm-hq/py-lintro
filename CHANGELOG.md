@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.104.2] - 2026-08-02
+
+### Fixed
+
+- **ci**: pass --timeout 600 to the CLI-transport AI review (#1901) (addeaf9)
+
 ## [0.104.1] - 2026-08-01
 
 ### Changed
