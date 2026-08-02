@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.104.3] - 2026-08-02
+
+### Changed
+
+- **ai**: run the AI review on every PR without a paths filter (#1904) (304bb38)
+
+### Fixed
+
+- **ci**: raise AI review limits so large-diff reviews can complete (258e55b)
+
 ## [0.104.2] - 2026-08-02
 
 ### Fixed
