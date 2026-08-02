@@ -13,8 +13,9 @@
   finding for, set that bullet's `finding_ref` to the finding's `file:line`; otherwise
   use an empty string.
 - **Do not score or state a verdict.** The merge-readiness verdict is computed by
-  lintro from the severities of the open findings (any P1 → Blocked; else any P2 →
-  Changes requested; else any P3 → Nits only; else Ready). Write only the reasoning:
+  lintro from the severities of the open findings (any P1 → {label_blocked}; else any
+  P2 → {label_changes_requested}; else any P3 → {label_nits_only}; else
+  {label_ready}). Write only the reasoning:
   `verdict_reasoning.deciding_factor` names the single issue that decides it (or says
   plainly that nothing blocks the merge) and `verdict_reasoning.failure_mechanism`
   traces how that issue fails in production. Two short paragraphs at most, total.

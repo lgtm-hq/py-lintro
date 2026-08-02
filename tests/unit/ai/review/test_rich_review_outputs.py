@@ -299,6 +299,12 @@ def test_cli_schema_matches_prompt_schema_fields() -> None:
     assert_that(set(properties["findings"]["items"]["properties"])).is_equal_to(
         set(prompt_schema["findings"][0]),
     )
+    assert_that(set(properties["verdict_reasoning"]["properties"])).is_equal_to(
+        set(prompt_schema["verdict_reasoning"]),
+    )
+    assert_that(
+        set(properties["file_assessments"]["items"]["properties"]),
+    ).is_equal_to(set(prompt_schema["file_assessments"][0]))
 
 
 def test_output_rules_forbid_a_model_supplied_verdict() -> None:
