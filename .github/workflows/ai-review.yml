@@ -49,11 +49,12 @@ name: AI Review - Dogfood
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
 
+# No paths filter: every PR gets the dogfood review (#1902). The lintro/**
+# filter dated from API-metered billing; under subscription billing the CI and
+# workflow diffs it skipped are exactly where recent regressions shipped.
 'on':
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'lintro/**'
 
 permissions: {}
 

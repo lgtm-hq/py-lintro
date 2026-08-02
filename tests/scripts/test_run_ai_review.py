@@ -241,6 +241,21 @@ def test_workflow_yaml_parses() -> None:
     assert_that(trigger).contains_key("pull_request")
 
 
+def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
+    """The pull_request trigger carries no ``paths`` filter (#1902).
+
+    The old ``lintro/**`` filter meant CI, script, and workflow PRs shipped with
+    no AI review at all — the #1900 timeout bug went out exactly that way. Under
+    subscription billing every PR gets the dogfood review.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    trigger = loaded[True] if True in loaded else loaded["on"]
+    pull_request = trigger["pull_request"]
+    assert_that(pull_request).does_not_contain_key("paths")
+    assert_that(pull_request).does_not_contain_key("paths-ignore")
+
+
 def test_workflow_never_rewrites_its_conclusion_to_success() -> None:
     """No ``continue-on-error`` anywhere, so a failed review shows as failed.
 
