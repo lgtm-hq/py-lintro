@@ -75,8 +75,14 @@ def test_normalize_title_strips_noise(raw: str, expected: str) -> None:
         ("./src/app.py", "src/app.py"),
         ("src\\app.py", "src/app.py"),
         (" src/app.py ", "src/app.py"),
+        (" ./src/app.py ", "src/app.py"),
     ],
-    ids=["dot-prefix", "windows-separator", "surrounding-space"],
+    ids=[
+        "dot-prefix",
+        "windows-separator",
+        "surrounding-space",
+        "space-then-dot-prefix",
+    ],
 )
 def test_normalize_file_path(raw: str, expected: str) -> None:
     """File paths normalize to POSIX form without a leading ``./``."""

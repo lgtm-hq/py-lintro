@@ -74,7 +74,7 @@ def normalize_file_path(path: str) -> str:
     Returns:
         Path with Windows separators converted and any leading ``./`` removed.
     """
-    return path.replace("\\", "/").removeprefix("./").strip()
+    return path.strip().replace("\\", "/").removeprefix("./")
 
 
 def fingerprint_for(*, file: str, category: str, title: str) -> str:
@@ -352,21 +352,11 @@ def match_findings(
         if record.status is FindingStatus.RESOLVED:
             merged.append(record)
             continue
-        closed = FindingRecord(
-            fingerprint=record.fingerprint,
-            ordinal=record.ordinal,
-            severity=record.severity,
-            category=record.category,
-            title=record.title,
-            file=record.file,
-            line=record.line,
+        closed = replace(
+            record,
             status=FindingStatus.RESOLVED,
-            since_round=record.since_round,
             resolved_sha=head_sha,
             resolved_round=round_number,
-            inline_comment_id=record.inline_comment_id,
-            regressed=record.regressed,
-            checklist_ids=record.checklist_ids,
         )
         merged.append(closed)
         resolved.append(closed)
