@@ -15,8 +15,10 @@ class FindingMatchResult:
     """Per-round transitions plus the merged finding set to persist.
 
     Attributes:
-        records: Full tracked finding set after the round, open records first
-            in first-seen order, followed by resolved records.
+        records: Full tracked finding set to persist after the round — every
+            current-round finding plus every prior record that survived. Order
+            is unspecified; consumers that need a particular ordering must sort
+            (for example by ``since_round`` or ``severity``).
         new: Findings seen for the first time in this round.
         carried: Findings that were already open and are still reported.
         resolved: Findings that were open and are absent from this round.

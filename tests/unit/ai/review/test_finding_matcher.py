@@ -337,12 +337,71 @@ def test_ambiguous_tie_prefers_carrying_over_an_open_finding() -> None:
     assert_that(result.carried).is_length(1)
     assert_that(result.regressed).is_empty()
     assert_that(result.resolved).is_empty()
+    # The carried record keeps the open sibling's ordinal, so its key cannot
+    # collide with the resolved record still tracked under ordinal 1.
+    assert_that(result.carried[0].ordinal).is_equal_to(2)
+    assert_that({record.key for record in result.records}).is_length(2)
+
+
+def test_record_keys_stay_unique_across_rounds() -> None:
+    """Identity keys never collide, even as duplicate groups grow and shrink."""
+    first = match_findings(
+        previous=None,
+        findings=[
+            _finding(title="Hardcoded credential", line=10),
+            _finding(title="Hardcoded credential", line=100),
+        ],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[_finding(title="Hardcoded credential", line=11)],
+        round_number=2,
+        head_sha="sha2",
+    )
+    third = match_findings(
+        previous=ReviewState(findings=second.records),
+        findings=[
+            _finding(title="Hardcoded credential", line=11),
+            _finding(title="Hardcoded credential", line=300),
+            _finding(title="Hardcoded credential", line=500),
+        ],
+        round_number=3,
+        head_sha="sha3",
+    )
+
+    keys = [record.key for record in third.records]
+    assert_that(keys).is_length(len(set(keys)))
+    assert_that(third.records).is_length(3)
+
+
+def test_carried_finding_keeps_its_original_ordinal() -> None:
+    """A carried finding's ordinal is stable even when siblings disappear."""
+    first = match_findings(
+        previous=None,
+        findings=[
+            _finding(title="Hardcoded credential", line=10),
+            _finding(title="Hardcoded credential", line=100),
+        ],
+        round_number=1,
+    )
+
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[_finding(title="Hardcoded credential", line=102)],
+        round_number=2,
+        head_sha="sha2",
+    )
+
+    assert_that(second.carried[0].ordinal).is_equal_to(2)
 
 
 def test_resolved_records_are_retained_in_the_merged_set() -> None:
     """Already-resolved findings stay in state so history is not lost."""
     first = match_findings(
-        previous=None, findings=[_finding(title="Leak")], round_number=1
+        previous=None,
+        findings=[_finding(title="Leak")],
+        round_number=1,
     )
     second = match_findings(
         previous=ReviewState(findings=first.records),

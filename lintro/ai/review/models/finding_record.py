@@ -6,25 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.models._coerce import coerce_int
 from lintro.ai.review.models.review_finding import Severity
 
 __all__ = ["FindingRecord"]
-
-
-def _coerce_int(value: Any, *, default: int = 0) -> int:
-    """Coerce an untrusted JSON value to an int, falling back to a default.
-
-    Args:
-        value: Raw value decoded from the state blob.
-        default: Value used when coercion is impossible.
-
-    Returns:
-        The coerced integer, or ``default``.
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +24,8 @@ class FindingRecord:
     Attributes:
         fingerprint: Stable hash of file path, category, and normalized title.
         ordinal: 1-based position among same-fingerprint findings, assigned by
-            first-seen line order within the round.
+            line order when the finding is first seen and then held for the
+            finding's lifetime so its identity key stays stable.
         severity: Finding severity at the most recent sighting.
         category: Finding category label.
         title: Finding title as reported (unnormalized, for display).
@@ -54,6 +40,7 @@ class FindingRecord:
         inline_comment_id: GitHub inline review comment id anchoring this
             finding, when one was posted.
         regressed: True when the finding reappeared after being resolved.
+        checklist_ids: Prompt checklist ids linked to this finding.
     """
 
     fingerprint: str
@@ -126,26 +113,38 @@ class FindingRecord:
         comment_id = payload.get("inline_comment_id")
         return cls(
             fingerprint=fingerprint,
-            ordinal=_coerce_int(payload.get("ordinal"), default=1) or 1,
+            ordinal=coerce_int(payload.get("ordinal"), default=1) or 1,
             severity=_parse_severity(payload.get("severity")),
             category=str(payload.get("category", "")),
             title=str(payload.get("title", "")),
             file=str(payload.get("file", "")),
-            line=_coerce_int(payload.get("line")),
+            line=coerce_int(payload.get("line")),
             status=_parse_status(payload.get("status")),
-            since_round=_coerce_int(payload.get("since_round"), default=1) or 1,
+            since_round=coerce_int(payload.get("since_round"), default=1) or 1,
             resolved_sha=str(resolved_map.get("sha", "")),
-            resolved_round=_coerce_int(resolved_map.get("round")),
+            resolved_round=coerce_int(resolved_map.get("round")),
             inline_comment_id=(
-                _coerce_int(comment_id) if comment_id is not None else None
+                coerce_int(comment_id) if comment_id is not None else None
             ),
             regressed=bool(payload.get("regressed", False)),
-            checklist_ids=tuple(
-                _coerce_int(item)
-                for item in payload.get("checklist_ids", [])
-                if isinstance(item, int | str)
-            ),
+            checklist_ids=_parse_checklist_ids(payload.get("checklist_ids")),
         )
+
+
+def _parse_checklist_ids(value: Any) -> tuple[int, ...]:
+    """Parse checklist ids from an untrusted state-blob value.
+
+    Args:
+        value: Raw value decoded from the state blob.
+
+    Returns:
+        Tuple of integer ids; empty when the value is not a list of numbers.
+    """
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        item for item in value if isinstance(item, int) and not isinstance(item, bool)
+    )
 
 
 def _parse_severity(value: Any) -> Severity:

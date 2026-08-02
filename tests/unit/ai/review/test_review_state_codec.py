@@ -181,7 +181,13 @@ def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
             "runs": [],
             "findings": [
                 {"severity": "P1"},
-                {"fingerprint": "c" * 16, "severity": "nonsense", "status": "weird"},
+                {
+                    "fingerprint": "c" * 16,
+                    "severity": "nonsense",
+                    "status": "weird",
+                    "checklist_ids": "not-a-list",
+                    "resolved_in": "not-a-mapping",
+                },
             ],
         },
     )
@@ -191,6 +197,23 @@ def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
     assert_that(decoded.findings).is_length(1)
     assert_that(decoded.findings[0].severity).is_equal_to(Severity.P3)
     assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.OPEN)
+    assert_that(decoded.findings[0].checklist_ids).is_empty()
+    assert_that(decoded.findings[0].resolved_sha).is_empty()
+
+
+def test_unrecognized_stored_verdict_does_not_fail_open() -> None:
+    """A corrupted verdict never decodes as READY, which would fabricate a pass."""
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [{"model": "claude", "verdict": "totally-bogus"}],
+            "findings": [],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
 
 
 def test_prune_keeps_state_under_the_hard_limit() -> None:

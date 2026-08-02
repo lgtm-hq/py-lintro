@@ -20,6 +20,7 @@ import re
 import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -212,6 +213,21 @@ def _pair_group(
     return pairs
 
 
+def _next_free_ordinal(*, taken: set[int]) -> int:
+    """Return the lowest 1-based ordinal not already used in a group.
+
+    Args:
+        taken: Ordinals already claimed by records sharing the fingerprint.
+
+    Returns:
+        The smallest unused ordinal.
+    """
+    ordinal = 1
+    while ordinal in taken:
+        ordinal += 1
+    return ordinal
+
+
 def _merge_pair(
     *,
     prior: FindingRecord,
@@ -229,7 +245,10 @@ def _merge_pair(
     regressed = prior.status is FindingStatus.RESOLVED
     merged = FindingRecord(
         fingerprint=prior.fingerprint,
-        ordinal=current.ordinal,
+        # The ordinal is part of the persistent identity: a matched finding
+        # keeps the one it was first assigned, so its key stays stable and can
+        # never collide with a sibling still tracked under the old ordinal.
+        ordinal=prior.ordinal,
         severity=current.severity,
         category=current.category,
         title=current.title,
@@ -294,22 +313,38 @@ def match_findings(
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
         prior_group = [prior_records[index] for index in prior_indices]
         pairs = _pair_group(prior=prior_group, current=group)
+        # Every prior record of this fingerprint stays in state (matched, or
+        # carried as resolved), so their ordinals remain taken.
+        taken = {record.ordinal for record in prior_group}
+        assigned: dict[int, FindingRecord] = {}
+
         for current_index, record in enumerate(group):
             group_index = pairs.get(current_index)
             if group_index is None:
-                merged.append(record)
-                new.append(record)
-                outcomes[record.key] = FindingMatchOutcome.NEW
                 continue
             prior_record = prior_group[group_index]
             matched_prior.add(prior_indices[group_index])
             updated, outcome = _merge_pair(prior=prior_record, current=record)
-            merged.append(updated)
+            assigned[current_index] = updated
             outcomes[updated.key] = outcome
             if outcome is FindingMatchOutcome.REGRESSED:
                 regressed.append(updated)
             else:
                 carried.append(updated)
+
+        unmatched = sorted(
+            (index for index in range(len(group)) if index not in assigned),
+            key=lambda index: (group[index].line, index),
+        )
+        for current_index in unmatched:
+            ordinal = _next_free_ordinal(taken=taken)
+            taken.add(ordinal)
+            record = replace(group[current_index], ordinal=ordinal)
+            assigned[current_index] = record
+            new.append(record)
+            outcomes[record.key] = FindingMatchOutcome.NEW
+
+        merged.extend(assigned[index] for index in range(len(group)))
 
     for index, record in enumerate(prior_records):
         if index in matched_prior:

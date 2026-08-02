@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -38,7 +38,7 @@ class ReviewState:
 
     @property
     def open_findings(self) -> tuple[FindingRecord, ...]:
-        """Return the currently open findings, oldest round first."""
+        """Return the currently open findings, in tracking order."""
         return tuple(
             record for record in self.findings if record.status is FindingStatus.OPEN
         )
@@ -51,10 +51,6 @@ class ReviewState:
             for record in self.findings
             if record.status is FindingStatus.RESOLVED
         )
-
-    def with_runs(self, *, runs: tuple[RunRecord, ...]) -> ReviewState:
-        """Return a copy of this state carrying a different run history."""
-        return replace(self, runs=runs)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the state for the hidden comment blob.
