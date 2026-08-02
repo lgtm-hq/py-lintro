@@ -62,13 +62,31 @@
   }
   .ring {
     position: absolute; left: 50%; top: 50%;
-    transform: translate(-50%, -50%);
     border: 1px dashed var(--line);
     border-radius: 50%;
   }
-  .r1 { width: 300px; height: 300px; }
-  .r2 { width: 500px; height: 500px; }
-  .r3 { width: 700px; height: 700px; border-color: rgba(223,230,255,0.08); }
+  .r1 { width: 300px; height: 300px; margin: -150px 0 0 -150px; animation: spin 240s linear infinite; }
+  .r2 { width: 500px; height: 500px; margin: -250px 0 0 -250px; animation: spin-rev 320s linear infinite; }
+  .r3 { width: 700px; height: 700px; margin: -350px 0 0 -350px; border-color: rgba(223,230,255,0.08); animation: spin 420s linear infinite; }
+
+  /* rotating chip layers — chips stay upright via counter-rotation */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes spin-rev { to { transform: rotate(-360deg); } }
+  .orbit { position: absolute; inset: 0; }
+  .o1 { animation: spin 95s linear infinite; }
+  .o2 { animation: spin-rev 150s linear infinite; }
+  .o3 { animation: spin 230s linear infinite; }
+  .sat-pos {
+    position: absolute; left: 50%; top: 50%;
+    transform: rotate(var(--a)) translate(var(--r)) rotate(calc(-1 * var(--a)));
+  }
+  .sat-c { transform: translate(-50%, -50%); }
+  .o1 .sat { animation: spin-rev 95s linear infinite; }
+  .o2 .sat { animation: spin 150s linear infinite; }
+  .o3 .sat { animation: spin-rev 230s linear infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .orbit, .ring, .o1 .sat, .o2 .sat, .o3 .sat { animation: none; }
+  }
   .core {
     position: absolute; left: 50%; top: 50%;
     transform: translate(-50%, -50%);
@@ -86,7 +104,7 @@
     border: 1px solid rgba(255,180,84,0.35);
   }
   .sat {
-    position: absolute;
+    display: inline-block;
     font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em;
     color: var(--ink);
     background: rgba(10,12,32,0.85);
@@ -103,24 +121,6 @@
     box-shadow: 0 0 8px var(--teal);
   }
   .sat.a::before { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-  /* ring 1 (300px → r=150) */
-  .s1  { left: calc(50% + 106px); top: calc(50% - 106px); }   /* 45°  */
-  .s2  { left: calc(50% - 150px); top: calc(50% + 16px);  }   /* 185° */
-  /* ring 2 (500px → r=250) */
-  .s3  { left: calc(50% + 177px); top: calc(50% + 177px); }   /* 315° */
-  .s4  { left: calc(50% - 250px); top: calc(50% - 60px);  }   /* 165° */
-  .s5  { left: calc(50% + 60px);  top: calc(50% - 250px); }   /* 76°  */
-  /* ring 3 (700px → r=350) */
-  .s6  { left: calc(50% + 303px); top: calc(50% - 175px); }   /* 30°  */
-  .s7  { left: calc(50% - 350px); top: calc(50% + 90px);  }   /* 194° */
-  .s8  { left: calc(50% + 90px);  top: calc(50% + 350px); }   /* 104° */
-  .s9  { left: calc(50% - 175px); top: calc(50% - 303px); }   /* 240° */
-  /* hairline connectors */
-  .beam {
-    position: absolute; left: 50%; top: 50%;
-    width: 1px; background: linear-gradient(to bottom, rgba(255,180,84,0.4), transparent);
-    transform-origin: top center;
-  }
 
   /* corner readouts */
   .readout {
@@ -277,15 +277,30 @@
     <div class="ring r2"></div>
     <div class="ring r3"></div>
     <div class="core">lintro</div>
-    <span class="sat s1">ruff</span>
-    <span class="sat a s2">black</span>
-    <span class="sat s3">prettier</span>
-    <span class="sat a s4">mypy</span>
-    <span class="sat s5">pytest</span>
-    <span class="sat s6">yamllint</span>
-    <span class="sat a s7">trufflehog</span>
-    <span class="sat s8">oxc</span>
-    <span class="sat s9">hadolint</span>
+    <div class="orbit o1">
+      <div class="sat-pos" style="--a:45deg;--r:150px"><div class="sat-c"><span class="sat">ruff</span></div></div>
+      <div class="sat-pos" style="--a:135deg;--r:150px"><div class="sat-c"><span class="sat a">black</span></div></div>
+      <div class="sat-pos" style="--a:225deg;--r:150px"><div class="sat-c"><span class="sat">mypy</span></div></div>
+      <div class="sat-pos" style="--a:315deg;--r:150px"><div class="sat-c"><span class="sat a">prettier</span></div></div>
+    </div>
+    <div class="orbit o2">
+      <div class="sat-pos" style="--a:0deg;--r:250px"><div class="sat-c"><span class="sat">pytest</span></div></div>
+      <div class="sat-pos" style="--a:60deg;--r:250px"><div class="sat-c"><span class="sat a">bandit</span></div></div>
+      <div class="sat-pos" style="--a:120deg;--r:250px"><div class="sat-c"><span class="sat">oxc</span></div></div>
+      <div class="sat-pos" style="--a:180deg;--r:250px"><div class="sat-c"><span class="sat a">yamllint</span></div></div>
+      <div class="sat-pos" style="--a:240deg;--r:250px"><div class="sat-c"><span class="sat">tsc</span></div></div>
+      <div class="sat-pos" style="--a:300deg;--r:250px"><div class="sat-c"><span class="sat a">stylelint</span></div></div>
+    </div>
+    <div class="orbit o3">
+      <div class="sat-pos" style="--a:15deg;--r:350px"><div class="sat-c"><span class="sat a">trufflehog</span></div></div>
+      <div class="sat-pos" style="--a:60deg;--r:350px"><div class="sat-c"><span class="sat">hadolint</span></div></div>
+      <div class="sat-pos" style="--a:105deg;--r:350px"><div class="sat-c"><span class="sat a">vale</span></div></div>
+      <div class="sat-pos" style="--a:150deg;--r:350px"><div class="sat-c"><span class="sat">clippy</span></div></div>
+      <div class="sat-pos" style="--a:195deg;--r:350px"><div class="sat-c"><span class="sat a">actionlint</span></div></div>
+      <div class="sat-pos" style="--a:240deg;--r:350px"><div class="sat-c"><span class="sat">pip-audit</span></div></div>
+      <div class="sat-pos" style="--a:285deg;--r:350px"><div class="sat-c"><span class="sat a">pydoclint</span></div></div>
+      <div class="sat-pos" style="--a:330deg;--r:350px"><div class="sat-c"><span class="sat">markdownlint</span></div></div>
+    </div>
   </div>
 
   <div class="readout ro-tl"><b>32</b>tools in orbit</div>
@@ -340,12 +355,21 @@
     <div class="sat-card"><span class="ic t">Py</span><div><h3>ruff</h3><div class="pub">astral.sh · python lint + fix</div><p>Blazing-fast linting and autofix for Python.</p></div><span class="st">✓ in orbit</span></div>
     <div class="sat-card"><span class="ic a">⬢</span><div><h3>black</h3><div class="pub">psf · python format</div><p>Uncompromising formatting, zero debates.</p></div><span class="st">✓ in orbit</span></div>
     <div class="sat-card"><span class="ic b">mλ</span><div><h3>mypy</h3><div class="pub">python.org · type check</div><p>Static types enforced on every sweep.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic p">⚠</span><div><h3>bandit</h3><div class="pub">pycqa · python security</div><p>Security anti-patterns caught in Python code.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic t">¶</span><div><h3>pydoclint</h3><div class="pub">jsh9 · docstring lint</div><p>Docstrings kept honest with signatures.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic a">Y</span><div><h3>yamllint</h3><div class="pub">adrienverge · yaml lint</div><p>YAML kept clean and consistent.</p></div><span class="st">✓ in orbit</span></div>
     <div class="sat-card"><span class="ic p">◈</span><div><h3>prettier</h3><div class="pub">prettier.io · js/ts format</div><p>Opinionated formatting for the web stack.</p></div><span class="st">✓ in orbit</span></div>
-    <div class="sat-card"><span class="ic t">✓</span><div><h3>pytest</h3><div class="pub">pytest.org · test runner</div><p>Test results folded into the same report.</p></div><span class="st">✓ in orbit</span></div>
-    <div class="sat-card"><span class="ic a">⚿</span><div><h3>trufflehog</h3><div class="pub">trufflesec · secret scan</div><p>Leaked credentials caught before push.</p></div><span class="st">✓ in orbit</span></div>
-    <div class="sat-card"><span class="ic b">✎</span><div><h3>vale</h3><div class="pub">errata.ai · prose lint</div><p>Style-guide enforcement for docs.</p></div><span class="st">✓ in orbit</span></div>
-    <div class="sat-card"><span class="ic p">▣</span><div><h3>hadolint</h3><div class="pub">hadolint · docker lint</div><p>Dockerfiles held to best practice.</p></div><span class="st">✓ in orbit</span></div>
-    <a class="sat-card more" href="#"><span><b>+ 24 more bodies</b><br>oxc · tsc · yamllint · clippy · actionlint · bandit …<br>→ browse the full constellation</span></a>
+    <div class="sat-card"><span class="ic b">Ox</span><div><h3>oxc</h3><div class="pub">oxc.rs · js/ts lint</div><p>Rust-speed linting for JS and TS.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic t">#</span><div><h3>stylelint</h3><div class="pub">stylelint · css lint</div><p>Stylesheets held to your rules.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic a">M↓</span><div><h3>markdownlint</h3><div class="pub">davidanson · markdown lint</div><p>Markdown style, standardized.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic p">✓</span><div><h3>pytest</h3><div class="pub">pytest.org · test runner</div><p>Test results folded into the same report.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic b">▣</span><div><h3>hadolint</h3><div class="pub">hadolint · docker lint</div><p>Dockerfiles held to best practice.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic t">⚙</span><div><h3>actionlint</h3><div class="pub">rhysd · workflow lint</div><p>GitHub Actions workflows, validated.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic a">✎</span><div><h3>vale</h3><div class="pub">errata.ai · prose lint</div><p>Style-guide enforcement for docs.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic p">⚿</span><div><h3>trufflehog</h3><div class="pub">trufflesec · secret scan</div><p>Leaked credentials caught before push.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic b">«»</span><div><h3>clippy</h3><div class="pub">rust-lang · rust lint</div><p>Rust lints beyond the compiler.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic t">◉</span><div><h3>pip-audit</h3><div class="pub">pypa · dependency audit</div><p>Known vulnerabilities in Python deps.</p></div><span class="st">✓ in orbit</span></div>
+    <a class="sat-card more" href="#"><span><b>+ 15 more bodies</b><br>tsc · vue-tsc · svelte-check · osv-scanner · golangci-lint …<br>→ browse the full constellation</span></a>
   </div>
 </section>
 
