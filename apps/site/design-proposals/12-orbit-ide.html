@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 12: Orbit × IDE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: #04040c;
+    --ink: #dfe6ff;
+    --dim: #6b7499;
+    --amber: #ffb454;
+    --teal: #4de3c2;
+    --line: rgba(223,230,255,0.14);
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background:
+      radial-gradient(1px 1px at 12% 22%, rgba(255,255,255,0.7) 50%, transparent 50%),
+      radial-gradient(1px 1px at 78% 12%, rgba(255,255,255,0.5) 50%, transparent 50%),
+      radial-gradient(1.5px 1.5px at 88% 64%, rgba(255,255,255,0.6) 50%, transparent 50%),
+      radial-gradient(1px 1px at 32% 78%, rgba(255,255,255,0.45) 50%, transparent 50%),
+      radial-gradient(1px 1px at 56% 34%, rgba(255,255,255,0.5) 50%, transparent 50%),
+      radial-gradient(1.5px 1.5px at 8% 58%, rgba(255,255,255,0.4) 50%, transparent 50%),
+      radial-gradient(1px 1px at 66% 88%, rgba(255,255,255,0.55) 50%, transparent 50%),
+      radial-gradient(1px 1px at 42% 8%, rgba(255,255,255,0.4) 50%, transparent 50%),
+      radial-gradient(1200px 700px at 50% 42%, #0d1030 0%, var(--space) 60%);
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow-x: hidden;
+  }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- minimal top nav ---------- */
+  nav {
+    position: relative; z-index: 10;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 26px 40px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  nav .brand { display: flex; align-items: center; gap: 12px; font-weight: 500; }
+  nav .brand .core { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); }
+  nav .links a { color: var(--dim); text-decoration: none; margin-left: 26px; }
+  nav .links a:hover { color: var(--ink); }
+
+  /* ---------- orbit hero ---------- */
+  .hero {
+    position: relative;
+    height: 760px;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  .orbit-stage {
+    position: absolute; left: 50%; top: 46%;
+    transform: translate(-50%, -50%);
+    width: 720px; height: 720px;
+  }
+  .ring {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+  .r1 { width: 300px; height: 300px; }
+  .r2 { width: 500px; height: 500px; }
+  .r3 { width: 700px; height: 700px; border-color: rgba(223,230,255,0.08); }
+  .core {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 150px; height: 150px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #ffd9a0, var(--amber) 45%, #b35c00 90%);
+    box-shadow: 0 0 90px rgba(255,180,84,0.5), 0 0 220px rgba(255,180,84,0.22);
+    display: grid; place-items: center;
+    font-family: var(--mono); font-weight: 500; font-size: 17px; color: #2a1500;
+    letter-spacing: 0.04em;
+  }
+  .core::after {
+    content: ''; position: absolute; inset: -14px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,180,84,0.35);
+  }
+  .sat {
+    position: absolute;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em;
+    color: var(--ink);
+    background: rgba(10,12,32,0.85);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
+    white-space: nowrap;
+    backdrop-filter: blur(4px);
+  }
+  .sat::before {
+    content: ''; display: inline-block;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--teal); margin-right: 8px;
+    box-shadow: 0 0 8px var(--teal);
+  }
+  .sat.a::before { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  /* ring 1 (300px → r=150) */
+  .s1  { left: calc(50% + 106px); top: calc(50% - 106px); }   /* 45°  */
+  .s2  { left: calc(50% - 150px); top: calc(50% + 16px);  }   /* 185° */
+  /* ring 2 (500px → r=250) */
+  .s3  { left: calc(50% + 177px); top: calc(50% + 177px); }   /* 315° */
+  .s4  { left: calc(50% - 250px); top: calc(50% - 60px);  }   /* 165° */
+  .s5  { left: calc(50% + 60px);  top: calc(50% - 250px); }   /* 76°  */
+  /* ring 3 (700px → r=350) */
+  .s6  { left: calc(50% + 303px); top: calc(50% - 175px); }   /* 30°  */
+  .s7  { left: calc(50% - 350px); top: calc(50% + 90px);  }   /* 194° */
+  .s8  { left: calc(50% + 90px);  top: calc(50% + 350px); }   /* 104° */
+  .s9  { left: calc(50% - 175px); top: calc(50% - 303px); }   /* 240° */
+  /* hairline connectors */
+  .beam {
+    position: absolute; left: 50%; top: 50%;
+    width: 1px; background: linear-gradient(to bottom, rgba(255,180,84,0.4), transparent);
+    transform-origin: top center;
+  }
+
+  /* corner readouts */
+  .readout {
+    position: absolute;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--dim);
+    line-height: 2.1;
+  }
+  .readout b { color: var(--ink); font-weight: 400; display: block; font-size: 15px; letter-spacing: 0.04em; }
+  .readout .t { color: var(--teal); }
+  .ro-tl { top: 24px; left: 8px; }
+  .ro-tr { top: 24px; right: 8px; text-align: right; }
+  .ro-bl { bottom: 24px; left: 8px; }
+  .ro-br { bottom: 24px; right: 8px; text-align: right; }
+
+  .hero-copy {
+    position: absolute; left: 50%; bottom: -8px;
+    transform: translateX(-50%);
+    text-align: center;
+    width: 100%;
+  }
+  .hero-copy h1 {
+    font-weight: 300;
+    font-size: clamp(30px, 3.6vw, 50px);
+    letter-spacing: 0.01em; line-height: 1.15;
+  }
+  .hero-copy h1 b { font-weight: 600; }
+  .hero-copy h1 .t { color: var(--teal); }
+  .hero-copy h1 .a { color: var(--amber); }
+  .hero-copy .actions { margin-top: 26px; display: flex; gap: 14px; justify-content: center; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
+    text-decoration: none; padding: 13px 24px; border-radius: 999px;
+  }
+  .btn-core { background: var(--amber); color: #2a1500; font-weight: 500; box-shadow: 0 0 30px rgba(255,180,84,0.35); }
+  .btn-ghost { border: 1px solid var(--line); color: var(--ink); }
+  .btn-ghost:hover { border-color: var(--teal); color: var(--teal); }
+
+  /* ---------- transmissions ---------- */
+  .sec { max-width: 1180px; margin: 0 auto; padding: 110px 40px 20px; }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 44px; }
+  .sec-head .sig {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--teal);
+  }
+  .sec-head h2 { font-weight: 300; font-size: clamp(26px, 3vw, 38px); letter-spacing: 0.01em; }
+  .sec-head h2 b { font-weight: 600; }
+  .sec-head .line { flex: 1; height: 1px; background: var(--line); align-self: center; }
+
+  .signals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .signal {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 26px;
+    background: rgba(10,12,32,0.5);
+    backdrop-filter: blur(6px);
+    position: relative;
+    overflow: hidden;
+  }
+  .signal::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(77,227,194,0.6), transparent);
+  }
+  .signal .freq { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--dim); }
+  .signal h3 { font-weight: 600; font-size: 20px; margin: 14px 0 10px; }
+  .signal p { font-size: 14px; color: var(--dim); line-height: 1.65; }
+  .signal .wave { margin-top: 22px; display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+  .signal .wave i { width: 3px; background: var(--teal); opacity: 0.55; border-radius: 2px; }
+  .signal .wave i:nth-child(odd) { opacity: 0.25; }
+
+  /* ---------- tool constellation (extension cards) ---------- */
+  .constellation { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .sat-card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 22px;
+    background: rgba(10,12,32,0.5);
+    backdrop-filter: blur(6px);
+    display: flex; gap: 16px; align-items: flex-start;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .sat-card:hover { border-color: rgba(77,227,194,0.5); transform: translateY(-2px); }
+  .sat-card .ic {
+    width: 42px; height: 42px; border-radius: 11px; flex-shrink: 0;
+    display: grid; place-items: center;
+    font-family: var(--mono); font-size: 14px; font-weight: 500;
+    background: rgba(223,230,255,0.05);
+    border: 1px solid var(--line);
+  }
+  .sat-card .ic.t { color: var(--teal); } .sat-card .ic.a { color: var(--amber); }
+  .sat-card .ic.b { color: #8b9bff; } .sat-card .ic.p { color: #d0a5ff; }
+  .sat-card h3 { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--ink); }
+  .sat-card .pub { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-top: 3px; }
+  .sat-card p { font-size: 13px; color: var(--dim); line-height: 1.6; margin-top: 8px; }
+  .sat-card .st {
+    margin-left: auto; flex-shrink: 0;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--teal); white-space: nowrap;
+  }
+  .sat-card.more {
+    align-items: center; justify-content: center;
+    border-style: dashed;
+    font-family: var(--mono); font-size: 13px; color: var(--dim);
+    text-align: center;
+  }
+  .sat-card.more b { color: var(--amber); font-weight: 500; }
+
+  /* ---------- uplink ---------- */
+  .uplink { text-align: center; padding: 120px 40px 110px; position: relative; }
+  .uplink::before {
+    content: ''; position: absolute; left: 50%; top: 55%; transform: translate(-50%,-50%);
+    width: 640px; height: 380px;
+    background: radial-gradient(closest-side, rgba(255,180,84,0.14), transparent 70%);
+    pointer-events: none;
+  }
+  .uplink .sig { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber); }
+  .uplink h2 { font-weight: 300; font-size: clamp(30px, 4vw, 52px); margin-top: 16px; position: relative; }
+  .uplink h2 b { font-weight: 600; }
+  .uplink .install {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 18px;
+    margin-top: 34px;
+    font-family: var(--mono); font-size: 15px;
+    border: 1px solid rgba(255,180,84,0.4);
+    background: rgba(10,12,32,0.8);
+    border-radius: 12px;
+    padding: 16px 24px;
+  }
+  .uplink .install .p { color: var(--amber); }
+  .uplink .install .copy { font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--teal); }
+  .uplink .actions { position: relative; margin-top: 26px; display: flex; gap: 14px; justify-content: center; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 26px 40px 34px;
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+  footer nav a { color: var(--dim); text-decoration: none; margin-left: 22px; }
+  footer nav a:hover { color: var(--teal); }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand"><span class="core"></span>lintro</span>
+  <div class="links">
+    <a href="#">Docs</a><a href="#">Tools</a><a href="#">Coverage</a><a href="#">GitHub ↗</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="orbit-stage" aria-hidden="true">
+    <div class="ring r1"></div>
+    <div class="ring r2"></div>
+    <div class="ring r3"></div>
+    <div class="core">lintro</div>
+    <span class="sat s1">ruff</span>
+    <span class="sat a s2">black</span>
+    <span class="sat s3">prettier</span>
+    <span class="sat a s4">mypy</span>
+    <span class="sat s5">pytest</span>
+    <span class="sat s6">yamllint</span>
+    <span class="sat a s7">trufflehog</span>
+    <span class="sat s8">oxc</span>
+    <span class="sat s9">hadolint</span>
+  </div>
+
+  <div class="readout ro-tl"><b>32</b>tools in orbit</div>
+  <div class="readout ro-tr"><b class="t">0</b>issues detected</div>
+  <div class="readout ro-bl"><b>1.8s</b>full sweep</div>
+  <div class="readout ro-br"><b>6</b>signal formats</div>
+
+  <div class="hero-copy">
+    <h1>Every tool in your stack,<br><b>held in <span class="a">one orbit.</span></b></h1>
+    <div class="actions">
+      <a class="btn btn-core" href="#">$ lintro check .</a>
+      <a class="btn btn-ghost" href="#">Explore the docs</a>
+    </div>
+  </div>
+</header>
+
+<section class="sec">
+  <div class="sec-head">
+    <span class="sig">// incoming transmissions</span>
+    <div class="line"></div>
+    <span class="sig">03 signals</span>
+  </div>
+  <div class="signals">
+    <article class="signal">
+      <span class="freq">CH·01 — unified</span>
+      <h3>One command surface</h3>
+      <p>Check, fix, and test through a single CLI. The interface stays constant while 32 native tools do the work underneath.</p>
+      <div class="wave"><i style="height:30%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:90%"></i><i style="height:60%"></i><i style="height:100%"></i><i style="height:40%"></i><i style="height:75%"></i><i style="height:55%"></i><i style="height:85%"></i><i style="height:35%"></i><i style="height:65%"></i></div>
+    </article>
+    <article class="signal">
+      <span class="freq">CH·02 — native</span>
+      <h3>Configs left untouched</h3>
+      <p>pyproject.toml, .prettierrc, .yamllint — detected in place and respected. Or enforce one setting across every tool at once.</p>
+      <div class="wave"><i style="height:60%"></i><i style="height:35%"></i><i style="height:85%"></i><i style="height:50%"></i><i style="height:95%"></i><i style="height:40%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:100%"></i><i style="height:45%"></i><i style="height:80%"></i><i style="height:30%"></i></div>
+    </article>
+    <article class="signal">
+      <span class="freq">CH·03 — reports</span>
+      <h3>Six signal formats</h3>
+      <p>Grid for humans, JSON and SARIF for machines, HTML for stakeholders. One run broadcasts to every channel.</p>
+      <div class="wave"><i style="height:45%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:100%"></i><i style="height:35%"></i><i style="height:70%"></i><i style="height:90%"></i><i style="height:50%"></i><i style="height:65%"></i><i style="height:85%"></i><i style="height:40%"></i><i style="height:75%"></i></div>
+    </article>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-head">
+    <span class="sig">// tool constellation</span>
+    <div class="line"></div>
+    <span class="sig">32 bodies in orbit</span>
+  </div>
+  <div class="constellation">
+    <div class="sat-card"><span class="ic t">Py</span><div><h3>ruff</h3><div class="pub">astral.sh · python lint + fix</div><p>Blazing-fast linting and autofix for Python.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic a">⬢</span><div><h3>black</h3><div class="pub">psf · python format</div><p>Uncompromising formatting, zero debates.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic b">mλ</span><div><h3>mypy</h3><div class="pub">python.org · type check</div><p>Static types enforced on every sweep.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic p">◈</span><div><h3>prettier</h3><div class="pub">prettier.io · js/ts format</div><p>Opinionated formatting for the web stack.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic t">✓</span><div><h3>pytest</h3><div class="pub">pytest.org · test runner</div><p>Test results folded into the same report.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic a">⚿</span><div><h3>trufflehog</h3><div class="pub">trufflesec · secret scan</div><p>Leaked credentials caught before push.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic b">✎</span><div><h3>vale</h3><div class="pub">errata.ai · prose lint</div><p>Style-guide enforcement for docs.</p></div><span class="st">✓ in orbit</span></div>
+    <div class="sat-card"><span class="ic p">▣</span><div><h3>hadolint</h3><div class="pub">hadolint · docker lint</div><p>Dockerfiles held to best practice.</p></div><span class="st">✓ in orbit</span></div>
+    <a class="sat-card more" href="#"><span><b>+ 24 more bodies</b><br>oxc · tsc · yamllint · clippy · actionlint · bandit …<br>→ browse the full constellation</span></a>
+  </div>
+</section>
+
+<section class="uplink">
+  <p class="sig">// establish uplink</p>
+  <h2>Bring your stack<br><b>into formation.</b></h2>
+  <div class="install"><span><span class="p">$</span> uv pip install lintro</span><span class="copy">copy</span></div>
+  <div class="actions">
+    <a class="btn btn-core" href="#">Read the docs →</a>
+    <a class="btn btn-ghost" href="#">★ GitHub</a>
+  </div>
+</section>
+
+<footer>
+  <span>lintro — unified code quality</span>
+  <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+</footer>
+
+</body>
+</html>
