@@ -126,7 +126,10 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
+# --timeout 600: the default ai.api_timeout (60s) is sized for streaming API
+# chunks; a CLI-transport turn runs the whole review in one `claude` invocation
+# and needs minutes (#1900; the sandbox reference uses the same value).
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --timeout 600 --post --output json >"$output_file" 2>&1
 review_status=$?
 set -e
 
