@@ -22,6 +22,7 @@ from loguru import logger
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github_constants import (
+    GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
@@ -43,12 +44,15 @@ from lintro.ai.review.github_sticky import (
 from lintro.ai.review.github_sticky import (
     build_sticky_comment,
     parse_review_state,
+    parse_review_state_v2,
 )
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
+    "GITHUB_COMMENT_HARD_LIMIT",
     "STATE_MARKER_PREFIX",
     "STICKY_MARKER",
     "MAX_COMMENT_CHARS",
@@ -58,6 +62,7 @@ __all__ = [
     "format_review_summary",
     "format_run_mechanics",
     "parse_review_state",
+    "parse_review_state_v2",
     "post_review_error_to_github",
     "post_review_to_github",
     "sanitize_comment_text",
@@ -97,11 +102,12 @@ def post_review_to_github(
         return False
 
     prompt_questions = question_map or {}
-    comment_id, prior_runs = _load_prior_runs(reporter=gh_reporter)
+    comment_id, prior_state = _load_prior_state(reporter=gh_reporter)
     diff_lines = gh_reporter.fetch_pr_diff_lines()
     body = build_sticky_comment(
         result=result,
-        prior_runs=prior_runs,
+        prior_state=prior_state,
+        head_sha=result.metadata.head_ref,
         checklist_display=checklist_display,
         question_map=prompt_questions,
         diff_lines=diff_lines,
@@ -150,34 +156,34 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
-    comment_id, prior_runs = _load_prior_runs(reporter=gh_reporter)
+    comment_id, prior_state = _load_prior_state(reporter=gh_reporter)
     body = format_error_comment(
         error=error,
         provider=provider,
         metadata=metadata,
-        prior_runs=prior_runs,
+        prior_state=prior_state,
     )
     return _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
 
 
-def _load_prior_runs(
+def _load_prior_state(
     *,
     reporter: GitHubPRReporter,
-) -> tuple[int | None, list[dict[str, Any]]]:
-    """Locate the sticky comment and parse its prior run records.
+) -> tuple[int | None, ReviewState]:
+    """Locate the sticky comment and decode its persisted review state.
 
     Args:
         reporter: GitHub reporter used to list PR comments.
 
     Returns:
-        Tuple of ``(comment_id, run_records)``; the id is ``None`` when no
-        sticky comment exists yet.
+        Tuple of ``(comment_id, state)``; the id is ``None`` and the state is
+        empty when no sticky comment exists yet.
     """
     found = reporter.find_issue_comment(marker=STICKY_MARKER)
     if found is None:
-        return None, []
+        return None, ReviewState()
     comment_id, prior_body = found
-    return comment_id, parse_review_state(body=prior_body)
+    return comment_id, parse_review_state_v2(body=prior_body)
 
 
 def _upsert_sticky(

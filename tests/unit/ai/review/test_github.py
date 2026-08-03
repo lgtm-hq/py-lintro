@@ -14,6 +14,7 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import (
+    GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
@@ -576,8 +577,9 @@ def test_sticky_truncation_keeps_fallback_and_marks_dropped(
 
     body = build_sticky_comment(result=result, diff_lines=diff_lines)
 
-    # The final body stays within the cap (plus the appended state block).
-    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS + 1000)
+    # The final comment (body plus the appended state block) stays within
+    # GitHub's hard limit.
+    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     # The fallback finding — with no inline surface — must survive truncation.
     assert_that(body).contains("FallbackOnlyFinding")
     # Truncation is explicit, not silent.
@@ -746,7 +748,7 @@ def test_build_sticky_cap_body_survives_all_fallback_overflow(
 
     body = build_sticky_comment(result=result, diff_lines=None)
 
-    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS + 1000)
+    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Findings")
     assert_that(body).contains("StickyFallback0")
     marker_present = "finding(s) omitted" in body or "more finding(s) truncated" in body
