@@ -8,7 +8,7 @@ remain here as Python; only the static prompt copy lives in template files.
 from __future__ import annotations
 
 from lintro.ai.prompts._loader import load_prompt_template
-from lintro.ai.review.enums.readiness_verdict import ReadinessVerdict
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.verdict import VERDICT_LABELS
@@ -190,8 +190,8 @@ def format_output_rules(*, checklist_count: int) -> str:
     """
     return REVIEW_OUTPUT_RULES_TEMPLATE.format(
         checklist_count=checklist_count,
-        label_blocked=VERDICT_LABELS[ReadinessVerdict.BLOCKED],
-        label_changes_requested=VERDICT_LABELS[ReadinessVerdict.CHANGES_REQUESTED],
-        label_nits_only=VERDICT_LABELS[ReadinessVerdict.NITS_ONLY],
-        label_ready=VERDICT_LABELS[ReadinessVerdict.READY],
+        label_blocked=VERDICT_LABELS[ReviewVerdict.BLOCKED],
+        label_changes_requested=VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED],
+        label_nits_only=VERDICT_LABELS[ReviewVerdict.NITS_ONLY],
+        label_ready=VERDICT_LABELS[ReviewVerdict.READY],
     ).strip()

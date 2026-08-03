@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from lintro.ai.review.enums.readiness_verdict import ReadinessVerdict
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -45,7 +45,7 @@ class ReviewResult:
         return any(finding.severity == Severity.P1 for finding in self.findings)
 
     @property
-    def readiness_verdict(self) -> ReadinessVerdict:
+    def readiness_verdict(self) -> ReviewVerdict:
         """Return the merge-readiness verdict derived from this run's findings.
 
         The verdict is computed from finding severities, never taken from the

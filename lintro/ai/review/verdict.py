@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from lintro.ai.review.enums.readiness_verdict import ReadinessVerdict
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 
 __all__ = [
@@ -24,11 +24,11 @@ __all__ = [
 ]
 
 #: Human-readable labels for each verdict, used by every surface.
-VERDICT_LABELS: dict[ReadinessVerdict, str] = {
-    ReadinessVerdict.BLOCKED: "Blocked",
-    ReadinessVerdict.CHANGES_REQUESTED: "Changes requested",
-    ReadinessVerdict.NITS_ONLY: "Nits only",
-    ReadinessVerdict.READY: "Ready",
+VERDICT_LABELS: dict[ReviewVerdict, str] = {
+    ReviewVerdict.BLOCKED: "Blocked",
+    ReviewVerdict.CHANGES_REQUESTED: "Changes requested",
+    ReviewVerdict.NITS_ONLY: "Nits only",
+    ReviewVerdict.READY: "Ready",
 }
 
 #: Fine-print rendered under the verdict reasoning. Built from
@@ -36,17 +36,17 @@ VERDICT_LABELS: dict[ReadinessVerdict, str] = {
 #: cannot leave the rendered rubric describing the old one.
 VERDICT_RUBRIC_FINE_PRINT: str = (
     "Verdict is derived from open findings: "
-    f"any P1 -> {VERDICT_LABELS[ReadinessVerdict.BLOCKED]}; "
-    f"else any P2 -> {VERDICT_LABELS[ReadinessVerdict.CHANGES_REQUESTED]}; "
-    f"else any P3 -> {VERDICT_LABELS[ReadinessVerdict.NITS_ONLY]}; "
-    f"else {VERDICT_LABELS[ReadinessVerdict.READY]}."
+    f"any P1 -> {VERDICT_LABELS[ReviewVerdict.BLOCKED]}; "
+    f"else any P2 -> {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}; "
+    f"else any P3 -> {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}; "
+    f"else {VERDICT_LABELS[ReviewVerdict.READY]}."
 )
 
 
 def derive_readiness_verdict(
     *,
     findings: Iterable[ReviewFinding],
-) -> ReadinessVerdict:
+) -> ReviewVerdict:
     """Derive the merge-readiness verdict from open finding severities.
 
     Args:
@@ -60,15 +60,15 @@ def derive_readiness_verdict(
     """
     severities = {finding.severity for finding in findings}
     if Severity.P1 in severities:
-        return ReadinessVerdict.BLOCKED
+        return ReviewVerdict.BLOCKED
     if Severity.P2 in severities:
-        return ReadinessVerdict.CHANGES_REQUESTED
+        return ReviewVerdict.CHANGES_REQUESTED
     if Severity.P3 in severities:
-        return ReadinessVerdict.NITS_ONLY
-    return ReadinessVerdict.READY
+        return ReviewVerdict.NITS_ONLY
+    return ReviewVerdict.READY
 
 
-def verdict_label(*, verdict: ReadinessVerdict) -> str:
+def verdict_label(*, verdict: ReviewVerdict) -> str:
     """Return the display label for a readiness verdict.
 
     Args:

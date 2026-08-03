@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.review.enums.readiness_verdict import ReadinessVerdict
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -52,16 +52,16 @@ def _finding(
 @pytest.mark.parametrize(
     ("severities", "expected"),
     [
-        ((Severity.P1, Severity.P2, Severity.P3), ReadinessVerdict.BLOCKED),
-        ((Severity.P2, Severity.P3), ReadinessVerdict.CHANGES_REQUESTED),
-        ((Severity.P3,), ReadinessVerdict.NITS_ONLY),
-        ((), ReadinessVerdict.READY),
+        ((Severity.P1, Severity.P2, Severity.P3), ReviewVerdict.BLOCKED),
+        ((Severity.P2, Severity.P3), ReviewVerdict.CHANGES_REQUESTED),
+        ((Severity.P3,), ReviewVerdict.NITS_ONLY),
+        ((), ReviewVerdict.READY),
     ],
     ids=["open=p1", "open=p2", "open=p3", "open=none"],
 )
 def test_derive_readiness_verdict_covers_rubric(
     severities: tuple[Severity, ...],
-    expected: ReadinessVerdict,
+    expected: ReviewVerdict,
 ) -> None:
     """Every rubric outcome is derived from the open finding severities."""
     findings = [_finding(severity=severity) for severity in severities]
@@ -75,7 +75,7 @@ def test_derive_readiness_verdict_ignores_lower_severities_when_p1_open() -> Non
     findings.append(_finding(severity=Severity.P1))
 
     assert_that(derive_readiness_verdict(findings=findings)).is_equal_to(
-        ReadinessVerdict.BLOCKED,
+        ReviewVerdict.BLOCKED,
     )
 
 
@@ -98,13 +98,13 @@ def test_review_result_exposes_derived_verdict() -> None:
     )
 
     assert_that(result.readiness_verdict).is_equal_to(
-        ReadinessVerdict.CHANGES_REQUESTED,
+        ReviewVerdict.CHANGES_REQUESTED,
     )
 
 
 def test_verdict_labels_cover_every_member() -> None:
     """Every verdict member has a display label."""
-    for verdict in ReadinessVerdict:
+    for verdict in ReviewVerdict:
         assert_that(verdict_label(verdict=verdict)).is_equal_to(VERDICT_LABELS[verdict])
 
 
