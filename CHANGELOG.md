@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.105.0] - 2026-08-03
+
+### Added
+
+- **review**: state schema v2 with per-run stats history and cross-run finding matching
+  (18a1af2)
+
 ## [0.104.3] - 2026-08-02
 
 ### Changed
