@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.ai.cli_schemas import REVIEW_CLI_SCHEMA
 from lintro.ai.prompts.review import REVIEW_OUTPUT_SCHEMA, format_output_rules
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -21,6 +22,7 @@ from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 from lintro.ai.review.orchestrator import (
     _ChunkReviewPartial,
     _payload_to_partial,
+    merge_pr_summaries,
     merge_review_results,
 )
 from lintro.ai.review.output import review_result_to_dict
@@ -138,6 +140,35 @@ def test_payload_to_partial_degrades_on_legacy_payload() -> None:
     assert_that(partial.file_assessments).is_empty()
 
 
+def test_merge_pr_summaries_drops_an_all_blank_headline_result() -> None:
+    """A merge with no usable headline text returns None, not a blank one.
+
+    parse_review_summary treats a summary with bullets but no headline as
+    non-None (is_empty requires both fields absent), so every chunk can
+    contribute a headline-less summary. Joining empty headlines would then
+    leave a structurally invalid ReviewSummary(headline="", ...) that
+    renderers would print as a blank heading line.
+    """
+    merged = merge_pr_summaries(
+        partials=[
+            _partial(
+                pr_summary=ReviewSummary(
+                    headline="",
+                    walkthrough=(SummaryBullet(text="Parses the payload."),),
+                ),
+            ),
+            _partial(
+                pr_summary=ReviewSummary(
+                    headline="",
+                    walkthrough=(SummaryBullet(text="Threads it through."),),
+                ),
+            ),
+        ],
+    )
+
+    assert_that(merged).is_none()
+
+
 def test_merge_review_results_merges_narrative_across_chunks() -> None:
     """Headlines join, bullets deduplicate, and file assessments key by path."""
     merged = merge_review_results(
@@ -238,7 +269,7 @@ def test_review_result_to_dict_includes_narrative_and_verdict() -> None:
 
     payload = review_result_to_dict(result=result)
 
-    assert_that(payload["readiness_verdict"]).is_equal_to("blocked")
+    assert_that(payload["readiness_verdict"]).is_equal_to(ReviewVerdict.BLOCKED.value)
     assert_that(payload["pr_summary"]["walkthrough"][0]["finding_ref"]).is_equal_to(
         "a.py:1",
     )
@@ -270,7 +301,7 @@ def test_review_result_to_dict_degrades_without_narrative() -> None:
     assert_that(payload["pr_summary"]).is_none()
     assert_that(payload["verdict_reasoning"]).is_none()
     assert_that(payload["file_assessments"]).is_empty()
-    assert_that(payload["readiness_verdict"]).is_equal_to("ready")
+    assert_that(payload["readiness_verdict"]).is_equal_to(ReviewVerdict.READY.value)
 
 
 def test_prompt_output_schema_declares_narrative_fields() -> None:

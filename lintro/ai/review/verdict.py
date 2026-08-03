@@ -31,6 +31,16 @@ VERDICT_LABELS: dict[ReviewVerdict, str] = {
     ReviewVerdict.READY: "Ready",
 }
 
+# Import-time exhaustiveness guard: a new ReviewVerdict member added without a
+# matching VERDICT_LABELS entry would otherwise only surface as a KeyError
+# inside verdict_label() at render time, or be caught by a test that a rushed
+# IDE-driven refactor might skip running.
+_missing_verdict_labels = set(ReviewVerdict) - set(VERDICT_LABELS)
+if _missing_verdict_labels:  # pragma: no cover - guards a future verdict
+    raise RuntimeError(
+        f"VERDICT_LABELS missing entries for: {_missing_verdict_labels}",
+    )
+
 #: Fine-print rendered under the verdict reasoning. Built from
 #: :data:`VERDICT_LABELS` rather than restating them, so a relabelled verdict
 #: cannot leave the rendered rubric describing the old one.

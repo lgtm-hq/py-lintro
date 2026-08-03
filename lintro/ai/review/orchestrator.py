@@ -1246,8 +1246,17 @@ def merge_pr_summaries(
             seen.add(bullet.text)
             bullets.append(bullet)
 
+    headline = " ".join(headlines)
+    if not headline.strip():
+        # Every chunk's summary was headline-less (only walkthrough bullets),
+        # so there is nothing to join. Returning a ReviewSummary with a blank
+        # headline here would let renderers print an empty heading line; None
+        # matches what merge_pr_summaries returns when no chunk had a summary
+        # at all.
+        return None
+
     return ReviewSummary(
-        headline=" ".join(headlines),
+        headline=headline,
         walkthrough=tuple(bullets[:MAX_WALKTHROUGH_BULLETS]),
     )
 
