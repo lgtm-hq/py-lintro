@@ -22,6 +22,7 @@ from lintro.ai.review.github_sticky import (
     parse_review_state,
     parse_review_state_v2,
 )
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
@@ -241,6 +242,29 @@ def test_error_comment_preserves_finding_history(
     assert_that(recovered.open_findings[0].status).is_equal_to(FindingStatus.OPEN)
 
 
+def test_error_comment_legacy_prior_runs_path_preserves_history(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The legacy ``prior_runs`` branch (no ``prior_state``) also survives.
+
+    ``test_error_comment_preserves_finding_history`` only exercises the
+    ``prior_state=`` path; a regression in ``RunRecord.from_dict`` or
+    ``renumber_if_legacy_v1`` on the older ``prior_runs=`` branch would
+    otherwise be invisible.
+    """
+    first = build_sticky_comment(result=sample_review_result, head_sha="sha1")
+
+    body = format_error_comment(
+        error=RuntimeError("boom"),
+        provider="anthropic",
+        prior_runs=parse_review_state(body=first),
+    )
+
+    recovered = parse_review_state_v2(body=body)
+    assert_that(recovered.runs).is_length(1)
+    assert_that(recovered.runs[0].round).is_equal_to(1)
+
+
 def test_sticky_comment_never_exceeds_github_hard_limit(
     sample_review_result: ReviewResult,
 ) -> None:
@@ -286,3 +310,35 @@ def test_dropping_runs_past_max_stored_runs_marks_state_truncated(
     state = parse_review_state_v2(body=body)
     assert_that(state.runs).is_length(MAX_STORED_RUNS)
     assert_that(state.truncated).is_true()
+
+
+def test_error_comment_prunes_a_near_limit_prior_state() -> None:
+    """format_error_comment must prune, not just append, an oversized state.
+
+    A valid prior state can nearly fill GitHub's comment cap on its own;
+    appending it to the error body unpruned can push the total over the
+    limit that ``build_sticky_comment`` otherwise always respects.
+    """
+    findings = tuple(
+        FindingRecord(
+            fingerprint=f"{index:016d}",
+            ordinal=1,
+            severity=Severity.P2,
+            category="security",
+            title="x" * 900,
+            file=f"src/module_{index}.py",
+            line=index,
+            status=FindingStatus.OPEN,
+            since_round=1,
+        )
+        for index in range(200)
+    )
+    prior_state = ReviewState(runs=(RunRecord(round=1, sha="sha1"),), findings=findings)
+
+    body = format_error_comment(
+        error=RuntimeError("boom"),
+        provider="anthropic",
+        prior_state=prior_state,
+    )
+
+    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)

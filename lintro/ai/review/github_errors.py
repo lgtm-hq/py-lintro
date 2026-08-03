@@ -16,6 +16,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.review_state_codec import (
+    prune_state_to_fit,
     render_state_block,
     renumber_if_legacy_v1,
 )
@@ -75,7 +76,8 @@ def format_error_comment(
     if state is None and prior_runs:
         runs = tuple(RunRecord.from_dict(run) for run in prior_runs)
         state = ReviewState(runs=renumber_if_legacy_v1(runs=runs))
-    if state is not None and (state.runs or state.findings):
+    if state is not None and (state.runs or state.findings or state.truncated):
+        state = prune_state_to_fit(state=state, body=body)
         body += render_state_block(state=state)
     return body
 

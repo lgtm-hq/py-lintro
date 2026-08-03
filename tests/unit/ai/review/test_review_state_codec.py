@@ -84,6 +84,9 @@ def test_round_trip_preserves_runs_and_findings() -> None:
     assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
     assert_that(decoded.findings).is_length(1)
     assert_that(decoded.findings[0].fingerprint).is_equal_to("a" * 16)
+    assert_that(decoded.findings[0].severity).is_equal_to(Severity.P2)
+    assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.OPEN)
+    assert_that(decoded.findings[0].since_round).is_equal_to(1)
 
 
 def test_resolved_provenance_round_trips() -> None:
