@@ -112,7 +112,11 @@ def resolve_bullet_finding(
         try:
             line = int(line_text)
         except ValueError:
-            path, line = reference, None
+            # path is already correctly split off by rpartition; only the
+            # line suffix was malformed, so keep path and drop the line
+            # instead of rebinding path to the whole unsplit reference (which
+            # would break the same-file fallback below).
+            line = None
 
     candidates = [finding for finding in findings if finding.file == path]
     if not candidates:

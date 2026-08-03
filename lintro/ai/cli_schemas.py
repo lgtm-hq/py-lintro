@@ -21,7 +21,10 @@ __all__ = [
 
 REVIEW_CLI_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["summary", "checklist", "findings"],
+    # summary is intentionally not required at the root: parse_review_summary
+    # already degrades to None (TL;DR-only rendering) when it is absent, so a
+    # CLI response with only findings and checklist must still validate.
+    "required": ["checklist", "findings"],
     "additionalProperties": False,
     "properties": {
         # The narrative fields (#1907) are optional: the schema stays

@@ -182,6 +182,24 @@ def test_parse_file_assessments_drops_unusable_entries() -> None:
     assert_that(assessments[0].overview).is_equal_to("First.")
 
 
+def test_parse_file_assessments_drops_entries_with_no_overview() -> None:
+    """A valid file path with a missing or blank overview is dropped too.
+
+    A blank FileAssessment.overview would render an empty per-file bullet,
+    violating the contract that every kept assessment has real content.
+    """
+    assessments = parse_file_assessments(
+        raw_assessments=[
+            {"file": "a.py", "overview": ""},
+            {"file": "b.py"},
+            {"file": "c.py", "overview": "Has content."},
+        ],
+    )
+
+    assert_that(assessments).is_length(1)
+    assert_that(assessments[0].file).is_equal_to("c.py")
+
+
 @pytest.mark.parametrize(
     "raw_assessments",
     [None, {}, "prose"],

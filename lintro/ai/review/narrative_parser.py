@@ -180,7 +180,8 @@ def parse_file_assessments(*, raw_assessments: object) -> tuple[FileAssessment, 
 
     Returns:
         Assessments in payload order, one per named file. Entries without a
-        file path are dropped; the first entry for a repeated path wins.
+        file path or a non-empty overview are dropped; the first entry for a
+        repeated path wins.
     """
     if not isinstance(raw_assessments, list):
         return ()
@@ -190,12 +191,10 @@ def parse_file_assessments(*, raw_assessments: object) -> tuple[FileAssessment, 
         if not isinstance(item, dict):
             continue
         path = _as_text(item.get("file"))
-        if not path or path in assessments:
+        overview = _as_text(item.get("overview"))
+        if not path or not overview or path in assessments:
             continue
-        assessments[path] = FileAssessment(
-            file=path,
-            overview=_as_text(item.get("overview")),
-        )
+        assessments[path] = FileAssessment(file=path, overview=overview)
     return tuple(assessments.values())
 
 

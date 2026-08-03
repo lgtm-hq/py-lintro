@@ -147,3 +147,21 @@ def test_resolve_bullet_finding_returns_none_when_unresolvable(
     assert_that(
         resolve_bullet_finding(finding_ref=finding_ref, findings=[finding]),
     ).is_none()
+
+
+def test_resolve_bullet_finding_falls_back_on_malformed_line_suffix() -> None:
+    """A malformed (non-integer) line suffix still resolves via same-file fallback.
+
+    Regression guard: the ValueError handler for an unparsable line suffix
+    must reset only the line, not overwrite the already-correctly-split path
+    with the whole unsplit reference — doing so would make the same-file
+    fallback below it unreachable.
+    """
+    finding = _finding(severity=Severity.P2, file="a.py", line=7)
+
+    resolved = resolve_bullet_finding(
+        finding_ref="a.py:not_a_number",
+        findings=[finding],
+    )
+
+    assert_that(resolved).is_equal_to(finding)
