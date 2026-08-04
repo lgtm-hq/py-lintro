@@ -38,6 +38,7 @@ from lintro.ai.review.review_state_codec import (
     render_state_block,
     renumber_if_legacy_v1,
 )
+from lintro.ai.review.severity_gate import count_downgrades
 
 
 def build_sticky_comment(
@@ -216,6 +217,8 @@ def _run_record(
         p1=counts[Severity.P1],
         p2=counts[Severity.P2],
         p3=counts[Severity.P3],
+        questions=sum(1 for finding in result.findings if finding.is_question),
+        downgraded=count_downgrades(findings=result.findings),
         partial=bool(metadata.partial),
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,

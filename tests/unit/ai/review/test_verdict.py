@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -165,3 +168,59 @@ def test_resolve_bullet_finding_falls_back_on_malformed_line_suffix() -> None:
     )
 
     assert_that(resolved).is_equal_to(finding)
+
+
+def test_questions_never_move_the_verdict() -> None:
+    """A P1-labelled question leaves the verdict at the findings' level (#1925)."""
+    question = replace(
+        _finding(severity=Severity.P1, file="a.py", line=1),
+        kind=FindingKind.QUESTION,
+    )
+    finding = _finding(severity=Severity.P3, file="b.py", line=2)
+
+    verdict = derive_readiness_verdict(findings=[question, finding])
+
+    assert_that(verdict).is_equal_to(ReviewVerdict.NITS_ONLY)
+
+
+def test_a_review_of_only_questions_is_ready() -> None:
+    """Questions alone leave nothing open to block the merge."""
+    question = replace(
+        _finding(severity=Severity.P1, file="a.py", line=1),
+        kind=FindingKind.QUESTION,
+    )
+
+    assert_that(derive_readiness_verdict(findings=[question])).is_equal_to(
+        ReviewVerdict.READY,
+    )
+
+
+def test_summary_bullets_never_resolve_to_a_question() -> None:
+    """A severity-marked bullet must point at a severity'd finding."""
+    question = replace(
+        _finding(severity=Severity.P1, file="a.py", line=7),
+        kind=FindingKind.QUESTION,
+    )
+
+    assert_that(
+        resolve_bullet_finding(finding_ref="a.py:7", findings=[question]),
+    ).is_none()
+
+
+def test_exact_question_reference_does_not_fall_back_to_another_finding() -> None:
+    """An exact reference to a question line never resolves via same-file fallback.
+
+    ``a.py:7`` is a question and ``a.py:42`` is a real finding. A bullet that
+    references the question's own line must yield ``None`` rather than
+    silently attaching the question's severity to the unrelated finding at
+    ``a.py:42`` through the same-file fallback.
+    """
+    question = replace(
+        _finding(severity=Severity.P1, file="a.py", line=7),
+        kind=FindingKind.QUESTION,
+    )
+    other = _finding(severity=Severity.P2, file="a.py", line=42)
+
+    assert_that(
+        resolve_bullet_finding(finding_ref="a.py:7", findings=[question, other]),
+    ).is_none()

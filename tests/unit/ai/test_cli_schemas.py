@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -71,3 +72,45 @@ def test_parse_fix_response_payload_accepts_array() -> None:
     """Fix parser accepts batch arrays."""
     payload = parse_fix_response_payload(content=json.dumps([{"line": 1}]))
     assert_that(payload).is_length(1)
+
+
+def _review_finding_schema() -> dict[str, Any]:
+    """Return the ``findings`` sub-schema of the review CLI schema.
+
+    Returns:
+        The findings array schema, narrowed from the schema's ``object``
+        value type so the structural assertions below stay type-checked.
+    """
+    properties = cast(dict[str, Any], REVIEW_CLI_SCHEMA["properties"])
+    return cast(dict[str, Any], properties["findings"])
+
+
+def test_review_cli_schema_accepts_the_corpus_finding_fields() -> None:
+    """The strict CLI schema permits every #1925 field (#1925).
+
+    The CLI schema sets ``additionalProperties: false``, so a field the prompt
+    asks for but the schema omits would be rejected outright at the transport
+    boundary.
+    """
+    properties = _review_finding_schema()["items"]["properties"]
+
+    assert_that(properties).contains_key(
+        "kind",
+        "failure_scenario",
+        "evidence_style",
+        "occurrences",
+    )
+    assert_that(properties["kind"]["enum"]).is_equal_to(["finding", "question"])
+    assert_that(properties["evidence_style"]["enum"]).is_equal_to(
+        ["diff_local", "cross_file", "speculative"],
+    )
+
+
+def test_review_cli_schema_keeps_the_new_fields_optional() -> None:
+    """A model that ignores the #1925 fields still produces a valid review."""
+    assert_that(_review_finding_schema()["items"]["required"]).does_not_contain(
+        "kind",
+        "failure_scenario",
+        "evidence_style",
+        "occurrences",
+    )

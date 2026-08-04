@@ -10,6 +10,7 @@ from lintro.ai.review.models.chunking_result import ChunkingResult
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -32,6 +33,7 @@ __all__ = [
     "FileAssessment",
     "FileClassification",
     "FindingMatchResult",
+    "FindingOccurrence",
     "FindingRecord",
     "PRMetadata",
     "ReviewChunk",

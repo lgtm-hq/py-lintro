@@ -240,7 +240,7 @@ def test_build_review_prompt_logs_secret_warning() -> None:
 def test_severity_normalization_lowercase() -> None:
     """A lowercase 'p1' severity normalizes to Severity.P1."""
     findings = parse_findings(
-        raw_findings=[{"severity": "p1", "title": "Bug"}],
+        raw_findings=[{"severity": "p1", "title": "Bug", "failure_scenario": "boom"}],
     )
 
     assert_that(findings).is_length(1)
@@ -250,7 +250,7 @@ def test_severity_normalization_lowercase() -> None:
 def test_severity_normalization_whitespace() -> None:
     """A trailing-space 'P1 ' severity normalizes to Severity.P1."""
     findings = parse_findings(
-        raw_findings=[{"severity": "P1 ", "title": "Bug"}],
+        raw_findings=[{"severity": "P1 ", "title": "Bug", "failure_scenario": "boom"}],
     )
 
     assert_that(findings).is_length(1)
@@ -260,7 +260,9 @@ def test_severity_normalization_whitespace() -> None:
 def test_severity_synonym_critical_maps_to_p1() -> None:
     """A blocking synonym like 'critical' maps to Severity.P1."""
     findings = parse_findings(
-        raw_findings=[{"severity": "critical", "title": "Bug"}],
+        raw_findings=[
+            {"severity": "critical", "title": "Bug", "failure_scenario": "boom"},
+        ],
     )
 
     assert_that(findings).is_length(1)
@@ -290,7 +292,15 @@ def test_normalize_severity_minor_maps_to_p3() -> None:
 def test_has_p1_findings_after_lowercase_normalization() -> None:
     """The exit gate fires when a lowercase 'p1' finding is normalized."""
     findings = parse_findings(
-        raw_findings=[{"severity": "p1", "title": "Bug", "file": "a.py", "line": 1}],
+        raw_findings=[
+            {
+                "severity": "p1",
+                "title": "Bug",
+                "file": "a.py",
+                "line": 1,
+                "failure_scenario": "boom",
+            },
+        ],
     )
     result = ReviewResult(
         metadata=_placeholder_metadata(),
@@ -306,7 +316,13 @@ def test_has_p1_findings_true_for_blocking_synonym() -> None:
     """A blocking synonym like 'blocker' trips the P1 exit gate."""
     findings = parse_findings(
         raw_findings=[
-            {"severity": "blocker", "title": "Bug", "file": "a.py", "line": 1},
+            {
+                "severity": "blocker",
+                "title": "Bug",
+                "file": "a.py",
+                "line": 1,
+                "failure_scenario": "boom",
+            },
         ],
     )
     result = ReviewResult(
@@ -322,7 +338,9 @@ def test_has_p1_findings_true_for_blocking_synonym() -> None:
 def test_has_p1_findings_true_for_gibberish_severity() -> None:
     """A truly unknown severity fails closed to P1 and trips the exit gate."""
     findings = parse_findings(
-        raw_findings=[{"severity": "banana", "title": "Bug"}],
+        raw_findings=[
+            {"severity": "banana", "title": "Bug", "failure_scenario": "boom"},
+        ],
     )
     result = ReviewResult(
         metadata=_placeholder_metadata(),

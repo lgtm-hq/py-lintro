@@ -48,7 +48,9 @@ script behavior → server routes → middleware → DB → client parsing → U
 
 **Do NOT report:**
 
-- Style/formatting issues linters would catch
+- Style/formatting issues linters would catch — lintro runs the native linters in the
+  same check run. The one exception is correctness-adjacent style (shadowed names,
+  misleading identifiers, confusing API misuse), which stays in scope as P3 `code-smell`
 - Missing docstrings unless they hide a behavioral contract
 - Deferred scope explicitly listed in the PR summary (if provided)
 - Suggestions to refactor unrelated code
@@ -60,5 +62,17 @@ script behavior → server routes → middleware → DB → client parsing → U
 - **P2:** Incorrect edge-case behavior, contract drift, or incomplete test coverage
 - **P3:** Breaking default needing migration notes, UX wording, minor inaccuracy, or
   test isolation nit
+
+**Severity calibration (read before assigning a P1):**
+
+- P1 is the merge-blocking bar, not the "I am confident" bar. A typical PR has 0–2; most
+  have none. Every open P1 blocks the PR outright, so an inflated one makes the whole
+  verdict worthless.
+- A P1 must come with a concrete `failure_scenario`: the inputs, the code path, and the
+  observable failure. If you cannot write that sentence, it is not a P1 — a P1 lacking
+  it is automatically downgraded to P2 and the correction is recorded against the run.
+- Torn between P1 and P2? Choose P2.
+- Suspicion you cannot evidence is not a low-severity finding — report it as a
+  `question` (max 3 per review).
 
 Respond ONLY with valid JSON. No markdown fences.

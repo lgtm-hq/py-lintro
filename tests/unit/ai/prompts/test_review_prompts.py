@@ -137,3 +137,32 @@ def test_review_system_is_nonempty() -> None:
     """System prompt contains review method instructions."""
     assert_that(REVIEW_SYSTEM).contains("Review method")
     assert_that(REVIEW_SYSTEM).contains("P1")
+
+
+def test_review_system_carries_p1_calibration_language() -> None:
+    """The system prompt states the P1 bar and the evidence requirement (#1925)."""
+    assert_that(REVIEW_SYSTEM).contains("Severity calibration")
+    assert_that(REVIEW_SYSTEM).contains("failure_scenario")
+    assert_that(REVIEW_SYSTEM).contains("Torn between P1 and P2? Choose P2.")
+
+
+def test_review_system_keeps_correctness_adjacent_style_in_scope() -> None:
+    """Linter-catchable style is out of scope, code smells are not."""
+    assert_that(REVIEW_SYSTEM).contains("Style/formatting issues linters would catch")
+    assert_that(REVIEW_SYSTEM).contains("code-smell")
+
+
+def test_output_schema_declares_the_corpus_finding_fields() -> None:
+    """The model-facing schema advertises every #1925 field."""
+    for field in ("kind", "failure_scenario", "evidence_style", "occurrences"):
+        assert_that(REVIEW_OUTPUT_SCHEMA).contains(field)
+
+
+def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
+    """Rendered rules carry the question cap and the occurrence instruction."""
+    rules = format_output_rules(checklist_count=4)
+
+    assert_that(rules).contains("3 per review")
+    assert_that(rules).contains("automatically downgraded to P2")
+    assert_that(rules).contains("occurrences")
+    assert_that(rules).contains("do not report the same problem twice")

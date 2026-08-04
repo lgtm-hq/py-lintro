@@ -9,11 +9,17 @@ from __future__ import annotations
 
 from loguru import logger
 
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
+from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.models.finding_occurrence import parse_occurrences
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.narrative_parser import collapse_to_single_line
+from lintro.ai.review.severity_gate import apply_p1_evidence_gate
 
 __all__ = [
     "SEVERITY_SYNONYMS",
+    "normalize_evidence_style",
+    "normalize_finding_kind",
     "normalize_severity",
     "parse_findings",
     "parse_severity_label",
@@ -96,6 +102,42 @@ def normalize_severity(*, raw: object) -> Severity:
     return Severity.P1
 
 
+def normalize_finding_kind(*, raw: object) -> FindingKind:
+    """Normalize a model-reported ``kind`` value to a member.
+
+    Args:
+        raw: Raw ``kind`` value from a parsed model response.
+
+    Returns:
+        The matching member, or :data:`FindingKind.FINDING` when the value is
+        absent or unrecognized. Defaulting to ``FINDING`` is the conservative
+        choice: a mislabelled question still gets reviewed and rendered, while
+        a mislabelled finding would silently vanish from the verdict.
+    """
+    try:
+        return FindingKind(str(raw).strip().lower())
+    except ValueError:
+        return FindingKind.FINDING
+
+
+def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
+    """Normalize a model-reported ``evidence_style`` value to a member.
+
+    Args:
+        raw: Raw ``evidence_style`` value from a parsed model response.
+
+    Returns:
+        The matching member, or :data:`EvidenceStyle.DIFF_LOCAL` when the
+        value is absent or unrecognized. The field drives display only, so an
+        unknown label falls back to the unchipped default rather than
+        asserting an evidence basis the model did not claim.
+    """
+    try:
+        return EvidenceStyle(str(raw).strip().lower())
+    except ValueError:
+        return EvidenceStyle.DIFF_LOCAL
+
+
 def parse_findings(
     *,
     raw_findings: object,
@@ -112,10 +154,16 @@ def parse_findings(
         severity_override: When set, every parsed finding is assigned this
             severity instead of the model-reported one. Custom review agents
             declare a severity policy in front matter, and that declared policy
-            wins over whatever the model labels an individual finding.
+            wins over whatever the model labels an individual finding — it
+            also exempts the pass from the P1 evidence gate.
 
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.
+        Every field added by #1925 (``kind``, ``failure_scenario``,
+        ``evidence_style``, ``occurrences``) is optional and degrades to its
+        default. Unless ``severity_override`` is set, the P1 evidence gate
+        runs: a P1 without a concrete failure scenario comes back as a marked
+        P2.
     """
     if not isinstance(raw_findings, list):
         return ()
@@ -142,6 +190,11 @@ def parse_findings(
             if severity_override is not None
             else normalize_severity(raw=item.get("severity", "P3"))
         )
+        # str() would turn a null failure_scenario into the truthy literal
+        # "None" and walk an unevidenced P1 straight through the gate.
+        failure_scenario = item.get("failure_scenario", "")
+        if not isinstance(failure_scenario, str):
+            failure_scenario = ""
         findings.append(
             ReviewFinding(
                 severity=severity,
@@ -156,6 +209,17 @@ def parse_findings(
                 checklist_ids=checklist_ids,
                 suggested_code=str(item.get("suggested_code", "")),
                 source=source,
+                kind=normalize_finding_kind(raw=item.get("kind", "")),
+                failure_scenario=failure_scenario,
+                evidence_style=normalize_evidence_style(
+                    raw=item.get("evidence_style", ""),
+                ),
+                occurrences=parse_occurrences(item.get("occurrences")),
             ),
         )
-    return tuple(findings)
+    if severity_override is not None:
+        # An author-declared severity policy is configuration, not model
+        # output, so the calibration gate has nothing to correct: downgrading
+        # it would silently override the agent's own front matter.
+        return tuple(findings)
+    return apply_p1_evidence_gate(findings=findings)

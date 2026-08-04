@@ -46,6 +46,13 @@ class RunRecord:
         p1: Count of P1 findings reported in this round.
         p2: Count of P2 findings reported in this round.
         p3: Count of P3 findings reported in this round.
+        questions: Count of entries reported as questions rather than
+            findings in this round (#1925). Excluded from ``p1``/``p2``/``p3``
+            and from the derived verdict.
+        downgraded: Count of P1 findings the evidence gate downgraded to P2 in
+            this round (#1925). Recorded per run so severity inflation, and
+            how much of it the gate absorbed, stays visible over time rather
+            than being an invisible parse-time edit.
         partial: True when the review stopped before every chunk was reviewed.
         chunks_reviewed: Number of chunks actually reviewed.
         chunks_total: Total number of chunks in the diff.
@@ -74,6 +81,8 @@ class RunRecord:
     p1: int = 0
     p2: int = 0
     p3: int = 0
+    questions: int = 0
+    downgraded: int = 0
     partial: bool = False
     chunks_reviewed: int = 0
     chunks_total: int = 0
@@ -109,6 +118,8 @@ class RunRecord:
             "p1": self.p1,
             "p2": self.p2,
             "p3": self.p3,
+            "questions": self.questions,
+            "downgraded": self.downgraded,
             "partial": self.partial,
             "chunks_reviewed": self.chunks_reviewed,
             "chunks_total": self.chunks_total,
@@ -151,6 +162,8 @@ class RunRecord:
             p1=coerce_int(payload.get("p1")),
             p2=coerce_int(payload.get("p2")),
             p3=coerce_int(payload.get("p3")),
+            questions=coerce_int(payload.get("questions")),
+            downgraded=coerce_int(payload.get("downgraded")),
             partial=bool(payload.get("partial", False)),
             chunks_reviewed=coerce_int(payload.get("chunks_reviewed")),
             chunks_total=coerce_int(payload.get("chunks_total")),

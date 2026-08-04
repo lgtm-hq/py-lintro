@@ -45,6 +45,7 @@ def _sample_response_json(*, include_finding: bool = True) -> str:
             "description": "Unknown status grants access",
             "cause": "else branch returns Active",
             "fix": "Default to Expired",
+            "failure_scenario": "An unknown status grants access in production",
             "confidence": "high",
             "checklist_ids": [1],
         }

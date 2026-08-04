@@ -66,9 +66,11 @@ def derive_readiness_verdict(
     Returns:
         ``BLOCKED`` when any P1 is open, ``CHANGES_REQUESTED`` when any P2 is
         open, ``NITS_ONLY`` when only P3s are open, and ``READY`` when nothing
-        is open.
+        is open. Questions (#1925) are excluded entirely: a question is
+        suspicion without proof, and letting it move the verdict would
+        reintroduce exactly the severity inflation it exists to absorb.
     """
-    severities = {finding.severity for finding in findings}
+    severities = {finding.severity for finding in findings if not finding.is_question}
     if Severity.P1 in severities:
         return ReviewVerdict.BLOCKED
     if Severity.P2 in severities:
@@ -109,7 +111,8 @@ def resolve_bullet_finding(
 
     Returns:
         The matching finding, or ``None`` when the reference is empty or does
-        not name any reviewed file.
+        not name any reviewed file. Questions are never resolved to: a
+        severity-marked summary bullet must point at a severity'd finding.
     """
     reference = finding_ref.strip()
     if not reference:
@@ -128,12 +131,15 @@ def resolve_bullet_finding(
             # would break the same-file fallback below).
             line = None
 
-    candidates = [finding for finding in findings if finding.file == path]
+    same_file = [finding for finding in findings if finding.file == path]
+    if line is not None:
+        exact = [finding for finding in same_file if finding.line == line]
+        if exact:
+            return next(
+                (finding for finding in exact if not finding.is_question),
+                None,
+            )
+    candidates = [finding for finding in same_file if not finding.is_question]
     if not candidates:
         return None
-    if line is None:
-        return candidates[0]
-    return next(
-        (finding for finding in candidates if finding.line == line),
-        candidates[0],
-    )
+    return candidates[0]
