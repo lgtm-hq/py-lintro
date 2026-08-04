@@ -30,6 +30,18 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     return {
         "metadata": metadata,
         "summary": result.summary,
+        "readiness_verdict": result.readiness_verdict.value,
+        "pr_summary": (
+            asdict(result.pr_summary) if result.pr_summary is not None else None
+        ),
+        "verdict_reasoning": (
+            asdict(result.verdict_reasoning)
+            if result.verdict_reasoning is not None
+            else None
+        ),
+        "file_assessments": [
+            asdict(assessment) for assessment in result.file_assessments
+        ],
         "checklist": [asdict(answer) for answer in result.checklist],
         "findings": [asdict(finding) for finding in result.findings],
     }

@@ -10,6 +10,7 @@ from __future__ import annotations
 from loguru import logger
 
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.narrative_parser import collapse_to_single_line
 
 __all__ = [
     "SEVERITY_SYNONYMS",
@@ -147,7 +148,7 @@ def parse_findings(
                 category=str(item.get("category", "logic-bug")),
                 file=str(item.get("file", "")),
                 line=line,
-                title=str(item.get("title", "")),
+                title=collapse_to_single_line(text=str(item.get("title", ""))),
                 description=str(item.get("description", "")),
                 cause=str(item.get("cause", "")),
                 fix=str(item.get("fix", "")),
