@@ -1183,3 +1183,88 @@ def test_describe_config_source_falls_back_to_defaults() -> None:
     assert_that(
         _describe_config_source(config_path=None, overrides=[]),
     ).is_equal_to("built-in defaults")
+
+
+def test_review_post_reports_config_source_and_transport() -> None:
+    """--post hands the posting layer the config file and the CLI overrides.
+
+    Driven through the CLI rather than the private helpers, so a rename of
+    those helpers cannot pass while the wiring itself has broken.
+    """
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
+    mock_config.config_path = "/home/runner/work/repo/repo/.lintro-config.yaml"
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+            return_value=MagicMock(model_name="gpt-4o", name="openai"),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value="",
+        ),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--timeout",
+                "600",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    kwargs = mock_post.call_args.kwargs
+    assert_that(kwargs["config_source"]).is_equal_to(
+        "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
+    )
+    assert_that(kwargs["transport"]).is_equal_to(str(AITransport.API))

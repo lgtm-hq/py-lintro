@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.exceptions import (
@@ -19,6 +20,7 @@ from lintro.ai.review.github import (
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
     _cap_body,
+    _count_new_commits,
     _format_findings_section,
     _sticky_comment_id,
     build_sticky_comment,
@@ -33,6 +35,8 @@ from lintro.ai.review.github import (
 )
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
 
 
 def _fresh_reporter() -> MagicMock:
@@ -851,3 +855,53 @@ def test_post_review_body_links_the_pointer_to_an_existing_sticky(
     assert_that(payload["body"]).contains(
         "https://github.com/owner/name/pull/7#issuecomment-42",
     )
+
+
+# --- new-commit counting (#1910) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("prior_sha", "shas", "expected"),
+    [
+        ("aaa111", ["aaa111", "bbb222", "ccc333"], 2),
+        ("ccc333", ["aaa111", "bbb222", "ccc333"], 0),
+        ("aaa111abcdef", ["aaa111", "bbb222"], 1),
+        ("zzz999", ["aaa111", "bbb222"], None),
+        ("aaa111", [], None),
+        ("", ["aaa111"], None),
+    ],
+)
+def test_count_new_commits_measures_from_the_prior_head(
+    prior_sha: str,
+    shas: list[str],
+    expected: int | None,
+) -> None:
+    """The count is commits after the prior head, or None when unresolvable."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = shas
+    prior_state = ReviewState(runs=(RunRecord(round=1, sha=prior_sha),))
+
+    counted = _count_new_commits(reporter=reporter, prior_state=prior_state)
+
+    assert_that(counted).is_equal_to(expected)
+
+
+def test_count_new_commits_is_none_without_a_prior_round() -> None:
+    """Round 1 has no baseline, so no delta is claimed."""
+    reporter = _fresh_reporter()
+
+    counted = _count_new_commits(reporter=reporter, prior_state=ReviewState())
+
+    assert_that(counted).is_none()
+    reporter.fetch_pr_commit_shas.assert_not_called()
+
+
+def test_count_new_commits_is_none_when_the_listing_fails() -> None:
+    """An unavailable commit listing yields None rather than a wrong count."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = None
+    prior_state = ReviewState(runs=(RunRecord(round=1, sha="aaa111"),))
+
+    assert_that(
+        _count_new_commits(reporter=reporter, prior_state=prior_state),
+    ).is_none()

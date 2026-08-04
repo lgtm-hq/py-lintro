@@ -25,7 +25,11 @@ def _body(
     result: ReviewResult,
     prior_state: ReviewState,
     head_sha: str = "fb740b2aaaa",
-    **kwargs: object,
+    sticky_url: str = "",
+    transport: str = "",
+    auth_mode: str = "",
+    config_source: str = "",
+    new_commits: int | None = None,
 ) -> str:
     """Build a review body for ``result`` against ``prior_state``.
 
@@ -33,7 +37,11 @@ def _body(
         result: Review result under test.
         prior_state: State decoded before this round.
         head_sha: Head sha reviewed in this round.
-        **kwargs: Extra keyword arguments forwarded to ``build_review_body``.
+        sticky_url: URL of the sticky status comment.
+        transport: Provider transport used for the round.
+        auth_mode: Authentication mode used by the transport.
+        config_source: Description of where the run's settings came from.
+        new_commits: Commits pushed since the previous round.
 
     Returns:
         The rendered Markdown body.
@@ -49,7 +57,11 @@ def _body(
         prior_state=prior_state,
         match=match,
         head_sha=head_sha,
-        **kwargs,  # type: ignore[arg-type]
+        sticky_url=sticky_url,
+        transport=transport,
+        auth_mode=auth_mode,
+        config_source=config_source,
+        new_commits=new_commits,
     )
 
 
@@ -445,3 +457,29 @@ def test_body_truncation_leaves_a_visible_marker(
 
     assert_that(len(body)).is_less_than_or_equal_to(60_000)
     assert_that(body).ends_with("✂️ Comment truncated to fit GitHub's size limit.")
+
+
+def test_skip_reasons_survive_a_full_reviewed_list(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A wide reviewed list must not crowd the skip reasons out of the body.
+
+    Reviewed and skipped entries once shared one 60-slot budget, so a PR
+    touching 60+ files rendered a skip *count* with no reason beside it —
+    exactly the ambiguity this section exists to remove.
+    """
+    metadata = replace(
+        sample_review_result.metadata,
+        reviewed_paths=tuple(f"src/module_{index}.py" for index in range(200)),
+        skipped_files=(
+            SkippedFile(path="docs/README.md", reason=FileSkipReason.PATH_FILTER),
+        ),
+    )
+    body = _body(
+        result=replace(sample_review_result, metadata=metadata),
+        prior_state=ReviewState(),
+    )
+
+    assert_that(body).contains(
+        "- `docs/README.md` — skipped (outside the requested --path filter)",
+    )
