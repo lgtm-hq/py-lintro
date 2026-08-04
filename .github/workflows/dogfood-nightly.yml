@@ -37,7 +37,7 @@ jobs:
       tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       job-name: '🌙 Nightly Dogfooding Lint'
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -165,7 +165,7 @@ jobs:
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-

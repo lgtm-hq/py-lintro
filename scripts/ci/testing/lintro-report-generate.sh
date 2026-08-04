@@ -45,7 +45,7 @@ LINTRO_OUTPUT=$(mktemp)
 LINTRO_RC=0
 "${DOCKER_RUN[@]}" lintro check . --output-format markdown \
 	--exclude "$EXCLUDE_DIRS" \
-	--tool-options pydoclint:timeout=120 >"$LINTRO_OUTPUT" 2>&1 || LINTRO_RC=$?
+	--tool-options pydoclint:timeout=120,semgrep:timeout=600 >"$LINTRO_OUTPUT" 2>&1 || LINTRO_RC=$?
 
 if [ "$LINTRO_RC" -ne 0 ] && { [ ! -s "$LINTRO_OUTPUT" ] ||
 	[ "$LINTRO_RC" -eq 125 ] || [ "$LINTRO_RC" -eq 126 ] || [ "$LINTRO_RC" -eq 127 ]; }; then
