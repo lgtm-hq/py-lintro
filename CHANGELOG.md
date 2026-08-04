@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.107.0] - 2026-08-04
+
+### Added
+
+- **review**: add fix-all and per-finding AI agent prompt rendering (#1913) (04b2e79)
+
 ## [0.106.0] - 2026-08-04
 
 ### Added
