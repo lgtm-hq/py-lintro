@@ -265,3 +265,47 @@ def test_legacy_run_record_defaults_the_new_counts_to_zero() -> None:
 
     assert_that(restored.questions).is_equal_to(0)
     assert_that(restored.downgraded).is_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    "failure_scenario",
+    [None, False, 0, {"why": "because"}, ["reasons"]],
+    ids=["none", "false", "zero", "mapping", "list"],
+)
+def test_a_non_string_failure_scenario_does_not_satisfy_the_gate(
+    failure_scenario: object,
+) -> None:
+    """Malformed evidence is absent evidence.
+
+    Regression guard: coercing the raw value with ``str()`` turns ``None``
+    into the truthy literal ``"None"`` and walks an unevidenced P1 straight
+    through the gate.
+
+    Args:
+        failure_scenario: Malformed ``failure_scenario`` value under test.
+    """
+    findings = parse_findings(
+        raw_findings=[_raw(failure_scenario=failure_scenario)],
+    )
+
+    assert_that(findings[0].failure_scenario).is_empty()
+    assert_that(findings[0].severity).is_equal_to(Severity.P2)
+    assert_that(findings[0].severity_downgraded).is_true()
+
+
+@pytest.mark.parametrize(
+    "file",
+    [None, 7, {"path": "a.py"}, ["a.py"]],
+    ids=["none", "number", "mapping", "list"],
+)
+def test_a_non_string_occurrence_file_is_rejected(file: object) -> None:
+    """A non-string path is dropped rather than coerced into a fake location.
+
+    Args:
+        file: Malformed occurrence ``file`` value under test.
+    """
+    findings = parse_findings(
+        raw_findings=[_raw(severity="P3", occurrences=[{"file": file, "line": 4}])],
+    )
+
+    assert_that(findings[0].occurrences).is_empty()

@@ -622,6 +622,7 @@ def test_occurrences_survive_a_state_round_trip() -> None:
     restored = FindingRecord.from_dict(match.records[0].to_dict())
 
     assert_that(restored).is_not_none()
+    assert restored is not None  # narrow type for mypy
     assert_that(restored.occurrence_total).is_equal_to(3)
     assert_that(restored.occurrences).is_length(3)
 
@@ -633,6 +634,52 @@ def test_a_pre_1925_record_degrades_to_a_single_occurrence() -> None:
     )
 
     assert_that(restored).is_not_none()
+    assert restored is not None  # narrow type for mypy
     assert_that(restored.kind).is_equal_to(FindingKind.FINDING)
     assert_that(restored.occurrence_count).is_equal_to(1)
     assert_that(restored.occurrence_total).is_equal_to(1)
+
+
+def test_an_omitted_occurrence_list_is_silence_not_progress() -> None:
+    """A round that reports no occurrences inherits the tracked locations.
+
+    Regression guard: synthesizing a single anchor occurrence for a finding
+    that simply omitted the field would read as "2 of 3 addressed" on every
+    degraded round, inventing progress that never happened.
+    """
+    first = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30))],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[
+            _finding(title="Unchecked return value", line=10, severity=Severity.P2),
+        ],
+        round_number=2,
+        head_sha="deadbeef",
+    )
+
+    record = second.records[0]
+    assert_that(record.occurrence_count).is_equal_to(3)
+    assert_that(record.occurrence_total).is_equal_to(3)
+    assert_that(record.occurrences_addressed).is_equal_to(0)
+
+
+def test_a_lone_occurrence_away_from_the_anchor_survives_serialization() -> None:
+    """A single occurrence at another location is real state, not noise."""
+    record = FindingRecord(
+        fingerprint="abc123",
+        file="src/app.py",
+        line=10,
+        occurrences=(FindingOccurrence(file="src/other.py", line=99),),
+    )
+
+    restored = FindingRecord.from_dict(record.to_dict())
+
+    assert_that(restored).is_not_none()
+    assert restored is not None  # narrow type for mypy
+    assert_that(restored.occurrences).is_equal_to(
+        (FindingOccurrence(file="src/other.py", line=99),),
+    )

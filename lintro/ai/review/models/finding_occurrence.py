@@ -48,12 +48,15 @@ class FindingOccurrence:
             payload: Decoded mapping for one occurrence.
 
         Returns:
-            The parsed occurrence, or ``None`` when it names no file.
+            The parsed occurrence, or ``None`` when it names no usable file.
+            A non-string ``file`` is rejected rather than coerced: ``str()``
+            would turn ``None`` into the path ``"None"`` and quietly invent a
+            location the model never reported.
         """
-        file = str(payload.get("file", "")).strip()
-        if not file:
+        file = payload.get("file")
+        if not isinstance(file, str) or not file.strip():
             return None
-        return cls(file=file, line=coerce_int(payload.get("line")))
+        return cls(file=file.strip(), line=coerce_int(payload.get("line")))
 
 
 def parse_occurrences(value: Any) -> tuple[FindingOccurrence, ...]:

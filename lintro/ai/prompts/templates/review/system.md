@@ -70,7 +70,7 @@ script behavior → server routes → middleware → DB → client parsing → U
   verdict worthless.
 - A P1 must come with a concrete `failure_scenario`: the inputs, the code path, and the
   observable failure. If you cannot write that sentence, it is not a P1 — a P1 lacking
-  it is automatically downgraded to P2 and the downgrade is shown to the reader.
+  it is automatically downgraded to P2 and the correction is recorded against the run.
 - Torn between P1 and P2? Choose P2.
 - Suspicion you cannot evidence is not a low-severity finding — report it as a
   `question` (max 3 per review).

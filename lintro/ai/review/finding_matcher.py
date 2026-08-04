@@ -136,16 +136,19 @@ def _normalized_occurrences(
         finding: Finding whose occurrence locations are being tracked.
 
     Returns:
-        Every occurrence of the pattern — never empty — with file paths
-        normalized the same way the fingerprint normalizes them, so a path
-        that changes only in separator style does not read as a new location.
+        The *explicitly reported* occurrences with file paths normalized the
+        same way the fingerprint normalizes them, so a path that changes only
+        in separator style does not read as a new location. Empty when the
+        model reported none — the distinction matters, because a later round
+        that omits the list must inherit the prior locations rather than
+        appear to have fixed all but one of them.
     """
     return tuple(
         FindingOccurrence(
             file=normalize_file_path(occurrence.file),
             line=occurrence.line,
         )
-        for occurrence in finding.all_occurrences
+        for occurrence in finding.occurrences
     )
 
 
@@ -197,7 +200,7 @@ def _current_records(
             checklist_ids=finding.checklist_ids,
             kind=finding.kind,
             occurrences=_normalized_occurrences(finding=finding),
-            occurrences_total=len(finding.all_occurrences),
+            occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
         )
         for index, finding in enumerate(findings)
@@ -300,7 +303,10 @@ def _merge_pair(
         regressed=regressed or prior.regressed,
         checklist_ids=current.checklist_ids or prior.checklist_ids,
         kind=current.kind,
-        occurrences=current.occurrences,
+        # A round that reports no occurrence list is not a claim that the
+        # pattern shrank to one location — it is silence, so the previously
+        # tracked locations are carried rather than treated as progress.
+        occurrences=current.occurrences or prior.occurrences,
         occurrences_total=max(prior.occurrence_total, current.occurrence_total),
         severity_downgraded=current.severity_downgraded,
     )

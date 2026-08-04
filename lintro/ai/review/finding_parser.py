@@ -161,8 +161,9 @@ def parse_findings(
         Parsed findings in payload order. Non-mapping entries are dropped.
         Every field added by #1925 (``kind``, ``failure_scenario``,
         ``evidence_style``, ``occurrences``) is optional and degrades to its
-        default, but the P1 evidence gate always runs: a P1 without a concrete
-        failure scenario comes back as a marked P2.
+        default. Unless ``severity_override`` is set, the P1 evidence gate
+        runs: a P1 without a concrete failure scenario comes back as a marked
+        P2.
     """
     if not isinstance(raw_findings, list):
         return ()
@@ -189,6 +190,11 @@ def parse_findings(
             if severity_override is not None
             else normalize_severity(raw=item.get("severity", "P3"))
         )
+        # str() would turn a null failure_scenario into the truthy literal
+        # "None" and walk an unevidenced P1 straight through the gate.
+        failure_scenario = item.get("failure_scenario", "")
+        if not isinstance(failure_scenario, str):
+            failure_scenario = ""
         findings.append(
             ReviewFinding(
                 severity=severity,
@@ -204,7 +210,7 @@ def parse_findings(
                 suggested_code=str(item.get("suggested_code", "")),
                 source=source,
                 kind=normalize_finding_kind(raw=item.get("kind", "")),
-                failure_scenario=str(item.get("failure_scenario", "")),
+                failure_scenario=failure_scenario,
                 evidence_style=normalize_evidence_style(
                     raw=item.get("evidence_style", ""),
                 ),

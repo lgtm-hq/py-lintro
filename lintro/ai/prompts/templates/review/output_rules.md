@@ -26,8 +26,8 @@
 - Every finding `title` must be a single line with no line breaks.
 - **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the
   observable result. "Could be a problem" is not a failure mechanism. A P1 without one
-  is automatically downgraded to P2 and the downgrade is shown to the reader, so the
-  only thing an uncalibrated P1 buys you is a visible correction.
+  is automatically downgraded to P2 and the correction is recorded against the run, so
+  an uncalibrated P1 buys you nothing but a logged downgrade.
 - **Calibrate severity.** P1 means merge-blocking defect: expect 0–2 on a typical PR and
   none at all on most. When you are torn between P1 and P2, choose P2.
 - Set `kind` to `question` when you suspect something but cannot show it — an

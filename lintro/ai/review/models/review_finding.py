@@ -65,9 +65,9 @@ class ReviewFinding:
         severity_downgraded: True when the P1 evidence gate downgraded this
             finding's reported severity. Surfaces render the downgrade rather
             than letting it happen silently.
-        evidence_style: Self-reported basis for the finding. Recorded and
-            displayed only; the sole behavioral effect is the verify-first
-            line prompts add for speculative findings.
+        evidence_style: Self-reported basis for the finding. Never suppresses
+            or down-ranks anything; the sole behavioral effect is the
+            verify-first line prompts add for speculative findings.
         occurrences: Every ``file:line`` at which this pattern occurs. Empty
             when the model reported none, in which case
             :attr:`all_occurrences` falls back to the finding's own location.

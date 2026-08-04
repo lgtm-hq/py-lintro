@@ -144,10 +144,15 @@ class FindingRecord:
             payload["checklist_ids"] = list(self.checklist_ids)
         if self.kind is not FindingKind.FINDING:
             payload["kind"] = str(self.kind)
-        if len(self.occurrences) > 1 or self.occurrences_total > 1:
+        # A lone occurrence identical to the record's own location adds
+        # nothing to the blob, but one at a *different* location is real
+        # tracked state and must survive the round trip.
+        anchor = (FindingOccurrence(file=self.file, line=self.line),)
+        if self.occurrences and self.occurrences != anchor:
             payload["occurrences"] = [
                 occurrence.to_dict() for occurrence in self.occurrences
             ]
+        if self.occurrence_total > 1:
             payload["occurrences_total"] = self.occurrence_total
         if self.severity_downgraded:
             payload["severity_downgraded"] = True

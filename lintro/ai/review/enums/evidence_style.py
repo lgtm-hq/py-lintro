@@ -8,9 +8,9 @@ from enum import StrEnum, auto
 class EvidenceStyle(StrEnum):
     """How a finding was arrived at, as reported by the model (#1925).
 
-    Recorded and displayed only: v1 deliberately does no suppression or
-    down-ranking on this field. Its one behavioral effect is the verify-first
-    line added to prompts for speculative findings.
+    Verdict suppression and severity down-ranking are intentionally out of
+    scope for v1; the sole behavioral effect is the verify-first caution line
+    added to prompts for :data:`SPECULATIVE` findings.
 
     Attributes:
         DIFF_LOCAL: Established from the diff hunk alone.
