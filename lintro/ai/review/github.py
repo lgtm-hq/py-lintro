@@ -118,18 +118,24 @@ def post_review_to_github(
             inline_failure=inline_failure,
         )
 
-    # The sticky is posted before inline comments so a failure in the inline
-    # path still leaves a status comment on the PR.
-    success = _upsert_sticky(
-        reporter=gh_reporter,
-        body=render(inline_failure=None),
-        comment_id=comment_id,
-    )
-
-    inline_findings, _fallback = _partition_findings(
+    inline_findings, fallback = _partition_findings(
         findings=result.findings,
         diff_lines=diff_lines,
     )
+
+    # A finding that maps to no line in the diff never gets an inline comment,
+    # so the sticky is its only surface from the outset — fold its detail in
+    # rather than leaving it as a title in a table (#1909). The sticky is also
+    # posted before the inline comments so an inline failure still leaves a
+    # status comment on the PR.
+    success = _upsert_sticky(
+        reporter=gh_reporter,
+        body=render(
+            inline_failure=_inline_failure(unmappable=fallback, rejected=[]),
+        ),
+        comment_id=comment_id,
+    )
+
     if inline_findings and not _post_inline_findings(
         reporter=gh_reporter,
         findings=inline_findings,
@@ -137,19 +143,52 @@ def post_review_to_github(
         question_map=prompt_questions,
     ):
         success = False
-        # Degraded path (#1909): those findings now have no surface at all, so
-        # re-render the sticky with their detail folded in. ``prior_state`` is
+        # Degraded path (#1909): the rejected findings now have no surface
+        # either, so re-render with both groups folded in. ``prior_state`` is
         # unchanged, so this round is not double-counted, and the comment is
         # only ever *updated* — a failed lookup skips rather than posting a
         # second sticky on the PR.
         _fold_inline_failure_into_sticky(
             reporter=gh_reporter,
             render=render,
-            findings=inline_findings,
+            failure=_inline_failure(
+                unmappable=fallback,
+                rejected=inline_findings,
+            ),
             comment_id=comment_id,
         )
 
     return success
+
+
+def _inline_failure(
+    *,
+    unmappable: list[ReviewFinding],
+    rejected: list[ReviewFinding],
+) -> InlinePostFailure | None:
+    """Describe the findings that have no inline comment to live on.
+
+    Two different things put a finding here, and the reason says which: it
+    anchors to no line in the PR's diff, or GitHub rejected the review batch
+    that carried it.
+
+    Args:
+        unmappable: Findings that map to no line in the diff.
+        rejected: Findings whose inline review batch the API rejected.
+
+    Returns:
+        The failure descriptor, or ``None`` when every finding has an inline
+        surface.
+    """
+    findings = [*rejected, *unmappable]
+    if not findings:
+        return None
+    reasons = []
+    if rejected:
+        reasons.append("the review API rejected the inline comments")
+    if unmappable:
+        reasons.append("some findings map to no line in this PR's diff")
+    return InlinePostFailure(reason="; ".join(reasons), findings=tuple(findings))
 
 
 class _StickyRenderer(Protocol):
@@ -171,7 +210,7 @@ def _fold_inline_failure_into_sticky(
     *,
     reporter: GitHubPRReporter,
     render: _StickyRenderer,
-    findings: list[ReviewFinding],
+    failure: InlinePostFailure | None,
     comment_id: int | None,
 ) -> None:
     """Re-render the sticky with the unpostable findings' detail folded in.
@@ -183,9 +222,11 @@ def _fold_inline_failure_into_sticky(
     Args:
         reporter: GitHub reporter used to locate and update the sticky comment.
         render: Callable that renders the sticky body for a given failure.
-        findings: Findings whose inline comments could not be posted.
+        failure: Findings whose inline comments could not be posted.
         comment_id: Sticky comment id known before the upsert, or ``None``.
     """
+    if failure is None:
+        return
     sticky_id = _sticky_comment_id(reporter=reporter, known=comment_id)
     if sticky_id is None:
         logger.warning(
@@ -193,13 +234,10 @@ def _fold_inline_failure_into_sticky(
             "be folded into it",
         )
         return
-    body = render(
-        inline_failure=InlinePostFailure(
-            reason="the review API rejected the inline comments",
-            findings=tuple(findings),
-        ),
-    )
-    if not reporter.update_issue_comment(comment_id=sticky_id, body=body):
+    if not reporter.update_issue_comment(
+        comment_id=sticky_id,
+        body=render(inline_failure=failure),
+    ):
         logger.warning(
             "Failed to fold inline-post failure details into the sticky comment",
         )

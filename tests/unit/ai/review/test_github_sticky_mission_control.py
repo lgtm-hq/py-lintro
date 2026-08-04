@@ -511,6 +511,7 @@ def test_degraded_path_warns_and_folds_details_into_the_sticky(
     )
     assert_that(body).contains("review API returned 422 - line not in diff")
     assert_that(body).contains("📋 Details for 1 finding not posted inline")
+    assert_that(body).contains("folded in below instead")
     # The full detail — normally only on the inline comment — is folded in.
     assert_that(body).contains(
         "Stores an application password as a module-level literal.",

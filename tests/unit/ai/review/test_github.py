@@ -386,12 +386,43 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     reporter.post_issue_comment.assert_not_called()
 
     degraded = reporter.update_issue_comment.call_args.kwargs["body"]
-    assert_that(degraded).contains("could not be posted as an inline comment")
-    assert_that(degraded).contains("not posted inline")
-    # The detail that the inline comment would have carried is folded in.
+    # Both the rejected finding and the one that maps to no diff line.
+    assert_that(degraded).contains("2 findings could not be posted as inline")
+    assert_that(degraded).contains("the review API rejected the inline comments")
+    assert_that(degraded).contains("map to no line in this PR's diff")
+    # The detail the inline comments would have carried is folded in.
     assert_that(degraded).contains("Unknown status grants access")
+    assert_that(degraded).contains("No test for unknown status")
     # The round is not double-counted by the second render.
     assert_that(parse_review_state(body=degraded)).is_length(1)
+
+
+def test_unmappable_findings_are_folded_in_without_any_failure(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A finding that anchors to no diff line still gets its detail shown.
+
+    It never had an inline comment to live on, so a title-only row in the open
+    table would be the whole of it — the sticky would carry a verdict whose
+    substance appears nowhere.
+    """
+    reporter = _fresh_reporter()
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+    )
+
+    assert_that(posted).is_true()
+    body = reporter.post_issue_comment.call_args.args[0]
+    assert_that(body).contains("1 finding could not be posted as an inline comment")
+    assert_that(body).contains("map to no line in this PR's diff")
+    # Exactly the unmappable finding is folded in; the diff-mappable one keeps
+    # its inline comment as the place its detail lives.
+    assert_that(body).contains("📋 Details for 1 finding not posted inline")
+    folded = body.split("📋 Details for", 1)[1].split("</details>", 1)[0]
+    assert_that(folded).contains("No test for unknown status")
+    assert_that(folded).does_not_contain("Unknown status grants access")
 
 
 def test_failed_inline_post_never_posts_a_second_sticky(

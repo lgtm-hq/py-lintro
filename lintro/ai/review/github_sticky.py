@@ -422,8 +422,10 @@ def _assemble_body(
         records=match.records,
         limit=limits.resolved,
     )
-    total_open = len(_sorted_open_records(records=match.records, limit=None))
-    total_resolved = len(_sorted_resolved_records(records=match.records, limit=None))
+    total_open = sum(
+        1 for record in match.records if record.status is FindingStatus.OPEN
+    )
+    total_resolved = len(match.records) - total_open
 
     sections: list[str] = [
         STICKY_MARKER,
@@ -683,8 +685,7 @@ def _degraded_row(*, failure: InlinePostFailure | None) -> str:
     surface = "an inline comment" if failure.count == 1 else "inline comments"
     return (
         f"> ⚠️ **{failure.count} {noun} could not be posted as {surface}**"
-        f"{cause}. Full details are folded in below until inline posting "
-        "succeeds."
+        f"{cause}. Full details are folded in below instead."
     )
 
 
