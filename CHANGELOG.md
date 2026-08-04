@@ -32,6 +32,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **ci**: raise semgrep timeout to 600s across dogfood jobs (#1932) (cbf6476)
 
+## [0.105.2] - 2026-08-04
+
+### Fixed
+
+- **deps**: bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5 (#1936) (5e98280)
+
 ## [0.105.1] - 2026-08-03
 
 ### Fixed
