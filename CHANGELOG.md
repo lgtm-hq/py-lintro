@@ -21,6 +21,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.106.0] - 2026-08-04
+
+### Added
+
+- **review**: add structured summary, verdict reasoning, and file assessments (#1915)
+  (5168140)
+
+### Fixed
+
+- **ci**: raise semgrep timeout to 600s across dogfood jobs (#1932) (cbf6476)
+
+## [0.105.2] - 2026-08-04
+
+### Fixed
+
+- **deps**: bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5 (#1936) (5e98280)
+
+## [0.105.1] - 2026-08-03
+
+### Fixed
+
+- **deps**: bump fast-uri to 4.1.2 for CVE-2026-18446 (#1928) (19c5ea8)
+
 ## [0.105.0] - 2026-08-03
 
 ### Added
