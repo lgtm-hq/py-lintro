@@ -21,9 +21,8 @@ GITHUB_COMMENT_HARD_LIMIT = 65_536
 MAX_COMMENT_CHARS = 60_000
 # Cap how many run records are retained in the sticky state block.
 MAX_STORED_RUNS = 30
-# Slack reserved when budgeting the findings section against the comment cap,
-# covering the truncation marker, section joins, and the final _cap_body notice.
-_TRUNCATION_MARGIN = 400
+# Number of leading characters of a commit sha rendered in comment surfaces.
+SHORT_SHA_LENGTH = 7
 
 _SEVERITY_EMOJI: dict[Severity, str] = {
     Severity.P1: "🔴",
@@ -37,19 +36,11 @@ _FOOTER = (
     "usage)</sub>"
 )
 
-_MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")
+#: One-line footer of the v5 sticky comment (#1909). Names where finding detail
+#: actually lives, so the sticky is read as an index rather than a duplicate.
+STICKY_FOOTER = (
+    "<sub>🤖 lintro · finding details on inline comments · updates in place on "
+    "every push · `~` = estimated locally (provider did not report usage)</sub>"
+)
 
-_RUN_MECHANICS_RE = re.compile(
-    r"\n\n<details><summary>⚙️ Run mechanics[\s\S]*?</details>",
-)
-_PREVIOUS_RUNS_RE = re.compile(
-    r"\n\n<details><summary>🕔 Previous runs[\s\S]*?</details>",
-)
-_CHECKLIST_APPENDIX_RE = re.compile(
-    r"\n### Cleared checks \(\d+\)[\s\S]*?(?=\n\n<details><summary>|\Z)",
-)
-_FINDINGS_SECTION_RE = re.compile(
-    r"(\n### Findings(?: \(\d+\))?)([\s\S]*?)"
-    r"(\n\*\*Structured checks:\*\* \d+[\s\S]*?(?=\n\n<details><summary>|\Z)|\Z)",
-)
-_FINDING_BLOCK_START_RE = re.compile(r"(?=\n\n[🔴🟠🟡] \*\*P[123]\*\*)")
+_MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")
