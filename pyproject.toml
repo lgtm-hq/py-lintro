@@ -384,8 +384,9 @@ constraint-dependencies = [
   # starlette: multipart/form parsing DoS
   # (GHSA-82w8-qh3p-5jfq, GHSA-wqp7-x3pw-xc5r)
   "starlette>=1.3.1",
-  # cryptography: OpenSSL-backed high-severity advisory (GHSA-537c-gmf6-5ccf)
-  "cryptography>=48.0.1",
+  # cryptography: OpenSSL-backed high-severity advisory (GHSA-537c-gmf6-5ccf);
+  # PKCS#7 Bleichenbacher oracle (GHSA-g6cj-pr64-35w5)
+  "cryptography>=50.0.0",
   # python-multipart: parser resource-exhaustion DoS
   # (GHSA-5rvq-cxj2-64vf, GHSA-pp6c-gr5w-3c5g)
   "python-multipart>=0.0.30",
