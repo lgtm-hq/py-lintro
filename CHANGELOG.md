@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.108.0] - 2026-08-04
+
+### Added
+
+- **review**: add corpus-informed finding model to the review pipeline (#1939) (fd8c0ec)
+
 ## [0.107.0] - 2026-08-04
 
 ### Added
