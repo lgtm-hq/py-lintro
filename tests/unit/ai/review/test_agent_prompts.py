@@ -470,7 +470,7 @@ def test_prompt_text_is_sanitized_against_mentions(
 
 @pytest.mark.parametrize(
     "field",
-    ["title", "category", "cause", "fix"],
+    ["title", "category", "cause", "fix", "file"],
 )
 def test_prompt_sanitizes_mentions_in_every_finding_field(field: str) -> None:
     """Every finding field passed through sanitize_comment_text is neutralized.
