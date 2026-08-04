@@ -140,6 +140,10 @@ def _scope_sentence(*, scope: AgentPromptScope, count: int) -> str:
 
     Returns:
         A single sentence naming exactly which findings are in scope.
+
+    Raises:
+        ValueError: When ``scope.kind`` is not a handled member of
+            :class:`AgentPromptScopeKind`.
     """
     if scope.kind is AgentPromptScopeKind.SINGLE_FINDING:
         return "Scope: this single finding from a lintro AI code review."
@@ -154,16 +158,21 @@ def _scope_sentence(*, scope: AgentPromptScope, count: int) -> str:
             f"Scope: {quantifier} still open on this PR{after} "
             "(not just the latest review)."
         )
-    where = (
-        f"round {scope.round_number}"
-        if scope.round_number is not None
-        else "the latest round"
-    )
-    return (
-        f"Scope: the {_plural(count=count, noun='finding')} posted in {where} of "
-        "this PR's lintro review ONLY (older open findings are covered by the "
-        "fix-all prompt on the sticky status comment)."
-    )
+    if scope.kind is AgentPromptScopeKind.THIS_REVIEW:
+        where = (
+            f"round {scope.round_number}"
+            if scope.round_number is not None
+            else "the latest round"
+        )
+        return (
+            f"Scope: the {_plural(count=count, noun='finding')} posted in {where} of "
+            "this PR's lintro review ONLY (older open findings are covered by the "
+            "fix-all prompt on the sticky status comment)."
+        )
+    # Exhaustiveness guard twin to _FOOTERS' _MISSING_FOOTERS check: a new
+    # AgentPromptScopeKind added without a branch here must fail loudly
+    # instead of silently falling through to THIS_REVIEW-flavored text.
+    raise ValueError(f"Unhandled AgentPromptScopeKind: {scope.kind!r}")
 
 
 def _panel_title(*, scope: AgentPromptScope, count: int) -> str:
@@ -175,6 +184,10 @@ def _panel_title(*, scope: AgentPromptScope, count: int) -> str:
 
     Returns:
         Panel title text, without the leading ``⚡``.
+
+    Raises:
+        ValueError: When ``scope.kind`` is not a handled member of
+            :class:`AgentPromptScopeKind`.
     """
     if scope.kind is AgentPromptScopeKind.SINGLE_FINDING:
         return "Prompt for AI agents"
@@ -189,7 +202,12 @@ def _panel_title(*, scope: AgentPromptScope, count: int) -> str:
         noun = _plural(count=count, noun="still-open finding")
         quantifier = noun if count == 1 else f"all {noun}"
         return f"Fix-all prompt — {quantifier}{rounds}"
-    return f"Fix prompt — this round's {_plural(count=count, noun='finding')} only"
+    if scope.kind is AgentPromptScopeKind.THIS_REVIEW:
+        return f"Fix prompt — this round's {_plural(count=count, noun='finding')} only"
+    # Exhaustiveness guard twin to _FOOTERS' _MISSING_FOOTERS check: a new
+    # AgentPromptScopeKind added without a branch here must fail loudly
+    # instead of silently falling through to THIS_REVIEW-flavored text.
+    raise ValueError(f"Unhandled AgentPromptScopeKind: {scope.kind!r}")
 
 
 def _group_by_file(

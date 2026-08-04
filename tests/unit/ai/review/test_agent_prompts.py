@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from assertpy import assert_that
 
@@ -425,8 +427,26 @@ def test_prompt_text_is_sanitized_against_mentions(
 
 def test_negative_round_number_is_rejected() -> None:
     """A scope cannot claim a round that no review could have produced."""
-    with pytest.raises(ValueError, match="round_number must be >= 1"):
+    with pytest.raises(ValueError, match="round_number must be a positive int"):
         AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN, round_number=0)
+
+
+@pytest.mark.parametrize(
+    "round_number",
+    [1.5, True],
+    ids=["float", "boolean"],
+)
+def test_non_int_round_number_is_rejected(round_number: object) -> None:
+    """A float or bool round number would render malformed scope text.
+
+    bool is an int subclass and would otherwise pass the `>= 1` check
+    silently; a float would render as "round 1.5".
+    """
+    with pytest.raises(ValueError, match="round_number must be a positive int"):
+        AgentPromptScope(
+            kind=AgentPromptScopeKind.ALL_OPEN,
+            round_number=cast(Any, round_number),
+        )
 
 
 def test_sticky_pointer_links_back_instead_of_duplicating_the_prompt() -> None:

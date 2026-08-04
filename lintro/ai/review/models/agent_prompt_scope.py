@@ -27,10 +27,14 @@ class AgentPromptScope:
         """Reject round numbers that cannot describe a real review round.
 
         Raises:
-            ValueError: When ``round_number`` is set but not a positive,
-                one-based round.
+            ValueError: When ``round_number`` is set but is not a genuine
+                positive int (``bool`` is an ``int`` subclass and a float
+                would silently produce malformed "round 1.5" wording).
         """
-        if self.round_number is not None and self.round_number < 1:
+        if self.round_number is None:
+            return
+        if type(self.round_number) is not int or self.round_number < 1:
             raise ValueError(
-                f"round_number must be >= 1 when set, got {self.round_number}",
+                f"round_number must be a positive int when set, got "
+                f"{self.round_number!r}",
             )
