@@ -55,6 +55,7 @@ from lintro.ai.review.errors_taxonomy import (
     resolve_cause_text,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.file_selection import resolve_file_selection
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
@@ -64,6 +65,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 from lintro.ai.review.narrative_parser import (
@@ -225,6 +227,7 @@ def resolve_review_chunks(
     diff_budget: int,
     classifications: list[FileClassification],
     force_semantic_chunking: bool = False,
+    skipped_sink: list[SkippedFile] | None = None,
 ) -> list[ReviewChunk]:
     """Resolve review chunks using a budget-gated fast path.
 
@@ -236,6 +239,9 @@ def resolve_review_chunks(
         diff_budget: Maximum estimated tokens available for diff content.
         classifications: Domain classifications for changed files.
         force_semantic_chunking: When True, skip the single-chunk fast path.
+        skipped_sink: Optional list the chunker's per-file skips are appended
+            to, so the caller can report *why* a changed file went unreviewed
+            instead of only how many did (#1910).
 
     Returns:
         Ordered list of review chunks to process.
@@ -251,6 +257,8 @@ def resolve_review_chunks(
         max_tokens=max(diff_budget, 1),
         classifications=classifications,
     )
+    if skipped_sink is not None:
+        skipped_sink.extend(chunking.skipped)
     return chunking.chunks or [_single_chunk_from_context(context=context)]
 
 
@@ -694,12 +702,14 @@ async def run_review_async(
         context_window=context_window,
         prompt_overhead=prompt_overhead,
     )
+    chunk_skips: list[SkippedFile] = []
     chunks = (
         resolve_review_chunks(
             context=context,
             diff_budget=diff_budget,
             classifications=classifications,
             force_semantic_chunking=force_semantic_chunking,
+            skipped_sink=chunk_skips,
         )
         if run_builtin_checklist
         else []
@@ -866,6 +876,8 @@ async def run_review_async(
         or merged.summary
     )
 
+    selection = resolve_file_selection(context=context, chunk_skips=chunk_skips)
+
     metadata = ReviewMetadata(
         model=provider.model_name,
         provider=provider.name,
@@ -874,8 +886,10 @@ async def run_review_async(
         strictness=review_sensitivity.strictness.value,
         chunks_total=len(chunks),
         chunks_current=chunks_reviewed,
-        files_reviewed=len(context.changed_files),
-        files_total=len(context.changed_files),
+        files_reviewed=len(selection.reviewed_paths),
+        files_total=len(selection.reviewed_paths) + len(selection.skipped),
+        reviewed_paths=selection.reviewed_paths,
+        skipped_files=selection.skipped,
         checklist_items=len(checklist_items),
         token_usage={
             "prompt": total_input,

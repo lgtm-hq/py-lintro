@@ -11,6 +11,7 @@ from lintro.ai.review.chunker import (
     chunk_review_context,
 )
 from lintro.ai.review.classifier import classify_changed_files
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.group_labels import (
@@ -332,3 +333,39 @@ def test_chunker_raises_when_diff_contains_extra_paths() -> None:
             classifications=classifications,
         )
     assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.DIFF_DESYNC)
+
+
+def test_chunker_records_why_a_sampled_file_was_omitted(
+    repetitive_unified_diff: str,
+) -> None:
+    """Sampling omissions carry a reason and the file whose diff they duplicate."""
+    changed_files = [
+        ChangedFile(
+            path=f"pkg/item{index}.py",
+            status="modified",
+            additions=1,
+            deletions=0,
+        )
+        for index in range(6)
+    ]
+    context = ReviewContext(
+        base_ref="base",
+        head_ref="head",
+        changed_files=changed_files,
+        unified_diff=repetitive_unified_diff,
+        pr_metadata=None,
+    )
+
+    result = chunk_review_context(
+        context=context,
+        max_tokens=10_000,
+        classifications=classify_changed_files(files=changed_files),
+        allow_omitted_files=True,
+    )
+
+    reasons = {entry.reason for entry in result.skipped}
+    assert_that(reasons).is_equal_to({FileSkipReason.REPETITIVE_DIFF})
+    assert_that(result.skipped[0].detail).contains("same diff hunks as")
+    assert_that(result.skipped_files).is_equal_to(
+        sorted(entry.path for entry in result.skipped),
+    )

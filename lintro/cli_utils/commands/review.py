@@ -477,6 +477,18 @@ def review_command(
             repo=effective_repo,
             checklist_display=checklist_display,
             question_map=question_map,
+            transport=str(effective_ai_config.transport),
+            config_source=_describe_config_source(
+                config_path=lintro_config.config_path,
+                overrides=_cli_overrides(
+                    depth=depth,
+                    strictness=strictness,
+                    transport=transport,
+                    timeout=timeout,
+                    semantic_chunks=semantic_chunks,
+                    paths=paths,
+                ),
+            ),
         )
         if not posted:
             logger.warning("GitHub review posting skipped or failed")
@@ -485,6 +497,71 @@ def review_command(
     if fail_on_findings and advisory_findings_count(advisory_results):
         exit_code = 1
     raise SystemExit(exit_code)
+
+
+def _cli_overrides(
+    *,
+    depth: int | None,
+    strictness: str | None,
+    transport: str | None,
+    timeout: float | None,
+    semantic_chunks: bool,
+    paths: list[str] | None,
+) -> list[str]:
+    """List the CLI flags that overrode configured review settings.
+
+    Only explicitly-passed options are listed: the point of the note is to
+    explain why a posted run's stats differ from the checked-in config, so
+    defaults would be noise.
+
+    Args:
+        depth: ``--depth`` value, or None when unset.
+        strictness: ``--strictness`` value, or None when unset.
+        transport: ``--transport`` value, or None when unset.
+        timeout: ``--timeout`` value, or None when unset.
+        semantic_chunks: Whether ``--semantic-chunks`` was passed.
+        paths: ``--path`` values, or None when unset.
+
+    Returns:
+        Rendered flag strings in CLI order.
+    """
+    overrides: list[str] = []
+    if depth is not None:
+        overrides.append(f"--depth {depth}")
+    if strictness is not None:
+        overrides.append(f"--strictness {strictness}")
+    if transport is not None:
+        overrides.append(f"--transport {transport}")
+    if timeout is not None:
+        overrides.append(f"--timeout {timeout:g}")
+    if semantic_chunks:
+        overrides.append("--semantic-chunks")
+    overrides.extend(f"--path {path}" for path in paths or [])
+    return overrides
+
+
+def _describe_config_source(
+    *,
+    config_path: str | None,
+    overrides: list[str],
+) -> str:
+    """Describe where this run's settings came from.
+
+    The config file is named, never pathed: an absolute path on a CI runner
+    leaks the workspace layout into a public PR comment and tells the reader
+    nothing they can act on.
+
+    Args:
+        config_path: Path of the loaded lintro config, if any.
+        overrides: Rendered CLI override flags.
+
+    Returns:
+        Human-readable provenance string for the posted run stats.
+    """
+    base = f"`{Path(config_path).name}`" if config_path else "built-in defaults"
+    if not overrides:
+        return base
+    return f"{base} + CLI overrides ({', '.join(overrides)})"
 
 
 def _existing_changed_files(

@@ -16,6 +16,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
@@ -23,6 +24,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.orchestrator import (
     _review_chunk,
     build_git_native_review_prompt,
@@ -998,3 +1000,37 @@ def test_run_review_skips_durable_session_without_capability() -> None:
 
     provider.begin_durable_session.assert_not_called()
     provider.end_durable_session.assert_not_called()
+
+
+def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
+    """Run metadata carries the reviewed paths and every skip with its reason."""
+    provider = _mock_provider(content=_sample_response_json())
+    context = _one_file_context()
+    context.skipped_files = [
+        SkippedFile(path="docs/README.md", reason=FileSkipReason.PATH_FILTER),
+    ]
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.reviewed_paths).is_equal_to(("src/main.py",))
+    assert_that(result.metadata.files_reviewed).is_equal_to(1)
+    assert_that(result.metadata.files_total).is_equal_to(2)
+    assert_that(result.metadata.skipped_files[0].reason).is_equal_to(
+        FileSkipReason.PATH_FILTER,
+    )

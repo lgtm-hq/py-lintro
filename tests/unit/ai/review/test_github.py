@@ -806,3 +806,47 @@ def test_build_sticky_survives_overflowing_finding_sets(
     assert_that(body).contains("### Open findings (400)")
     assert_that(body).contains("StickyOverflow0")
     assert_that(body).contains("more open findings not listed")
+
+
+# --- per-review comment body (#1910) ---------------------------------------
+
+
+def test_post_review_uses_the_rich_review_body(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The review event carries the #1910 body, not the old bare label."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = ["aaa111", "bbb222"]
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+        transport="cli",
+        config_source="`.lintro-config.yaml`",
+    )
+
+    assert_that(posted).is_true()
+    payload = reporter.api_request.call_args.args[2]
+    assert_that(payload["body"]).contains("🔎 **Lintro review —")
+    assert_that(payload["body"]).contains("**📊 Run stats**")
+    assert_that(payload["body"]).contains("Config source: `.lintro-config.yaml`")
+    assert_that(payload["body"]).does_not_contain("Lintro review findings")
+
+
+def test_post_review_body_links_the_pointer_to_an_existing_sticky(
+    sample_review_result: ReviewResult,
+) -> None:
+    """When the sticky already exists, the dedup pointer links straight to it."""
+    reporter = _fresh_reporter()
+    reporter.find_issue_comment.return_value = (
+        42,
+        build_sticky_comment(result=sample_review_result),
+    )
+    reporter.fetch_pr_commit_shas.return_value = []
+
+    post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    payload = reporter.api_request.call_args.args[2]
+    assert_that(payload["body"]).contains(
+        "https://github.com/owner/name/pull/7#issuecomment-42",
+    )

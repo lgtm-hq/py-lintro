@@ -19,7 +19,11 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.cli import cli
-from lintro.cli_utils.commands.review import _merge_advisory_into_json
+from lintro.cli_utils.commands.review import (
+    _cli_overrides,
+    _describe_config_source,
+    _merge_advisory_into_json,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
@@ -1145,3 +1149,36 @@ def test_full_review_json_merges_advisory_key() -> None:
     payload = json.loads(result.output)
     assert_that(payload["summary"]).is_equal_to("ok")
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+
+
+def test_cli_overrides_lists_only_explicit_flags() -> None:
+    """Only options the caller actually passed appear as overrides."""
+    overrides = _cli_overrides(
+        depth=None,
+        strictness=None,
+        transport="cli",
+        timeout=600.0,
+        semantic_chunks=False,
+        paths=None,
+    )
+
+    assert_that(overrides).is_equal_to(["--transport cli", "--timeout 600"])
+
+
+def test_describe_config_source_names_the_file_without_its_path() -> None:
+    """An absolute CI path must not leak into a public PR comment."""
+    described = _describe_config_source(
+        config_path="/home/runner/work/repo/repo/.lintro-config.yaml",
+        overrides=["--timeout 600"],
+    )
+
+    assert_that(described).is_equal_to(
+        "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
+    )
+
+
+def test_describe_config_source_falls_back_to_defaults() -> None:
+    """With no config file the note says so rather than rendering an empty name."""
+    assert_that(
+        _describe_config_source(config_path=None, overrides=[]),
+    ).is_equal_to("built-in defaults")
