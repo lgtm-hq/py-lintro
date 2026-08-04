@@ -31,6 +31,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - **ci**: raise semgrep timeout to 600s across dogfood jobs (#1932) (cbf6476)
+
+## [0.105.1] - 2026-08-03
+
+### Fixed
+
 - **deps**: bump fast-uri to 4.1.2 for CVE-2026-18446 (#1928) (19c5ea8)
 
 ## [0.105.0] - 2026-08-03
