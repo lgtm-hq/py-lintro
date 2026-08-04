@@ -20,6 +20,7 @@ from lintro.ai.review.github import (
     STICKY_MARKER,
     _cap_body,
     _format_findings_section,
+    _sticky_comment_id,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
@@ -359,6 +360,74 @@ def test_post_review_creates_sticky_when_absent(
     reporter.update_issue_comment.assert_not_called()
     body = reporter.post_issue_comment.call_args.args[0]
     assert_that(body).contains(STICKY_MARKER)
+
+
+def test_failed_inline_post_folds_details_into_the_sticky(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A rejected inline batch leaves the sticky as the findings' only surface.
+
+    Without this the PR keeps a verdict whose findings appear nowhere: the
+    inline comments were rejected and the sticky only indexes titles.
+    """
+    reporter = _fresh_reporter()
+    # The inline review batch is the only call routed through api_request.
+    reporter.api_request.return_value = False
+    reporter.find_issue_comment.return_value = (77, "")
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+    )
+
+    assert_that(posted).is_false()
+    # Two updates: the healthy render, then the degraded re-render in place.
+    assert_that(reporter.update_issue_comment.call_count).is_equal_to(2)
+    reporter.post_issue_comment.assert_not_called()
+
+    degraded = reporter.update_issue_comment.call_args.kwargs["body"]
+    assert_that(degraded).contains("could not be posted as an inline comment")
+    assert_that(degraded).contains("not posted inline")
+    # The detail that the inline comment would have carried is folded in.
+    assert_that(degraded).contains("Unknown status grants access")
+    # The round is not double-counted by the second render.
+    assert_that(parse_review_state(body=degraded)).is_length(1)
+
+
+def test_failed_inline_post_never_posts_a_second_sticky(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A sticky that cannot be located is skipped, not duplicated on the PR."""
+    reporter = _fresh_reporter()
+    reporter.api_request.return_value = False
+    # No sticky exists beforehand, and the lookup after creation still misses.
+    reporter.find_issue_comment.return_value = None
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+    )
+
+    assert_that(posted).is_false()
+    # Exactly one sticky was created, and no degraded duplicate followed it.
+    assert_that(reporter.post_issue_comment.call_count).is_equal_to(1)
+    reporter.update_issue_comment.assert_not_called()
+
+
+def test_sticky_comment_id_short_circuits_on_a_known_id() -> None:
+    """A known id is reused without a second lookup against the API."""
+    reporter = _fresh_reporter()
+
+    assert_that(_sticky_comment_id(reporter=reporter, known=42)).is_equal_to(42)
+    reporter.find_issue_comment.assert_not_called()
+
+
+def test_sticky_comment_id_relocates_a_just_created_comment() -> None:
+    """With no prior id the sticky is re-located by its marker."""
+    reporter = _fresh_reporter()
+    reporter.find_issue_comment.return_value = (99, "body")
+
+    assert_that(_sticky_comment_id(reporter=reporter, known=None)).is_equal_to(99)
 
 
 def test_post_review_updates_existing_sticky(

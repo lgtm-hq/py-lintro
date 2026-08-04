@@ -134,6 +134,13 @@ for _table_name, _table in (
     if _missing:  # pragma: no cover - guards a future verdict
         raise RuntimeError(f"{_table_name} missing entries for: {_missing}")
 
+# _VERDICT_SEVERITY is guarded separately because READY is deliberately absent
+# from it. Without this a new non-READY verdict would pass the loop above and
+# then KeyError inside _readiness_pill on a live PR.
+_missing = set(ReviewVerdict) - {ReviewVerdict.READY} - set(_VERDICT_SEVERITY)
+if _missing:  # pragma: no cover - guards a future verdict
+    raise RuntimeError(f"_VERDICT_SEVERITY missing entries for: {_missing}")
+
 #: Emoji marking a tracked entry that is a question rather than a finding.
 _QUESTION_EMOJI = "❓"
 
@@ -314,9 +321,15 @@ def _fit_body(
 
     # 3. Finally the open findings, keeping as many as fit. A verdict with no
     # substance is worse than an over-long comment the final cap will trim, so
-    # one finding is always rendered even when it alone overflows.
+    # the search floor is one finding, and one is still rendered when even that
+    # overflows.
     limits = replace(limits, resolved=0)
-    fitted = _largest_fitting(assemble=assemble, limits=limits, field="open")
+    fitted = _largest_fitting(
+        assemble=assemble,
+        limits=limits,
+        field="open",
+        minimum=1,
+    )
     if fitted is None:
         fitted = assemble(limits=replace(limits, open=1))
     return _cap_body(body=fitted)
@@ -327,6 +340,7 @@ def _largest_fitting(
     assemble: _Assembler,
     limits: _RenderLimits,
     field: str,
+    minimum: int = 0,
 ) -> str | None:
     """Binary-search the largest value of one limit whose body still fits.
 
@@ -338,13 +352,16 @@ def _largest_fitting(
         assemble: Callable taking ``limits`` and returning the rendered body.
         limits: Limits already applied to the cheaper sections.
         field: Name of the :class:`_RenderLimits` field to search over.
+        minimum: Smallest count the section may be rendered at. Sections whose
+            absence would hollow out the comment pass ``1`` so the search can
+            never settle on showing none of them.
 
     Returns:
         The body rendered at the largest fitting count, or ``None`` when not
-        even zero entries of that section make the body fit.
+        even ``minimum`` entries of that section make the body fit.
     """
     best: str | None = None
-    lower, upper = 0, _PRUNE_SEARCH_CEILING
+    lower, upper = minimum, _PRUNE_SEARCH_CEILING
     while lower <= upper:
         middle = (lower + upper) // 2
         candidate = assemble(limits=replace(limits, **{field: middle}))
@@ -621,10 +638,12 @@ def _tiles_section(*, records: tuple[FindingRecord, ...]) -> str:
     counts = dict.fromkeys((Severity.P1, Severity.P2, Severity.P3), 0)
     fixed = 0
     for record in records:
+        # A question that stopped being asked was never a defect, so it must not
+        # inflate the "fixed" tile, which reads as remediated findings.
+        if record.is_question:
+            continue
         if record.status is FindingStatus.RESOLVED:
             fixed += 1
-            continue
-        if record.is_question:
             continue
         counts[record.severity] = counts.get(record.severity, 0) + 1
     return "\n".join(
@@ -916,7 +935,13 @@ def _history_section(
     prefix = "~" if estimated else ""
     models = _model_counts(runs=runs)
 
-    shown = runs if limit is None else [*runs[:-1][len(runs) - 1 - limit :], runs[-1]]
+    if limit is None:
+        shown = runs
+    else:
+        # Clamp before slicing: a limit above the prior-run count would make the
+        # start index negative and silently show the *newest* few instead of all.
+        keep = min(max(limit, 0), len(runs) - 1)
+        shown = [*runs[:-1][len(runs) - 1 - keep :], runs[-1]]
     dropped = len(runs) - len(shown)
 
     summary = (
@@ -1135,8 +1160,9 @@ def _cell(*, text: str, limit: int) -> str:
 
 def _short_sha(*, sha: str) -> str:
     """Return the display-length prefix of a commit sha, or an empty string."""
-    cleaned = sanitize_comment_text(sha, limit=64).strip()
-    return cleaned[:SHORT_SHA_LENGTH]
+    cleaned = sanitize_comment_text(sha, limit=64).strip()[:SHORT_SHA_LENGTH]
+    # Escape *after* truncating: escaping first could cut an escape pair in half.
+    return cleaned.replace("|", "\\|")
 
 
 def _transport_label(*, transport: str, auth_mode: str) -> str:

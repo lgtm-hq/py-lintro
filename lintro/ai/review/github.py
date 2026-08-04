@@ -15,6 +15,7 @@ Public helpers live in sibling modules and are re-exported here so existing
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
@@ -142,17 +143,52 @@ def post_review_to_github(
         # unchanged, so this round is not double-counted, and the comment is
         # only ever *updated* — a failed lookup skips rather than posting a
         # second sticky on the PR.
-        sticky_id = _sticky_comment_id(reporter=gh_reporter, known=comment_id)
-        if sticky_id is not None:
-            reporter_body = render(
-                inline_failure=InlinePostFailure(
-                    reason="the review API rejected the inline comments",
-                    findings=tuple(inline_findings),
-                ),
-            )
-            gh_reporter.update_issue_comment(comment_id=sticky_id, body=reporter_body)
+        _fold_inline_failure_into_sticky(
+            reporter=gh_reporter,
+            render=render,
+            findings=inline_findings,
+            comment_id=comment_id,
+        )
 
     return success
+
+
+def _fold_inline_failure_into_sticky(
+    *,
+    reporter: GitHubPRReporter,
+    render: Callable[..., str],
+    findings: list[ReviewFinding],
+    comment_id: int | None,
+) -> None:
+    """Re-render the sticky with the unpostable findings' detail folded in.
+
+    Failing here is not worth failing the run over — the caller has already
+    recorded the inline failure — but it must not be silent either, or a PR
+    quietly ends up with a verdict whose findings appear nowhere.
+
+    Args:
+        reporter: GitHub reporter used to locate and update the sticky comment.
+        render: Callable that renders the sticky body for a given failure.
+        findings: Findings whose inline comments could not be posted.
+        comment_id: Sticky comment id known before the upsert, or ``None``.
+    """
+    sticky_id = _sticky_comment_id(reporter=reporter, known=comment_id)
+    if sticky_id is None:
+        logger.warning(
+            "Sticky comment not found — inline-post failure details could not "
+            "be folded into it",
+        )
+        return
+    body = render(
+        inline_failure=InlinePostFailure(
+            reason="the review API rejected the inline comments",
+            findings=tuple(findings),
+        ),
+    )
+    if not reporter.update_issue_comment(comment_id=sticky_id, body=body):
+        logger.warning(
+            "Failed to fold inline-post failure details into the sticky comment",
+        )
 
 
 def _sticky_comment_id(

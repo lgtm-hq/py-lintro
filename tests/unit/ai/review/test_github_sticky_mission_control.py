@@ -13,6 +13,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
+    STATE_MARKER_PREFIX,
     STICKY_MARKER,
 )
 from lintro.ai.review.github_sticky import (
@@ -71,7 +72,7 @@ def _with(
 
 def _body_only(*, body: str) -> str:
     """Strip the hidden state blob so assertions only see rendered Markdown."""
-    return body.split("<!-- lintro-ai-review-state", 1)[0]
+    return body.split(STATE_MARKER_PREFIX, 1)[0]
 
 
 def _max_details_depth(*, body: str) -> int:
@@ -241,6 +242,64 @@ def test_open_table_marks_new_and_carries_since_round(
     assert_that(second).contains(
         "| **new** | 🟠 P2 | Unguarded divide | `src/example.py:8` | round 2 |",
     )
+
+
+def test_open_table_marks_a_regressed_finding(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A finding that comes back after being fixed is flagged, not silently new."""
+    first = build_sticky_comment(
+        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
+        head_sha="sha1",
+    )
+    fixed = build_sticky_comment(
+        result=_with(base=sample_review_result, findings=()),
+        prior_state=parse_review_state_v2(body=first),
+        head_sha="sha2",
+    )
+
+    regressed = _body_only(
+        body=build_sticky_comment(
+            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
+            prior_state=parse_review_state_v2(body=fixed),
+            head_sha="sha3",
+        ),
+    )
+
+    assert_that(regressed).contains("| ↩ regressed | 🔴 P1 | Leak |")
+    # Its provenance survives the round trip through resolved and back.
+    assert_that(regressed).contains("round 1 |")
+
+
+def test_resolved_questions_do_not_inflate_the_fixed_tile(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The fixed tile counts remediated findings, not questions that lapsed."""
+    first = build_sticky_comment(
+        result=_with(
+            base=sample_review_result,
+            findings=(
+                _finding(title="Leak"),
+                _finding(
+                    title="Is this intentional?",
+                    line=20,
+                    kind=FindingKind.QUESTION,
+                ),
+            ),
+        ),
+        head_sha="sha1",
+    )
+
+    second = _body_only(
+        body=build_sticky_comment(
+            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
+            prior_state=parse_review_state_v2(body=first),
+            head_sha="sha2",
+        ),
+    )
+
+    # One open blocker, and the lapsed question is not counted as fixed.
+    assert_that(second).contains("| **1** | **0** | **0** | **0** |")
 
 
 def test_resolved_table_stamps_the_fixing_commit(
@@ -576,3 +635,28 @@ def test_comment_stays_under_the_hard_limit_with_huge_finding_sets(
     rendered = _body_only(body=body)
     assert_that(rendered).contains("### Open findings (400)")
     assert_that(rendered).contains("more open findings not listed")
+    # Never a verdict with no substance: at least one finding is always listed.
+    assert_that(rendered).contains("| 🟠 P2 |")
+
+
+def test_pruning_never_lists_zero_open_findings(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Even a single finding too large for the cap is still listed.
+
+    The open-finding search floor is one, so it can never settle on the
+    strictly-smaller body that lists none of them.
+    """
+    findings = (
+        _finding(
+            title="Oversized " + "x" * (GITHUB_COMMENT_HARD_LIMIT // 2),
+            severity=Severity.P1,
+        ),
+    )
+
+    body = build_sticky_comment(
+        result=_with(base=sample_review_result, findings=findings),
+    )
+
+    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
+    assert_that(_body_only(body=body)).contains("### Open findings (1)")
