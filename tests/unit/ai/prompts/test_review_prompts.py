@@ -15,6 +15,7 @@ from lintro.ai.prompts.review import (
     format_deferred_scope_section,
     format_external_review_section,
     format_lint_results_section,
+    format_output_rules,
 )
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -39,6 +40,7 @@ def test_review_user_prompt_template_renders_all_placeholders() -> None:
         lint_results_section="",
         strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
+        output_rules=format_output_rules(checklist_count=1),
     )
 
     assert_that(rendered).contains("Test PR")

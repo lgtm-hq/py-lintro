@@ -21,10 +21,60 @@ __all__ = [
 
 REVIEW_CLI_SCHEMA: dict[str, object] = {
     "type": "object",
-    "required": ["summary", "checklist", "findings"],
+    # summary is intentionally not required at the root: parse_review_summary
+    # already degrades to None (TL;DR-only rendering) when it is absent, so a
+    # CLI response with only findings and checklist must still validate.
+    "required": ["checklist", "findings"],
     "additionalProperties": False,
     "properties": {
-        "summary": {"type": "string"},
+        # The narrative fields (#1907) are optional: the schema stays
+        # satisfiable by a model that only produces findings, and the parsers
+        # degrade to TL;DR-only rendering when they are absent.
+        "summary": {
+            "type": "object",
+            "required": ["headline"],
+            "additionalProperties": False,
+            "properties": {
+                "headline": {"type": "string"},
+                "walkthrough": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["text"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "text": {"type": "string"},
+                            "finding_ref": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        "verdict_reasoning": {
+            "type": "object",
+            "required": ["deciding_factor"],
+            "additionalProperties": False,
+            "properties": {
+                "deciding_factor": {"type": "string"},
+                "failure_mechanism": {"type": "string"},
+                "files_needing_attention": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        },
+        "file_assessments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["file", "overview"],
+                "additionalProperties": False,
+                "properties": {
+                    "file": {"type": "string"},
+                    "overview": {"type": "string"},
+                },
+            },
+        },
         "checklist": {
             "type": "array",
             "items": {
@@ -64,6 +114,9 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                     "description": {"type": "string"},
                     "cause": {"type": "string"},
                     "fix": {"type": "string"},
+                    # Requested by the prompt schema; without it here the
+                    # strict CLI schema would reject the field outright.
+                    "suggested_code": {"type": "string"},
                     "confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
