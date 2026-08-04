@@ -46,6 +46,7 @@ from lintro.ai.review.github_sticky import (
     parse_review_state,
     parse_review_state_v2,
 )
+from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -104,16 +105,26 @@ def post_review_to_github(
     prompt_questions = question_map or {}
     comment_id, prior_state = _load_prior_state(reporter=gh_reporter)
     diff_lines = gh_reporter.fetch_pr_diff_lines()
-    body = build_sticky_comment(
-        result=result,
-        prior_state=prior_state,
-        head_sha=result.metadata.head_ref,
-        checklist_display=checklist_display,
-        question_map=prompt_questions,
-        diff_lines=diff_lines,
-    )
 
-    success = _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
+    def render(*, inline_failure: InlinePostFailure | None) -> str:
+        """Render the sticky body against the unchanged prior state."""
+        return build_sticky_comment(
+            result=result,
+            prior_state=prior_state,
+            head_sha=result.metadata.head_ref,
+            checklist_display=checklist_display,
+            question_map=prompt_questions,
+            diff_lines=diff_lines,
+            inline_failure=inline_failure,
+        )
+
+    # The sticky is posted before inline comments so a failure in the inline
+    # path still leaves a status comment on the PR.
+    success = _upsert_sticky(
+        reporter=gh_reporter,
+        body=render(inline_failure=None),
+        comment_id=comment_id,
+    )
 
     inline_findings, _fallback = _partition_findings(
         findings=result.findings,
@@ -126,8 +137,43 @@ def post_review_to_github(
         question_map=prompt_questions,
     ):
         success = False
+        # Degraded path (#1909): those findings now have no surface at all, so
+        # re-render the sticky with their detail folded in. ``prior_state`` is
+        # unchanged, so this round is not double-counted, and the comment is
+        # only ever *updated* — a failed lookup skips rather than posting a
+        # second sticky on the PR.
+        sticky_id = _sticky_comment_id(reporter=gh_reporter, known=comment_id)
+        if sticky_id is not None:
+            reporter_body = render(
+                inline_failure=InlinePostFailure(
+                    reason="the review API rejected the inline comments",
+                    findings=tuple(inline_findings),
+                ),
+            )
+            gh_reporter.update_issue_comment(comment_id=sticky_id, body=reporter_body)
 
     return success
+
+
+def _sticky_comment_id(
+    *,
+    reporter: GitHubPRReporter,
+    known: int | None,
+) -> int | None:
+    """Return the sticky comment's id, re-locating it when it was just created.
+
+    Args:
+        reporter: GitHub reporter used to list PR comments.
+        known: The id known before the sticky was upserted, or ``None`` when it
+            did not exist yet.
+
+    Returns:
+        The comment id to update, or ``None`` when it still cannot be found.
+    """
+    if known is not None:
+        return known
+    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    return None if found is None else found[0]
 
 
 def post_review_error_to_github(
