@@ -5,8 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models._coerce import coerce_int
+from lintro.ai.review.models.finding_occurrence import (
+    FindingOccurrence,
+    parse_occurrences,
+)
 from lintro.ai.review.models.review_finding import Severity
 
 __all__ = ["FindingRecord"]
@@ -41,6 +46,16 @@ class FindingRecord:
             finding, when one was posted.
         regressed: True when the finding reappeared after being resolved.
         checklist_ids: Prompt checklist ids linked to this finding.
+        kind: Whether the tracked entry is a finding or a question (#1925).
+            Questions are tracked like findings but excluded from the derived
+            verdict.
+        occurrences: Locations at which the pattern was still present at the
+            most recent sighting.
+        occurrences_total: High-water number of occurrences ever seen for this
+            pattern. Held across rounds so partial progress reads as
+            ``addressed / total`` even after some locations are fixed.
+        severity_downgraded: True when the P1 evidence gate downgraded the
+            severity at the most recent sighting.
     """
 
     fingerprint: str
@@ -57,11 +72,46 @@ class FindingRecord:
     inline_comment_id: int | None = None
     regressed: bool = False
     checklist_ids: tuple[int, ...] = field(default_factory=tuple)
+    kind: FindingKind = FindingKind.FINDING
+    occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
+    occurrences_total: int = 0
+    severity_downgraded: bool = False
 
     @property
     def key(self) -> str:
         """Return the composite identity key ``fingerprint#ordinal``."""
         return f"{self.fingerprint}#{self.ordinal}"
+
+    @property
+    def is_question(self) -> bool:
+        """Return True when the tracked entry is a question."""
+        return self.kind is FindingKind.QUESTION
+
+    @property
+    def occurrence_count(self) -> int:
+        """Return how many occurrences were present at the last sighting."""
+        return len(self.occurrences) or 1
+
+    @property
+    def occurrence_total(self) -> int:
+        """Return the high-water occurrence count for this pattern."""
+        return max(self.occurrences_total, self.occurrence_count)
+
+    @property
+    def occurrences_addressed(self) -> int:
+        """Return how many occurrences of the pattern are already gone.
+
+        Resolution is pattern-level: a record only reaches ``RESOLVED`` once
+        every occurrence has disappeared, so while it is open this count is
+        the partial progress surfaces render as ``14/20 addressed``.
+
+        Returns:
+            Number of occurrences addressed since the pattern's high-water
+            mark; the full total once the record is resolved.
+        """
+        if self.status is FindingStatus.RESOLVED:
+            return self.occurrence_total
+        return max(self.occurrence_total - self.occurrence_count, 0)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the record for the hidden state blob.
@@ -92,6 +142,15 @@ class FindingRecord:
             payload["regressed"] = True
         if self.checklist_ids:
             payload["checklist_ids"] = list(self.checklist_ids)
+        if self.kind is not FindingKind.FINDING:
+            payload["kind"] = str(self.kind)
+        if len(self.occurrences) > 1 or self.occurrences_total > 1:
+            payload["occurrences"] = [
+                occurrence.to_dict() for occurrence in self.occurrences
+            ]
+            payload["occurrences_total"] = self.occurrence_total
+        if self.severity_downgraded:
+            payload["severity_downgraded"] = True
         return payload
 
     @classmethod
@@ -128,6 +187,10 @@ class FindingRecord:
             ),
             regressed=bool(payload.get("regressed", False)),
             checklist_ids=_parse_checklist_ids(payload.get("checklist_ids")),
+            kind=_parse_kind(payload.get("kind")),
+            occurrences=parse_occurrences(payload.get("occurrences")),
+            occurrences_total=coerce_int(payload.get("occurrences_total")),
+            severity_downgraded=bool(payload.get("severity_downgraded", False)),
         )
 
 
@@ -159,6 +222,26 @@ def _parse_severity(value: Any) -> Severity:
         return Severity(str(value).upper())
     except ValueError:
         return Severity.P1
+
+
+def _parse_kind(value: Any) -> FindingKind:
+    """Parse a finding kind label from an untrusted state blob.
+
+    An unrecognized or absent label becomes ``FINDING``: a v1/v2 record
+    carries no kind key, and mistaking a question for a finding merely renders
+    it with a severity, whereas the reverse would drop a real defect out of
+    the derived verdict.
+
+    Args:
+        value: Raw kind value decoded from the state blob.
+
+    Returns:
+        The parsed kind, defaulting to :data:`FindingKind.FINDING`.
+    """
+    try:
+        return FindingKind(str(value).lower())
+    except ValueError:
+        return FindingKind.FINDING
 
 
 def _parse_status(value: Any) -> FindingStatus:

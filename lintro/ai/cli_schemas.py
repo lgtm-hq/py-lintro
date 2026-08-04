@@ -117,6 +117,30 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                     # Requested by the prompt schema; without it here the
                     # strict CLI schema would reject the field outright.
                     "suggested_code": {"type": "string"},
+                    # #1925 finding-model fields. All optional: the parser
+                    # degrades every one of them to a default, so a model that
+                    # ignores them still produces a valid review.
+                    "kind": {
+                        "type": "string",
+                        "enum": ["finding", "question"],
+                    },
+                    "failure_scenario": {"type": "string"},
+                    "evidence_style": {
+                        "type": "string",
+                        "enum": ["diff_local", "cross_file", "speculative"],
+                    },
+                    "occurrences": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["file", "line"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "file": {"type": "string"},
+                                "line": {"type": "integer"},
+                            },
+                        },
+                    },
                     "confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],

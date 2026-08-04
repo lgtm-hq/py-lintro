@@ -24,3 +24,26 @@
 - `file_assessments` holds one entry per reviewed file with a single-sentence
   `overview`. Do not include severity counts — lintro derives those from `findings`.
 - Every finding `title` must be a single line with no line breaks.
+- **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the
+  observable result. "Could be a problem" is not a failure mechanism. A P1 without one
+  is automatically downgraded to P2 and the downgrade is shown to the reader, so the
+  only thing an uncalibrated P1 buys you is a visible correction.
+- **Calibrate severity.** P1 means merge-blocking defect: expect 0–2 on a typical PR and
+  none at all on most. When you are torn between P1 and P2, choose P2.
+- Set `kind` to `question` when you suspect something but cannot show it — an
+  assumption you want the author to confirm, context you lack. Questions carry no
+  severity, never affect the verdict, and are capped at **3 per review**. Use them
+  instead of inflating severity; if the answer confirms a defect you will report it as
+  a normal finding next round.
+- Set `evidence_style` honestly: `diff_local` when the diff hunk alone shows it,
+  `cross_file` when you traced code outside the hunk, `speculative` when you inferred it
+  without verifying. A speculative finding is not penalized — it is labelled, and its
+  fix prompt tells the agent to reproduce it first.
+- **Style and formatting a linter would catch are out of scope** — lintro runs the
+  native linters in the same check run, so reporting them is pure noise. The one
+  exception is correctness-adjacent style: shadowed names, misleading identifiers, and
+  confusing API misuse stay in scope as P3 `code-smell`.
+- There is no cap on findings, but **do not report the same problem twice**. When one
+  problem repeats across locations, report it once and list every location in
+  `occurrences` as `file`/`line` pairs — including the primary one. It renders as a
+  single collapsed thread, and its fix prompt enumerates every location.

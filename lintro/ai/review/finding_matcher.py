@@ -26,6 +26,7 @@ from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
@@ -108,9 +109,13 @@ def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
 
     Returns:
         The readiness verdict implied by the open findings' severities.
+        Questions (#1925) are excluded: they carry no severity semantics and
+        must never move the verdict.
     """
     severities = {
-        record.severity for record in findings if record.status is FindingStatus.OPEN
+        record.severity
+        for record in findings
+        if record.status is FindingStatus.OPEN and not record.is_question
     }
     if Severity.P1 in severities:
         return ReviewVerdict.BLOCKED
@@ -119,6 +124,29 @@ def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
     if Severity.P3 in severities:
         return ReviewVerdict.NITS_ONLY
     return ReviewVerdict.READY
+
+
+def _normalized_occurrences(
+    *,
+    finding: ReviewFinding,
+) -> tuple[FindingOccurrence, ...]:
+    """Return a finding's occurrences with their paths normalized.
+
+    Args:
+        finding: Finding whose occurrence locations are being tracked.
+
+    Returns:
+        Every occurrence of the pattern — never empty — with file paths
+        normalized the same way the fingerprint normalizes them, so a path
+        that changes only in separator style does not read as a new location.
+    """
+    return tuple(
+        FindingOccurrence(
+            file=normalize_file_path(occurrence.file),
+            line=occurrence.line,
+        )
+        for occurrence in finding.all_occurrences
+    )
 
 
 def _current_records(
@@ -167,6 +195,10 @@ def _current_records(
             status=FindingStatus.OPEN,
             since_round=round_number,
             checklist_ids=finding.checklist_ids,
+            kind=finding.kind,
+            occurrences=_normalized_occurrences(finding=finding),
+            occurrences_total=len(finding.all_occurrences),
+            severity_downgraded=finding.severity_downgraded,
         )
         for index, finding in enumerate(findings)
     ]
@@ -235,6 +267,12 @@ def _merge_pair(
 ) -> tuple[FindingRecord, FindingMatchOutcome]:
     """Merge a matched prior record with its current-round sighting.
 
+    A finding with several occurrences is one pattern, not one finding per
+    location, so the merged record keeps this round's surviving occurrences
+    while holding the high-water total. Fixing 6 of 20 call sites therefore
+    reads as partial progress on an open finding, and only the disappearance
+    of the whole pattern resolves it.
+
     Args:
         prior: Previously tracked record.
         current: Freshly built record for this round.
@@ -261,6 +299,10 @@ def _merge_pair(
         inline_comment_id=prior.inline_comment_id,
         regressed=regressed or prior.regressed,
         checklist_ids=current.checklist_ids or prior.checklist_ids,
+        kind=current.kind,
+        occurrences=current.occurrences,
+        occurrences_total=max(prior.occurrence_total, current.occurrence_total),
+        severity_downgraded=current.severity_downgraded,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
@@ -279,6 +321,11 @@ def match_findings(
     Every current finding is classified as ``new``, ``carried``, or
     ``regressed``; every prior open finding absent from this round is marked
     ``resolved`` and stamped with the head sha and round that resolved it.
+
+    Resolution is pattern-level (#1925): a finding reported at several
+    occurrences resolves only when the whole pattern stops being reported.
+    Fixing some of its locations leaves it open with a lower
+    ``occurrence_count`` against an unchanged ``occurrence_total``.
 
     Args:
         previous: State decoded from the prior sticky comment, or ``None`` for

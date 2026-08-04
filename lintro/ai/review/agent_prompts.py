@@ -22,12 +22,15 @@ import re
 import textwrap
 
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.github_render import sanitize_comment_text
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.review_finding import ReviewFinding
 
 __all__ = [
+    "SPECULATIVE_NOTICE",
     "VERIFICATION_PREAMBLE",
+    "prompt_findings",
     "render_agent_prompt",
     "render_agent_prompt_panel",
     "render_finding_prompt",
@@ -42,6 +45,13 @@ VERIFICATION_PREAMBLE = (
     "These are open findings from a lintro AI code review. Verify each one "
     "against the current code. Fix only still-valid issues, skip the rest with "
     "a brief reason, keep changes minimal, and validate with tests."
+)
+
+#: Verbatim caution appended to a speculative finding's prompt block. The model
+#: self-reports the evidence basis (#1925); an inferred finding must be
+#: reproduced before an agent starts editing code on its say-so.
+SPECULATIVE_NOTICE = (
+    "This finding is inferred, not verified — confirm it reproduces before fixing."
 )
 
 #: Column at which prompt prose is soft-wrapped inside the fenced code block.
@@ -231,6 +241,67 @@ def _group_by_file(
     return list(grouped.items())
 
 
+def _occurrence_lines(*, finding: ReviewFinding) -> list[str]:
+    """Render every location of a repeated finding pattern.
+
+    Display collapses a repeated pattern to one thread, but the prompt must
+    not: an agent handed "fix this" for a pattern with twenty call sites has
+    to be told about all twenty, or nineteen silently survive the fix.
+
+    Args:
+        finding: Finding whose occurrences are being enumerated.
+
+    Returns:
+        Prompt lines listing every occurrence, or an empty list when the
+        pattern occurs only once.
+    """
+    occurrences = finding.all_occurrences
+    if len(occurrences) < 2:
+        return []
+    lines = [
+        _wrap(
+            text=(
+                f"Occurs at {len(occurrences)} locations — apply the "
+                "equivalent fix at each and verify each one still reproduces "
+                "before changing it:"
+            ),
+            initial_indent=_CONTINUATION_INDENT,
+            subsequent_indent=_CONTINUATION_INDENT,
+        ),
+    ]
+    lines.extend(
+        _wrap(
+            text=(
+                f"- {sanitize_comment_text(occurrence.file, limit=_PATH_LIMIT)}"
+                f":{occurrence.line}"
+            ),
+            initial_indent=_CONTINUATION_INDENT * 2,
+            subsequent_indent=_CONTINUATION_INDENT * 3,
+        )
+        for occurrence in occurrences
+    )
+    return lines
+
+
+def prompt_findings(
+    *,
+    findings: tuple[ReviewFinding, ...],
+) -> tuple[ReviewFinding, ...]:
+    """Select the entries a remediation prompt should cover.
+
+    Questions (#1925) are excluded from every prompt scope: there is nothing
+    to fix until the author answers, and a question promoted to a real finding
+    next round arrives with its own severity and prompt.
+
+    Args:
+        findings: Candidate entries in presentation order.
+
+    Returns:
+        The subset that represents actionable findings.
+    """
+    return tuple(finding for finding in findings if not finding.is_question)
+
+
 def _finding_block(*, finding: ReviewFinding) -> list[str]:
     """Render one finding as a bullet plus indented continuation lines.
 
@@ -275,6 +346,15 @@ def _finding_block(*, finding: ReviewFinding) -> list[str]:
                 subsequent_indent=_CONTINUATION_INDENT,
             ),
         )
+    if finding.evidence_style is EvidenceStyle.SPECULATIVE:
+        lines.append(
+            _wrap(
+                text=SPECULATIVE_NOTICE,
+                initial_indent=_CONTINUATION_INDENT,
+                subsequent_indent=_CONTINUATION_INDENT,
+            ),
+        )
+    lines.extend(_occurrence_lines(finding=finding))
     return lines
 
 
@@ -287,23 +367,27 @@ def render_agent_prompt(
 
     The prompt opens with a scope sentence (so a copied prompt can never be
     confused with the other surface's prompt), then the verbatim verification
-    preamble, then the findings grouped by file.
+    preamble, then the findings grouped by file. Questions are dropped before
+    anything is counted or rendered, so the scope sentence never promises a
+    fix for something that only asked a question.
 
     Args:
         findings: Findings in scope, in the order they should be presented.
         scope: Which finding set the prompt covers.
 
     Returns:
-        Plain-text prompt body, or an empty string when there are no findings.
+        Plain-text prompt body, or an empty string when the scope holds no
+        actionable findings (questions do not count).
     """
-    if not findings:
+    actionable = prompt_findings(findings=findings)
+    if not actionable:
         return ""
 
     sections: list[str] = [
-        _wrap(text=_scope_sentence(scope=scope, count=len(findings))),
+        _wrap(text=_scope_sentence(scope=scope, count=len(actionable))),
         _wrap(text=VERIFICATION_PREAMBLE),
     ]
-    for path, file_findings in _group_by_file(findings=findings):
+    for path, file_findings in _group_by_file(findings=actionable):
         safe_path = sanitize_comment_text(path, limit=_PATH_LIMIT)
         sections.append(f"In `{safe_path}`:")
         sections.extend(
@@ -319,7 +403,8 @@ def render_finding_prompt(*, finding: ReviewFinding) -> str:
         finding: Finding the inline comment is anchored to.
 
     Returns:
-        Plain-text prompt body scoped to exactly this finding.
+        Plain-text prompt body scoped to exactly this finding, or an empty
+        string when the entry is a question — questions get no prompt panel.
     """
     return render_agent_prompt(
         findings=(finding,),
@@ -384,7 +469,7 @@ def render_agent_prompt_panel(
         return ""
     return render_prompt_panel(
         prompt=prompt,
-        title=_panel_title(scope=scope, count=len(findings)),
+        title=_panel_title(scope=scope, count=len(prompt_findings(findings=findings))),
         footer=_FOOTERS[scope.kind] if footer is None else footer,
     )
 
@@ -402,7 +487,8 @@ def render_finding_prompt_panel(
             single-finding footer; pass ``""`` to omit it.
 
     Returns:
-        Markdown for the panel.
+        Markdown for the panel, or an empty string when the entry is a
+        question.
     """
     return render_agent_prompt_panel(
         findings=(finding,),

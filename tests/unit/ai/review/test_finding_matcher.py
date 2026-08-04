@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
@@ -16,6 +19,7 @@ from lintro.ai.review.finding_matcher import (
     normalize_file_path,
     normalize_title,
 )
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
@@ -471,3 +475,164 @@ def test_derive_verdict_ignores_resolved_findings() -> None:
     assert_that(derive_verdict(findings=second.records)).is_equal_to(
         ReviewVerdict.READY,
     )
+
+
+def _pattern(
+    *,
+    lines: tuple[int, ...],
+    title: str = "Unchecked return value",
+    file: str = "src/app.py",
+) -> ReviewFinding:
+    """Build a finding that occurs at several locations.
+
+    Args:
+        lines: Line numbers at which the pattern occurs.
+        title: Finding title.
+        file: Repository-relative file path of every occurrence.
+
+    Returns:
+        The constructed finding, anchored at the first occurrence.
+    """
+    return replace(
+        _finding(title=title, file=file, line=lines[0], severity=Severity.P2),
+        occurrences=tuple(FindingOccurrence(file=file, line=line) for line in lines),
+    )
+
+
+def test_a_single_occurrence_finding_tracks_one_location() -> None:
+    """A finding with no explicit occurrences still counts as one (#1925)."""
+    match = match_findings(
+        previous=None,
+        findings=[_finding(title="Solo defect")],
+        round_number=1,
+    )
+
+    record = match.records[0]
+    assert_that(record.occurrence_count).is_equal_to(1)
+    assert_that(record.occurrence_total).is_equal_to(1)
+    assert_that(record.occurrences_addressed).is_equal_to(0)
+
+
+def test_a_repeated_pattern_is_one_tracked_finding() -> None:
+    """Twenty call sites of one defect are one record, not twenty."""
+    match = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30, 40))],
+        round_number=1,
+    )
+
+    assert_that(match.records).is_length(1)
+    assert_that(match.records[0].occurrence_total).is_equal_to(4)
+
+
+def test_partial_progress_keeps_the_pattern_open_with_counts() -> None:
+    """Fixing some occurrences is progress, not resolution."""
+    first = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30, 40, 50))],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[_pattern(lines=(30, 50))],
+        round_number=2,
+        head_sha="deadbeef",
+    )
+
+    assert_that(second.resolved).is_empty()
+    assert_that(second.carried).is_length(1)
+    record = second.records[0]
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.occurrence_count).is_equal_to(2)
+    assert_that(record.occurrence_total).is_equal_to(5)
+    assert_that(record.occurrences_addressed).is_equal_to(3)
+
+
+def test_a_pattern_resolves_only_when_every_occurrence_is_gone() -> None:
+    """Pattern-level resolution needs the whole pattern to disappear."""
+    first = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30))],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="cafebabe",
+    )
+
+    record = second.records[0]
+    assert_that(record.status).is_equal_to(FindingStatus.RESOLVED)
+    assert_that(record.occurrences_addressed).is_equal_to(3)
+
+
+def test_one_reappearing_occurrence_regresses_the_whole_pattern() -> None:
+    """A single returning call site reopens the pattern with its full total."""
+    first = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30))],
+        round_number=1,
+    )
+    resolved = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="cafebabe",
+    )
+    third = match_findings(
+        previous=ReviewState(findings=resolved.records),
+        findings=[_pattern(lines=(20,))],
+        round_number=3,
+        head_sha="f00d",
+    )
+
+    assert_that(third.regressed).is_length(1)
+    record = third.records[0]
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.regressed).is_true()
+    assert_that(record.occurrence_count).is_equal_to(1)
+    assert_that(record.occurrence_total).is_equal_to(3)
+    assert_that(record.occurrences_addressed).is_equal_to(2)
+
+
+def test_questions_are_tracked_but_excluded_from_the_verdict() -> None:
+    """A tracked question never blocks the PR (#1925)."""
+    question = replace(
+        _finding(title="Is this intentional", severity=Severity.P1),
+        kind=FindingKind.QUESTION,
+    )
+    match = match_findings(previous=None, findings=[question], round_number=1)
+
+    assert_that(match.records).is_length(1)
+    assert_that(match.records[0].is_question).is_true()
+    assert_that(derive_verdict(findings=match.records)).is_equal_to(
+        ReviewVerdict.READY,
+    )
+
+
+def test_occurrences_survive_a_state_round_trip() -> None:
+    """Occurrence counts persist in the state blob, not just in memory."""
+    match = match_findings(
+        previous=None,
+        findings=[_pattern(lines=(10, 20, 30))],
+        round_number=1,
+    )
+
+    restored = FindingRecord.from_dict(match.records[0].to_dict())
+
+    assert_that(restored).is_not_none()
+    assert_that(restored.occurrence_total).is_equal_to(3)
+    assert_that(restored.occurrences).is_length(3)
+
+
+def test_a_pre_1925_record_degrades_to_a_single_occurrence() -> None:
+    """State written before #1925 parses with sane occurrence defaults."""
+    restored = FindingRecord.from_dict(
+        {"fingerprint": "abc123", "severity": "P2", "file": "a.py", "line": 3},
+    )
+
+    assert_that(restored).is_not_none()
+    assert_that(restored.kind).is_equal_to(FindingKind.FINDING)
+    assert_that(restored.occurrence_count).is_equal_to(1)
+    assert_that(restored.occurrence_total).is_equal_to(1)

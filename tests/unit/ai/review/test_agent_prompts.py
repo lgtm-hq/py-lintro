@@ -9,6 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.agent_prompts import (
+    SPECULATIVE_NOTICE,
     VERIFICATION_PREAMBLE,
     render_agent_prompt,
     render_agent_prompt_panel,
@@ -18,7 +19,10 @@ from lintro.ai.review.agent_prompts import (
     render_sticky_prompt_pointer,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 
 
@@ -516,3 +520,99 @@ def test_sticky_pointer_links_back_instead_of_duplicating_the_prompt() -> None:
         "[sticky comment's fix-all](https://example.test/c/1)",
     )
     assert_that(pointer).does_not_contain("```")
+
+
+def test_questions_are_excluded_from_fix_all_prompts() -> None:
+    """A question contributes nothing to a fix-all prompt (#1925)."""
+    finding = _finding(title="Real defect", file="src/a.py")
+    question = replace(
+        _finding(title="Is this intentional", file="src/b.py"),
+        kind=FindingKind.QUESTION,
+    )
+
+    prompt = render_agent_prompt(
+        findings=(finding, question),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN, round_number=1),
+    )
+
+    assert_that(prompt).contains("Real defect")
+    assert_that(prompt).does_not_contain("Is this intentional")
+    assert_that(prompt).does_not_contain("src/b.py")
+
+
+def test_fix_all_scope_counts_exclude_questions() -> None:
+    """The scope sentence never promises to fix a question."""
+    finding = _finding(title="Real defect")
+    question = replace(_finding(title="A doubt"), kind=FindingKind.QUESTION)
+
+    panel = render_agent_prompt_panel(
+        findings=(finding, question),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN, round_number=1),
+    )
+
+    assert_that(panel).contains("the 1 finding still open")
+    assert_that(panel).contains("1 still-open finding")
+
+
+def test_a_question_gets_no_prompt_at_all() -> None:
+    """Questions render no per-finding prompt or panel."""
+    question = replace(_finding(title="A doubt"), kind=FindingKind.QUESTION)
+
+    assert_that(render_finding_prompt(finding=question)).is_empty()
+    assert_that(render_finding_prompt_panel(finding=question)).is_empty()
+
+
+def test_speculative_findings_carry_the_verify_first_line() -> None:
+    """An inferred finding tells the agent to reproduce it before fixing."""
+    finding = replace(_finding(), evidence_style=EvidenceStyle.SPECULATIVE)
+
+    prompt = render_finding_prompt(finding=finding)
+
+    assert_that(" ".join(prompt.split())).contains(SPECULATIVE_NOTICE)
+
+
+@pytest.mark.parametrize(
+    "evidence_style",
+    [EvidenceStyle.DIFF_LOCAL, EvidenceStyle.CROSS_FILE],
+    ids=["style=diff_local", "style=cross_file"],
+)
+def test_verified_findings_omit_the_verify_first_line(
+    evidence_style: EvidenceStyle,
+) -> None:
+    """Only speculative findings get the extra caution.
+
+    Args:
+        evidence_style: Non-speculative evidence style under test.
+    """
+    finding = replace(_finding(), evidence_style=evidence_style)
+
+    prompt = render_finding_prompt(finding=finding)
+
+    assert_that(" ".join(prompt.split())).does_not_contain(SPECULATIVE_NOTICE)
+
+
+def test_prompts_enumerate_every_occurrence_of_a_pattern() -> None:
+    """Display collapses a repeated pattern; the prompt must not."""
+    finding = replace(
+        _finding(file="src/a.py", line=10),
+        occurrences=(
+            FindingOccurrence(file="src/a.py", line=10),
+            FindingOccurrence(file="src/a.py", line=42),
+            FindingOccurrence(file="src/b.py", line=7),
+        ),
+    )
+
+    prompt = " ".join(render_finding_prompt(finding=finding).split())
+
+    assert_that(prompt).contains("Occurs at 3 locations")
+    assert_that(prompt).contains("apply the equivalent fix at each")
+    assert_that(prompt).contains("src/a.py:10")
+    assert_that(prompt).contains("src/a.py:42")
+    assert_that(prompt).contains("src/b.py:7")
+
+
+def test_single_occurrence_findings_get_no_occurrence_list() -> None:
+    """A pattern that occurs once reads exactly as it did before #1925."""
+    prompt = render_finding_prompt(finding=_finding())
+
+    assert_that(prompt).does_not_contain("Occurs at")

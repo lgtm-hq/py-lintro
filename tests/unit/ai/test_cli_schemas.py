@@ -71,3 +71,37 @@ def test_parse_fix_response_payload_accepts_array() -> None:
     """Fix parser accepts batch arrays."""
     payload = parse_fix_response_payload(content=json.dumps([{"line": 1}]))
     assert_that(payload).is_length(1)
+
+
+def test_review_cli_schema_accepts_the_corpus_finding_fields() -> None:
+    """The strict CLI schema permits every #1925 field (#1925).
+
+    The CLI schema sets ``additionalProperties: false``, so a field the prompt
+    asks for but the schema omits would be rejected outright at the transport
+    boundary.
+    """
+    findings = REVIEW_CLI_SCHEMA["properties"]["findings"]
+    properties = findings["items"]["properties"]
+
+    assert_that(properties).contains_key(
+        "kind",
+        "failure_scenario",
+        "evidence_style",
+        "occurrences",
+    )
+    assert_that(properties["kind"]["enum"]).is_equal_to(["finding", "question"])
+    assert_that(properties["evidence_style"]["enum"]).is_equal_to(
+        ["diff_local", "cross_file", "speculative"],
+    )
+
+
+def test_review_cli_schema_keeps_the_new_fields_optional() -> None:
+    """A model that ignores the #1925 fields still produces a valid review."""
+    findings = REVIEW_CLI_SCHEMA["properties"]["findings"]
+
+    assert_that(findings["items"]["required"]).does_not_contain(
+        "kind",
+        "failure_scenario",
+        "evidence_style",
+        "occurrences",
+    )

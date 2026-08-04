@@ -96,9 +96,21 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
 
 
 def _severity_counts(*, findings: tuple[ReviewFinding, ...]) -> dict[Severity, int]:
-    """Count findings by severity."""
+    """Count findings by severity.
+
+    Questions (#1925) carry no severity semantics and are excluded, so the
+    counts always match the finding set the derived verdict was computed from.
+
+    Args:
+        findings: Findings to count over.
+
+    Returns:
+        Count per severity, with every severity present.
+    """
     counts: dict[Severity, int] = {Severity.P1: 0, Severity.P2: 0, Severity.P3: 0}
     for finding in findings:
+        if finding.is_question:
+            continue
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
     return counts
 
