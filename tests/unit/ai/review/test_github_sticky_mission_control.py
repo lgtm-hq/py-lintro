@@ -17,6 +17,13 @@ from lintro.ai.review.github_constants import (
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
 )
+
+# ``_fit_body``/``_RenderLimits`` are imported deliberately. The floor-of-one
+# invariant they encode cannot be reached through ``build_sticky_comment``:
+# every model-supplied string the renderer embeds is itself length-capped, so
+# no genuine finding set can make a one-finding body overflow. Driving the
+# search with a stub assembler is the only way to prove the floor holds, and a
+# test that cannot fail is worth less than one coupled to a private name.
 from lintro.ai.review.github_sticky import (
     _fit_body,
     _RenderLimits,
@@ -214,6 +221,95 @@ def test_delta_line_counts_resolved_new_and_unchanged(
     assert_that(_body_only(body=second)).contains(
         "✔ 1 resolved · **1 new** · 1 unchanged since round 1",
     )
+
+
+def test_delta_line_reports_regressions_separately(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A regressed finding is not unchanged — it was fixed and came back.
+
+    Counting it as unchanged made the delta line contradict the ``↩ regressed``
+    cell the open table shows immediately below it.
+    """
+    first = build_sticky_comment(
+        result=_with(
+            base=sample_review_result,
+            findings=(
+                _finding(title="Leak"),
+                _finding(title="Slow loop", severity=Severity.P2, line=44),
+            ),
+        ),
+        head_sha="sha1",
+    )
+    fixed = build_sticky_comment(
+        result=_with(
+            base=sample_review_result,
+            findings=(_finding(title="Slow loop", severity=Severity.P2, line=44),),
+        ),
+        prior_state=parse_review_state_v2(body=first),
+        head_sha="sha2",
+    )
+
+    third = _body_only(
+        body=build_sticky_comment(
+            result=_with(
+                base=sample_review_result,
+                findings=(
+                    _finding(title="Leak"),
+                    _finding(title="Slow loop", severity=Severity.P2, line=44),
+                ),
+            ),
+            prior_state=parse_review_state_v2(body=fixed),
+            head_sha="sha3",
+        ),
+    )
+
+    assert_that(third).contains(
+        "✔ 0 resolved · **0 new** · ↩ 1 regressed · 1 unchanged since round 2",
+    )
+    # The line and the table agree on what happened to that finding.
+    assert_that(third).contains("| ↩ regressed | 🔴 P1 | Leak |")
+
+
+def test_delta_line_omits_the_regressed_clause_when_there_are_none(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The common case stays short — no "0 regressed" noise."""
+    first = build_sticky_comment(
+        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
+        head_sha="sha1",
+    )
+
+    second = _body_only(
+        body=build_sticky_comment(
+            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
+            prior_state=parse_review_state_v2(body=first),
+            head_sha="sha2",
+        ),
+    )
+
+    assert_that(second).contains("✔ 0 resolved · **0 new** · 1 unchanged since round 1")
+    assert_that(second).does_not_contain("regressed")
+
+
+def test_history_summary_renders_millions_of_tokens_as_millions(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A long-running PR's cumulative tokens must not read as ``1500.0k``."""
+    prior_state = ReviewState(
+        runs=(RunRecord(round=1, sha="sha1", model="m", total=1_500_000, cost=1.0),),
+    )
+
+    body = _body_only(
+        body=build_sticky_comment(
+            result=sample_review_result,
+            prior_state=prior_state,
+            head_sha="sha2",
+        ),
+    )
+
+    assert_that(body).contains("M tokens")
+    assert_that(body).does_not_contain("1501.2k")
 
 
 def test_open_table_marks_new_and_carries_since_round(
@@ -549,18 +645,9 @@ def test_no_degraded_content_when_inline_posting_succeeded(
 # --- size capping ------------------------------------------------------------
 
 
-def test_oldest_history_is_pruned_before_any_finding(
-    sample_review_result: ReviewResult,
-) -> None:
-    """Under size pressure the oldest rounds go first, and findings go last.
-
-    The exact finding count at which the 65,536-char cap starts biting depends
-    on every string in the layout, so rather than hard-code one the test sweeps
-    a range of finding counts and asserts the invariants at each: the comment
-    always fits, the rounds still shown are always the newest ones, any drop is
-    announced, and no finding is sacrificed while history remains to shed.
-    """
-    prior_state = ReviewState(
+def _history_prior_state() -> ReviewState:
+    """Build a state carrying ``_PRIOR_ROUNDS`` cheap synthetic prior runs."""
+    return ReviewState(
         runs=tuple(
             RunRecord(
                 round=round_number,
@@ -576,22 +663,81 @@ def test_oldest_history_is_pruned_before_any_finding(
             for round_number in range(1, _PRIOR_ROUNDS + 1)
         ),
     )
-    saw_partial_history = False
 
-    for count in range(108, 128):
-        findings = tuple(
-            _finding(
-                title=f"Finding {index} " + "x" * 100,
-                file=f"src/module_{index}.py",
-                line=index,
-                severity=Severity.P2,
-            )
-            for index in range(count)
+
+def _render_with_findings(
+    *,
+    base: ReviewResult,
+    count: int,
+    prior_state: ReviewState,
+) -> str:
+    """Render a sticky carrying ``count`` bulky open findings."""
+    findings = tuple(
+        _finding(
+            title=f"Finding {index} " + "x" * 100,
+            file=f"src/module_{index}.py",
+            line=index,
+            severity=Severity.P2,
         )
-        body = build_sticky_comment(
-            result=_with(base=sample_review_result, findings=findings),
+        for index in range(count)
+    )
+    return build_sticky_comment(
+        result=_with(base=base, findings=findings),
+        prior_state=prior_state,
+        head_sha="deadbee",
+    )
+
+
+def test_oldest_history_is_pruned_before_any_finding(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Under size pressure the oldest rounds go first, and findings go last.
+
+    The finding count at which the 65,536-char cap starts biting depends on
+    every string in the layout, so hard-coding a sweep range would turn any
+    unrelated layout change into a false alarm. The crossing point is located
+    by bisection instead — history shrinks monotonically as findings grow — and
+    the invariants are asserted in a window around wherever it actually falls:
+    the comment always fits, the rounds still shown are always the newest ones,
+    any drop is announced, and no finding is sacrificed while history remains
+    to shed.
+    """
+    prior_state = _history_prior_state()
+
+    def rounds_shown(*, count: int) -> int:
+        """Return how many prior rounds survive at a given finding count."""
+        rendered = _body_only(
+            body=_render_with_findings(
+                base=sample_review_result,
+                count=count,
+                prior_state=prior_state,
+            ),
+        )
+        return len(_ROUND_RE.findall(rendered))
+
+    # Bisect for the smallest finding count at which any history is dropped.
+    low, high = 1, 600
+    assert_that(rounds_shown(count=low)).is_equal_to(_PRIOR_ROUNDS)
+    while low < high:
+        middle = (low + high) // 2
+        if rounds_shown(count=middle) < _PRIOR_ROUNDS:
+            high = middle
+        else:
+            low = middle + 1
+    crossing = low
+
+    # At the crossing some history is gone but the newest rounds remain: a
+    # single extra finding can cost more than one round's worth of characters,
+    # so the drop is not necessarily exactly one.
+    assert_that(rounds_shown(count=crossing)).is_less_than(_PRIOR_ROUNDS)
+    assert_that(rounds_shown(count=crossing)).is_greater_than(0)
+
+    saw_partial_history = False
+    for count in range(max(crossing - 2, 1), crossing + 4):
+        body = _render_with_findings(
+            base=sample_review_result,
+            count=count,
             prior_state=prior_state,
-            head_sha="deadbee",
         )
         rendered = _body_only(body=body)
         shown = [int(number) for number in _ROUND_RE.findall(rendered)]
@@ -660,7 +806,12 @@ def test_pruning_never_settles_on_zero_open_findings() -> None:
         seen.append(limits.open)
         return "x" * (MAX_COMMENT_CHARS + 1_000)
 
-    body = _fit_body(assemble=assemble, prior_run_count=0)
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=0,
+        open_count=8,
+        resolved_count=0,
+    )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(body).contains("Comment truncated to fit GitHub's size limit")

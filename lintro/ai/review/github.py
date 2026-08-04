@@ -185,7 +185,10 @@ def _inline_failure(
         return None
     reasons = []
     if rejected:
-        reasons.append("the review API rejected the inline comments")
+        # ``_post_inline_findings`` only reports a boolean, so a 422, a 5xx, a
+        # timeout and a network error all arrive here identically. The wording
+        # must not name a cause the code never observed.
+        reasons.append("the inline review comments could not be posted")
     if unmappable:
         reasons.append("some findings map to no line in this PR's diff")
     return InlinePostFailure(reason="; ".join(reasons), findings=tuple(findings))

@@ -47,7 +47,11 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.finding_matcher import derive_verdict, match_findings
+from lintro.ai.review.finding_matcher import (
+    derive_verdict,
+    match_findings,
+    normalize_file_path,
+)
 from lintro.ai.review.github_constants import (
     _SEVERITY_EMOJI,
     MAX_COMMENT_CHARS,
@@ -277,7 +281,15 @@ def build_sticky_comment(
             limits=limits,
         )
 
-    body = _fit_body(assemble=assemble, prior_run_count=len(all_runs) - 1)
+    open_count = sum(
+        1 for record in match.records if record.status is FindingStatus.OPEN
+    )
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=len(all_runs) - 1,
+        open_count=open_count,
+        resolved_count=len(match.records) - open_count,
+    )
     new_state = ReviewState(
         runs=tuple(all_runs),
         findings=match.records,
@@ -292,6 +304,8 @@ def _fit_body(
     *,
     assemble: _Assembler,
     prior_run_count: int,
+    open_count: int,
+    resolved_count: int,
 ) -> str:
     """Shrink the rendered body until it fits ``MAX_COMMENT_CHARS``.
 
@@ -303,6 +317,8 @@ def _fit_body(
     Args:
         assemble: Callable taking ``limits`` and returning the rendered body.
         prior_run_count: Number of prior runs available to the history table.
+        open_count: Number of open findings, bounding that section's search.
+        resolved_count: Number of resolved findings, likewise.
 
     Returns:
         A body at or under the cap when that is reachable by pruning, else the
@@ -321,7 +337,12 @@ def _fit_body(
             return body
 
     # 2. Then the oldest resolved findings — they are already fixed.
-    fitted = _largest_fitting(assemble=assemble, limits=limits, field="resolved")
+    fitted = _largest_fitting(
+        assemble=assemble,
+        limits=limits,
+        field="resolved",
+        ceiling=resolved_count,
+    )
     if fitted is not None:
         return fitted
 
@@ -334,6 +355,7 @@ def _fit_body(
         assemble=assemble,
         limits=limits,
         field="open",
+        ceiling=open_count,
         minimum=1,
     )
     if fitted is None:
@@ -346,6 +368,7 @@ def _largest_fitting(
     assemble: _Assembler,
     limits: _RenderLimits,
     field: str,
+    ceiling: int,
     minimum: int = 0,
 ) -> str | None:
     """Binary-search the largest value of one limit whose body still fits.
@@ -358,6 +381,9 @@ def _largest_fitting(
         assemble: Callable taking ``limits`` and returning the rendered body.
         limits: Limits already applied to the cheaper sections.
         field: Name of the :class:`_RenderLimits` field to search over.
+        ceiling: Number of entries the section actually has. Bounding the
+            search by this rather than a fixed constant keeps the render count
+            at ~log2(n) instead of ~12 renders for a three-finding round.
         minimum: Smallest count the section may be rendered at. Sections whose
             absence would hollow out the comment pass ``1`` so the search can
             never settle on showing none of them.
@@ -367,7 +393,7 @@ def _largest_fitting(
         even ``minimum`` entries of that section make the body fit.
     """
     best: str | None = None
-    lower, upper = minimum, _PRUNE_SEARCH_CEILING
+    lower, upper = minimum, min(ceiling, _PRUNE_SEARCH_CEILING)
     while lower <= upper:
         middle = (lower + upper) // 2
         candidate = assemble(limits=replace(limits, **{field: middle}))
@@ -536,11 +562,17 @@ def _delta_line(*, match: FindingMatchResult, round_number: int) -> str:
     """
     if round_number <= 1:
         return ""
-    unchanged = len(match.carried) + len(match.regressed)
-    return (
-        f"✔ {len(match.resolved)} resolved · **{len(match.new)} new** · "
-        f"{unchanged} unchanged since round {round_number - 1}"
-    )
+    parts = [
+        f"✔ {len(match.resolved)} resolved",
+        f"**{len(match.new)} new**",
+    ]
+    # A regressed finding was resolved and came back, so it is emphatically not
+    # unchanged — and the open table already labels it "↩ regressed". Folding it
+    # into the unchanged count made the two contradict each other.
+    if match.regressed:
+        parts.append(f"↩ {len(match.regressed)} regressed")
+    parts.append(f"{len(match.carried)} unchanged since round {round_number - 1}")
+    return " · ".join(parts)
 
 
 def _summary_section(*, result: ReviewResult) -> str:
@@ -1103,9 +1135,16 @@ def _sorted_open_findings(
     Returns:
         Findings sorted by severity, then file, then line.
     """
+    # Records store the *normalized* path, so sorting findings by the raw one
+    # would let ``limit`` select a different subset for the prompt than for the
+    # table (for example "./z.py" vs "a.py").
     ordered = sorted(
         findings,
-        key=lambda finding: (finding.severity.value, finding.file, finding.line),
+        key=lambda finding: (
+            finding.severity.value,
+            normalize_file_path(finding.file),
+            finding.line,
+        ),
     )
     return tuple(ordered if limit is None else ordered[:limit])
 
@@ -1231,9 +1270,19 @@ def _model_counts(*, runs: list[RunRecord]) -> list[tuple[str, int]]:
 
 
 def _fmt_compact(*, value: int) -> str:
-    """Format a large count compactly, for example ``24.9k``."""
+    """Format a large count compactly, for example ``24.9k`` or ``1.5M``.
+
+    Args:
+        value: Count to format.
+
+    Returns:
+        The compact representation. Cumulative token totals across many rounds
+        reach seven figures, which must not render as ``1500.0k``.
+    """
     if value < 1000:
         return str(value)
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
     return f"{value / 1000:.1f}k"
 
 

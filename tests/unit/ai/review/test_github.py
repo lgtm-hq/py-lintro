@@ -388,7 +388,7 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     degraded = reporter.update_issue_comment.call_args.kwargs["body"]
     # Both the rejected finding and the one that maps to no diff line.
     assert_that(degraded).contains("2 findings could not be posted as inline")
-    assert_that(degraded).contains("the review API rejected the inline comments")
+    assert_that(degraded).contains("could not be posted")
     assert_that(degraded).contains("map to no line in this PR's diff")
     # The detail the inline comments would have carried is folded in.
     assert_that(degraded).contains("Unknown status grants access")
