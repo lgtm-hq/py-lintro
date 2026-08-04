@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -151,6 +152,15 @@ def test_round_one_all_open_scope_omits_the_round_suffix() -> None:
     assert_that(prompt.splitlines()[0]).does_not_contain("after round")
 
 
+def test_round_one_all_open_panel_title_states_round_one() -> None:
+    """The panel header for round 1 spells out '(round 1)', not a range."""
+    panel = render_agent_prompt_panel(
+        findings=(_finding(), _finding(line=8)),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN, round_number=1),
+    )
+    assert_that(panel.splitlines()[1]).ends_with("(round 1)**")
+
+
 def test_round_less_this_review_scope_names_the_latest_round() -> None:
     """Surfaces that do not track rounds still get an unambiguous scope line."""
     prompt = render_agent_prompt(
@@ -171,6 +181,18 @@ def test_round_less_all_open_panel_title_omits_the_round_suffix() -> None:
     assert_that(panel.splitlines()[1]).is_equal_to(
         "> ⚡ **Fix-all prompt — all 2 still-open findings**",
     )
+
+
+def test_round_less_all_open_scope_sentence_names_no_round() -> None:
+    """Without a round number the scope sentence itself carries no round text."""
+    prompt = render_agent_prompt(
+        findings=(_finding(), _finding(line=8)),
+        scope=AgentPromptScope(kind=AgentPromptScopeKind.ALL_OPEN),
+    )
+    assert_that(prompt.splitlines()[0]).starts_with(
+        "Scope: ALL 2 findings still open on this PR",
+    )
+    assert_that(prompt.splitlines()[0]).does_not_contain("round")
 
 
 def test_single_open_finding_panel_title_uses_the_singular_form() -> None:
@@ -261,6 +283,27 @@ def test_empty_cause_and_fix_are_omitted() -> None:
         scope=_ALL_OPEN,
     )
     assert_that(prompt).does_not_contain("Fix:")
+
+
+def test_cause_only_reasoning_omits_the_description() -> None:
+    """A finding with no description but a cause still renders a reasoning line."""
+    prompt = render_agent_prompt(
+        findings=(_finding(description="", cause="Root cause here.", fix=""),),
+        scope=_ALL_OPEN,
+    )
+    assert_that(prompt).contains("Root cause here.")
+    assert_that(prompt).does_not_contain("Fix:")
+
+
+def test_no_description_no_cause_no_fix_omits_the_reasoning_block() -> None:
+    """A finding with no description, cause, or fix emits only the bullet line."""
+    prompt = render_agent_prompt(
+        findings=(_finding(description="", cause="", fix=""),),
+        scope=_ALL_OPEN,
+    )
+    lines = prompt.splitlines()
+    bullet_index = next(i for i, line in enumerate(lines) if line.startswith("- Line"))
+    assert_that(len(lines)).is_equal_to(bullet_index + 1)
 
 
 def test_no_findings_render_no_prompt() -> None:
@@ -423,6 +466,23 @@ def test_prompt_text_is_sanitized_against_mentions(
     assert_that(prompt).does_not_contain(broken)
     if preserved:
         assert_that(prompt).contains(preserved)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["title", "category", "cause", "fix"],
+)
+def test_prompt_sanitizes_mentions_in_every_finding_field(field: str) -> None:
+    """Every finding field passed through sanitize_comment_text is neutralized.
+
+    test_prompt_text_is_sanitized_against_mentions only varies description;
+    _finding_block also sanitizes title, category, cause, and fix
+    independently, so each needs its own coverage.
+    """
+    base = _finding(cause="A root cause.")
+    finding = replace(base, **cast(Any, {field: "Reported by @octocat."}))
+    prompt = render_agent_prompt(findings=(finding,), scope=_ALL_OPEN)
+    assert_that(prompt).does_not_contain("@octocat")
 
 
 def test_negative_round_number_is_rejected() -> None:
