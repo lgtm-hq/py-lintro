@@ -15,8 +15,7 @@ Public helpers live in sibling modules and are re-exported here so existing
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from loguru import logger
 
@@ -153,10 +152,25 @@ def post_review_to_github(
     return success
 
 
+class _StickyRenderer(Protocol):
+    """Callable that renders the sticky body for a given inline-post outcome."""
+
+    def __call__(self, *, inline_failure: InlinePostFailure | None) -> str:
+        """Render the body.
+
+        Args:
+            inline_failure: Findings whose inline comments could not be posted.
+
+        Returns:
+            The complete sticky comment body.
+        """
+        ...  # pragma: no cover - structural type only
+
+
 def _fold_inline_failure_into_sticky(
     *,
     reporter: GitHubPRReporter,
-    render: Callable[..., str],
+    render: _StickyRenderer,
     findings: list[ReviewFinding],
     comment_id: int | None,
 ) -> None:

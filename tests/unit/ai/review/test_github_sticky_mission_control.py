@@ -13,10 +13,13 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
+    MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
 )
 from lintro.ai.review.github_sticky import (
+    _fit_body,
+    _RenderLimits,
     build_sticky_comment,
     parse_review_state_v2,
 )
@@ -639,24 +642,78 @@ def test_comment_stays_under_the_hard_limit_with_huge_finding_sets(
     assert_that(rendered).contains("| 🟠 P2 |")
 
 
-def test_pruning_never_lists_zero_open_findings(
+def test_pruning_never_settles_on_zero_open_findings() -> None:
+    """The open-finding search floors at one, never at none.
+
+    A binary search with a floor of zero would happily pick the body that
+    lists no findings at all when even one overflows — producing exactly the
+    substanceless verdict the whole design exists to prevent. Driven through
+    ``_fit_body`` with a stub assembler because every model-supplied string the
+    real renderer embeds is itself length-capped, so no single genuine finding
+    can push a real body over the limit.
+    """
+    seen: list[int | None] = []
+
+    def assemble(*, limits: _RenderLimits) -> str:
+        """Return an always-oversized body and record the counts tried."""
+        seen.append(limits.open)
+        return "x" * (MAX_COMMENT_CHARS + 1_000)
+
+    body = _fit_body(assemble=assemble, prior_run_count=0)
+
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
+    assert_that(body).contains("Comment truncated to fit GitHub's size limit")
+    # Zero open findings was never even considered.
+    assert_that([count for count in seen if count == 0]).is_empty()
+    assert_that(seen).contains(1)
+
+
+def test_untrusted_text_cannot_close_the_folded_collapsible(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Even a single finding too large for the cap is still listed.
+    """A model-written closing tag must not end the fold-in early.
 
-    The open-finding search floor is one, so it can never settle on the
-    strictly-smaller body that lists none of them.
+    The folded detail is the only place model prose sits inside a
+    ``<details>``; an unescaped ``</details>`` there would break the
+    one-level-only structure the rest of the comment relies on.
     """
-    findings = (
-        _finding(
-            title="Oversized " + "x" * (GITHUB_COMMENT_HARD_LIMIT // 2),
-            severity=Severity.P1,
-        ),
+    hostile = replace(
+        _finding(title="Leak"),
+        description="</details><details><summary>pwned</summary>",
+    )
+
+    body = build_sticky_comment(
+        result=_with(base=sample_review_result, findings=(hostile,)),
+        inline_failure=InlinePostFailure(reason="422", findings=(hostile,)),
+    )
+
+    assert_that(_max_details_depth(body=body)).is_equal_to(1)
+    assert_that(_body_only(body=body)).contains("&lt;/details")
+
+
+def test_folded_details_shrink_under_size_pressure(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The fold-in is pruned with a marker rather than blindly truncated."""
+    findings = tuple(
+        replace(
+            _finding(
+                title=f"Failed finding {index}",
+                file=f"src/module_{index}.py",
+                line=index,
+                severity=Severity.P2,
+            ),
+            description="detail " * 400,
+        )
+        for index in range(120)
     )
 
     body = build_sticky_comment(
         result=_with(base=sample_review_result, findings=findings),
+        inline_failure=InlinePostFailure(reason="422", findings=findings),
     )
 
+    rendered = _body_only(body=body)
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
-    assert_that(_body_only(body=body)).contains("### Open findings (1)")
+    assert_that(rendered).contains("not detailed")
+    assert_that(_max_details_depth(body=body)).is_equal_to(1)

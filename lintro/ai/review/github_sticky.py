@@ -33,6 +33,7 @@ Two invariants the renderer enforces:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
@@ -143,6 +144,11 @@ if _missing:  # pragma: no cover - guards a future verdict
 
 #: Emoji marking a tracked entry that is a question rather than a finding.
 _QUESTION_EMOJI = "❓"
+
+#: Matches a ``<details>``/``</details>`` tag in untrusted model text. The folded
+#: finding detail sits *inside* a collapsible, so a model-written closing tag
+#: would end it early and break the sticky's one-level-only structure.
+_DETAILS_TAG_RE = re.compile(r"<(/?)(details|summary)\b", re.IGNORECASE)
 
 #: Maximum characters of a finding title rendered in a table cell.
 _TITLE_LIMIT = 160
@@ -437,6 +443,7 @@ def _assemble_body(
             failure=inline_failure,
             checklist_display=checklist_display,
             question_map=question_map,
+            limit=limits.open,
         ),
         render_agent_prompt_panel(
             findings=open_findings,
@@ -737,6 +744,7 @@ def _degraded_details(
     failure: InlinePostFailure | None,
     checklist_display: ChecklistDisplay,
     question_map: dict[int, str],
+    limit: int | None = None,
 ) -> str:
     """Fold full finding detail into the sticky when inline posting failed.
 
@@ -748,6 +756,9 @@ def _degraded_details(
         failure: Findings whose inline comments could not be posted.
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text for linked questions.
+        limit: Maximum number of findings to fold in. Shares the open-finding
+            limit so this section shrinks under the same size pressure instead
+            of being left to blunt tail truncation.
 
     Returns:
         A single-level collapsible carrying each failed finding's detail, or an
@@ -756,19 +767,27 @@ def _degraded_details(
     if failure is None or failure.is_empty:
         return ""
 
+    shown = failure.findings if limit is None else failure.findings[:limit]
     lines = [
         f"<details><summary>📋 Details for {failure.count} "
         f"{_plural(count=failure.count, noun='finding')} not posted inline"
         "</summary>",
         "",
     ]
-    for finding in failure.findings:
+    for finding in shown:
         lines.extend(
             _folded_finding(
                 finding=finding,
                 checklist_display=checklist_display,
                 question_map=question_map,
             ),
+        )
+    dropped = failure.count - len(shown)
+    if dropped > 0:
+        lines.append(
+            f"> ✂️ **{dropped} more failed "
+            f"{_plural(count=dropped, noun='finding')} not detailed** to fit "
+            "GitHub's size limit — see the workflow run log.",
         )
     lines.extend(["", "</details>"])
     return "\n".join(lines)
@@ -794,16 +813,16 @@ def _folded_finding(
         _QUESTION_EMOJI if finding.is_question else _SEVERITY_EMOJI[finding.severity]
     )
     label = "question" if finding.is_question else finding.severity.value
-    location = sanitize_comment_text(finding.file, limit=200)
+    location = _inline_safe(text=finding.file, limit=200)
     where = f"`{location}:{finding.line}`" if finding.line > 0 else f"`{location}`"
     lines = [
-        f"**{emoji} {label}** · `{sanitize_comment_text(finding.category, limit=60)}`"
-        f" — **{sanitize_comment_text(finding.title, limit=_TITLE_LIMIT)}** · {where}",
+        f"**{emoji} {label}** · `{_inline_safe(text=finding.category, limit=60)}`"
+        f" — **{_inline_safe(text=finding.title, limit=_TITLE_LIMIT)}** · {where}",
         "",
-        sanitize_comment_text(finding.description, limit=2000),
+        _inline_safe(text=finding.description, limit=2000),
     ]
     for heading, text in (("Cause", finding.cause), ("Fix", finding.fix)):
-        body = sanitize_comment_text(text, limit=2000).strip()
+        body = _inline_safe(text=text, limit=2000).strip()
         if body:
             lines.extend(["", f"**{heading}:** {body}"])
     if checklist_display in {ChecklistDisplay.LINKED, ChecklistDisplay.ALL}:
@@ -1156,6 +1175,25 @@ def _cell(*, text: str, limit: int) -> str:
     """
     safe = sanitize_comment_text(text, limit=limit)
     return safe.replace("|", "\\|").replace("\n", " ").replace("\r", " ").strip()
+
+
+def _inline_safe(*, text: str, limit: int) -> str:
+    """Sanitize model text for embedding *inside* a collapsible.
+
+    On top of the usual mention neutralization, a model-written ``<details>``
+    or ``</details>`` is defanged: the folded finding detail lives inside a
+    collapsible, so an unescaped closing tag would end it early and let the
+    rest of the comment render at the wrong nesting level.
+
+    Args:
+        text: Raw model-derived text.
+        limit: Maximum length before truncation.
+
+    Returns:
+        Text safe to embed within a ``<details>`` block.
+    """
+    safe = sanitize_comment_text(text, limit=limit)
+    return _DETAILS_TAG_RE.sub(r"&lt;\1\2", safe)
 
 
 def _short_sha(*, sha: str) -> str:
