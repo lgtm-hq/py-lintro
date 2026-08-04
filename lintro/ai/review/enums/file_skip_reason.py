@@ -18,6 +18,7 @@ class FileSkipReason(StrEnum):
 
     PATH_FILTER = auto()
     REPETITIVE_DIFF = auto()
+    AGENT_SCOPE = auto()
 
 
 #: Human-readable phrase rendered after a skipped file's path.
@@ -25,6 +26,9 @@ FILE_SKIP_REASON_LABELS: dict[FileSkipReason, str] = {
     FileSkipReason.PATH_FILTER: "outside the requested --path filter",
     FileSkipReason.REPETITIVE_DIFF: (
         "identical to a sampled file's diff (repetitive-diff sampling)"
+    ),
+    FileSkipReason.AGENT_SCOPE: (
+        "matched no enabled review agent's globs (review.custom_agents: only)"
     ),
 }
 

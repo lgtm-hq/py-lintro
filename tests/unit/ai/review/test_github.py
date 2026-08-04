@@ -41,6 +41,7 @@ def _fresh_reporter() -> MagicMock:
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.fetch_pr_commit_shas.return_value = []
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
     reporter.api_request.return_value = True

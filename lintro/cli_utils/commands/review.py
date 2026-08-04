@@ -485,6 +485,7 @@ def review_command(
                     strictness=strictness,
                     transport=transport,
                     timeout=timeout,
+                    context_window=context_window,
                     semantic_chunks=semantic_chunks,
                     paths=paths,
                 ),
@@ -505,6 +506,7 @@ def _cli_overrides(
     strictness: str | None,
     transport: str | None,
     timeout: float | None,
+    context_window: int | None,
     semantic_chunks: bool,
     paths: list[str] | None,
 ) -> list[str]:
@@ -519,6 +521,7 @@ def _cli_overrides(
         strictness: ``--strictness`` value, or None when unset.
         transport: ``--transport`` value, or None when unset.
         timeout: ``--timeout`` value, or None when unset.
+        context_window: ``--context-window`` value, or None when unset.
         semantic_chunks: Whether ``--semantic-chunks`` was passed.
         paths: ``--path`` values, or None when unset.
 
@@ -534,6 +537,8 @@ def _cli_overrides(
         overrides.append(f"--transport {transport}")
     if timeout is not None:
         overrides.append(f"--timeout {timeout:g}")
+    if context_window is not None:
+        overrides.append(f"--context-window {context_window}")
     if semantic_chunks:
         overrides.append("--semantic-chunks")
     overrides.extend(f"--path {path}" for path in paths or [])

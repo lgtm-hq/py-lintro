@@ -373,7 +373,36 @@ def _commits_section(
 def _skipped_line(*, entry: SkippedFile) -> str:
     """Render one skipped file with the reason it was skipped."""
     path = sanitize_comment_text(entry.path, limit=300)
-    return f"- `{path}` — skipped ({entry.label})"
+    # The reason carries a file path in its detail, so it is sanitized on the
+    # same terms as the path itself rather than trusted because it is
+    # partly-canned text.
+    label = sanitize_comment_text(entry.label, limit=300)
+    return f"- `{path}` — skipped ({label})"
+
+
+def _partial_run_warning(*, result: ReviewResult) -> str:
+    """Warn that a stopped-early run may not have covered the listed files.
+
+    A partial run's chunks are reviewed concurrently, so which files the
+    completed chunks covered is not recoverable per-file. Naming the
+    uncertainty is honest; listing a precise "reviewed" set that may be wrong
+    is not.
+
+    Args:
+        result: This round's review result.
+
+    Returns:
+        A warning line, or an empty string when the run completed.
+    """
+    metadata = result.metadata
+    if not metadata.partial:
+        return ""
+    reason = sanitize_comment_text(metadata.stopped_reason or "incomplete", limit=60)
+    return (
+        f"> ⚠️ Review stopped early ({reason}) after "
+        f"{metadata.chunks_reviewed} of {metadata.chunks_total} chunks — some "
+        "files listed below may not have been reviewed in full."
+    )
 
 
 def _files_section(*, result: ReviewResult) -> str:
@@ -396,16 +425,20 @@ def _files_section(*, result: ReviewResult) -> str:
     if skipped:
         summary += f" · {len(skipped)} skipped"
 
-    entries = [
+    # Reviewed and skipped files get independent budgets. Sharing one would let
+    # a wide PR's reviewed list crowd out the skip lines, and the skips are the
+    # half a reader cannot reconstruct from the diff.
+    warning = _partial_run_warning(result=result)
+    entries = [*([warning, ""] if warning else [])]
+    entries.extend(
         f"- `{sanitize_comment_text(path, limit=300)}`"
         for path in reviewed[:_MAX_LISTED_FILES]
-    ]
+    )
     hidden_reviewed = max(len(reviewed) - _MAX_LISTED_FILES, 0)
     if hidden_reviewed:
         entries.append(f"- …and {hidden_reviewed} more reviewed")
-    remaining = max(_MAX_LISTED_FILES - len(reviewed), 0)
-    entries.extend(_skipped_line(entry=entry) for entry in skipped[:remaining])
-    hidden_skipped = max(len(skipped) - remaining, 0)
+    entries.extend(_skipped_line(entry=entry) for entry in skipped[:_MAX_LISTED_FILES])
+    hidden_skipped = max(len(skipped) - _MAX_LISTED_FILES, 0)
     if hidden_skipped:
         entries.append(f"- …and {hidden_skipped} more skipped")
 

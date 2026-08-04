@@ -1158,6 +1158,7 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         strictness=None,
         transport="cli",
         timeout=600.0,
+        context_window=None,
         semantic_chunks=False,
         paths=None,
     )

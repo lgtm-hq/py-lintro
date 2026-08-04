@@ -1034,3 +1034,33 @@ def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
     assert_that(result.metadata.skipped_files[0].reason).is_equal_to(
         FileSkipReason.PATH_FILTER,
     )
+
+
+def test_run_review_records_files_no_custom_agent_covered() -> None:
+    """An agents-only run reports files outside every agent's scope as skipped."""
+    provider = _mock_provider(content=_sample_response_json())
+    context = _one_file_context()
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            run_builtin_checklist=False,
+        )
+
+    assert_that(result.metadata.reviewed_paths).is_empty()
+    assert_that(result.metadata.skipped_files[0].reason).is_equal_to(
+        FileSkipReason.AGENT_SCOPE,
+    )

@@ -13,6 +13,7 @@ from lintro.ai.review.github_review_body import (
     REVIEW_BODY_FOOTER,
     build_review_body,
 )
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
@@ -399,10 +400,10 @@ def test_footer_delegates_the_other_two_surfaces(
     assert_that(body).contains("inline comments")
 
 
-def test_body_stays_within_the_github_comment_limit(
+def test_long_file_lists_are_summarized_not_dumped(
     sample_review_result: ReviewResult,
 ) -> None:
-    """An enormous file list is truncated with a visible marker, not silently."""
+    """A wide PR reports a file count rather than thousands of list items."""
     metadata = replace(
         sample_review_result.metadata,
         reviewed_paths=tuple(f"src/module_{index}.py" for index in range(5_000)),
@@ -412,4 +413,35 @@ def test_body_stays_within_the_github_comment_limit(
         prior_state=ReviewState(),
     )
 
+    assert_that(body).contains("…and 4940 more reviewed")
     assert_that(len(body)).is_less_than_or_equal_to(60_000)
+
+
+def test_body_truncation_leaves_a_visible_marker(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Oversized content is cut with a marker, never silently."""
+    finding = sample_review_result.findings[0]
+    bulk = tuple(
+        replace(finding, title=f"Finding {index}", line=index + 1)
+        for index in range(4_000)
+    )
+    result = replace(sample_review_result, findings=bulk)
+    match = match_findings(
+        previous=ReviewState(),
+        findings=bulk,
+        round_number=1,
+        head_sha="fb740b2aaa",
+    )
+    # One extra still-open record makes this round a strict subset of the open
+    # set, so the full prompt panel renders instead of the sticky pointer.
+    carried = FindingRecord(fingerprint="carried", title="Older finding")
+    body = build_review_body(
+        result=result,
+        prior_state=_prior_state(rounds=1),
+        match=replace(match, records=(*match.records, carried)),
+        head_sha="fb740b2aaa",
+    )
+
+    assert_that(len(body)).is_less_than_or_equal_to(60_000)
+    assert_that(body).ends_with("✂️ Comment truncated to fit GitHub's size limit.")

@@ -46,9 +46,11 @@ from lintro.ai.review.custom_agent_runner import (
     run_custom_agent_passes,
 )
 from lintro.ai.review.custom_agents import (
+    CustomAgentSelection,
     CustomAgentSpec,
     select_custom_agents,
 )
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
@@ -257,9 +259,13 @@ def resolve_review_chunks(
         max_tokens=max(diff_budget, 1),
         classifications=classifications,
     )
+    if not chunking.chunks:
+        # The whole-context fallback reviews every file, so the chunker's
+        # skips no longer describe what happened and must not be reported.
+        return [_single_chunk_from_context(context=context)]
     if skipped_sink is not None:
         skipped_sink.extend(chunking.skipped)
-    return chunking.chunks or [_single_chunk_from_context(context=context)]
+    return chunking.chunks
 
 
 async def _review_all_chunks(
@@ -876,7 +882,17 @@ async def run_review_async(
         or merged.summary
     )
 
-    selection = resolve_file_selection(context=context, chunk_skips=chunk_skips)
+    selection = resolve_file_selection(
+        context=context,
+        chunk_skips=[
+            *chunk_skips,
+            *_agent_scope_skips(
+                context=context,
+                selection=agent_selection,
+                run_builtin_checklist=run_builtin_checklist,
+            ),
+        ],
+    )
 
     metadata = ReviewMetadata(
         model=provider.model_name,
@@ -1925,6 +1941,38 @@ def _pick_preferred_checklist_answer(
     if candidate_strength >= existing_strength:
         return candidate
     return existing
+
+
+def _agent_scope_skips(
+    *,
+    context: ReviewContext,
+    selection: CustomAgentSelection,
+    run_builtin_checklist: bool,
+) -> list[SkippedFile]:
+    """List changed files no custom agent covered in an agents-only run.
+
+    Under ``review.custom_agents: only`` the built-in checklist never runs, so
+    a file outside every enabled agent's globs is not reviewed at all. Without
+    this record the run would report it as reviewed and the gap would read as
+    a clean pass.
+
+    Args:
+        context: Collected review context.
+        selection: Custom agents partitioned into selected and skipped.
+        run_builtin_checklist: Whether the built-in checklist passes ran.
+
+    Returns:
+        Skip records for the uncovered files; empty when the checklist ran
+        (it covers every changed file).
+    """
+    if run_builtin_checklist:
+        return []
+    covered = {path for agent in selection.selected for path in agent.files}
+    return [
+        SkippedFile(path=changed.path, reason=FileSkipReason.AGENT_SCOPE)
+        for changed in context.changed_files
+        if changed.path not in covered
+    ]
 
 
 def _single_chunk_from_context(*, context: ReviewContext) -> ReviewChunk:
