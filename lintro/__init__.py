@@ -1,3 +1,3 @@
 """Lintro - A unified CLI core for code formatting, linting, and quality assurance."""
 
-__version__ = "0.105.0"
+__version__ = "0.106.0"
