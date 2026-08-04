@@ -74,4 +74,6 @@ def parse_occurrences(value: Any) -> tuple[FindingOccurrence, ...]:
     parsed = (
         FindingOccurrence.from_dict(item) for item in value if isinstance(item, dict)
     )
-    return tuple(occurrence for occurrence in parsed if occurrence is not None)
+    return tuple(
+        dict.fromkeys(occurrence for occurrence in parsed if occurrence is not None),
+    )

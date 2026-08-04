@@ -19,7 +19,10 @@ from lintro.ai.review.finding_matcher import (
     normalize_file_path,
     normalize_title,
 )
-from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.finding_occurrence import (
+    FindingOccurrence,
+    parse_occurrences,
+)
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
@@ -682,4 +685,29 @@ def test_a_lone_occurrence_away_from_the_anchor_survives_serialization() -> None
     assert restored is not None  # narrow type for mypy
     assert_that(restored.occurrences).is_equal_to(
         (FindingOccurrence(file="src/other.py", line=99),),
+    )
+
+
+def test_parse_occurrences_deduplicates_repeated_locations() -> None:
+    """A model that reports the same location twice yields one occurrence.
+
+    The matcher counts occurrences by tuple length to derive
+    ``occurrences_total`` and partial-progress counts. A duplicate raw
+    location must not inflate that count, or a later round that reports the
+    same location once would look like progress was made when the location
+    never changed.
+    """
+    parsed = parse_occurrences(
+        [
+            {"file": "src/app.py", "line": 10},
+            {"file": "src/app.py", "line": 10},
+            {"file": "src/app.py", "line": 20},
+        ],
+    )
+
+    assert_that(parsed).is_equal_to(
+        (
+            FindingOccurrence(file="src/app.py", line=10),
+            FindingOccurrence(file="src/app.py", line=20),
+        ),
     )

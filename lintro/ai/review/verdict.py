@@ -131,16 +131,15 @@ def resolve_bullet_finding(
             # would break the same-file fallback below).
             line = None
 
-    candidates = [
-        finding
-        for finding in findings
-        if finding.file == path and not finding.is_question
-    ]
+    same_file = [finding for finding in findings if finding.file == path]
+    if line is not None:
+        exact = [finding for finding in same_file if finding.line == line]
+        if exact:
+            return next(
+                (finding for finding in exact if not finding.is_question),
+                None,
+            )
+    candidates = [finding for finding in same_file if not finding.is_question]
     if not candidates:
         return None
-    if line is None:
-        return candidates[0]
-    return next(
-        (finding for finding in candidates if finding.line == line),
-        candidates[0],
-    )
+    return candidates[0]

@@ -205,3 +205,22 @@ def test_summary_bullets_never_resolve_to_a_question() -> None:
     assert_that(
         resolve_bullet_finding(finding_ref="a.py:7", findings=[question]),
     ).is_none()
+
+
+def test_exact_question_reference_does_not_fall_back_to_another_finding() -> None:
+    """An exact reference to a question line never resolves via same-file fallback.
+
+    ``a.py:7`` is a question and ``a.py:42`` is a real finding. A bullet that
+    references the question's own line must yield ``None`` rather than
+    silently attaching the question's severity to the unrelated finding at
+    ``a.py:42`` through the same-file fallback.
+    """
+    question = replace(
+        _finding(severity=Severity.P1, file="a.py", line=7),
+        kind=FindingKind.QUESTION,
+    )
+    other = _finding(severity=Severity.P2, file="a.py", line=42)
+
+    assert_that(
+        resolve_bullet_finding(finding_ref="a.py:7", findings=[question, other]),
+    ).is_none()
