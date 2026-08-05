@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import json
+import urllib.request
 from dataclasses import replace
+from http.client import HTTPMessage
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
@@ -218,6 +222,31 @@ def test_round_two_finding_new_to_this_round_keeps_mode_a(
     )
 
 
+def test_prior_round_without_a_recorded_sha_falls_back_to_mode_b(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A sticky from a version that never stored a sha leaves the round unknown."""
+    reporter = _reporter()
+    result = _with_change(
+        result=sample_review_result,
+        change=SuggestedChange(start_line=10, end_line=10, replacement="ok"),
+    )
+    # A run entry exists, so this is not round 1, but it carries no sha — there
+    # is nothing to compare against and no suggestion may claim to be on this
+    # round's diff.
+    reporter.find_issue_comment.return_value = (
+        42,
+        build_sticky_comment(result=result, head_sha=""),
+    )
+
+    post_review_to_github(result=result, reporter=reporter)
+
+    assert_that(reporter.fetch_compare_lines.called).is_false()
+    body = _inline_comments(reporter=reporter)[0]["body"]
+    assert_that(body).does_not_contain("```suggestion")
+    assert_that(body).contains("**Fix:**")
+
+
 # --- compare endpoint -------------------------------------------------------
 
 
@@ -266,8 +295,8 @@ def test_fetch_compare_lines_refuses_non_sha_refs() -> None:
     assert_that(urlopen.called).is_false()
 
 
-def test_fetch_compare_lines_merges_duplicate_filenames_across_pages() -> None:
-    """A file split across comparison pages keeps every line it changed."""
+def test_fetch_compare_lines_merges_duplicate_filenames() -> None:
+    """A filename listed twice keeps every line it changed."""
     reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
     payload = {
         "files": [
@@ -307,6 +336,65 @@ def test_fetch_compare_lines_rejects_a_sha_with_a_trailing_newline() -> None:
 
     assert_that(lines).is_none()
     assert_that(urlopen.called).is_false()
+
+
+def test_fetch_compare_lines_issues_exactly_one_request() -> None:
+    """The compare endpoint paginates commits, not files — do not walk pages."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+    payload = {
+        "files": [
+            {"filename": f"src/f{index}.py", "patch": "@@ -1 +1 @@\n+one"}
+            for index in range(100)
+        ],
+    }
+
+    with patch("urllib.request.urlopen", return_value=_reader(payload)) as urlopen:
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(urlopen.call_count).is_equal_to(1)
+    assert_that(lines).is_length(100)
+    requested = urlopen.call_args.args[0].full_url
+    assert_that(requested).does_not_contain("page=")
+
+
+def test_fetch_compare_lines_returns_none_without_a_files_array() -> None:
+    """A response that names no files is unknown, not an empty diff."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+
+    with patch("urllib.request.urlopen", return_value=_reader({"status": "identical"})):
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(lines).is_none()
+
+
+def test_api_requests_never_replay_the_token_to_a_redirect_target() -> None:
+    """Urllib copies ordinary headers across redirects; the token must not go."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_reader({"files": []}),
+    ) as urlopen:
+        reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    request = urlopen.call_args.args[0]
+    # ``header_items()`` merges both maps, so the split is only visible in the
+    # underlying dicts: ordinary headers ride along on a redirect, unredirected
+    # ones do not.
+    assert_that(request.headers).does_not_contain_key("Authorization")
+    assert_that(request.unredirected_hdrs).contains_key("Authorization")
+
+    redirected = urllib.request.HTTPRedirectHandler().redirect_request(
+        request,
+        io.BytesIO(),
+        302,
+        "Found",
+        HTTPMessage(),
+        "http://evil.example/steal",
+    )
+    if redirected is None:  # pragma: no cover - urllib always redirects a 302
+        pytest.fail("expected urllib to build a redirected request")
+    assert_that(dict(redirected.header_items())).does_not_contain_key("Authorization")
 
 
 def test_fetch_compare_lines_returns_none_on_failure() -> None:

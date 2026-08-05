@@ -410,7 +410,8 @@ def _suggested_change_section(*, change: SuggestedChange) -> str:
         change: The change rendered as the comment's suggestion block.
 
     Returns:
-        Prompt lines naming the range and the exact replacement text.
+        Prompt lines naming the range, then the replacement in its own fenced
+        block, byte-for-byte as the suggestion renders it.
     """
     span = (
         f"line {change.start_line}"
@@ -423,14 +424,18 @@ def _suggested_change_section(*, change: SuggestedChange) -> str:
             f"suggestion block — replace {span} with the following, verbatim:"
         ),
     )
-    # Deliberately uncapped: the suggestion block renders the replacement in
-    # full, and the whole point of this section is that the two are identical.
-    # ``plan_inline_fix`` already bounds the total to MAX_REPLACEMENT_CHARS.
-    replacement = "\n".join(
-        f"{_CONTINUATION_INDENT}{sanitize_comment_text(line)}"
-        for line in change.replacement.splitlines() or [""]
+    # Rendered raw: no continuation indent and no per-line truncation. Both
+    # would silently corrupt an indentation-sensitive replacement, and the
+    # suggestion block applies neither — the two paths have to produce
+    # identical code. Only mention-neutralization is applied, matching
+    # ``_suggestion_block``; ``plan_inline_fix`` already bounds the total size.
+    # The fence is sized against the text so a replacement containing its own
+    # backticks cannot close it early.
+    body = "\n".join(
+        sanitize_comment_text(line) for line in change.replacement.splitlines() or [""]
     )
-    return f"{header}\n{replacement}"
+    fence = _fence_for(text=body)
+    return f"{header}\n{fence}\n{body}\n{fence}"
 
 
 def render_finding_prompt(

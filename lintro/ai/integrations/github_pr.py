@@ -76,6 +76,43 @@ class GitHubPRReporter:
             gh_ws = os.environ.get("GITHUB_WORKSPACE", "")
             self.workspace_root = Path(gh_ws) if gh_ws else _detect_repo_root()
 
+    def _authorized_request(
+        self,
+        *,
+        url: str,
+        method: str,
+        data: bytes | None = None,
+        content_type: str = "",
+    ) -> urllib.request.Request:
+        """Build an API request whose token cannot leak to a redirect target.
+
+        ``urllib`` copies ordinary headers onto redirected requests without
+        re-checking the scheme or the host, so a ``302`` to ``http://…`` would
+        replay the ``Authorization`` header in cleartext to an arbitrary origin
+        (CWE-319). Adding it as an *unredirected* header is urllib's mechanism
+        for exactly this: the token is sent to the URL validated here and to no
+        other. A redirected GitHub endpoint (a renamed repository, say) then
+        answers 401 and the caller degrades — the token stays put either way.
+
+        Args:
+            url: Fully-built request URL. The caller validates its scheme.
+            method: HTTP method.
+            data: Optional request body.
+            content_type: Optional ``Content-Type`` for a request with a body.
+
+        Returns:
+            The prepared request.
+        """
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if content_type:
+            headers["Content-Type"] = content_type
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        req.add_unredirected_header("Authorization", f"Bearer {self.token}")
+        return req
+
     def is_available(self) -> bool:
         """Check whether all required context is present.
 
@@ -211,15 +248,7 @@ class GitHubPRReporter:
         page = 1
         while True:
             url = f"{base_url}?per_page=100&page={page}"
-            req = urllib.request.Request(
-                url,
-                method="GET",
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+            req = self._authorized_request(url=url, method="GET")
             try:
                 with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                     req,
@@ -262,52 +291,42 @@ class GitHubPRReporter:
             or ``None`` when the shas are unusable or the comparison cannot be
             fetched. ``None`` is a refusal, not an empty diff: callers must not
             read it as "nothing changed".
+
+            Deliberately a single unpaginated request. Unlike the PR *files*
+            endpoint, the compare endpoint paginates its ``commits`` array, not
+            its ``files`` array, which GitHub caps server-side at 300 entries.
+            Walking ``page`` here would re-request commits and tell us nothing
+            new about files. A comparison wider than that cap simply yields
+            fewer committable suggestions, which is the safe direction: those
+            findings fall back to a described fix.
         """
         if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
             logger.debug("Refusing to compare non-sha refs: {}...{}", base, head)
             return None
-        base_url = f"{self.api_base}/repos/{self.repo}/compare/{base}...{head}"
-        parsed = urllib.parse.urlparse(base_url)
+        url = f"{self.api_base}/repos/{self.repo}/compare/{base}...{head}"
+        parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             return None
 
-        all_files: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            url = f"{base_url}?per_page=100&page={page}"
-            req = urllib.request.Request(
-                url,
-                method="GET",
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+        req = self._authorized_request(url=url, method="GET")
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                req,
+                timeout=30,
+            ) as resp:
+                payload = json.loads(resp.read().decode())
+        except (urllib.error.URLError, json.JSONDecodeError, OSError):
+            logger.debug(
+                "Failed to compare {}...{}; treating this round's diff as unknown",
+                base,
+                head,
             )
-            try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
-                    req,
-                    timeout=30,
-                ) as resp:
-                    payload = json.loads(resp.read().decode())
-            except (urllib.error.URLError, json.JSONDecodeError, OSError):
-                logger.debug(
-                    "Failed to compare {}...{}; treating this round's diff as "
-                    "unknown",
-                    base,
-                    head,
-                )
-                return None
+            return None
 
-            files_page = payload.get("files") if isinstance(payload, dict) else None
-            if not isinstance(files_page, list) or not files_page:
-                break
-            all_files.extend(files_page)
-            if len(files_page) < 100:
-                break
-            page += 1
-
-        return _files_to_lines(files=all_files)
+        files = payload.get("files") if isinstance(payload, dict) else None
+        if not isinstance(files, list):
+            return None
+        return _files_to_lines(files=files)
 
     def fetch_pr_commit_shas(self) -> list[str] | None:
         """Fetch the PR's commit shas, oldest first.
@@ -329,15 +348,7 @@ class GitHubPRReporter:
         page = 1
         while True:
             url = f"{base_url}?per_page=100&page={page}"
-            req = urllib.request.Request(
-                url,
-                method="GET",
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+            req = self._authorized_request(url=url, method="GET")
             try:
                 with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                     req,
@@ -382,15 +393,7 @@ class GitHubPRReporter:
         page = 1
         while True:
             url = f"{base_url}?per_page=100&page={page}"
-            req = urllib.request.Request(
-                url,
-                method="GET",
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+            req = self._authorized_request(url=url, method="GET")
             try:
                 with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                     req,
@@ -454,16 +457,11 @@ class GitHubPRReporter:
             True if the request succeeded (2xx status).
         """
         data = json.dumps(payload).encode()
-        req = urllib.request.Request(
-            url,
-            data=data,
+        req = self._authorized_request(
+            url=url,
             method=method,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "application/json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+            data=data,
+            content_type="application/json",
         )
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":

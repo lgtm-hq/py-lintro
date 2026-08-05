@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.agent_prompts import render_finding_prompt
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.fix_mode import FixMode
 from lintro.ai.review.enums.suggestion_rejection import SuggestionRejection
@@ -346,9 +347,53 @@ def test_mode_a_prompt_carries_the_replacement_untruncated() -> None:
         ),
     )
 
-    # Once inside the suggestion block, once inside the prompt panel.
+    # Once inside the suggestion block, once inside the prompt panel. A
+    # single-line replacement carries no blockquote prefix in either copy.
     assert_that(body.count(long_line)).is_equal_to(2)
     assert_that(body).does_not_contain("…")
+
+
+def test_mode_a_prompt_preserves_replacement_indentation_verbatim() -> None:
+    """The prompt must not reindent code the suggestion commits as-is."""
+    replacement = "def divide(a, b):\n    if b == 0:\n        raise ValueError()\n    return a / b"
+    finding = _finding(
+        suggested_change=SuggestedChange(
+            start_line=10,
+            end_line=13,
+            replacement=replacement,
+        ),
+    )
+
+    prompt = render_finding_prompt(
+        finding=finding,
+        suggested_change=SuggestedChange(
+            start_line=10,
+            end_line=13,
+            replacement=replacement,
+        ),
+    )
+
+    # Byte-for-byte: a continuation indent here would silently reindent the
+    # code relative to what the suggestion block commits.
+    assert_that(prompt).contains(replacement)
+    assert_that(prompt).contains("replace lines 10-13 with the following, verbatim")
+
+
+def test_mode_a_prompt_fence_survives_backticks_in_the_replacement() -> None:
+    """A replacement containing a fence cannot close the prompt's own block."""
+    finding = _finding(
+        suggested_change=SuggestedChange(
+            start_line=10,
+            end_line=10,
+            replacement='doc = """```md\ntext\n```"""',
+        ),
+    )
+    change = finding.suggested_change
+
+    prompt = render_finding_prompt(finding=finding, suggested_change=change)
+
+    # The wrapping fence must be strictly longer than the longest inner run.
+    assert_that(prompt).contains("````")
 
 
 def test_reasoning_is_fully_visible_with_no_collapsible() -> None:
