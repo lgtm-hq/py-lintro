@@ -25,7 +25,9 @@ from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
 
 #: Commit shas are interpolated into a compare URL, so only hex refs are
 #: accepted — a branch name or user-supplied ref must not reach path building.
-_SHA_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
+#: Matched with ``fullmatch``: ``$`` alone would admit a trailing newline, and
+#: a control character in the URL makes ``Request`` raise outside the handler.
+_SHA_RE = re.compile(r"[0-9a-fA-F]{4,40}")
 
 
 class GitHubPRReporter:
@@ -261,7 +263,7 @@ class GitHubPRReporter:
             fetched. ``None`` is a refusal, not an empty diff: callers must not
             read it as "nothing changed".
         """
-        if not _SHA_RE.match(base) or not _SHA_RE.match(head):
+        if not _SHA_RE.fullmatch(base) or not _SHA_RE.fullmatch(head):
             logger.debug("Refusing to compare non-sha refs: {}...{}", base, head)
             return None
         base_url = f"{self.api_base}/repos/{self.repo}/compare/{base}...{head}"
@@ -581,16 +583,21 @@ def _files_to_lines(*, files: Sequence[dict[str, Any]]) -> dict[str, set[int]]:
 
     Returns:
         Mapping of file path to the right-side line numbers it changed. Entries
-        without a path or without a patch (binary files, or files too large for
-        GitHub to render) are omitted.
+        that are not mappings are skipped rather than raising — the caller's
+        error handling does not wrap this reduction. Entries without a path or
+        without a patch (binary files, or files too large for GitHub to render)
+        are omitted. A filename appearing on more than one page has its line
+        sets merged, not overwritten.
     """
     result: dict[str, set[int]] = {}
     for entry in files:
+        if not isinstance(entry, dict):
+            continue
         filename = entry.get("filename", "")
         patch = entry.get("patch", "")
         if not filename or not patch:
             continue
-        result[filename] = _parse_patch_lines(patch)
+        result.setdefault(filename, set()).update(_parse_patch_lines(patch))
     return result
 
 

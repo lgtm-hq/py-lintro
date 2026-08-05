@@ -13,6 +13,7 @@ from lintro.ai.review.enums.suggestion_rejection import SuggestionRejection
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.github_render import format_finding_comment
 from lintro.ai.review.inline_fix import (
+    MAX_REPLACED_LINES,
     MAX_REPLACEMENT_CHARS,
     InlineFixPlan,
     finding_suggested_change,
@@ -136,6 +137,19 @@ def test_multiline_change_fully_inside_the_round_diff_selects_mode_a() -> None:
         pytest.param(
             _finding(
                 suggested_change=SuggestedChange(
+                    start_line=10,
+                    end_line=10 + MAX_REPLACED_LINES,
+                    replacement="x",
+                ),
+            ),
+            _round_diff({10}),
+            False,
+            SuggestionRejection.SPAN_TOO_LARGE,
+            id="oversized-span",
+        ),
+        pytest.param(
+            _finding(
+                suggested_change=SuggestedChange(
                     start_line=12,
                     end_line=10,
                     replacement="x",
@@ -226,9 +240,17 @@ def test_every_invalid_case_falls_back_to_mode_b(
     assert_that(plan.committable_change).is_none()
 
 
-def test_windows_style_paths_match_the_round_diff() -> None:
-    """A backslash path still resolves against the API's forward-slash keys."""
-    finding = _finding(file="./src\\example.py")
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("./src\\example.py", id="dot-slash-backslash"),
+        pytest.param(".\\src\\example.py", id="windows-relative"),
+        pytest.param("  src/example.py  ", id="padded"),
+    ],
+)
+def test_awkward_paths_still_match_the_round_diff(path: str) -> None:
+    """Odd path spellings still resolve against the API's forward-slash keys."""
+    finding = _finding(file=path)
 
     plan = plan_inline_fix(finding=finding, round_diff_lines=_round_diff({10}))
 

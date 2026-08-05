@@ -263,6 +263,49 @@ def test_fetch_compare_lines_refuses_non_sha_refs() -> None:
     assert_that(urlopen.called).is_false()
 
 
+def test_fetch_compare_lines_merges_duplicate_filenames_across_pages() -> None:
+    """A file split across comparison pages keeps every line it changed."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+    payload = {
+        "files": [
+            {"filename": "src/main.py", "patch": "@@ -1 +1 @@\n+one"},
+            {"filename": "src/main.py", "patch": "@@ -9 +9 @@\n+nine"},
+        ],
+    }
+
+    with patch("urllib.request.urlopen", return_value=_reader(payload)):
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(lines).is_equal_to({"src/main.py": {1, 9}})
+
+
+def test_fetch_compare_lines_skips_non_mapping_entries() -> None:
+    """A malformed files array degrades rather than raising past the handler."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+    payload = {
+        "files": [
+            "not-a-file",
+            {"filename": "src/main.py", "patch": "@@ -1 +1 @@\n+one"},
+        ],
+    }
+
+    with patch("urllib.request.urlopen", return_value=_reader(payload)):
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(lines).is_equal_to({"src/main.py": {1}})
+
+
+def test_fetch_compare_lines_rejects_a_sha_with_a_trailing_newline() -> None:
+    """A trailing newline must not reach URL construction."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+
+    with patch("urllib.request.urlopen") as urlopen:
+        lines = reporter.fetch_compare_lines(base="aaa111\n", head="bbb222")
+
+    assert_that(lines).is_none()
+    assert_that(urlopen.called).is_false()
+
+
 def test_fetch_compare_lines_returns_none_on_failure() -> None:
     """A failed comparison is unknown, not an empty diff."""
     reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)

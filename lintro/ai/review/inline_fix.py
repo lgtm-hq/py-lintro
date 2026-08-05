@@ -24,6 +24,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.suggested_change import SuggestedChange
 
 __all__ = [
+    "MAX_REPLACED_LINES",
     "MAX_REPLACEMENT_CHARS",
     "InlineFixPlan",
     "finding_suggested_change",
@@ -37,6 +38,11 @@ __all__ = [
 #: too — a described fix is the safer trade.
 MAX_REPLACEMENT_CHARS = 4_000
 
+#: Largest line span one committable suggestion may replace. The range comes
+#: from untrusted model output and is expanded into a set on the posting path,
+#: so it is bounded before anything materializes it.
+MAX_REPLACED_LINES = 200
+
 
 def normalize_diff_path(path: str) -> str:
     """Normalize a finding path to the form the GitHub diff API reports.
@@ -45,10 +51,13 @@ def normalize_diff_path(path: str) -> str:
         path: Repository-relative path as reported by the model.
 
     Returns:
-        The path with a leading ``./`` removed and backslashes converted to
-        forward slashes; empty when nothing usable remains.
+        The path with backslashes converted to forward slashes and a leading
+        ``./`` removed; empty when nothing usable remains. Order matters: a
+        Windows-style ``.\\src\\a.py`` only grows a strippable ``./`` after the
+        separators are normalized, and surrounding whitespace has to go first
+        or it hides the prefix from ``removeprefix``.
     """
-    return path.removeprefix("./").replace("\\", "/").strip()
+    return path.strip().replace("\\", "/").removeprefix("./")
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +156,8 @@ def plan_inline_fix(
         return _described(rejection=SuggestionRejection.REPLACEMENT_TOO_LARGE)
     if change.start_line < 1 or change.end_line < change.start_line:
         return _described(rejection=SuggestionRejection.INVALID_RANGE)
+    if change.end_line - change.start_line + 1 > MAX_REPLACED_LINES:
+        return _described(rejection=SuggestionRejection.SPAN_TOO_LARGE)
     if finding.line not in change.line_span:
         return _described(rejection=SuggestionRejection.ANCHOR_OUTSIDE_RANGE)
     if carried_over:
@@ -154,6 +165,6 @@ def plan_inline_fix(
     if round_diff_lines is None:
         return _described(rejection=SuggestionRejection.NO_ROUND_DIFF)
     changed = round_diff_lines.get(normalize_diff_path(finding.file), set())
-    if not set(change.line_span).issubset(changed):
+    if not changed.issuperset(change.line_span):
         return _described(rejection=SuggestionRejection.LINES_NOT_IN_ROUND_DIFF)
     return InlineFixPlan(mode=FixMode.SUGGESTION, change=change)

@@ -18,6 +18,9 @@ class SuggestionRejection(StrEnum):
         EMPTY_REPLACEMENT: The replacement is blank, which would delete the
             anchored lines rather than fix them.
         INVALID_RANGE: The line range is not a positive, ordered span.
+        SPAN_TOO_LARGE: The range names more lines than one suggestion may
+            plausibly replace; expanding it would be the model's decision, not
+            the renderer's.
         REPLACEMENT_TOO_LARGE: The replacement is big enough to threaten
             GitHub's comment size limit, which would cost the reader the
             reasoning as well as the suggestion.
@@ -34,6 +37,7 @@ class SuggestionRejection(StrEnum):
     NO_SUGGESTED_CHANGE = auto()
     EMPTY_REPLACEMENT = auto()
     INVALID_RANGE = auto()
+    SPAN_TOO_LARGE = auto()
     REPLACEMENT_TOO_LARGE = auto()
     ANCHOR_OUTSIDE_RANGE = auto()
     CARRIED_OVER = auto()
