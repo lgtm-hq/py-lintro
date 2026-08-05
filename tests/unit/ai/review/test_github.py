@@ -33,6 +33,7 @@ from lintro.ai.review.github import (
     post_review_to_github,
     sanitize_comment_text,
 )
+from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
@@ -45,6 +46,7 @@ def _fresh_reporter() -> MagicMock:
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
@@ -55,7 +57,7 @@ def _fresh_reporter() -> MagicMock:
     return reporter
 
 
-# --- formatting: severity badges, chips, collapsibles, suggestions ----------
+# --- formatting: severity badges, chips, fix slot, prompt panel -------------
 
 
 def test_format_finding_comment_uses_color_badge_and_chips(
@@ -68,19 +70,25 @@ def test_format_finding_comment_uses_color_badge_and_chips(
     assert_that(comment).contains("🔴 **P1**")
     assert_that(comment).contains("`security`")
     assert_that(comment).contains("`high confidence`")
-    assert_that(comment).contains("<details><summary>")
+    assert_that(comment).contains("**Fail-open default**")
     assert_that(comment).contains("Default to Expired")
 
 
 def test_format_finding_comment_emits_suggestion_block(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A finding with suggested_code renders a GitHub suggestion block."""
+    """A validated mode A plan renders a GitHub suggestion block."""
     finding = replace(
         sample_review_result.findings[0],
         suggested_code="    return Status.EXPIRED",
     )
-    comment = format_finding_comment(finding=finding)
+    comment = format_finding_comment(
+        finding=finding,
+        inline_fix=plan_inline_fix(
+            finding=finding,
+            round_diff_lines={finding.file: {finding.line}},
+        ),
+    )
 
     assert_that(comment).contains("```suggestion")
     assert_that(comment).contains("return Status.EXPIRED")
@@ -230,7 +238,13 @@ def test_suggestion_block_neutralizes_mentions(
         sample_review_result.findings[0],
         suggested_code="# ping @team\nreturn Status.EXPIRED",
     )
-    comment = format_finding_comment(finding=finding)
+    comment = format_finding_comment(
+        finding=finding,
+        inline_fix=plan_inline_fix(
+            finding=finding,
+            round_diff_lines={finding.file: {finding.line}},
+        ),
+    )
 
     assert_that(comment).contains("```suggestion")
     assert_that(comment).does_not_contain("@team")

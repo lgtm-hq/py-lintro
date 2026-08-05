@@ -8,6 +8,7 @@ from enum import StrEnum
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.suggested_change import SuggestedChange
 
 __all__ = ["ReviewFinding", "Severity"]
 
@@ -71,6 +72,13 @@ class ReviewFinding:
         occurrences: Every ``file:line`` at which this pattern occurs. Empty
             when the model reported none, in which case
             :attr:`all_occurrences` falls back to the finding's own location.
+        suggested_change: Structured form of the same fix (#1911): the exact
+            line range replaced plus its full replacement text. Preferred over
+            ``suggested_code`` because a committable GitHub suggestion must
+            replace exactly the lines its comment is anchored to, which an
+            unranged blob cannot express. ``None`` when the model reported no
+            structured change; ``suggested_code`` is then read as a
+            single-line change over the finding's own line.
     """
 
     severity: Severity
@@ -90,6 +98,7 @@ class ReviewFinding:
     severity_downgraded: bool = False
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
+    suggested_change: SuggestedChange | None = None
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:

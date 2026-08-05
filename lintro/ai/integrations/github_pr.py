@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +22,10 @@ from loguru import logger
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
+
+#: Commit shas are interpolated into a compare URL, so only hex refs are
+#: accepted — a branch name or user-supplied ref must not reach path building.
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
 
 
 class GitHubPRReporter:
@@ -232,14 +237,75 @@ class GitHubPRReporter:
                 break
             page += 1
 
-        result: dict[str, set[int]] = {}
-        for f in all_files:
-            filename = f.get("filename", "")
-            patch = f.get("patch", "")
-            if not filename or not patch:
-                continue
-            result[filename] = _parse_patch_lines(patch)
-        return result
+        return _files_to_lines(files=all_files)
+
+    def fetch_compare_lines(
+        self,
+        *,
+        base: str,
+        head: str,
+    ) -> dict[str, set[int]] | None:
+        """Fetch the changed lines between two commits.
+
+        Used to establish *this round's* posted diff (#1911): a committable
+        ``suggestion`` block is only valid on lines the round actually pushed,
+        which is a strictly smaller set than the PR's cumulative diff.
+
+        Args:
+            base: Base commit sha (the previously reviewed head).
+            head: Head commit sha for this round.
+
+        Returns:
+            Mapping of ``{file_path: {line_numbers...}}`` for right-side lines,
+            or ``None`` when the shas are unusable or the comparison cannot be
+            fetched. ``None`` is a refusal, not an empty diff: callers must not
+            read it as "nothing changed".
+        """
+        if not _SHA_RE.match(base) or not _SHA_RE.match(head):
+            logger.debug("Refusing to compare non-sha refs: {}...{}", base, head)
+            return None
+        base_url = f"{self.api_base}/repos/{self.repo}/compare/{base}...{head}"
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "https":
+            return None
+
+        all_files: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            url = f"{base_url}?per_page=100&page={page}"
+            req = urllib.request.Request(
+                url,
+                method="GET",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                    req,
+                    timeout=30,
+                ) as resp:
+                    payload = json.loads(resp.read().decode())
+            except (urllib.error.URLError, json.JSONDecodeError, OSError):
+                logger.debug(
+                    "Failed to compare {}...{}; treating this round's diff as "
+                    "unknown",
+                    base,
+                    head,
+                )
+                return None
+
+            files_page = payload.get("files") if isinstance(payload, dict) else None
+            if not isinstance(files_page, list) or not files_page:
+                break
+            all_files.extend(files_page)
+            if len(files_page) < 100:
+                break
+            page += 1
+
+        return _files_to_lines(files=all_files)
 
     def fetch_pr_commit_shas(self) -> list[str] | None:
         """Fetch the PR's commit shas, oldest first.
@@ -507,6 +573,27 @@ def _detect_repo_root() -> Path | None:
         return None
 
 
+def _files_to_lines(*, files: Sequence[dict[str, Any]]) -> dict[str, set[int]]:
+    """Reduce a GitHub files listing to right-side changed lines per path.
+
+    Args:
+        files: Entries from a ``files`` array (PR files or a comparison).
+
+    Returns:
+        Mapping of file path to the right-side line numbers it changed. Entries
+        without a path or without a patch (binary files, or files too large for
+        GitHub to render) are omitted.
+    """
+    result: dict[str, set[int]] = {}
+    for entry in files:
+        filename = entry.get("filename", "")
+        patch = entry.get("patch", "")
+        if not filename or not patch:
+            continue
+        result[filename] = _parse_patch_lines(patch)
+    return result
+
+
 def _parse_patch_lines(patch: str) -> set[int]:
     """Extract right-side (new) line numbers from a unified diff patch.
 
@@ -516,8 +603,6 @@ def _parse_patch_lines(patch: str) -> set[int]:
     Returns:
         Set of line numbers on the right side of the diff.
     """
-    import re
-
     lines: set[int] = set()
     current_line = 0
     for raw_line in patch.split("\n"):

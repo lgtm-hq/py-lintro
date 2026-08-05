@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lintro.ai.review.agent_prompts import render_finding_prompt_panel
 from lintro.ai.review.checklist_display import (
     cleared_answers,
     format_review_questions_markdown,
@@ -10,30 +11,22 @@ from lintro.ai.review.checklist_display import (
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
+from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.sanitize import sanitize_comment_text
 
+__all__ = [
+    "format_finding_comment",
+    "format_review_summary",
+    "format_run_mechanics",
+    "sanitize_comment_text",
+]
 
-def sanitize_comment_text(text: str, *, limit: int | None = None) -> str:
-    """Neutralize untrusted model output for safe rendering in a PR comment.
-
-    Breaks GitHub ``@mentions`` (so injected text cannot ping or notify users)
-    by inserting a zero-width space after a leading ``@``, and optionally caps
-    the length. The input originates from an untrusted PR diff, so this is a
-    security boundary, not cosmetic.
-
-    Args:
-        text: Raw model-derived text.
-        limit: Optional maximum character length before truncation.
-
-    Returns:
-        Sanitized text safe to embed in Markdown.
-    """
-    cleaned = _MENTION_RE.sub("@​", text or "")
-    if limit is not None and len(cleaned) > limit:
-        cleaned = cleaned[: max(limit - 1, 0)].rstrip() + "…"
-    return cleaned
+#: Severities that earn a per-finding agent prompt panel (#1911). A P3 nit gets
+#: none: the panel is an affordance, and one on every finding is wallpaper.
+_PROMPT_SEVERITIES: frozenset[Severity] = frozenset({Severity.P1, Severity.P2})
 
 
 def _chip(text: str) -> str:
@@ -132,18 +125,31 @@ def format_finding_comment(
     finding: ReviewFinding,
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
     question_map: dict[int, str] | None = None,
+    inline_fix: InlineFixPlan | None = None,
 ) -> str:
-    """Format a review finding as a rich GitHub markdown comment.
+    """Format a review finding as a GitHub markdown comment (#1911).
 
-    Used both for inline review comments and for the summary's findings list.
-    Renders the severity as a color emoji, category and confidence as ``code``
-    chips, the cause/fix in a collapsible ``<details>``, and a GitHub
-    ``suggestion`` block when the finding carries concrete replacement code.
+    Top to bottom: a severity/category/confidence chip header, a bold title,
+    the reasoning **fully visible** (no collapsible — a reviewer should not
+    have to click to learn why something is flagged), then one conditional fix
+    slot, then the per-finding agent prompt. There is no footer.
+
+    The fix slot follows ``inline_fix``: mode A renders a committable
+    ``suggestion`` block, mode B a highlighted ``**Fix:**`` one-liner. Mode A
+    keeps the prompt panel as well — the suggestion serves click-to-commit
+    reviewers and the prompt serves local-editor and agent users, and both
+    describe the identical change.
 
     Args:
         finding: Review finding to format.
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text for linked display.
+        inline_fix: Fix slot chosen for this finding's inline comment. ``None``
+            means the body is being embedded in another surface (the sticky
+            comment's folded detail, for instance) rather than posted as an
+            inline review comment: a ``suggestion`` block is not committable
+            there and a per-finding prompt panel would repeat the fix-all
+            prompt already on that surface, so neither is rendered.
 
     Returns:
         Markdown comment body.
@@ -152,7 +158,6 @@ def format_finding_comment(
     title = sanitize_comment_text(finding.title, limit=200)
     description = sanitize_comment_text(finding.description, limit=2000)
     cause = sanitize_comment_text(finding.cause, limit=2000)
-    fix = sanitize_comment_text(finding.fix, limit=2000)
 
     header = (
         f"{_severity_badge(severity=finding.severity)} · "
@@ -161,28 +166,14 @@ def format_finding_comment(
     if finding.source:
         source = sanitize_comment_text(finding.source, limit=100)
         header += f" · {_chip(f'agent: {source}')}"
-    lines = [header, "", f"### {title}", "", description]
-
-    detail: list[str] = []
+    lines = [header, "", f"**{title}**"]
+    if description.strip():
+        lines.extend(["", description])
     if cause.strip():
-        detail.append(f"**Cause:** {cause}")
-    if fix.strip():
-        detail.append(f"**Fix:** {fix}")
-    if detail:
-        lines.extend(
-            [
-                "",
-                "<details><summary>💡 Why this matters &amp; how to fix</summary>",
-                "",
-                "\n\n".join(detail),
-                "",
-                "</details>",
-            ],
-        )
+        lines.extend(["", f"**Root cause:** {cause}"])
 
-    suggestion = _suggestion_block(finding=finding)
-    if suggestion:
-        lines.extend(["", suggestion])
+    lines.extend(_fix_slot(finding=finding, inline_fix=inline_fix))
+    lines.extend(_prompt_slot(finding=finding, inline_fix=inline_fix))
 
     body = "\n".join(lines)
     if checklist_display in {ChecklistDisplay.LINKED, ChecklistDisplay.ALL}:
@@ -191,18 +182,76 @@ def format_finding_comment(
             question_map=prompt_questions,
         )
         body += format_review_questions_markdown(questions=linked)
-    body += "\n\n<sub>lintro · " + _chip(finding.category) + "</sub>"
     return body
 
 
-def _suggestion_block(*, finding: ReviewFinding) -> str:
-    """Render a GitHub ``suggestion`` block when concrete code is available."""
-    code = finding.suggested_code
-    if not code or not code.strip():
-        return ""
+def _fix_slot(
+    *,
+    finding: ReviewFinding,
+    inline_fix: InlineFixPlan | None,
+) -> list[str]:
+    """Render the conditional fix slot for a finding comment.
+
+    Args:
+        finding: Finding being rendered.
+        inline_fix: Chosen fix plan, or ``None`` for a non-inline surface.
+
+    Returns:
+        Markdown lines for the slot; empty when the finding names no fix at
+        all.
+    """
+    change = inline_fix.committable_change if inline_fix is not None else None
+    if change is not None:
+        return ["", _suggestion_block(replacement=change.replacement)]
+    fix = sanitize_comment_text(finding.fix, limit=2000).strip()
+    if not fix:
+        return []
+    return ["", f"**Fix:** {fix}"]
+
+
+def _prompt_slot(
+    *,
+    finding: ReviewFinding,
+    inline_fix: InlineFixPlan | None,
+) -> list[str]:
+    """Render the per-finding agent prompt panel, when it earns its space.
+
+    The panel is gated to P1 and P2 (#1911): a nit does not warrant a
+    copy-paste agent hand-off, and a panel on every P3 turns the affordance
+    into wallpaper. Questions carry no fix and are excluded by the prompt
+    renderer itself.
+
+    Args:
+        finding: Finding being rendered.
+        inline_fix: Chosen fix plan, or ``None`` for a non-inline surface.
+
+    Returns:
+        Markdown lines for the panel, or an empty list when it is gated off.
+    """
+    if inline_fix is None or finding.severity not in _PROMPT_SEVERITIES:
+        return []
+    panel = render_finding_prompt_panel(
+        finding=finding,
+        # In mode A the prompt must land the same edit the suggestion would, or
+        # the two paths silently diverge and whichever the reader picks is a
+        # coin flip.
+        suggested_change=inline_fix.committable_change,
+    )
+    return ["", panel] if panel else []
+
+
+def _suggestion_block(*, replacement: str) -> str:
+    """Render a GitHub ``suggestion`` block around untrusted replacement text.
+
+    Args:
+        replacement: Full replacement for the anchored lines.
+
+    Returns:
+        The fenced ``suggestion`` block.
+    """
     # Neutralize fence break-out and @mentions in untrusted model code. The
     # suggestion body renders as Markdown, so an unescaped `@user` still pings.
-    safe = code.replace("```", "``​`")
+    safe = replacement.replace("```", "``​`")
     safe = _MENTION_RE.sub("@​", safe)
     return "```suggestion\n" + safe + "\n```"
 
@@ -311,7 +360,7 @@ def _is_diff_mappable(
     Returns:
         True when the finding lands on a diff-covered line, else False.
     """
-    rel = finding.file.removeprefix("./").replace("\\", "/")
+    rel = normalize_diff_path(finding.file)
     if not rel or finding.line <= 0 or diff_lines is None:
         return False
     return finding.line in diff_lines.get(rel, set())

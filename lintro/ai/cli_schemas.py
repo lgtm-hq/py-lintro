@@ -117,6 +117,23 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                     # Requested by the prompt schema; without it here the
                     # strict CLI schema would reject the field outright.
                     "suggested_code": {"type": "string"},
+                    # #1911 structured hunk. Optional like the rest: a fix that
+                    # is not a clean hunk omits it and renders as a described
+                    # one-liner instead of a committable suggestion.
+                    "suggested_change": {
+                        "type": "object",
+                        "required": ["lines", "replacement"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "lines": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "minItems": 2,
+                                "maxItems": 2,
+                            },
+                            "replacement": {"type": "string"},
+                        },
+                    },
                     # #1925 finding-model fields. All optional: the parser
                     # degrades every one of them to a default, so a model that
                     # ignores them still produces a valid review.
