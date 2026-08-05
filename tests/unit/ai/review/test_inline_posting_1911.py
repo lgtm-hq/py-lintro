@@ -327,6 +327,23 @@ def test_fetch_compare_lines_skips_non_mapping_entries() -> None:
     assert_that(lines).is_equal_to({"src/main.py": {1}})
 
 
+def test_fetch_compare_lines_skips_malformed_filename_and_patch_values() -> None:
+    """A wrongly-typed field is skipped, not raised past the caller's handler."""
+    reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+    payload = {
+        "files": [
+            {"filename": ["src/main.py"], "patch": "@@ -1 +1 @@\n+one"},
+            {"filename": "src/other.py", "patch": {"not": "a string"}},
+            {"filename": "src/main.py", "patch": "@@ -1 +1 @@\n+one"},
+        ],
+    }
+
+    with patch("urllib.request.urlopen", return_value=_reader(payload)):
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(lines).is_equal_to({"src/main.py": {1}})
+
+
 def test_fetch_compare_lines_rejects_a_sha_with_a_trailing_newline() -> None:
     """A trailing newline must not reach URL construction."""
     reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)

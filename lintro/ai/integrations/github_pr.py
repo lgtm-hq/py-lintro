@@ -593,6 +593,11 @@ def _files_to_lines(*, files: Sequence[dict[str, Any]]) -> dict[str, set[int]]:
             continue
         filename = entry.get("filename", "")
         patch = entry.get("patch", "")
+        # Type, not merely truthiness: a list ``filename`` is unhashable and a
+        # non-string ``patch`` has no ``split``. Either would raise from outside
+        # the caller's handler instead of degrading to a described fix.
+        if not isinstance(filename, str) or not isinstance(patch, str):
+            continue
         if not filename or not patch:
             continue
         result.setdefault(filename, set()).update(_parse_patch_lines(patch))
