@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.111.0] - 2026-08-05
+
+### Added
+
+- **review**: rebuild inline finding comments with a conditional fix slot (#1947)
+  (5a1451a)
+
 ## [0.110.0] - 2026-08-05
 
 ### Added
