@@ -2,7 +2,7 @@
 
 Renders a rich, telemetry-informative sticky comment (one per PR, updated in
 place) with a severity-count header, TL;DR, per-finding blocks (severity color
-emoji, category/confidence chips, collapsible cause/fix), an always-visible
+emoji, category/confidence chips, visible reasoning), an always-visible
 cumulative telemetry header, per-run mechanics with exact vs approximate (``~``)
 labeling, and a machine-readable state block. All model-derived text is
 sanitized (``@mentions`` neutralized, size capped) since it comes from an
@@ -21,7 +21,7 @@ from loguru import logger
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
-from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
@@ -47,6 +47,11 @@ from lintro.ai.review.github_sticky import (
     build_sticky_comment,
     parse_review_state,
     parse_review_state_v2,
+)
+from lintro.ai.review.inline_fix import (
+    finding_suggested_change,
+    normalize_diff_path,
+    plan_inline_fix,
 )
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
@@ -136,6 +141,15 @@ def post_review_to_github(
         findings=result.findings,
         diff_lines=diff_lines,
     )
+    # Matching is pure and deterministic over (prior_state, findings), so the
+    # sticky, the review body and the inline comments all recompute the same
+    # transitions and cannot disagree about what is new or carried over.
+    match = match_findings(
+        previous=prior_state,
+        findings=result.findings,
+        round_number=prior_state.next_round,
+        head_sha=head_sha,
+    )
 
     # A finding that maps to no line in the diff never gets an inline comment,
     # so the sticky is its only surface from the outset — fold its detail in
@@ -157,15 +171,7 @@ def post_review_to_github(
         review_body = build_review_body(
             result=result,
             prior_state=prior_state,
-            # Matching is pure and deterministic over (prior_state, findings),
-            # so recomputing it here yields exactly what the sticky persisted —
-            # the two surfaces cannot disagree about what is new or resolved.
-            match=match_findings(
-                previous=prior_state,
-                findings=result.findings,
-                round_number=prior_state.next_round,
-                head_sha=head_sha,
-            ),
+            match=match,
             head_sha=head_sha,
             sticky_url=_sticky_url(
                 reporter=gh_reporter,
@@ -188,6 +194,15 @@ def post_review_to_github(
             checklist_display=checklist_display,
             question_map=prompt_questions,
             review_body=review_body,
+            round_diff_lines=_round_diff_lines(
+                reporter=gh_reporter,
+                prior_state=prior_state,
+                diff_lines=diff_lines,
+                head_sha=head_sha,
+            ),
+            carried_fingerprints=frozenset(
+                record.fingerprint for record in match.carried
+            ),
         ):
             success = False
             # Degraded path (#1909): the rejected findings now have no surface
@@ -435,6 +450,40 @@ def _upsert_sticky(
     return reporter.post_issue_comment(body)
 
 
+def _round_diff_lines(
+    *,
+    reporter: GitHubPRReporter,
+    prior_state: ReviewState,
+    diff_lines: dict[str, set[int]] | None,
+    head_sha: str,
+) -> dict[str, set[int]] | None:
+    """Determine the lines this round's posted diff changed (#1911).
+
+    A committable ``suggestion`` block is only valid where the review comment
+    is anchored to a line this round posted. On round 1 that is the whole PR
+    diff. Afterwards it is only what arrived since the previously reviewed
+    head, so a finding sitting on untouched code loses its one-click fix even
+    though the line is still inside the PR's cumulative diff.
+
+    Args:
+        reporter: GitHub reporter used to compare commits.
+        prior_state: State decoded from the sticky comment before this round.
+        diff_lines: The PR's cumulative diff lines.
+        head_sha: This round's head commit sha.
+
+    Returns:
+        Lines changed by this round, or ``None`` when the round's diff cannot
+        be established — every suggestion then falls back to a described fix
+        rather than risking a suggestion GitHub will reject.
+    """
+    if not prior_state.runs:
+        return diff_lines
+    prior_sha = prior_state.runs[-1].sha
+    if not prior_sha or not head_sha:
+        return None
+    return reporter.fetch_compare_lines(base=prior_sha, head=head_sha)
+
+
 def _post_inline_findings(
     *,
     reporter: GitHubPRReporter,
@@ -442,8 +491,16 @@ def _post_inline_findings(
     checklist_display: ChecklistDisplay,
     question_map: dict[int, str],
     review_body: str = "",
+    round_diff_lines: dict[str, set[int]] | None = None,
+    carried_fingerprints: frozenset[str] = frozenset(),
 ) -> bool:
     """Post inline PR review comments for mappable findings.
+
+    Each comment's fix slot is chosen by :func:`plan_inline_fix`. A comment in
+    mode A is anchored to *exactly* the lines its suggestion replaces — a
+    multi-line change carries ``start_line``/``line`` rather than a single
+    ``line`` — because GitHub rejects a suggestion that does not cover its
+    anchor exactly.
 
     Args:
         reporter: GitHub reporter used to submit the review.
@@ -452,25 +509,53 @@ def _post_inline_findings(
         question_map: Prompt id to question text for linked display.
         review_body: Markdown body posted with the review. Falls back to a
             plain label when empty.
+        round_diff_lines: Lines changed by this round's posted diff. ``None``
+            disables committable suggestions entirely.
+        carried_fingerprints: Fingerprints of findings already reported in an
+            earlier round; they fall back to a described fix.
 
     Returns:
         True when the review was submitted successfully.
     """
     comments: list[dict[str, Any]] = []
     for finding in findings:
-        rel = finding.file.removeprefix("./").replace("\\", "/")
-        comments.append(
-            {
-                "path": rel,
-                "body": format_finding_comment(
-                    finding=finding,
-                    checklist_display=checklist_display,
-                    question_map=question_map,
-                ),
-                "line": finding.line,
-                "side": "RIGHT",
-            },
+        plan = plan_inline_fix(
+            finding=finding,
+            round_diff_lines=round_diff_lines,
+            carried_over=fingerprint_for(
+                file=finding.file,
+                category=finding.category,
+                title=finding.title,
+            )
+            in carried_fingerprints,
         )
+        comment: dict[str, Any] = {
+            "path": normalize_diff_path(finding.file),
+            "body": format_finding_comment(
+                finding=finding,
+                checklist_display=checklist_display,
+                question_map=question_map,
+                inline_fix=plan,
+            ),
+            "line": finding.line,
+            "side": "RIGHT",
+        }
+        change = plan.committable_change
+        if change is not None and change.is_multiline:
+            comment["start_line"] = change.start_line
+            comment["start_side"] = "RIGHT"
+            comment["line"] = change.end_line
+        elif plan.rejection is not None and finding_suggested_change(finding=finding):
+            # The model did offer a hunk and it was refused. Say which rule
+            # refused it: a silently described fix looks like the model simply
+            # had nothing mechanical to propose.
+            logger.debug(
+                "No committable suggestion for {}:{} — {}",
+                finding.file,
+                finding.line,
+                plan.rejection.value,
+            )
+        comments.append(comment)
 
     if not comments:
         return True

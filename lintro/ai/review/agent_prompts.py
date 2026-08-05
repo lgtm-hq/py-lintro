@@ -23,9 +23,10 @@ import textwrap
 
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
-from lintro.ai.review.github_render import sanitize_comment_text
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.suggested_change import SuggestedChange
+from lintro.ai.review.sanitize import sanitize_comment_text
 
 __all__ = [
     "SPECULATIVE_NOTICE",
@@ -396,20 +397,71 @@ def render_agent_prompt(
     return "\n\n".join(sections)
 
 
-def render_finding_prompt(*, finding: ReviewFinding) -> str:
+def _suggested_change_section(*, change: SuggestedChange) -> str:
+    """Render the block tying a prompt to this comment's suggestion block.
+
+    An inline comment in mode A (#1911) carries both a committable suggestion
+    and this prompt. They must specify the *same* edit: a reviewer who commits
+    the suggestion and an agent handed the prompt have to end up with identical
+    code, so the prompt restates the replacement verbatim instead of
+    paraphrasing it.
+
+    Args:
+        change: The change rendered as the comment's suggestion block.
+
+    Returns:
+        Prompt lines naming the range, then the replacement in its own fenced
+        block, byte-for-byte as the suggestion renders it.
+    """
+    span = (
+        f"line {change.start_line}"
+        if not change.is_multiline
+        else f"lines {change.start_line}-{change.end_line}"
+    )
+    header = _wrap(
+        text=(
+            "Apply exactly the change already proposed in this comment's "
+            f"suggestion block — replace {span} with the following, verbatim:"
+        ),
+    )
+    # Rendered raw: no continuation indent and no per-line truncation. Both
+    # would silently corrupt an indentation-sensitive replacement, and the
+    # suggestion block applies neither — the two paths have to produce
+    # identical code. Only mention-neutralization is applied, matching
+    # ``_suggestion_block``; ``plan_inline_fix`` already bounds the total size.
+    # The fence is sized against the text so a replacement containing its own
+    # backticks cannot close it early.
+    body = "\n".join(
+        sanitize_comment_text(line) for line in change.replacement.splitlines() or [""]
+    )
+    fence = _fence_for(text=body)
+    return f"{header}\n{fence}\n{body}\n{fence}"
+
+
+def render_finding_prompt(
+    *,
+    finding: ReviewFinding,
+    suggested_change: SuggestedChange | None = None,
+) -> str:
     """Render the single-finding agent prompt used by inline comments.
 
     Args:
         finding: Finding the inline comment is anchored to.
+        suggested_change: The change the same comment renders as a committable
+            suggestion block, when it has one. Restated verbatim so the prompt
+            and the suggestion cannot drift apart.
 
     Returns:
         Plain-text prompt body scoped to exactly this finding, or an empty
         string when the entry is a question — questions get no prompt panel.
     """
-    return render_agent_prompt(
+    prompt = render_agent_prompt(
         findings=(finding,),
         scope=AgentPromptScope(kind=AgentPromptScopeKind.SINGLE_FINDING),
     )
+    if not prompt or suggested_change is None:
+        return prompt
+    return f"{prompt}\n\n{_suggested_change_section(change=suggested_change)}"
 
 
 def render_prompt_panel(*, prompt: str, title: str, footer: str = "") -> str:
@@ -477,12 +529,16 @@ def render_agent_prompt_panel(
 def render_finding_prompt_panel(
     *,
     finding: ReviewFinding,
+    suggested_change: SuggestedChange | None = None,
     footer: str | None = None,
 ) -> str:
     """Render the single-finding prompt panel used by inline comments.
 
     Args:
         finding: Finding the inline comment is anchored to.
+        suggested_change: The change the same comment renders as a committable
+            suggestion block, when it has one (#1911). The prompt then restates
+            that exact replacement so both paths apply the identical fix.
         footer: Small-print line under the collapsed body. Defaults to the
             single-finding footer; pass ``""`` to omit it.
 
@@ -490,10 +546,17 @@ def render_finding_prompt_panel(
         Markdown for the panel, or an empty string when the entry is a
         question.
     """
-    return render_agent_prompt_panel(
-        findings=(finding,),
-        scope=AgentPromptScope(kind=AgentPromptScopeKind.SINGLE_FINDING),
-        footer=footer,
+    scope = AgentPromptScope(kind=AgentPromptScopeKind.SINGLE_FINDING)
+    prompt = render_finding_prompt(
+        finding=finding,
+        suggested_change=suggested_change,
+    )
+    if not prompt:
+        return ""
+    return render_prompt_panel(
+        prompt=prompt,
+        title=_panel_title(scope=scope, count=1),
+        footer=_FOOTERS[scope.kind] if footer is None else footer,
     )
 
 

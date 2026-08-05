@@ -13,6 +13,7 @@ from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.finding_occurrence import parse_occurrences
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.suggested_change import parse_suggested_change
 from lintro.ai.review.narrative_parser import collapse_to_single_line
 from lintro.ai.review.severity_gate import apply_p1_evidence_gate
 
@@ -160,10 +161,10 @@ def parse_findings(
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.
         Every field added by #1925 (``kind``, ``failure_scenario``,
-        ``evidence_style``, ``occurrences``) is optional and degrades to its
-        default. Unless ``severity_override`` is set, the P1 evidence gate
-        runs: a P1 without a concrete failure scenario comes back as a marked
-        P2.
+        ``evidence_style``, ``occurrences``) and by #1911
+        (``suggested_change``) is optional and degrades to its default.
+        Unless ``severity_override`` is set, the P1 evidence gate runs: a P1
+        without a concrete failure scenario comes back as a marked P2.
     """
     if not isinstance(raw_findings, list):
         return ()
@@ -215,6 +216,9 @@ def parse_findings(
                     raw=item.get("evidence_style", ""),
                 ),
                 occurrences=parse_occurrences(item.get("occurrences")),
+                suggested_change=parse_suggested_change(
+                    item.get("suggested_change"),
+                ),
             ),
         )
     if severity_override is not None:

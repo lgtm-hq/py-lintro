@@ -39,6 +39,10 @@
       "failure_scenario": "REQUIRED for P1 — the concrete mechanism by which this fails (inputs, path taken, observable result); else empty string",
       "fix": "Concise fix suggestion",
       "suggested_code": "Exact replacement for the flagged line(s) when a mechanical fix applies (one-click GitHub suggestion); else empty string",
+      "suggested_change": {
+        "lines": [123, 124],
+        "replacement": "Full replacement text for exactly those lines; omit the whole object when the fix is not a clean hunk"
+      },
       "evidence_style": "diff_local|cross_file|speculative",
       "occurrences": [{ "file": "path/to/file", "line": 123 }],
       "confidence": "high|medium|low",
