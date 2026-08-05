@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.110.0] - 2026-08-05
+
+### Added
+
+- **review**: rebuild the per-review comment body (#1943) (bc0c83b)
+
 ## [0.109.0] - 2026-08-04
 
 ### Added
