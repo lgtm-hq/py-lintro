@@ -478,6 +478,7 @@ def review_command(
             checklist_display=checklist_display,
             question_map=question_map,
             transport=str(effective_ai_config.transport),
+            auto_resolve=lintro_config.review.auto_resolve,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,
                 overrides=_cli_overrides(

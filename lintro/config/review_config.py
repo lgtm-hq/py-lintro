@@ -156,6 +156,16 @@ class ReviewConfig(BaseModel):
             "(one agent call per chunk) but can surface more per-file doc nits."
         ),
     )
+    auto_resolve: bool = Field(
+        default=True,
+        description=(
+            "Resolve a PR review thread once its finding no longer reproduces. "
+            "The '✔ Addressed' banner is written onto the inline comment either "
+            "way; set false to keep resolving threads a manual ceremony. A "
+            "partially addressed pattern is never resolved, and a regression "
+            "never reopens a resolved thread."
+        ),
+    )
     custom_agents: CustomAgentMode = Field(
         default=CustomAgentMode.ENABLED,
         description=(
