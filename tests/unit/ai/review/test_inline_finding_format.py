@@ -328,6 +328,29 @@ def test_multiline_mode_a_prompt_names_the_full_range() -> None:
     assert_that(body).contains("third")
 
 
+def test_mode_a_prompt_carries_the_replacement_untruncated() -> None:
+    """The prompt and the suggestion must be byte-identical, however long."""
+    long_line = "x" * (MAX_REPLACEMENT_CHARS - 100)
+    finding = _finding(
+        suggested_change=SuggestedChange(
+            start_line=10,
+            end_line=10,
+            replacement=long_line,
+        ),
+    )
+    body = format_finding_comment(
+        finding=finding,
+        inline_fix=plan_inline_fix(
+            finding=finding,
+            round_diff_lines=_round_diff({10}),
+        ),
+    )
+
+    # Once inside the suggestion block, once inside the prompt panel.
+    assert_that(body.count(long_line)).is_equal_to(2)
+    assert_that(body).does_not_contain("…")
+
+
 def test_reasoning_is_fully_visible_with_no_collapsible() -> None:
     """Cause and description render in the body, not behind a details tag."""
     finding = _finding()

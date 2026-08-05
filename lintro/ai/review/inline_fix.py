@@ -45,7 +45,7 @@ MAX_REPLACED_LINES = 200
 
 
 def normalize_diff_path(path: str) -> str:
-    """Normalize a finding path to the form the GitHub diff API reports.
+    r"""Normalize a finding path to the form the GitHub diff API reports.
 
     Args:
         path: Repository-relative path as reported by the model.

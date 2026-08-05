@@ -423,8 +423,11 @@ def _suggested_change_section(*, change: SuggestedChange) -> str:
             f"suggestion block — replace {span} with the following, verbatim:"
         ),
     )
+    # Deliberately uncapped: the suggestion block renders the replacement in
+    # full, and the whole point of this section is that the two are identical.
+    # ``plan_inline_fix`` already bounds the total to MAX_REPLACEMENT_CHARS.
     replacement = "\n".join(
-        f"{_CONTINUATION_INDENT}{sanitize_comment_text(line, limit=_TEXT_LIMIT)}"
+        f"{_CONTINUATION_INDENT}{sanitize_comment_text(line)}"
         for line in change.replacement.splitlines() or [""]
     )
     return f"{header}\n{replacement}"

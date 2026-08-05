@@ -69,6 +69,9 @@ def _inline_comments(*, reporter: MagicMock) -> list[dict[str, Any]]:
         The ``comments`` array of the review payload.
     """
     payload = reporter.api_request.call_args.args[2]
+    # Guard the positional index: if the production call ever stops passing the
+    # payload third, this fails naming the cause instead of a bare KeyError.
+    assert_that(payload).is_instance_of(dict)
     comments: list[dict[str, Any]] = payload["comments"]
     return comments
 
