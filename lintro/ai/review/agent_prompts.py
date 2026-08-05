@@ -497,7 +497,7 @@ def render_finding_prompt_panel(
     )
 
 
-def render_sticky_prompt_pointer(*, sticky_url: str) -> str:
+def render_sticky_prompt_pointer(*, sticky_url: str = "") -> str:
     """Render the one-line pointer that replaces a duplicate fix-all panel.
 
     When this round's findings are exactly the PR's still-open findings, the
@@ -505,12 +505,16 @@ def render_sticky_prompt_pointer(*, sticky_url: str) -> str:
     to the sticky instead, so there is never a wrong prompt to copy.
 
     Args:
-        sticky_url: URL of the sticky status comment.
+        sticky_url: URL of the sticky status comment. When empty (the sticky's
+            id is not known yet, e.g. the comment is being created in this same
+            run) the pointer renders unlinked rather than as a dead link.
 
     Returns:
         Markdown for the pointer line.
     """
-    return (
-        "⚡ Fix prompt: identical to the "
-        f"[sticky comment's fix-all]({sticky_url}) this round — copy it there."
+    target = (
+        f"[sticky comment's fix-all]({sticky_url})"
+        if sticky_url
+        else "sticky comment's fix-all"
     )
+    return f"⚡ Fix prompt: identical to the {target} this round — copy it there."

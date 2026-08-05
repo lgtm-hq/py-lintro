@@ -31,7 +31,7 @@ def prepare_review_chunks(
         context: Collected review diff context.
         max_tokens: Maximum estimated tokens per chunk diff.
         allow_omitted_files: When True (default), return omitted repetitive-diff
-            files in ``skipped_files`` instead of raising. Pass False for strict
+            files in ``skipped`` instead of raising. Pass False for strict
             behavior.
 
     Returns:

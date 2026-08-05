@@ -19,7 +19,11 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.cli import cli
-from lintro.cli_utils.commands.review import _merge_advisory_into_json
+from lintro.cli_utils.commands.review import (
+    _cli_overrides,
+    _describe_config_source,
+    _merge_advisory_into_json,
+)
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
@@ -338,17 +342,29 @@ def test_review_exits_zero_without_p1_findings() -> None:
 def _mock_review_pipeline(
     *,
     mock_collect: MagicMock | None = None,
+    mock_config: MagicMock | None = None,
 ) -> dict[str, Any]:
-    """Return patched review dependencies for CliRunner mode wiring tests."""
+    """Return patched review dependencies for CliRunner mode wiring tests.
+
+    Args:
+        mock_collect: Replacement for the context-collection patch.
+        mock_config: Replacement lintro config. Defaults to a minimal config
+            with AI enabled; pass one to exercise config-dependent wiring
+            without duplicating the whole patch stack.
+
+    Returns:
+        Named patchers to enter around a ``CliRunner`` invocation.
+    """
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
+    if mock_config is None:
+        mock_config = MagicMock(ai={"enabled": True})
+        mock_config.review.depth = 1
+        mock_config.review.strictness = ReviewStrictness.BALANCED
+        mock_config.review.sensitivity = MagicMock()
+        mock_config.review.force_semantic_chunking = False
+        mock_config.review.checklist_display = ChecklistDisplay.OFF
 
     collect_patch = (
         patch(
@@ -1145,3 +1161,93 @@ def test_full_review_json_merges_advisory_key() -> None:
     payload = json.loads(result.output)
     assert_that(payload["summary"]).is_equal_to("ok")
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+
+
+def test_cli_overrides_lists_only_explicit_flags() -> None:
+    """Only options the caller actually passed appear as overrides."""
+    overrides = _cli_overrides(
+        depth=None,
+        strictness=None,
+        transport="cli",
+        timeout=600.0,
+        context_window=None,
+        semantic_chunks=False,
+        paths=None,
+    )
+
+    assert_that(overrides).is_equal_to(["--transport cli", "--timeout 600"])
+
+
+def test_describe_config_source_names_the_file_without_its_path() -> None:
+    """An absolute CI path must not leak into a public PR comment."""
+    described = _describe_config_source(
+        config_path="/home/runner/work/repo/repo/.lintro-config.yaml",
+        overrides=["--timeout 600"],
+    )
+
+    assert_that(described).is_equal_to(
+        "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
+    )
+
+
+def test_describe_config_source_falls_back_to_defaults() -> None:
+    """With no config file the note says so rather than rendering an empty name."""
+    assert_that(
+        _describe_config_source(config_path=None, overrides=[]),
+    ).is_equal_to("built-in defaults")
+
+
+def test_review_post_reports_config_source_and_transport() -> None:
+    """--post hands the posting layer the config file and the CLI overrides.
+
+    Driven through the CLI rather than the private helpers, so a rename of
+    those helpers cannot pass while the wiring itself has broken.
+    """
+    runner = CliRunner()
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
+    mock_config.config_path = "/home/runner/work/repo/repo/.lintro-config.yaml"
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+    patches = _mock_review_pipeline(mock_config=mock_config)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--timeout",
+                "600",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    kwargs = mock_post.call_args.kwargs
+    assert_that(kwargs["config_source"]).is_equal_to(
+        "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
+    )
+    assert_that(kwargs["transport"]).is_equal_to(str(AITransport.API))

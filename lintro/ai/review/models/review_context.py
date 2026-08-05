@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
+from lintro.ai.review.models.skipped_file import SkippedFile
 
 
 @dataclass
@@ -21,6 +22,9 @@ class ReviewContext:
         post_image_files: Full post-change contents for changed workflow files
             keyed by repository-relative path.
         repo_root: Absolute path to the git repository root.
+        skipped_files: Changed files dropped during context collection, each
+            carrying why it was dropped. Reported on the per-review comment so
+            a narrowed review scope is visible rather than implied (#1910).
     """
 
     base_ref: str
@@ -30,3 +34,4 @@ class ReviewContext:
     pr_metadata: PRMetadata | None = None
     post_image_files: dict[str, str] = field(default_factory=dict)
     repo_root: str = ""
+    skipped_files: list[SkippedFile] = field(default_factory=list)

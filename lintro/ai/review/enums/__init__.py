@@ -6,6 +6,7 @@ from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.file_domain import FileDomain
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -18,6 +19,7 @@ __all__ = [
     "ChangedFileStatus",
     "EvidenceStyle",
     "FileDomain",
+    "FileSkipReason",
     "FindingKind",
     "FindingMatchOutcome",
     "FindingStatus",

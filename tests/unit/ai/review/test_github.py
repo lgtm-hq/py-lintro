@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import MagicMock
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.exceptions import (
@@ -19,6 +20,7 @@ from lintro.ai.review.github import (
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
     _cap_body,
+    _count_new_commits,
     _format_findings_section,
     _sticky_comment_id,
     build_sticky_comment,
@@ -33,6 +35,8 @@ from lintro.ai.review.github import (
 )
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
 
 
 def _fresh_reporter() -> MagicMock:
@@ -41,6 +45,7 @@ def _fresh_reporter() -> MagicMock:
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.fetch_pr_commit_shas.return_value = []
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
     reporter.api_request.return_value = True
@@ -806,3 +811,154 @@ def test_build_sticky_survives_overflowing_finding_sets(
     assert_that(body).contains("### Open findings (400)")
     assert_that(body).contains("StickyOverflow0")
     assert_that(body).contains("more open findings not listed")
+
+
+# --- per-review comment body (#1910) ---------------------------------------
+
+
+def test_post_review_uses_the_rich_review_body(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The review event carries the #1910 body, not the old bare label."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = ["aaa111", "bbb222"]
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+        transport="cli",
+        config_source="`.lintro-config.yaml`",
+    )
+
+    assert_that(posted).is_true()
+    payload = reporter.api_request.call_args.args[2]
+    assert_that(payload["body"]).contains("🔎 **Lintro review —")
+    assert_that(payload["body"]).contains("**📊 Run stats**")
+    assert_that(payload["body"]).contains("Config source: `.lintro-config.yaml`")
+    assert_that(payload["body"]).does_not_contain("Lintro review findings")
+
+
+def test_post_review_body_links_the_pointer_to_an_existing_sticky(
+    sample_review_result: ReviewResult,
+) -> None:
+    """When the sticky already exists, the dedup pointer links straight to it."""
+    reporter = _fresh_reporter()
+    reporter.find_issue_comment.return_value = (
+        42,
+        build_sticky_comment(result=sample_review_result),
+    )
+    reporter.fetch_pr_commit_shas.return_value = []
+
+    post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    payload = reporter.api_request.call_args.args[2]
+    assert_that(payload["body"]).contains(
+        "https://github.com/owner/name/pull/7#issuecomment-42",
+    )
+
+
+# --- new-commit counting (#1910) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("prior_sha", "shas", "expected"),
+    [
+        ("aaa111", ["aaa111", "bbb222", "ccc333"], 2),
+        ("ccc333", ["aaa111", "bbb222", "ccc333"], 0),
+        ("aaa111abcdef", ["aaa111", "bbb222"], 1),
+        ("zzz999", ["aaa111", "bbb222"], None),
+        ("aaa111", [], None),
+        ("", ["aaa111"], None),
+    ],
+)
+def test_count_new_commits_measures_from_the_prior_head(
+    prior_sha: str,
+    shas: list[str],
+    expected: int | None,
+) -> None:
+    """The count is commits after the prior head, or None when unresolvable."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = shas
+    prior_state = ReviewState(runs=(RunRecord(round=1, sha=prior_sha),))
+
+    counted = _count_new_commits(reporter=reporter, prior_state=prior_state)
+
+    assert_that(counted).is_equal_to(expected)
+
+
+def test_count_new_commits_is_none_without_a_prior_round() -> None:
+    """Round 1 has no baseline, so no delta is claimed."""
+    reporter = _fresh_reporter()
+
+    counted = _count_new_commits(reporter=reporter, prior_state=ReviewState())
+
+    assert_that(counted).is_none()
+    reporter.fetch_pr_commit_shas.assert_not_called()
+
+
+def test_count_new_commits_is_none_when_the_listing_fails() -> None:
+    """An unavailable commit listing yields None rather than a wrong count."""
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = None
+    prior_state = ReviewState(runs=(RunRecord(round=1, sha="aaa111"),))
+
+    assert_that(
+        _count_new_commits(reporter=reporter, prior_state=prior_state),
+    ).is_none()
+
+
+def test_review_body_links_a_sticky_created_in_this_same_run(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Round 1's pointer resolves the sticky that was just created (#1909/#1910).
+
+    The sticky is upserted before the inline review is posted, so by the time
+    the body is built the comment exists even on the first round — the pointer
+    must link to it rather than fall back to unlinked text.
+    """
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = []
+    # First lookup loads prior state (no sticky yet); the second runs after the
+    # sticky has been created and finds it.
+    reporter.find_issue_comment.side_effect = [
+        None,
+        (99, build_sticky_comment(result=sample_review_result)),
+    ]
+
+    post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    payload = reporter.api_request.call_args.args[2]
+    assert_that(payload["body"]).contains(
+        "https://github.com/owner/name/pull/7#issuecomment-99",
+    )
+
+
+def test_review_body_and_degraded_sticky_coexist(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A rejected inline batch still folds detail into the sticky (#1909).
+
+    The per-review body (#1910) is built inside the same branch that owns the
+    degraded path, so a regression there would silently drop either the body or
+    the fold-in.
+    """
+    reporter = _fresh_reporter()
+    reporter.fetch_pr_commit_shas.return_value = []
+    reporter.api_request.return_value = False
+    reporter.find_issue_comment.side_effect = [
+        None,
+        (77, build_sticky_comment(result=sample_review_result)),
+        (77, build_sticky_comment(result=sample_review_result)),
+    ]
+
+    posted = post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    assert_that(posted).is_false()
+    # The review body still reached the (rejected) review call…
+    assert_that(reporter.api_request.call_args.args[2]["body"]).contains(
+        "🔎 **Lintro review —",
+    )
+    # …and the sticky was re-rendered with the unpostable findings folded in.
+    reporter.update_issue_comment.assert_called()
+    folded = reporter.update_issue_comment.call_args.kwargs["body"]
+    assert_that(folded).contains("could not be posted")

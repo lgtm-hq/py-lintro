@@ -214,7 +214,7 @@ class GitHubPRReporter:
                 },
             )
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                     req,
                     timeout=30,
                 ) as resp:
@@ -240,6 +240,57 @@ class GitHubPRReporter:
                 continue
             result[filename] = _parse_patch_lines(patch)
         return result
+
+    def fetch_pr_commit_shas(self) -> list[str] | None:
+        """Fetch the PR's commit shas, oldest first.
+
+        Used to state how many commits arrived since the previous review round.
+        Failures return ``None`` so callers can omit the count rather than
+        report a fabricated one.
+
+        Returns:
+            Commit shas in chronological order, or ``None`` when the listing
+            could not be fetched.
+        """
+        base_url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/commits"
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "https":
+            return None
+
+        shas: list[str] = []
+        page = 1
+        while True:
+            url = f"{base_url}?per_page=100&page={page}"
+            req = urllib.request.Request(
+                url,
+                method="GET",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                    req,
+                    timeout=30,
+                ) as resp:
+                    commits_page = json.loads(resp.read().decode())
+            except (urllib.error.URLError, json.JSONDecodeError, OSError):
+                logger.debug("Failed to fetch PR commits; omitting commit count")
+                return None
+
+            if not isinstance(commits_page, list) or not commits_page:
+                break
+            shas.extend(
+                str(commit.get("sha", ""))
+                for commit in commits_page
+                if isinstance(commit, dict) and commit.get("sha")
+            )
+            if len(commits_page) < 100:
+                break
+            page += 1
+        return shas
 
     def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
         """Find an existing issue comment containing a hidden marker.
@@ -273,7 +324,7 @@ class GitHubPRReporter:
                 },
             )
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                     req,
                     timeout=30,
                 ) as resp:
@@ -352,7 +403,7 @@ class GitHubPRReporter:
             return False
 
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                 req,
                 timeout=30,
             ) as resp:

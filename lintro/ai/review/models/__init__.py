@@ -21,6 +21,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 
@@ -44,6 +45,7 @@ __all__ = [
     "ReviewState",
     "ReviewSummary",
     "RunRecord",
+    "SkippedFile",
     "Severity",
     "SummaryBullet",
     "VerdictReasoning",

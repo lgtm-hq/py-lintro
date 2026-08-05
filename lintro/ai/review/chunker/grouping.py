@@ -14,6 +14,7 @@ from lintro.ai.review.chunker.workflow_scripts import (
 )
 from lintro.ai.review.context import split_unified_diff_by_file
 from lintro.ai.review.enums.file_domain import FileDomain
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.glob_utils import path_matches_any_glob
@@ -28,6 +29,7 @@ from lintro.ai.review.models.chunking_result import ChunkingResult
 from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.path_utils import is_test_path, matches_test_for_source
 from lintro.ai.token_budget import estimate_tokens, truncate_to_budget
 
@@ -50,7 +52,7 @@ def chunk_review_context(
         max_tokens: Maximum estimated tokens per chunk diff.
         classifications: Domain classifications for changed files.
         allow_omitted_files: When True (default), return omitted repetitive-diff
-            files in ``skipped_files`` instead of raising. Pass False for strict
+            files in ``skipped`` instead of raising. Pass False for strict
             behavior.
 
     Returns:
@@ -117,15 +119,16 @@ def chunk_review_context(
             classification_map=classification_map,
         )
     )
+    skipped_sampling_paths = {entry.path for entry in skipped_from_sampling}
     warnings: list[str] = _unreferenced_workflow_script_warnings(
-        file_paths=[path for path in file_paths if path not in skipped_from_sampling],
+        file_paths=[path for path in file_paths if path not in skipped_sampling_paths],
         per_file_diffs=per_file_diffs,
         post_image_files=context.post_image_files,
     )
     if skipped_from_sampling and not allow_omitted_files:
         raise ReviewContextError(
             "Repetitive identical diffs omitted files from review: "
-            f"{', '.join(sorted(skipped_from_sampling))}. "
+            f"{', '.join(sorted(skipped_sampling_paths))}. "
             "Pass allow_omitted_files=True to proceed with sampling.",
             code=ReviewContextErrorCode.REPETITIVE_SAMPLING_OMITTED,
         )
@@ -139,7 +142,7 @@ def chunk_review_context(
 
     chunks: list[ReviewChunk] = []
     warnings.extend(sampling_warnings)
-    skipped_files: list[str] = list(skipped_from_sampling)
+    skipped_files: list[SkippedFile] = list(skipped_from_sampling)
     truncated = False
     chunk_id = 1
 
@@ -178,7 +181,7 @@ def chunk_review_context(
         chunks=chunks,
         truncated=truncated,
         warnings=warnings,
-        skipped_files=sorted(set(skipped_files)),
+        skipped=sorted(set(skipped_files), key=lambda entry: entry.path),
     )
 
 
@@ -438,8 +441,19 @@ def _sample_repetitive_files(
     file_paths: list[str],
     per_file_diffs: dict[str, str],
     classification_map: dict[str, FileClassification],
-) -> tuple[list[str], dict[str, str], list[str], list[str]]:
-    """Sample repetitive identical diffs, keeping three representative files."""
+) -> tuple[list[str], dict[str, str], list[SkippedFile], list[str]]:
+    """Sample repetitive identical diffs, keeping three representative files.
+
+    Args:
+        file_paths: Candidate paths eligible for sampling.
+        per_file_diffs: Per-file unified diff text.
+        classification_map: Domain classification per path.
+
+    Returns:
+        Tuple of sampled paths, per-path sampling notes, the files omitted by
+        sampling (each carrying the representative file it duplicates), and
+        user-facing sampling warnings.
+    """
     signature_groups: dict[str, list[str]] = defaultdict(list)
     for path in file_paths:
         signature = _hunk_signature(
@@ -451,7 +465,7 @@ def _sample_repetitive_files(
     sampled_paths: list[str] = []
     sampling_notes: dict[str, str] = {}
     sampling_warnings: list[str] = []
-    skipped_paths: list[str] = []
+    skipped_paths: list[SkippedFile] = []
 
     for paths in signature_groups.values():
         if len(paths) <= _REPETITIVE_FILE_THRESHOLD:
@@ -464,7 +478,14 @@ def _sample_repetitive_files(
         )[:_REPETITIVE_SAMPLE_COUNT]
         sampled_paths.extend(selected)
         omitted = sorted(set(paths) - set(selected))
-        skipped_paths.extend(omitted)
+        skipped_paths.extend(
+            SkippedFile(
+                path=path,
+                reason=FileSkipReason.REPETITIVE_DIFF,
+                detail=f"same diff hunks as `{selected[0]}`",
+            )
+            for path in omitted
+        )
         omitted_preview = ", ".join(omitted[:10])
         if len(omitted) > 10:
             omitted_preview = f"{omitted_preview}, and {len(omitted) - 10} more"

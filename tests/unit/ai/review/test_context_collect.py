@@ -16,6 +16,7 @@ from lintro.ai.review.context import (
     resolve_default_base_branch,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -938,3 +939,42 @@ def test_normalize_path_prefix_preserves_edge_whitespace() -> None:
     assert_that(
         _path_matches_any_prefix(path="foo", prefixes=[spaced_prefix]),
     ).is_false()
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_review_context_records_path_filter_skips(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """Files dropped by --path are recorded with the reason they were dropped."""
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    queue_diff_snapshot(
+        dispatcher,
+        diff_ref="base123...head456",
+        unified=(
+            "diff --git a/a.py b/a.py\n"
+            "+++ b/a.py\n"
+            "+a\n"
+            "diff --git a/pkg/b.py b/pkg/b.py\n"
+            "+++ b/pkg/b.py\n"
+            "+b\n"
+        ),
+        name_status="M\0a.py\0M\0pkg/b.py\0",
+        numstat="1\t0\ta.py\01\t0\tpkg/b.py\0",
+    )
+    mock_run.side_effect = dispatcher
+
+    context = collect_review_context(base="main", paths=["pkg/"])
+
+    assert_that([entry.path for entry in context.skipped_files]).is_equal_to(["a.py"])
+    assert_that(context.skipped_files[0].reason).is_equal_to(
+        FileSkipReason.PATH_FILTER,
+    )

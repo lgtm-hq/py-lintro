@@ -567,3 +567,98 @@ def test_deprecated_api_request_alias_delegates(test_token: str) -> None:
 
     assert_that(result).is_true()
     mock.assert_called_once_with("POST", "https://api.github.com/x", {"a": 1})
+
+
+# --- PR commit listing (#1910) ---------------------------------------------
+
+
+def _json_response(payload: object) -> MagicMock:
+    """Build a context-manager mock returning ``payload`` as a JSON body.
+
+    Args:
+        payload: Object serialized as the response body.
+
+    Returns:
+        A MagicMock usable as an ``urlopen`` return value.
+    """
+    response = MagicMock()
+    response.read.return_value = json.dumps(payload).encode()
+    response.__enter__ = MagicMock(return_value=response)
+    response.__exit__ = MagicMock(return_value=False)
+    return response
+
+
+def test_fetch_pr_commit_shas_returns_single_page(test_token: str) -> None:
+    """A short-page response ends pagination and yields its shas in order."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    page = [{"sha": "aaa"}, {"sha": "bbb"}]
+
+    with patch(
+        "urllib.request.urlopen",
+        return_value=_json_response(page),
+    ) as mock_open:
+        shas = reporter.fetch_pr_commit_shas()
+
+    assert_that(shas).is_equal_to(["aaa", "bbb"])
+    assert_that(mock_open.call_count).is_equal_to(1)
+
+
+def test_fetch_pr_commit_shas_accumulates_pages(test_token: str) -> None:
+    """A full first page triggers a second fetch and both pages are kept."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    first = [{"sha": f"sha{index}"} for index in range(100)]
+    second = [{"sha": "tail"}]
+
+    with patch(
+        "urllib.request.urlopen",
+        side_effect=[_json_response(first), _json_response(second)],
+    ) as mock_open:
+        shas = reporter.fetch_pr_commit_shas()
+
+    assert_that(shas).is_length(101)
+    assert_that((shas or [])[-1]).is_equal_to("tail")
+    assert_that(mock_open.call_count).is_equal_to(2)
+
+
+def test_fetch_pr_commit_shas_skips_malformed_entries(test_token: str) -> None:
+    """Entries without a usable sha are dropped rather than stringified."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    page = [{"sha": "aaa"}, {"sha": ""}, "not-a-dict", {"commit": {}}]
+
+    with patch("urllib.request.urlopen", return_value=_json_response(page)):
+        shas = reporter.fetch_pr_commit_shas()
+
+    assert_that(shas).is_equal_to(["aaa"])
+
+
+def test_fetch_pr_commit_shas_rejects_non_https(test_token: str) -> None:
+    """A non-HTTPS API base is refused before any request is made."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+        api_base="http://internal.example",
+    )
+
+    with patch("urllib.request.urlopen") as mock_open:
+        shas = reporter.fetch_pr_commit_shas()
+
+    assert_that(shas).is_none()
+    mock_open.assert_not_called()
+
+
+def test_fetch_pr_commit_shas_returns_none_on_transport_error(
+    test_token: str,
+) -> None:
+    """A failed listing yields None so callers omit the count, not zero it."""
+    import urllib.error
+
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    with patch(
+        "urllib.request.urlopen",
+        side_effect=urllib.error.URLError("boom"),
+    ):
+        shas = reporter.fetch_pr_commit_shas()
+
+    assert_that(shas).is_none()

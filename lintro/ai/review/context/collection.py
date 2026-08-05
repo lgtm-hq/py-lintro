@@ -22,11 +22,13 @@ from lintro.ai.review.context.pr_metadata import (
     _parse_pr_view_json,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.skipped_file import SkippedFile
 
 _WORKFLOW_PATH_PREFIX = ".github/workflows/"
 
@@ -401,6 +403,7 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
         unified_diff=context.unified_diff,
         pr_metadata=context.pr_metadata,
         post_image_files=post_image_files,
+        skipped_files=context.skipped_files,
     )
 
 
@@ -508,6 +511,17 @@ def _filter_context_by_paths(
         for path, content in context.post_image_files.items()
         if path in filtered_paths
     }
+    # Record the exclusions rather than letting them vanish: a `--path` filter
+    # is the difference between "the review saw nothing wrong here" and "the
+    # review never looked", and only the per-file reason distinguishes them.
+    skipped = [
+        *context.skipped_files,
+        *(
+            SkippedFile(path=changed_file.path, reason=FileSkipReason.PATH_FILTER)
+            for changed_file in context.changed_files
+            if changed_file.path not in filtered_paths
+        ),
+    ]
     return ReviewContext(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
@@ -515,6 +529,7 @@ def _filter_context_by_paths(
         unified_diff=unified_diff,
         pr_metadata=context.pr_metadata,
         post_image_files=filtered_post_image,
+        skipped_files=skipped,
     )
 
 

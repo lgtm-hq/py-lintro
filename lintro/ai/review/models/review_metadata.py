@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.models.skipped_file import SkippedFile
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewMetadata:
@@ -39,6 +41,10 @@ class ReviewMetadata:
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
             run because they are disabled or matched no changed file.
+        reviewed_paths (tuple[str, ...]): Repository-relative paths the review
+            actually looked at, in sorted order.
+        skipped_files (tuple[SkippedFile, ...]): Changed files excluded from
+            the review, each carrying the reason it was excluded (#1910).
     """
 
     model: str
@@ -63,3 +69,5 @@ class ReviewMetadata:
     duration_seconds: float = 0.0
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
+    reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
+    skipped_files: tuple[SkippedFile, ...] = field(default_factory=tuple)
