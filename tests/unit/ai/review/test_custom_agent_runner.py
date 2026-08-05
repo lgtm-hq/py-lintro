@@ -13,7 +13,11 @@ from assertpy import assert_that
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+    AIProviderError,
+)
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.custom_agent_runner import (
@@ -27,6 +31,7 @@ from lintro.ai.review.custom_agents import (
     parse_custom_agent,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import Severity
@@ -493,3 +498,69 @@ def test_run_review_only_mode_skips_builtin_checklist(tmp_path: Path) -> None:
     assert_that(result.metadata.chunks_total).is_equal_to(0)
     assert_that(result.metadata.custom_agents_run).is_equal_to(1)
     assert_that(result.summary).contains("Custom review agents only")
+
+
+def test_only_mode_marks_a_failed_agent_scope_as_unreviewed(
+    tmp_path: Path,
+) -> None:
+    """A failed agent's files are reported skipped, not silently reviewed.
+
+    The agent is *selected* — its globs match ``src/app.py`` — but a non-budget
+    provider error skips its pass. Crediting coverage from selection rather
+    than completion would report the file as reviewed when nothing read it,
+    which is precisely the clean-pass illusion these records exist to prevent.
+    """
+    agent = _agent(tmp_path=tmp_path)
+    provider = _mock_provider(content="{}")
+
+    with (
+        _patch_builtin_call(content="{}"),
+        patch(
+            "lintro.ai.review.custom_agent_runner.call_ai",
+            side_effect=AIProviderError("agent exploded"),
+        ),
+    ):
+        result = run_review(
+            _context(),
+            provider=provider,
+            ai_config=_ai_config(),
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            custom_agents=(agent,),
+            run_builtin_checklist=False,
+        )
+
+    assert_that(result.metadata.custom_agents_run).is_equal_to(0)
+    assert_that(result.metadata.reviewed_paths).is_empty()
+    skipped = {entry.path: entry.reason for entry in result.metadata.skipped_files}
+    assert_that(skipped).contains_key("src/app.py")
+    assert_that(skipped["src/app.py"]).is_equal_to(FileSkipReason.AGENT_SCOPE)
+
+
+def test_only_mode_credits_coverage_to_a_completed_agent(
+    tmp_path: Path,
+) -> None:
+    """A completed agent's scoped files count as reviewed."""
+    agent = _agent(tmp_path=tmp_path)
+    provider = _mock_provider(content="{}")
+
+    with (
+        _patch_builtin_call(content="{}"),
+        _patch_agent_call(content=_agent_response(findings=[]), cost=0.001),
+    ):
+        result = run_review(
+            _context(),
+            provider=provider,
+            ai_config=_ai_config(),
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            custom_agents=(agent,),
+            run_builtin_checklist=False,
+        )
+
+    assert_that(result.metadata.reviewed_paths).contains("src/app.py")
+    # docs/readme.md matches no agent glob, so it stays an explicit skip.
+    skipped = {entry.path for entry in result.metadata.skipped_files}
+    assert_that(skipped).is_equal_to({"docs/readme.md"})

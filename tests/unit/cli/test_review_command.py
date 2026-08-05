@@ -342,17 +342,29 @@ def test_review_exits_zero_without_p1_findings() -> None:
 def _mock_review_pipeline(
     *,
     mock_collect: MagicMock | None = None,
+    mock_config: MagicMock | None = None,
 ) -> dict[str, Any]:
-    """Return patched review dependencies for CliRunner mode wiring tests."""
+    """Return patched review dependencies for CliRunner mode wiring tests.
+
+    Args:
+        mock_collect: Replacement for the context-collection patch.
+        mock_config: Replacement lintro config. Defaults to a minimal config
+            with AI enabled; pass one to exercise config-dependent wiring
+            without duplicating the whole patch stack.
+
+    Returns:
+        Named patchers to enter around a ``CliRunner`` invocation.
+    """
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
+    if mock_config is None:
+        mock_config = MagicMock(ai={"enabled": True})
+        mock_config.review.depth = 1
+        mock_config.review.strictness = ReviewStrictness.BALANCED
+        mock_config.review.sensitivity = MagicMock()
+        mock_config.review.force_semantic_chunking = False
+        mock_config.review.checklist_display = ChecklistDisplay.OFF
 
     collect_patch = (
         patch(
@@ -1192,9 +1204,6 @@ def test_review_post_reports_config_source_and_transport() -> None:
     those helpers cannot pass while the wiring itself has broken.
     """
     runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
     mock_config = MagicMock(
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
@@ -1204,45 +1213,19 @@ def test_review_post_reports_config_source_and_transport() -> None:
     mock_config.review.sensitivity = MagicMock()
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
+    patches = _mock_review_pipeline(mock_config=mock_config)
 
     with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_provider",
-            return_value=MagicMock(model_name="gpt-4o", name="openai"),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=_empty_result(),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.render_review_output",
-            return_value="",
-        ),
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
         patch(
             "lintro.ai.review.github.post_review_to_github",
             return_value=True,

@@ -9,6 +9,7 @@ from assertpy import assert_that
 from lintro import __version__ as lintro_version
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_review_body import (
     REVIEW_BODY_FOOTER,
     build_review_body,
@@ -426,7 +427,7 @@ def test_long_file_lists_are_summarized_not_dumped(
     )
 
     assert_that(body).contains("…and 4940 more reviewed")
-    assert_that(len(body)).is_less_than_or_equal_to(60_000)
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
 
 
 def test_body_truncation_leaves_a_visible_marker(
@@ -455,7 +456,7 @@ def test_body_truncation_leaves_a_visible_marker(
         head_sha="fb740b2aaa",
     )
 
-    assert_that(len(body)).is_less_than_or_equal_to(60_000)
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(body).ends_with("✂️ Comment truncated to fit GitHub's size limit.")
 
 

@@ -890,6 +890,9 @@ async def run_review_async(
                 context=context,
                 selection=agent_selection,
                 run_builtin_checklist=run_builtin_checklist,
+                completed_agents=frozenset(
+                    result.agent_name for result in custom_results
+                ),
             ),
         ],
     )
@@ -1948,18 +1951,25 @@ def _agent_scope_skips(
     context: ReviewContext,
     selection: CustomAgentSelection,
     run_builtin_checklist: bool,
+    completed_agents: frozenset[str],
 ) -> list[SkippedFile]:
-    """List changed files no custom agent covered in an agents-only run.
+    """List changed files no custom agent reviewed in an agents-only run.
 
     Under ``review.custom_agents: only`` the built-in checklist never runs, so
-    a file outside every enabled agent's globs is not reviewed at all. Without
-    this record the run would report it as reviewed and the gap would read as
-    a clean pass.
+    a file no agent looked at is not reviewed at all. Without this record the
+    run would report it as reviewed and the gap would read as a clean pass.
+
+    Coverage is credited from the agents that *completed*, never from the ones
+    that were merely selected. A selected agent can fail to produce a pass in
+    two ways — a non-budget ``AIError`` skips it and the run continues, or a
+    cost-cap stop means later agents never start — and in both cases its files
+    were scheduled but never read.
 
     Args:
         context: Collected review context.
         selection: Custom agents partitioned into selected and skipped.
         run_builtin_checklist: Whether the built-in checklist passes ran.
+        completed_agents: Names of the agents that returned a completed pass.
 
     Returns:
         Skip records for the uncovered files; empty when the checklist ran
@@ -1967,7 +1977,12 @@ def _agent_scope_skips(
     """
     if run_builtin_checklist:
         return []
-    covered = {path for agent in selection.selected for path in agent.files}
+    covered = {
+        path
+        for agent in selection.selected
+        if agent.agent.name in completed_agents
+        for path in agent.files
+    }
     return [
         SkippedFile(path=changed.path, reason=FileSkipReason.AGENT_SCOPE)
         for changed in context.changed_files
