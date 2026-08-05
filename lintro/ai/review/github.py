@@ -484,6 +484,28 @@ def _partial_progress(
     return progressed
 
 
+def _fresh_thread_id(
+    *,
+    record: FindingRecord,
+    newest: Mapping[str, int],
+) -> int | None:
+    """Return the comment id of a regression's *new* thread, when there is one.
+
+    Args:
+        record: The regressed record, still pointing at its old thread.
+        newest: Highest comment id seen per finding key.
+
+    Returns:
+        The new comment's id, or ``None`` when this round posted no fresh
+        comment for the finding — the old thread carries the same marker, so
+        without this check its banner would link to itself.
+    """
+    candidate = newest.get(record.key)
+    if candidate is None or candidate == record.inline_comment_id:
+        return None
+    return candidate
+
+
 def _run_lifecycle(
     *,
     reporter: GitHubPRReporter,
@@ -557,7 +579,7 @@ def _run_lifecycle(
         new_thread_urls={
             record.key: _comment_url(
                 reporter=reporter,
-                comment_id=newest.get(record.key),
+                comment_id=_fresh_thread_id(record=record, newest=newest),
             )
             for record in regressed
         },

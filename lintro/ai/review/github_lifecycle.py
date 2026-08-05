@@ -251,10 +251,13 @@ def _banner_lines(
         lines.append(
             f"> ✔ **Addressed in `{fixed_in}` · round {record.resolved_round}**",
         )
+    # Without a url there may be no new thread at all: a finding that no longer
+    # anchors to a line in the diff is re-raised on the sticky comment instead,
+    # so pointing at an inline comment that does not exist would be a lie.
     pointer = (
         f"see the [new thread]({new_thread_url})"
         if new_thread_url
-        else "see the new inline comment for this finding"
+        else "the finding is open again — see the sticky comment's open findings"
     )
     lines.append(
         f"> ↩ **Regressed in {where} · round {round_number}** — {pointer}. "

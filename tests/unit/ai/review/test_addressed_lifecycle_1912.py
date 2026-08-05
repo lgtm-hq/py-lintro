@@ -332,6 +332,25 @@ def test_regressed_thread_is_bannered_and_stays_resolved() -> None:
     assert_that(body).contains("#discussion_r9")
 
 
+def test_a_regression_without_a_new_thread_does_not_link_one() -> None:
+    """A finding off the diff gets no fresh comment, so promise none."""
+    reporter = _FakeReporter(threads=_threads(is_resolved=True))
+    record = _record(regressed=True, resolved_sha="0f0f0f0f", resolved_round=2)
+
+    sync_addressed_lifecycle(
+        reporter=reporter,
+        regressed=(record,),
+        comment_bodies={_COMMENT_ID: _INLINE_BODY},
+        head_sha=_HEAD_SHA,
+        round_number=4,
+    )
+
+    body = reporter.edits[0][1]
+    assert_that(body).contains("↩ **Regressed in `abc1234` · round 4**")
+    assert_that(body).contains("see the sticky comment's open findings")
+    assert_that(body).does_not_contain("new thread]")
+
+
 def test_unchanged_body_is_never_patched() -> None:
     """The second run of a round must make no request at all."""
     reporter = _FakeReporter(threads=_threads(is_resolved=True))
