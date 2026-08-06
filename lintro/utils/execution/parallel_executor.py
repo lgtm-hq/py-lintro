@@ -202,6 +202,7 @@ def run_tools_parallel(
                         action=action,
                         on_result=on_tool_complete,
                         max_fix_retries=max_fix_retries,
+                        profile=profile,
                     ),
                 )
 
