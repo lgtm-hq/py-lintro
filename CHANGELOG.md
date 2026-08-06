@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.1] - 2026-08-06
+
+### Fixed
+
+- **review**: close mock-parity gaps from the #1905 comment-surfaces audit (#1952)
+  (3fd782e)
+
 ## [0.112.0] - 2026-08-06
 
 ### Added
