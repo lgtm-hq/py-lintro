@@ -349,6 +349,53 @@ class _LifecycleEdit:
     new_thread_url: str = ""
 
 
+#: Which stage wins when one thread qualifies for two of them in a round.
+#: Regression sorts first because it is the only stage that subsumes another:
+#: its banner already carries the ``✔ Addressed in <sha>`` line for the round
+#: that had fixed the finding, and it adds what a reader cannot get anywhere
+#: else — this thread is stale, the live discussion moved to the new one
+#: (mock-4 section 3, state D). "Addressed" outranks "partial" for the same
+#: reason a whole is more than a part. Lower sorts first.
+_STAGE_PRECEDENCE: dict[LifecycleStage, int] = {
+    LifecycleStage.REGRESSED: 0,
+    LifecycleStage.ADDRESSED: 1,
+    LifecycleStage.PARTIAL: 2,
+}
+
+
+def _one_edit_per_thread(
+    *,
+    edits: Sequence[_LifecycleEdit],
+) -> list[tuple[int, _LifecycleEdit]]:
+    """Collapse the planned edits to at most one per inline comment.
+
+    A single record can qualify for two stages in one round — a regression that
+    also lost some of its occurrences. Editing its comment twice would apply the
+    second banner to the pre-edit body, silently undoing the first edit's
+    ``(historical)`` retitle and leaving a regression banner beside a live fix
+    prompt.
+
+    Args:
+        edits: Planned edits, in stage order.
+
+    Returns:
+        ``(comment id, edit)`` pairs, one per comment, keeping the stage that
+        most needs saying. Edits without a comment id are dropped: they have no
+        thread to stamp.
+    """
+    chosen: dict[int, _LifecycleEdit] = {}
+    for edit in edits:
+        comment_id = edit.record.inline_comment_id
+        if comment_id is None:
+            continue
+        held = chosen.get(comment_id)
+        if held is None or (
+            _STAGE_PRECEDENCE[edit.stage] < _STAGE_PRECEDENCE[held.stage]
+        ):
+            chosen[comment_id] = edit
+    return list(chosen.items())
+
+
 def sync_addressed_lifecycle(
     *,
     reporter: LifecycleClient,
@@ -416,16 +463,14 @@ def sync_addressed_lifecycle(
             for record in regressed
         ),
     ]
+    planned = _one_edit_per_thread(edits=edits)
 
     edited: list[str] = []
     unchanged: list[str] = []
     failed: list[str] = []
     resolvable_ids: list[tuple[str, int]] = []
 
-    for edit in edits:
-        comment_id = edit.record.inline_comment_id
-        if comment_id is None:
-            continue
+    for comment_id, edit in planned:
         current = comment_bodies.get(comment_id)
         if current is None:
             logger.debug(

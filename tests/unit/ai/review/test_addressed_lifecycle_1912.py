@@ -351,6 +351,97 @@ def test_a_regression_without_a_new_thread_does_not_link_one() -> None:
     assert_that(body).does_not_contain("new thread]")
 
 
+def test_one_thread_gets_one_banner_even_when_two_stages_apply() -> None:
+    """A regression that also lost occurrences must not be edited twice.
+
+    The second edit would start from the pre-edit body, undoing the first one's
+    ``(historical)`` retitle and leaving a regression banner beside a live fix
+    prompt. Regression wins: partial progress on a thread the discussion has
+    already left is the less useful half of the story.
+    """
+    reporter = _FakeReporter(threads=_threads(is_resolved=True))
+    record = _record(
+        regressed=True,
+        resolved_sha="0f0f0f0f",
+        resolved_round=2,
+        occurrences=(FindingOccurrence(file="src/main.py", line=10),) * 6,
+        occurrences_total=20,
+    )
+
+    sync_addressed_lifecycle(
+        reporter=reporter,
+        partial=(record,),
+        regressed=(record,),
+        comment_bodies={_COMMENT_ID: _INLINE_BODY},
+        head_sha=_HEAD_SHA,
+        round_number=4,
+    )
+
+    assert_that(reporter.edits).is_length(1)
+    body = reporter.edits[0][1]
+    assert_that(body).contains("↩ **Regressed in")
+    assert_that(body).contains("(historical)")
+    assert_that(body).does_not_contain("14/20 addressed")
+
+
+def test_a_regression_outranks_an_addressed_stamp_on_the_same_thread() -> None:
+    """State D: the old thread must point at the new one, not read as fixed.
+
+    The regression banner already carries the ``✔ Addressed in <sha>`` line for
+    the round that had fixed the finding, so it loses nothing — while a bare
+    "addressed" stamp would hide that the finding is open again elsewhere.
+    """
+    reporter = _FakeReporter(threads=_threads(is_resolved=True))
+    record = _record(
+        regressed=True,
+        resolved_sha="0f0f0f0f",
+        resolved_round=2,
+    )
+    url = "https://github.com/owner/name/pull/7#discussion_r9"
+
+    report = sync_addressed_lifecycle(
+        reporter=reporter,
+        resolved=(record,),
+        regressed=(record,),
+        comment_bodies={_COMMENT_ID: _INLINE_BODY},
+        head_sha=_HEAD_SHA,
+        round_number=4,
+        new_thread_urls={record.key: url},
+    )
+
+    assert_that(reporter.edits).is_length(1)
+    body = reporter.edits[0][1]
+    assert_that(body).contains("↩ **Regressed in `abc1234` · round 4**")
+    assert_that(body).contains("#discussion_r9")
+    # A regression never resolves the thread off its own back: it is already
+    # resolved and the live discussion is on the fresh thread.
+    assert_that(report.resolved).is_empty()
+    assert_that(reporter.resolved_threads).is_empty()
+
+
+def test_a_record_without_a_comment_id_is_never_stamped() -> None:
+    """A finding whose thread was never captured has nothing to edit."""
+    reporter = _FakeReporter(threads=_threads())
+    record = _record(
+        status=FindingStatus.RESOLVED,
+        resolved_round=3,
+        inline_comment_id=None,
+    )
+
+    report = sync_addressed_lifecycle(
+        reporter=reporter,
+        resolved=(record,),
+        comment_bodies={_COMMENT_ID: _INLINE_BODY},
+        head_sha=_HEAD_SHA,
+        round_number=3,
+    )
+
+    assert_that(reporter.edits).is_empty()
+    assert_that(report.edited).is_empty()
+    assert_that(report.resolved).is_empty()
+    assert_that(reporter.resolved_threads).is_empty()
+
+
 def test_unchanged_body_is_never_patched() -> None:
     """The second run of a round must make no request at all."""
     reporter = _FakeReporter(threads=_threads(is_resolved=True))
@@ -824,3 +915,19 @@ def test_graphql_url_follows_a_github_enterprise_api_base() -> None:
     )
 
     assert_that(reporter.graphql_url).is_equal_to("https://ghe.example.com/api/graphql")
+
+
+def test_graphql_refuses_a_non_https_api_base() -> None:
+    """A cleartext base must never carry the bearer token."""
+    reporter = GitHubPRReporter(
+        token=_TEST_TOKEN,
+        repo="owner/name",
+        pr_number=7,
+        api_base="http://ghe.example.com/api/v3",
+    )
+
+    with patch("urllib.request.urlopen") as urlopen:
+        resolved = reporter.resolve_review_thread(thread_id=_THREAD_ID)
+
+    assert_that(resolved).is_false()
+    urlopen.assert_not_called()

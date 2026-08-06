@@ -294,7 +294,9 @@ When `lintro review --post` runs again on a PR, every finding the new round no l
 reproduces is stamped on its own inline comment rather than only in the sticky summary:
 
 - **Addressed** — the comment gets a `✔ Addressed in <sha> · round N` banner, its
-  copy-paste agent prompt is retitled `(historical)`, and the thread is resolved.
+  copy-paste agent prompt is retitled `(historical)`, and the thread is resolved when
+  `review.auto_resolve` is true — which it is by default; set it to `false` to opt out
+  and resolve the thread by hand.
 - **Partially addressed** — a finding reported at several locations resolves only when
   the whole pattern is gone. Progress shows as `✔ 14/20 addressed in <sha> · round N`
   and the thread stays open.
