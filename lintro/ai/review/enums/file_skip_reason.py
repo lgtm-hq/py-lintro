@@ -17,6 +17,7 @@ class FileSkipReason(StrEnum):
     """
 
     PATH_FILTER = auto()
+    CONFIG_EXCLUDED = auto()
     REPETITIVE_DIFF = auto()
     AGENT_SCOPE = auto()
 
@@ -24,6 +25,7 @@ class FileSkipReason(StrEnum):
 #: Human-readable phrase rendered after a skipped file's path.
 FILE_SKIP_REASON_LABELS: dict[FileSkipReason, str] = {
     FileSkipReason.PATH_FILTER: "outside the requested --path filter",
+    FileSkipReason.CONFIG_EXCLUDED: "excluded by config (ai.exclude_paths)",
     FileSkipReason.REPETITIVE_DIFF: (
         "identical to a sampled file's diff (repetitive-diff sampling)"
     ),

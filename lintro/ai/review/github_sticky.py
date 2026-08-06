@@ -9,11 +9,12 @@ inline comments.
 Layout, top to bottom:
 
 1. header — ``🔎 Lintro Review · round N · commit <sha>``
-2. readiness pill + delta line
+2. readiness pill, the verdict rubric as fine-print directly under it, then the
+   delta line
 3. ``Summary`` — headline plus walkthrough bullets, severity-marked when a
    bullet is tied to an open P1/P2
-4. ``Why it's blocked`` — the model's reasoning, the verdict rubric as
-   fine-print, and the files needing attention
+4. ``Why it's blocked`` — the model's reasoning and the files needing
+   attention
 5. severity tiles (blockers / warnings / nits / fixed)
 6. ``Open findings`` — one line per finding, titles only
 7. the fix-all agent prompt panel, scoped to *all* still-open findings
@@ -61,6 +62,7 @@ from lintro.ai.review.github_constants import (
     STICKY_FOOTER,
     STICKY_MARKER,
 )
+from lintro.ai.review.github_lifecycle import inline_comment_url
 from lintro.ai.review.github_render import (
     _fmt_cost,
     _fmt_int,
@@ -189,6 +191,16 @@ _DETAILS_TAG_RE = re.compile(r"<(/?)(details|summary)\b", re.IGNORECASE)
 #: Maximum characters of a finding title rendered in a table cell.
 _TITLE_LIMIT = 160
 
+#: End of the first sentence of a round narrative. Terminators other than the
+#: period are matched too: a headline ending in "?" or "!" is one sentence, and
+#: splitting on ". " alone would persist the whole paragraph after it.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+
+#: Maximum characters of a stored per-round narrative, on the way in (it is
+#: persisted in the state blob, which competes for the same size cap) and on
+#: the way out.
+_NARRATIVE_LIMIT = 200
+
 #: Upper bound for the finding-count binary searches. No review round
 #: realistically reports more findings than this, and the search costs only
 #: ~log2(n) renders.
@@ -243,6 +255,8 @@ def build_sticky_comment(
     auth_mode: str = "",
     inline_failure: InlinePostFailure | None = None,
     inline_comment_ids: Mapping[str, int] | None = None,
+    repo: str = "",
+    pr_number: int | None = None,
 ) -> str:
     """Compose the full v5 "mission control" sticky PR comment body.
 
@@ -271,8 +285,11 @@ def build_sticky_comment(
             table and folds those findings' full detail back in.
         inline_comment_ids: Finding key to the id of the inline comment that
             carries it, captured after this round's review was submitted
-            (#1912). Stamped onto the persisted records so a later round can
-            edit those comments in place; rendering is unaffected.
+            (#1912). Stamped onto the persisted records, and used to link each
+            open finding's title to the thread that carries its detail.
+        repo: ``owner/name`` slug of the repository, used to build those links.
+        pr_number: Pull request number, likewise. Titles render unlinked when
+            either is unknown rather than as dead links.
 
     Returns:
         Complete Markdown body carrying the hidden marker and state block,
@@ -287,8 +304,21 @@ def build_sticky_comment(
         round_number=round_number,
         head_sha=head_sha,
     )
+    # Stamp the ids before rendering, not only before persisting: the open
+    # table links each title to its thread, and a round-1 finding's id is only
+    # known on the refresh pass that passes ``inline_comment_ids`` in.
+    match = replace(
+        match,
+        records=stamp_comment_ids(
+            records=match.records,
+            comment_ids=inline_comment_ids,
+        ),
+    )
     verdict = derive_verdict(findings=match.records)
     prior = list(state.runs)
+    open_count = sum(
+        1 for record in match.records if record.status is FindingStatus.OPEN
+    )
     current = _run_record(
         result=result,
         round_number=round_number,
@@ -296,6 +326,8 @@ def build_sticky_comment(
         transport=transport,
         auth_mode=auth_mode,
         verdict=verdict,
+        resolved=len(match.resolved),
+        open_after=open_count,
     )
     combined_runs = [*prior, current]
     all_runs = combined_runs[-MAX_STORED_RUNS:]
@@ -316,11 +348,10 @@ def build_sticky_comment(
             question_map=question_map or {},
             inline_failure=inline_failure,
             limits=limits,
+            repo=repo,
+            pr_number=pr_number,
         )
 
-    open_count = sum(
-        1 for record in match.records if record.status is FindingStatus.OPEN
-    )
     body = _fit_body(
         assemble=assemble,
         prior_run_count=len(all_runs) - 1,
@@ -329,10 +360,7 @@ def build_sticky_comment(
     )
     new_state = ReviewState(
         runs=tuple(all_runs),
-        findings=stamp_comment_ids(
-            records=match.records,
-            comment_ids=inline_comment_ids,
-        ),
+        findings=match.records,
         truncated=state.truncated or runs_dropped,
     )
     return body + render_state_block(
@@ -459,6 +487,8 @@ def _assemble_body(
     question_map: dict[int, str],
     inline_failure: InlinePostFailure | None,
     limits: _RenderLimits,
+    repo: str = "",
+    pr_number: int | None = None,
 ) -> str:
     """Render every sticky section in order and join the non-empty ones.
 
@@ -475,6 +505,8 @@ def _assemble_body(
         question_map: Prompt id to question text.
         inline_failure: Findings whose inline comments could not be posted.
         limits: Per-section render limits.
+        repo: ``owner/name`` slug used to link finding titles to their threads.
+        pr_number: Pull request number used for the same links.
 
     Returns:
         The assembled body, without the hidden state block.
@@ -497,6 +529,7 @@ def _assemble_body(
         STICKY_MARKER,
         _header(round_number=round_number, head_sha=head_sha),
         _readiness_pill(verdict=verdict, records=match.records),
+        _verdict_explainer(),
         _delta_line(match=match, round_number=round_number),
         _summary_section(result=result),
         _reasoning_section(result=result, verdict=verdict),
@@ -506,6 +539,8 @@ def _assemble_body(
             records=open_records,
             match=match,
             total=total_open,
+            repo=repo,
+            pr_number=pr_number,
         ),
         _degraded_details(
             failure=inline_failure,
@@ -587,6 +622,22 @@ def _readiness_pill(
     )
     noun = _plural(count=count, noun=_VERDICT_NOUNS[verdict])
     return f"{label} — {count} open {noun}"
+
+
+def _verdict_explainer() -> str:
+    """Render the verdict-derivation rubric as fine-print under the pill.
+
+    It sits directly under the readiness verdict, not inside the reasoning
+    section: the rubric explains the *pill*, and a reader who wants to know how
+    "Blocked" was decided should not have to find it three sections later. It is
+    rendered on every round, including a clean ``READY`` one — that is precisely
+    the round where a reader most needs to know the verdict was derived from
+    open findings rather than asked of the model.
+
+    Returns:
+        The ``<sub>``-wrapped rubric line.
+    """
+    return f"<sub>{VERDICT_RUBRIC_FINE_PRINT}</sub>"
 
 
 def _delta_line(*, match: FindingMatchResult, round_number: int) -> str:
@@ -676,7 +727,10 @@ def _summary_bullet(*, text: str, finding_ref: str, result: ReviewResult) -> str
 
 
 def _reasoning_section(*, result: ReviewResult, verdict: ReviewVerdict) -> str:
-    """Render the model's verdict reasoning plus the derivation fine-print.
+    """Render the model's verdict reasoning and the files it points at.
+
+    The derivation rubric is deliberately *not* here: it explains the readiness
+    pill and is rendered directly under it by :func:`_verdict_explainer`.
 
     Args:
         result: Current review result.
@@ -697,7 +751,6 @@ def _reasoning_section(*, result: ReviewResult, verdict: ReviewVerdict) -> str:
             text = sanitize_comment_text(paragraph, limit=2000).strip()
             if text:
                 lines.extend(["", text])
-    lines.extend(["", f"<sub>{VERDICT_RUBRIC_FINE_PRINT}</sub>"])
     if reasoning is not None and reasoning.files_needing_attention:
         files = " · ".join(
             f"`{sanitize_comment_text(path, limit=200)}`"
@@ -766,16 +819,21 @@ def _open_findings_section(
     records: list[FindingRecord],
     match: FindingMatchResult,
     total: int,
+    repo: str = "",
+    pr_number: int | None = None,
 ) -> str:
     """Render the open-findings index table.
 
     Titles only, one line each: the detail lives on the inline comments, and
-    duplicating it here is what made the previous sticky unreadable.
+    duplicating it here is what made the previous sticky unreadable. Each title
+    links to that detail so the index is one click from the thread.
 
     Args:
         records: Open records to render, already ordered and limited.
         match: Cross-round matching outcome, for the ``Δ`` column.
         total: Total number of open findings before any limit was applied.
+        repo: ``owner/name`` slug used to build the per-finding links.
+        pr_number: Pull request number used for the same links.
 
     Returns:
         The ``Open findings`` section, always present so a reader never has to
@@ -794,7 +852,7 @@ def _open_findings_section(
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
             f"| {_severity_cell(record=record)} "
-            f"| {_cell(text=record.title, limit=_TITLE_LIMIT)} "
+            f"| {_finding_cell(record=record, repo=repo, pr_number=pr_number)} "
             f"| `{_location(record=record)}` "
             f"| round {record.since_round} |",
         )
@@ -1063,9 +1121,9 @@ def _history_section(
         "",
         badges,
         "",
-        "| Run | Commit | Verdict | Model | Open | Tokens (in/out) | Est. cost "
-        "| Duration |",
-        "|:-:|---|---|---|:-:|---|---|---|",
+        "| Run | Commit | Verdict | Model | Open | Fixed | Tokens (in/out) "
+        "| Est. cost | Duration |",
+        "|:-:|---|---|---|:-:|:-:|---|---|---|",
     ]
     for run in reversed(shown):
         lines.append(_history_row(run=run, latest=run is runs[-1]))
@@ -1087,6 +1145,12 @@ def _history_section(
 def _history_row(*, run: RunRecord, latest: bool) -> str:
     """Render one row of the per-run history table.
 
+    ``Open`` is what was still open *after* the round, not what the round
+    raised: a round that reported three findings and fixed two of them left one
+    open, and the raised count told that story backwards. A record persisted
+    before those counts existed renders the raised total and ``—`` rather than
+    a fabricated zero.
+
     Args:
         run: Run record to render.
         latest: True when this is the most recent run.
@@ -1096,12 +1160,17 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
     """
     prefix = "~" if run.estimated else ""
     short = _short_sha(sha=run.sha)
+    open_after = (
+        run.open_after if run.open_after is not None else run.p1 + run.p2 + run.p3
+    )
+    fixed = "—" if run.resolved is None else str(run.resolved)
     return (
         f"| {run.round}{' (latest)' if latest else ''} "
         f"| {f'`{short}`' if short else '—'} "
         f"| {VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} "
         f"| `{_cell(text=run.model or 'unknown', limit=60)}` "
-        f"| {run.p1 + run.p2 + run.p3} "
+        f"| {open_after} "
+        f"| {fixed} "
         f"| {prefix}{_fmt_int(run.prompt)} / {prefix}{_fmt_int(run.completion)} "
         f"| {_fmt_cost(run.cost, estimated=run.estimated)} "
         f"| {run.duration:.0f}s |"
@@ -1109,22 +1178,35 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
 
 
 def _history_mini_summary(*, run: RunRecord) -> str:
-    """Render one prior round's one-line recap under the history table.
+    """Render one prior round's recap under the history table.
+
+    The round line names the verdict; the line under it is the model's own
+    one-sentence account of that round when it wrote one, because "🔴 1 · 🟠 2"
+    says how many things were wrong and never what they were. A record with no
+    stored narrative — a legacy one, or a round whose model returned no summary
+    — falls back to the severity counts.
 
     Args:
         run: Prior run record to summarize.
 
     Returns:
-        A single Markdown line.
+        Markdown for the recap, as a round line plus its detail line.
     """
     short = _short_sha(sha=run.sha)
     where = f" · `{short}`" if short else ""
-    return (
+    head = (
         f"**Round {run.round}**{where} · "
-        f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} — "
-        f"🔴 {run.p1} · 🟠 {run.p2} · 🟡 {run.p3}"
+        f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()}"
         + (" · ⚠️ partial" if run.partial else "")
     )
+    # Table-safe *and* collapsible-safe: the recap sits inside the history
+    # <details>, so a model-written closing tag would end it early.
+    narrative = _DETAILS_TAG_RE.sub(
+        r"&lt;\1\2",
+        _cell(text=run.narrative, limit=_NARRATIVE_LIMIT),
+    )
+    detail = narrative or f"🔴 {run.p1} · 🟠 {run.p2} · 🟡 {run.p3}"
+    return f"{head}\n{detail}"
 
 
 # --- ordering and cell helpers ----------------------------------------------
@@ -1227,6 +1309,37 @@ def _delta_cell(*, record: FindingRecord, match: FindingMatchResult) -> str:
     if outcome is FindingMatchOutcome.REGRESSED:
         return "↩ regressed"
     return "—"
+
+
+def _finding_cell(
+    *,
+    record: FindingRecord,
+    repo: str,
+    pr_number: int | None,
+) -> str:
+    """Render the title cell, linked to the finding's inline comment.
+
+    Args:
+        record: Open finding record.
+        repo: ``owner/name`` slug of the repository.
+        pr_number: Pull request number.
+
+    Returns:
+        The title as a Markdown link to its thread, or plain text when the
+        finding has no inline comment (it was never diff-mappable, the posting
+        failed, or its id has not been captured yet). Link syntax inside the
+        title is neutralized by ``_cell``'s sanitizer, so a model-written
+        ``]`` cannot break out of the link label.
+    """
+    title = _cell(text=record.title, limit=_TITLE_LIMIT)
+    url = inline_comment_url(
+        repo=repo,
+        pr_number=pr_number,
+        comment_id=record.inline_comment_id,
+    )
+    if not url:
+        return title
+    return f"[{title.replace('[', '(').replace(']', ')')}]({url})"
 
 
 def _severity_cell(*, record: FindingRecord) -> str:
@@ -1356,6 +1469,8 @@ def _run_record(
     transport: str,
     auth_mode: str,
     verdict: ReviewVerdict,
+    resolved: int,
+    open_after: int,
 ) -> RunRecord:
     """Build a machine-readable run record from a review result.
 
@@ -1366,6 +1481,8 @@ def _run_record(
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
         verdict: Readiness verdict derived from the open findings.
+        resolved: Number of findings this round resolved.
+        open_after: Number of findings still open after this round.
 
     Returns:
         The run record persisted in the state blob.
@@ -1401,7 +1518,36 @@ def _run_record(
         partial=bool(metadata.partial),
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,
+        resolved=resolved,
+        open_after=open_after,
+        narrative=_round_narrative(result=result),
     )
+
+
+def _round_narrative(*, result: ReviewResult) -> str:
+    """Extract the one-line narrative persisted for this round.
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        The structured summary's headline when the model produced one, else the
+        first sentence of the flat summary, else an empty string. Only the
+        first sentence is kept: the recap is one line under a round heading,
+        and a paragraph there turns the history into the wall of text the
+        sticky redesign exists to undo.
+    """
+    summary = result.pr_summary
+    headline = (summary.headline if summary else "").strip()
+    text = headline or result.summary.strip()
+    if not text:
+        return ""
+    # Whitespace is normalized first so a sentence broken across lines is still
+    # recognized as one boundary, and so the stored line cannot carry a newline
+    # into the recap.
+    normalized = " ".join(text.split())
+    sentence = _SENTENCE_BOUNDARY_RE.split(normalized, maxsplit=1)[0]
+    return sentence[:_NARRATIVE_LIMIT].strip()
 
 
 def _cap_body(*, body: str) -> str:

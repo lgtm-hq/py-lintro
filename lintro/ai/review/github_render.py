@@ -18,11 +18,15 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
 
 __all__ = [
+    "REGRESSED_TITLE_SUFFIX",
     "format_finding_comment",
-    "format_review_summary",
     "format_run_mechanics",
     "sanitize_comment_text",
 ]
+
+#: Appended to the title of a regression's freshly raised inline comment, so
+#: the thread does not read as a brand-new finding.
+REGRESSED_TITLE_SUFFIX = " (regressed)"
 
 #: Severities that earn a per-finding agent prompt panel (#1911). A P3 nit gets
 #: none: the panel is an affordance, and one on every finding is wallpaper.
@@ -108,24 +112,13 @@ def _severity_counts(*, findings: tuple[ReviewFinding, ...]) -> dict[Severity, i
     return counts
 
 
-def _count_row(*, counts: dict[Severity, int]) -> list[str]:
-    """Render the severity count table."""
-    return [
-        "| 🔴 P1 | 🟠 P2 | 🟡 P3 |",
-        "|:-:|:-:|:-:|",
-        (
-            f"| **{counts[Severity.P1]}** | **{counts[Severity.P2]}** | "
-            f"**{counts[Severity.P3]}** |"
-        ),
-    ]
-
-
 def format_finding_comment(
     *,
     finding: ReviewFinding,
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
     question_map: dict[int, str] | None = None,
     inline_fix: InlineFixPlan | None = None,
+    title_suffix: str = "",
 ) -> str:
     """Format a review finding as a GitHub markdown comment (#1911).
 
@@ -150,12 +143,16 @@ def format_finding_comment(
             inline review comment: a ``suggestion`` block is not committable
             there and a per-finding prompt panel would repeat the fix-all
             prompt already on that surface, so neither is rendered.
+        title_suffix: Text appended to the bold title, inside the bold run. A
+            regression is re-raised on a *fresh* thread, so without ``"
+            (regressed)"`` on the title it reads as a brand-new finding to
+            anyone who does not read the provenance blockquote above it.
 
     Returns:
         Markdown comment body.
     """
     prompt_questions = question_map or {}
-    title = sanitize_comment_text(finding.title, limit=200)
+    title = sanitize_comment_text(finding.title, limit=200) + title_suffix
     description = sanitize_comment_text(finding.description, limit=2000)
     cause = sanitize_comment_text(finding.cause, limit=2000)
 
@@ -206,7 +203,12 @@ def _fix_slot(
     fix = sanitize_comment_text(finding.fix, limit=2000).strip()
     if not fix:
         return []
-    return ["", f"**Fix:** {fix}"]
+    # Mode B has no committable block to draw the eye, so the described fix is
+    # highlighted instead of sitting as one more bold run in the prose. A
+    # ``[!TIP]`` alert is a plain blockquote to GitHub, so it neither nests
+    # inside nor collides with the ``[!IMPORTANT]`` prompt panel that follows.
+    quoted = [f"> {line}".rstrip() for line in f"**Fix:** {fix}".splitlines()]
+    return ["", "> [!TIP]", *quoted]
 
 
 def _prompt_slot(
@@ -256,90 +258,6 @@ def _suggestion_block(*, replacement: str) -> str:
     return "```suggestion\n" + safe + "\n```"
 
 
-def format_review_summary(
-    *,
-    result: ReviewResult,
-    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
-    question_map: dict[int, str] | None = None,
-    diff_lines: dict[str, set[int]] | None = None,
-    findings_char_budget: int | None = None,
-) -> str:
-    """Format the per-run review summary section.
-
-    Produces the scannable body for a single run: header line, partial-state
-    note, severity count table, TL;DR, a compact findings list with collapsible
-    detail, and (optionally) the checklist appendix.
-
-    Args:
-        result: Review result to summarize.
-        checklist_display: Structured checklist visibility mode.
-        question_map: Prompt id to question text for the checklist appendix.
-        diff_lines: Diff line map used to order fallback findings first in the
-            findings section. ``None`` treats all findings as fallback.
-        findings_char_budget: Optional soft character budget for the findings
-            section; overflow is replaced by an explicit truncation marker.
-
-    Returns:
-        Markdown summary section body.
-    """
-    metadata = result.metadata
-    counts = _severity_counts(findings=result.findings)
-    est = metadata.token_usage_estimated
-    head_bits = [
-        f"**{metadata.files_reviewed} files** reviewed",
-        f"depth {metadata.depth}",
-        f"`{sanitize_comment_text(metadata.model, limit=60)}`",
-        _fmt_cost(metadata.cost_estimate_usd, estimated=est),
-    ]
-    lines = [
-        "## 🔎 Lintro Review",
-        "",
-        "> " + " · ".join(head_bits),
-    ]
-    if metadata.partial:
-        reason = sanitize_comment_text(
-            metadata.stopped_reason or "incomplete",
-            limit=60,
-        )
-        if metadata.chunks_reviewed <= 0:
-            note = (
-                f"> ⚠️ **Partial review** — stopped at {reason} before "
-                f"reviewing any of {metadata.chunks_total} chunks. No findings "
-                "were produced. Raise `ai.max_cost_usd` or narrow `--path`, then "
-                "re-run."
-            )
-        else:
-            note = (
-                f"> ⚠️ **Partial review** — stopped at {reason} after "
-                f"{metadata.chunks_reviewed} of {metadata.chunks_total} "
-                "chunks. Findings below cover only the reviewed portion. Raise "
-                "`ai.max_cost_usd` or narrow `--path` to review the rest."
-            )
-        lines.extend(["", note])
-
-    lines.extend(["", *_count_row(counts=counts)])
-
-    summary_text = sanitize_comment_text(result.summary or "(no summary)", limit=4000)
-    lines.extend(["", f"**TL;DR** — {summary_text}"])
-
-    lines.extend(
-        _format_findings_section(
-            findings=result.findings,
-            checklist_display=checklist_display,
-            question_map=question_map or {},
-            diff_lines=diff_lines,
-            char_budget=findings_char_budget,
-        ),
-    )
-
-    lines.append(f"\n**Structured checks:** {metadata.checklist_items}")
-
-    if checklist_display == ChecklistDisplay.ALL:
-        lines.extend(_format_checklist_appendix_markdown(result=result))
-
-    return "\n".join(lines)
-
-
 def _is_diff_mappable(
     *,
     finding: ReviewFinding,
@@ -364,123 +282,6 @@ def _is_diff_mappable(
     if not rel or finding.line <= 0 or diff_lines is None:
         return False
     return finding.line in diff_lines.get(rel, set())
-
-
-def _finding_block(
-    *,
-    finding: ReviewFinding,
-    checklist_display: ChecklistDisplay,
-    question_map: dict[int, str],
-) -> list[str]:
-    """Render the markdown lines for a single finding in the findings list."""
-    location = _location_label(finding=finding)
-    title = sanitize_comment_text(finding.title, limit=200)
-    headline = (
-        f"{_severity_badge(severity=finding.severity)} · "
-        f"{_chip(finding.category)} — **{title}**"
-    )
-    if location:
-        headline += f" · {location}"
-    body = format_finding_comment(
-        finding=finding,
-        checklist_display=checklist_display,
-        question_map=question_map,
-    )
-    return [
-        "",
-        headline,
-        "",
-        "<details><summary>Details</summary>",
-        "",
-        body,
-        "",
-        "</details>",
-    ]
-
-
-def _format_findings_section(
-    *,
-    findings: tuple[ReviewFinding, ...],
-    checklist_display: ChecklistDisplay,
-    question_map: dict[int, str],
-    diff_lines: dict[str, set[int]] | None = None,
-    char_budget: int | None = None,
-) -> list[str]:
-    """Render a compact, collapsible list of all findings.
-
-    Non-diff-mappable ("fallback") findings render first: they have no inline
-    surface, so if truncation must drop anything it only drops findings that
-    also exist as inline comments. When ``char_budget`` is set and the rendered
-    blocks would overflow it, rendering stops early and an explicit marker names
-    how many findings were dropped so nothing silently vanishes.
-
-    Args:
-        findings: Findings to render.
-        checklist_display: Structured checklist visibility mode.
-        question_map: Prompt id to question text for linked display.
-        diff_lines: Diff line map used to order fallback findings first. ``None``
-            treats every finding as fallback (preserving severity ordering).
-        char_budget: Optional soft character budget for the finding blocks. When
-            exceeded, remaining *diff-mappable* findings are replaced by a
-            truncation marker (they still exist as inline comments). Fallback
-            findings are never budget-truncated — they have no other surface.
-
-    Returns:
-        Markdown lines for the findings section.
-    """
-    if not findings:
-        return ["", "### Findings", "", "✅ No actionable findings."]
-
-    ordered = sorted(
-        findings,
-        key=lambda f: (
-            _is_diff_mappable(finding=f, diff_lines=diff_lines),
-            f.severity.value,
-            f.file,
-            f.line,
-        ),
-    )
-    lines = ["", f"### Findings ({len(findings)})"]
-    used = 0
-    for index, finding in enumerate(ordered):
-        block = _finding_block(
-            finding=finding,
-            checklist_display=checklist_display,
-            question_map=question_map,
-        )
-        block_len = len("\n".join(block))
-        # The budget is enforced on *every* finding so the section always fits
-        # inside the caller's char_budget — otherwise ``_cap_body`` would later
-        # trim the sticky from the tail and could silently drop findings.
-        # Fallback (non-diff-mappable) findings sort first, so they are only ever
-        # dropped when fallback content alone exceeds GitHub's hard comment limit
-        # (unavoidable). The marker text adapts: if any dropped finding is a
-        # fallback (no inline surface), it points to the workflow logs rather
-        # than to inline comments that do not exist for it. ``index > 0`` always
-        # renders at least one finding so a single oversized block is not lost.
-        if char_budget is not None and index > 0 and used + block_len > char_budget:
-            remaining = ordered[index:]
-            dropped = len(remaining)
-            any_fallback = any(
-                not _is_diff_mappable(finding=item, diff_lines=diff_lines)
-                for item in remaining
-            )
-            where = (
-                "the workflow logs"
-                if any_fallback
-                else "the inline comments and workflow logs"
-            )
-            lines.extend(
-                [
-                    "",
-                    f"> ✂️ **{dropped} more finding(s) truncated** to fit "
-                    f"GitHub's size limit — see {where} for the full list.",
-                ],
-            )
-            break
-        lines.extend(block)
-        used += block_len
-    return lines
 
 
 def _location_label(*, finding: ReviewFinding) -> str:

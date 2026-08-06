@@ -320,6 +320,7 @@ def review_command(
             pr_number=context_pr,
             repo=context_repo,
             paths=paths,
+            exclude_globs=list(ai_config.exclude_paths),
         )
     except ReviewContextError as exc:
         raise click.ClickException(str(exc)) from exc

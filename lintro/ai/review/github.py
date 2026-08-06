@@ -38,17 +38,15 @@ from lintro.ai.review.github_constants import (
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_lifecycle import (
     finding_marker,
+    inline_comment_url,
     parse_finding_marker,
     regression_provenance,
     sync_addressed_lifecycle,
 )
 from lintro.ai.review.github_render import (
-    _format_findings_section as _format_findings_section,
-)
-from lintro.ai.review.github_render import (
+    REGRESSED_TITLE_SUFFIX,
     _partition_findings,
     format_finding_comment,
-    format_review_summary,
     format_run_mechanics,
     sanitize_comment_text,
 )
@@ -83,7 +81,6 @@ __all__ = [
     "build_sticky_comment",
     "format_error_comment",
     "format_finding_comment",
-    "format_review_summary",
     "format_run_mechanics",
     "parse_review_state",
     "parse_review_state_v2",
@@ -159,6 +156,8 @@ def post_review_to_github(
             auth_mode=auth_mode,
             inline_failure=inline_failure,
             inline_comment_ids=comment_ids,
+            repo=gh_reporter.repo or "",
+            pr_number=gh_reporter.pr_number,
         )
 
     inline_findings, fallback = _partition_findings(
@@ -416,11 +415,10 @@ def _comment_url(*, reporter: GitHubPRReporter, comment_id: int | None) -> str:
         The comment's anchor URL, or an empty string — a pointer renders
         unlinked rather than as a dead link.
     """
-    if comment_id is None:
-        return ""
-    return (
-        f"https://github.com/{reporter.repo}/pull/{reporter.pr_number}"
-        f"#discussion_r{comment_id}"
+    return inline_comment_url(
+        repo=reporter.repo or "",
+        pr_number=reporter.pr_number,
+        comment_id=comment_id,
     )
 
 
@@ -854,6 +852,10 @@ def _post_inline_findings(
                     checklist_display=checklist_display,
                     question_map=question_map,
                     inline_fix=plan,
+                    # A regression's fresh thread must say so in its title:
+                    # the provenance note explains the history, but the title
+                    # is what a reader scanning the PR's comments sees.
+                    title_suffix=REGRESSED_TITLE_SUFFIX if key in notes else "",
                 ),
                 key=key,
                 note=notes.get(key, ""),

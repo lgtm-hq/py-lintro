@@ -56,6 +56,16 @@ class RunRecord:
         partial: True when the review stopped before every chunk was reviewed.
         chunks_reviewed: Number of chunks actually reviewed.
         chunks_total: Total number of chunks in the diff.
+        resolved: Number of findings this round resolved. ``None`` on a record
+            persisted before the field existed — history renders that as ``—``
+            rather than as a fabricated zero, which would read as "this round
+            fixed nothing".
+        open_after: Number of findings still open *after* this round, which is
+            what a reader of the history actually wants to know. ``None`` on a
+            legacy record, where only the raised count was ever stored.
+        narrative: One-line recap of the round in the model's own words, taken
+            from the structured summary headline (or the review summary's first
+            sentence). Empty when the model produced neither.
     """
 
     round: int = 1
@@ -86,15 +96,20 @@ class RunRecord:
     partial: bool = False
     chunks_reviewed: int = 0
     chunks_total: int = 0
+    resolved: int | None = None
+    open_after: int | None = None
+    narrative: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the run record for the hidden state blob.
 
         Returns:
             JSON-serializable mapping carrying both the v1 aggregate keys and
-            the v2 additions.
+            the v2 additions. The optional per-round fields are omitted when
+            unset, so a record that predates them round-trips byte-identically
+            and keeps rendering as "unknown" rather than as zero.
         """
-        return {
+        payload: dict[str, Any] = {
             "round": self.round,
             "timestamp": self.timestamp,
             "sha": self.sha,
@@ -124,6 +139,13 @@ class RunRecord:
             "chunks_reviewed": self.chunks_reviewed,
             "chunks_total": self.chunks_total,
         }
+        if self.resolved is not None:
+            payload["resolved"] = self.resolved
+        if self.open_after is not None:
+            payload["open_after"] = self.open_after
+        if self.narrative:
+            payload["narrative"] = self.narrative
+        return payload
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> RunRecord:
@@ -167,7 +189,34 @@ class RunRecord:
             partial=bool(payload.get("partial", False)),
             chunks_reviewed=coerce_int(payload.get("chunks_reviewed")),
             chunks_total=coerce_int(payload.get("chunks_total")),
+            resolved=_optional_count(payload.get("resolved")),
+            open_after=_optional_count(payload.get("open_after")),
+            narrative=str(payload.get("narrative", "")),
         )
+
+
+def _optional_count(value: Any) -> int | None:
+    """Parse a count that may be absent from a legacy record.
+
+    Args:
+        value: Raw value decoded from the state blob, or ``None`` when the key
+            was never written.
+
+    Returns:
+        The parsed count, or ``None`` when the key is absent. A present but
+        unparsable value also yields ``None``: rendering "unknown" is honest,
+        whereas coercing it to zero would claim the round fixed nothing.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            return max(int(float(value)), 0)
+        except (TypeError, ValueError, OverflowError):
+            # ``int(float("inf"))`` raises OverflowError, and a corrupted blob
+            # must degrade to "unknown" rather than abort the whole decode.
+            return None
+    return None
 
 
 def _parse_verdict(value: Any) -> ReviewVerdict:

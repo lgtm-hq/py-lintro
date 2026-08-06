@@ -449,6 +449,7 @@ def test_review_uncommitted_mode() -> None:
             "pr_number": None,
             "repo": None,
             "paths": None,
+            "exclude_globs": [],
         },
     )
 
@@ -487,6 +488,7 @@ def test_review_pr_mode() -> None:
             "pr_number": 5,
             "repo": "owner/repo",
             "paths": None,
+            "exclude_globs": [],
         },
     )
 
@@ -521,6 +523,7 @@ def test_review_plain_mode() -> None:
             "pr_number": None,
             "repo": None,
             "paths": None,
+            "exclude_globs": [],
         },
     )
 
@@ -614,6 +617,7 @@ def test_review_post_with_repo_without_pr() -> None:
             "pr_number": 42,
             "repo": "owner/repo",
             "paths": None,
+            "exclude_globs": [],
         },
     )
 

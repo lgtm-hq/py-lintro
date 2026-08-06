@@ -43,6 +43,7 @@ __all__ = [
     "LifecycleReport",
     "apply_lifecycle_block",
     "finding_marker",
+    "inline_comment_url",
     "parse_finding_marker",
     "regression_provenance",
     "render_lifecycle_block",
@@ -264,6 +265,33 @@ def _banner_lines(
         "This thread stays resolved.",
     )
     return lines
+
+
+def inline_comment_url(
+    *,
+    repo: str,
+    pr_number: int | str | None,
+    comment_id: int | None,
+) -> str:
+    """Build the browser URL of an inline review comment.
+
+    Lives here rather than on the posting adapter because more than one surface
+    links to a thread: the lifecycle banners point back at the original one, and
+    the sticky comment's open-findings table points at each finding's live one.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request number, or ``None`` when it is unknown.
+        comment_id: Review comment id, or ``None`` when it is unknown.
+
+    Returns:
+        The comment's anchor URL, or an empty string when any part of the
+        address is missing — a pointer renders unlinked rather than as a dead
+        link.
+    """
+    if comment_id is None or not repo or pr_number is None:
+        return ""
+    return f"https://github.com/{repo}/pull/{pr_number}#discussion_r{comment_id}"
 
 
 def regression_provenance(*, record: FindingRecord, thread_url: str = "") -> str:

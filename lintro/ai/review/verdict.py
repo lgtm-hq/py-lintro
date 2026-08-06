@@ -4,8 +4,9 @@ The readiness verdict is **derived in code**, never asked of the model: a
 model-scored verdict drifts from the findings it is supposed to summarize, and
 a reader who sees "Ready" above a P1 finding stops trusting the whole comment.
 The rubric below is the single source of truth — surfaces render it as
-fine-print under the reasoning rather than restating it, and the review prompt
-tells the model the verdict is computed so it writes only the reasoning.
+fine-print directly under the readiness verdict rather than restating it, and
+the review prompt tells the model the verdict is computed so it writes only the
+reasoning.
 """
 
 from __future__ import annotations
@@ -41,15 +42,17 @@ if _missing_verdict_labels:  # pragma: no cover - guards a future verdict
         f"VERDICT_LABELS missing entries for: {_missing_verdict_labels}",
     )
 
-#: Fine-print rendered under the verdict reasoning. Built from
+#: Fine-print rendered directly under the readiness verdict. Built from
 #: :data:`VERDICT_LABELS` rather than restating them, so a relabelled verdict
-#: cannot leave the rendered rubric describing the old one.
+#: cannot leave the rendered rubric describing the old one. The severity dots
+#: match the ones the surfaces use for findings, so the rubric reads as the
+#: same vocabulary as the tables above and below it.
 VERDICT_RUBRIC_FINE_PRINT: str = (
-    "Verdict is derived from open findings: "
-    f"any P1 -> {VERDICT_LABELS[ReviewVerdict.BLOCKED]}; "
-    f"else any P2 -> {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}; "
-    f"else any P3 -> {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}; "
-    f"else {VERDICT_LABELS[ReviewVerdict.READY]}."
+    "Verdict is derived: open 🔴 P1 → "
+    f"{VERDICT_LABELS[ReviewVerdict.BLOCKED]} · else open 🟠 P2 → "
+    f"{VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]} · else 🟡 P3 → "
+    f"{VERDICT_LABELS[ReviewVerdict.NITS_ONLY]} · else ✅ "
+    f"{VERDICT_LABELS[ReviewVerdict.READY]}."
 )
 
 
