@@ -499,10 +499,12 @@ def pinned_npm_spec(package_name: str) -> str:
 
 @register_command_builder
 class NodeJSBuilder(CommandBuilder):
-    """Builder for Node.js tools (Astro, Markdownlint, TypeScript, Vue-tsc).
+    """Builder for Node.js tools (Astro, Markdownlint, Prettier, TypeScript, …).
 
-    Uses bunx to run Node.js tools when available, falling back to
-    direct tool invocation if bunx is not found.
+    Prefers a project-local ``node_modules/.bin`` shim (absolute path) so
+    version checks and execution use the package.json-pinned binary even when
+    a stale global install is earlier on PATH. Falls back to bunx, then npx,
+    then the bare binary name.
     """
 
     _package_names: dict[ToolName, str] | None = None
@@ -526,6 +528,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
+                ToolName.PRETTIER: "prettier",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
@@ -639,7 +642,7 @@ class NodeJSBuilder(CommandBuilder):
                 use the process working directory.
 
         Returns:
-            Command list to execute the tool via bunx/npx or directly.
+            Command list to execute the tool via local bin, bunx, or directly.
         """
         if tool_name_enum is None:
             return [tool_name]
@@ -650,7 +653,17 @@ class NodeJSBuilder(CommandBuilder):
             self.package_names.get(tool_name_enum, tool_name),
         )
 
-        # Pinned tools never resolve @latest: local install -> PATH -> pinned spec
+        # Prefer project-local binary over a stale global PATH install.
+        local_bin = find_local_node_binary(binary_name, start=start)
+        if local_bin is not None:
+            logger.debug(
+                "Using project-local {} binary: {}",
+                binary_name,
+                local_bin,
+            )
+            return [local_bin]
+
+        # Pinned tools never resolve @latest: PATH -> pinned bunx/npx spec
         if tool_name_enum in self.pinned_tools:
             return self._get_pinned_command(
                 binary_name=binary_name,
