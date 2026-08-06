@@ -142,6 +142,44 @@ def test_open_finding_renders_unlinked_without_repo_context(
     assert_that(body).does_not_contain("#discussion_r")
 
 
+def test_a_model_written_bracket_cannot_break_out_of_the_link(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A title is untrusted text, and it is the link's label.
+
+    Without neutralized brackets a title like ``Fix][evil](http://phish)``
+    closes the label early and injects an attacker-chosen URL into the sticky
+    comment, so the guard is load-bearing rather than cosmetic.
+    """
+    hostile = "Fix][evil](https://phishing.example"
+    result = _with(
+        base=sample_review_result,
+        findings=(_finding(title=hostile),),
+    )
+    state = parse_review_state_v2(body=build_sticky_comment(result=result))
+
+    body = _body_only(
+        body=build_sticky_comment(
+            result=result,
+            prior_state=state,
+            inline_comment_ids={state.findings[0].key: 424242},
+            repo="owner/name",
+            pr_number=7,
+        ),
+    )
+
+    row = next(line for line in body.splitlines() if "discussion_r424242" in line)
+
+    assert_that(row).contains(
+        "[Fix)(evil)(https://phishing.example]"
+        "(https://github.com/owner/name/pull/7#discussion_r424242)",
+    )
+    # The label closes exactly once, at the real thread URL. (The raw title
+    # still appears verbatim inside the fix-all prompt's fenced code block,
+    # where Markdown renders it as literal text rather than as a link.)
+    assert_that(row).does_not_contain("](https://phishing.example")
+
+
 # --- 2. run history: fixed count and still-open count ------------------------
 
 
