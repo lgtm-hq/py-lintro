@@ -1,0 +1,13 @@
+[
+  {
+    "source": "cursor_bugbot",
+    "comment_id": 4901673768,
+    "created_at": "2026-07-07T08:23:27Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#issuecomment-4901673768",
+    "file": null,
+    "line": null,
+    "severity_guess": null,
+    "title": "Bugbot is not enabled for your account, so this pull request was not reviewed.",
+    "body": "Bugbot is not enabled for your account, so this pull request was not reviewed.\n\nEnable Bugbot in the [Cursor dashboard](https://www.cursor.com/dashboard/bugbot) to get automatic reviews on future PRs."
+  }
+]

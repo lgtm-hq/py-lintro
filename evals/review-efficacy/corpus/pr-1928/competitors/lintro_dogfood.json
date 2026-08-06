@@ -1,0 +1,13 @@
+[
+  {
+    "source": "lintro_dogfood",
+    "comment_id": 5171269153,
+    "created_at": "2026-08-03T20:18:47Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1928#issuecomment-5171269153",
+    "file": null,
+    "line": null,
+    "severity_guess": "P1",
+    "title": "**Cumulative (this PR):** ~4,229 tok · ~$0.1299 · 1 runs (0 exact, 1 est.) · models: `claude-sonnet-4-6` ×1",
+    "body": "**Cumulative (this PR):** ~4,229 tok · ~$0.1299 · 1 runs (0 exact, 1 est.) · models: `claude-sonnet-4-6` ×1\n\n## 🔎 Lintro Review\n\n> **4 files** reviewed · depth 1 · `claude-sonnet-4-6` · ~$0.1299\n\n| 🔴 P1 | 🟠 P2 | 🟡 P3 |\n|:-:|:-:|:-:|\n| **0** | **0** | **0** |\n\n**TL;DR** — This is a minimal, correct security patch: all four files that must move in lockstep (both package.json overrides and both bun.lock resolved entries) are updated consistently to fast-uri 4.1.2 with a matching SHA-512 integrity hash. The change introduces no application logic, no interface modifications, and no new dependencies. Safe to merge as-is.\n\n### Findings\n\n✅ No actionable findings.\n\n**Structured checks:** 25\n\n<details><summary>⚙️ Run mechanics (this run)</summary>\n\n**Model:** `claude-sonnet-4-6` · **Provider:** `anthropic` · **Depth:** 1 · **Tokens:** ~4,229 tok (in 2 / out 4,227, estimated) · **Est. cost:** ~$0.1299 · **Duration:** 78.1s\n\n</details>\n\n<sub>🤖 Automated review by lintro · not a substitute for human review · `~` = approximate (estimated locally; provider did not report token usage)</sub>"
+  }
+]

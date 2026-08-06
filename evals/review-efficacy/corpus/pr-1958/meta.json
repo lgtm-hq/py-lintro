@@ -1,0 +1,24 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1958,
+  "title": "fix(review): render the sticky This-run stats as badge tables",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1958",
+  "base_ref": "main",
+  "base_oid": "ac24f2079bc77bb8394c40f40e167fdff0e3f0d4",
+  "head_oid": "32341b7379aaa49fc67e4ee5a6e431a6e1bcc525",
+  "merged_at": "2026-08-06T14:09:25Z",
+  "additions": 385,
+  "deletions": 65,
+  "changed_files": 5,
+  "files": [
+    "lintro/ai/review/github_render.py",
+    "lintro/ai/review/github_review_body.py",
+    "lintro/ai/review/github_sticky.py",
+    "tests/unit/ai/review/test_github_badge_tables.py",
+    "tests/unit/ai/review/test_github_sticky_mission_control.py"
+  ],
+  "competitor_counts": {
+    "coderabbit": 4,
+    "lintro_dogfood": 1
+  }
+}

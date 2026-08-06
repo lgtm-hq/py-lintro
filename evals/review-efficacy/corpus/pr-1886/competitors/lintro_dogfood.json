@@ -1,0 +1,13 @@
+[
+  {
+    "source": "lintro_dogfood",
+    "comment_id": 5148879198,
+    "created_at": "2026-08-01T01:35:03Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1886#issuecomment-5148879198",
+    "file": null,
+    "line": null,
+    "severity_guess": null,
+    "title": "🔎 Lintro Review",
+    "body": "## 🔎 Lintro Review\n\n> ❌ **Review could not complete** — `anthropic` the provider reported no available quota or credits — the account balance is depleted (provider reported: Anthropic API error: Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011CdbAnbz3bS44mstha34Xf'})\n\nTop up the provider account (or raise the plan quota), or lower `ai.max_cost_usd`, then re-run.\n\n<sub>🤖 Automated review by lintro · not a substitute for human review · `~` = approximate (estimated locally; provider did not report token usage)</sub>"
+  }
+]

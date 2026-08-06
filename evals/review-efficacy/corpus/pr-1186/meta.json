@@ -1,0 +1,21 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1186,
+  "title": "docs(ai): complete config reference and correct privacy claims",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1186",
+  "base_ref": "main",
+  "base_oid": "1025c80296590d927c2a2c0fb28c6f2cbd570421",
+  "head_oid": "6ab8995b04d35bdf4d700c1569c91469ca384fc2",
+  "merged_at": "2026-07-30T06:01:27Z",
+  "additions": 162,
+  "deletions": 29,
+  "changed_files": 1,
+  "files": [
+    "docs/ai-features.md"
+  ],
+  "competitor_counts": {
+    "coderabbit": 1,
+    "cursor_bugbot": 1,
+    "greptile": 16
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1891,
+  "title": "feat(mcp): add review toolkit exposing AI diff review",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1891",
+  "base_ref": "main",
+  "base_oid": "a5e650df842ae69e888b13e67a6045e980fd1641",
+  "head_oid": "2dfcca1710691f58c81cc3516ac6dbfe18c4852f",
+  "merged_at": "2026-08-01T09:50:21Z",
+  "additions": 1577,
+  "deletions": 8,
+  "changed_files": 6,
+  "files": [
+    "docs/mcp.md",
+    "lintro/mcp/enums/mcp_error_code.py",
+    "lintro/mcp/server.py",
+    "lintro/mcp/toolkits/__init__.py",
+    "lintro/mcp/toolkits/review.py",
+    "tests/unit/mcp/test_toolkit_review.py"
+  ],
+  "competitor_counts": {
+    "coderabbit": 1,
+    "lintro_dogfood": 1
+  }
+}

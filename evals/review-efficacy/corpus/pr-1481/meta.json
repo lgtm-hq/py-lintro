@@ -1,0 +1,31 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1481,
+  "title": "refactor: split oversized modules under the size gate",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1481",
+  "base_ref": "main",
+  "base_oid": "a369677039ba9d6268991759781181989773a823",
+  "head_oid": "e6119c92a9d0d85e51fe6b6c0db321e640bb9c93",
+  "merged_at": "2026-07-30T21:06:16Z",
+  "additions": 1889,
+  "deletions": 1551,
+  "changed_files": 10,
+  "files": [
+    "lintro/ai/review/github.py",
+    "lintro/ai/review/github_constants.py",
+    "lintro/ai/review/github_errors.py",
+    "lintro/ai/review/github_render.py",
+    "lintro/ai/review/github_sticky.py",
+    "lintro/tools/definitions/_ts_checker_base.py",
+    "lintro/tools/definitions/_ts_checker_command.py",
+    "lintro/tools/definitions/_ts_checker_execution.py",
+    "lintro/utils/module_size.py",
+    "pyproject.toml"
+  ],
+  "competitor_counts": {
+    "coderabbit": 10,
+    "cursor_bugbot": 1,
+    "greptile": 2,
+    "lintro_dogfood": 1
+  }
+}
