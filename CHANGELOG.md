@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.0] - 2026-08-06
+
+### Added
+
+- **review**: close inline finding threads with an addressed lifecycle (#1949) (d203946)
+
 ## [0.111.0] - 2026-08-05
 
 ### Added
