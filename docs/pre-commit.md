@@ -34,7 +34,7 @@ system install gives you the full tool set.
    ```yaml
    repos:
      - repo: https://github.com/lgtm-hq/py-lintro
-       rev: v0.69.0 # pin to a released tag
+       rev: v0.78.2 # pin to a released tag (auto-updated on release)
        hooks:
          - id: lintro-check
    ```
@@ -67,7 +67,7 @@ mixed set of staged files is fine.
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.69.0
+    rev: v0.78.2
     hooks:
       - id: lintro-check
 ```
@@ -80,7 +80,7 @@ run as failed so you can review and re-stage the result:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.69.0
+    rev: v0.78.2
     hooks:
       - id: lintro-format
       - id: lintro-check
@@ -93,7 +93,7 @@ Use pre-commit's standard `files`/`exclude`/`types` overrides to narrow a hook:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.69.0
+    rev: v0.78.2
     hooks:
       - id: lintro-check
         files: ^src/
@@ -107,7 +107,7 @@ required — use the `-python` hook variants:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.69.0
+    rev: v0.78.2
     hooks:
       - id: lintro-check-python
 ```
@@ -131,7 +131,8 @@ cached.
   "Executable `lintro` not found" error otherwise — install it first (see Quick Start
   step 1).
 - Always pin `rev:` to a released tag (not a branch) so hook runs are reproducible;
-  `pre-commit autoupdate` can bump it for you.
+  `pre-commit autoupdate` can bump it for you. In this repository, example pins in this
+  doc are refreshed automatically when the release Version-PR runs.
 - With `language: system`, the `rev:` selects which hook _definitions_ are used; the
   lintro _version_ that runs is whatever is installed on the machine. With the `-python`
   variants, `rev:` also pins the lintro version itself.

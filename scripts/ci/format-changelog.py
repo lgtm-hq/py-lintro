@@ -12,7 +12,8 @@ prose and list items to 88 columns using the exact greedy word-wrap that
 requiring nothing beyond the standard library.
 
 It is wired into ``.github/workflows/release-version-pr.yml`` via the reusable
-workflow's ``version-update-script`` input, which runs after the CHANGELOG is
+workflow's ``version-update-script`` input (through
+:mod:`scripts.ci.version_update`), which runs after the CHANGELOG is
 written and before the version PR is committed. That job has no Node toolchain
 and blocks npm egress, so a pure-standard-library formatter is used here instead
 of shelling out to ``prettier``.

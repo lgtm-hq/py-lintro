@@ -57,6 +57,8 @@ lintro check --output-format grid  # Beautiful output
 
 - **🎯 Unified Interface** - One command for all your linting and formatting tools
 - **📊 Consistent Output** - Beautiful, standardized output formats across all tools
+- **🏥 Health Score** - 0-100 aggregate quality score with `--score` and `--fail-under`
+  CI gates ([details](docs/configuration.md))
 - **🔧 Auto-fixing** - Automatically fix issues where possible
 - **🐳 Docker Ready** - Run in isolated containers for consistent environments
 - **📈 Rich Reporting** - Multiple formats: grid, JSON, HTML, CSV, Markdown
