@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.2] - 2026-08-06
+
+### Fixed
+
+- **review**: always render the fix prompt inline in the per-review comment (#1957)
+  (ac24f20)
+
 ## [0.112.1] - 2026-08-06
 
 ### Fixed
