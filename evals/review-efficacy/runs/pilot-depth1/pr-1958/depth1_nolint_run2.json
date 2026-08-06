@@ -1,0 +1,371 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 5,
+    "files_total": 5,
+    "checklist_items": 41,
+    "token_usage": {
+      "prompt": 6,
+      "completion": 25767,
+      "total": 25773
+    },
+    "cost_estimate_usd": 0.6189697000000001,
+    "base_ref": "ac24f2079bc77bb8394c40f40e167fdff0e3f0d4",
+    "head_ref": "32341b7379aaa49fc67e4ee5a6e431a6e1bcc525",
+    "timestamp": "2026-08-06T17:59:41.771028+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 470.42316031799965,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "lintro/ai/review/github_render.py",
+      "lintro/ai/review/github_review_body.py",
+      "lintro/ai/review/github_sticky.py",
+      "tests/unit/ai/review/test_github_badge_tables.py",
+      "tests/unit/ai/review/test_github_sticky_mission_control.py"
+    ],
+    "skipped_files": []
+  },
+  "summary": "Moves badge-table rendering into a shared github_render.py utility so the sticky comment's This-run section and the per-review body cannot drift from each other.",
+  "readiness_verdict": "ready",
+  "pr_summary": {
+    "headline": "Moves badge-table rendering into a shared github_render.py utility so the sticky comment's This-run section and the per-review body cannot drift from each other.",
+    "walkthrough": [
+      {
+        "text": "format_badge_table, format_badge_tables, and run_stats_primary_cells are extracted into github_render.py with _escape_cell handling pipe, backslash, and line-break sanitization so a stray character in any cell cannot shear a GFM table row.",
+        "finding_ref": "lintro/ai/review/github_render.py:75"
+      },
+      {
+        "text": "github_review_body.py deletes the now-redundant private _badge_table and delegates both primary and secondary rows to the shared renderer via format_badge_tables, narrowing the diff to a trivial call-site swap.",
+        "finding_ref": ""
+      },
+      {
+        "text": "github_sticky.py replaces the prose-format _this_run_section with two badge tables, emitting **This run** as a heading followed by the shared primary row and a sticky-specific secondary row.",
+        "finding_ref": ""
+      },
+      {
+        "text": "test_github_badge_tables.py adds 234 lines covering the helper contract (escaping, blank-line separation, empty-row skipping), the ordering rule, the ~ prefix for estimated values, a full snapshot of the sticky's This-run block, and an equality assertion that both surfaces produce the same primary value row.",
+        "finding_ref": ""
+      },
+      {
+        "text": "test_github_sticky_mission_control.py updates the one pinned assertion from the old prose-line format to the new table headers and value rows.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "Nothing blocks the merge. All 41 checklist items answered no. The shared renderer and its escaping logic are correct for all practical inputs, the old _badge_table is fully replaced with no orphaned call sites, and the test suite covers escaping, ordering, blank-line separation, empty-row skipping, and the estimated-vs-reported tilde rule end-to-end through both public build_* surfaces.",
+    "failure_mechanism": "",
+    "files_needing_attention": []
+  },
+  "file_assessments": [
+    {
+      "file": "lintro/ai/review/github_render.py",
+      "overview": "Adds _escape_cell, format_badge_table, format_badge_tables, and run_stats_primary_cells as the shared badge-table rendering layer exported from the module."
+    },
+    {
+      "file": "lintro/ai/review/github_review_body.py",
+      "overview": "Deletes the private _badge_table function and its hand-rolled cell assembly, replacing both call sites with the shared format_badge_tables and run_stats_primary_cells imports."
+    },
+    {
+      "file": "lintro/ai/review/github_sticky.py",
+      "overview": "Rewrites _this_run_section from a joined prose string to two badge tables produced by the shared renderer, matching the per-review body's visual layout."
+    },
+    {
+      "file": "tests/unit/ai/review/test_github_badge_tables.py",
+      "overview": "New test file covering the helper contract, the ~ estimation prefix, pipe and backslash escaping, empty-row handling, and an equality assertion that both rendering surfaces agree on the primary row."
+    },
+    {
+      "file": "tests/unit/ai/review/test_github_sticky_mission_control.py",
+      "overview": "Updates the one test that pinned the old prose-line format to assert the new table header and value rows instead."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "format_badge_tables uses continue to skip empty rows, not an early return that drops pending work; no independent work paths exist in the changed functions.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "test_github_badge_tables.py helper _sticky/_body both pass transport='cli', auth_mode='subscription' as explicit controlled inputs; fixture token_usage_estimated=False matches the production non-estimated default path.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "The docstring in _escape_cell claims 'GFM honors \\| inside code spans' \u2014 this is broadly correct for GitHub's renderer; the implementation does escape pipes. No behavioral claim is falsified.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "format_badge_table returns [] for empty cells; format_badge_tables skips them with continue \u2014 both return empty rather than a stub table, which callers handle correctly.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "No defaults changed; format_badge_table and run_stats_primary_cells are additive new exports, and the deleted _badge_table was private to github_review_body.py.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "Centralizing in github_render.py eliminates the prior lockstep: both surfaces call run_stats_primary_cells/format_badge_tables from one definition; no two production files must change together.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "_badge_table in github_review_body.py is deleted, not retained alongside the new format_badge_table; no duplicate logic remains.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "The snapshot test at test_github_badge_tables.py:192 and the equality assertion at line 185 confirm both surfaces produce identical primary rows and the ~ prefix is preserved; implementation matches the PR description.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No enum parsing or access-control logic in the diff.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No HTTP client code or server error classification in the diff.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server routes or error response shapes modified.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "All test assertions check rendered string content (headers, value rows, ~ prefix, escaping) \u2014 not mere presence/visibility.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "Tests call public functions (format_badge_table, build_sticky_comment, build_review_body) with no mocking of private internals.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "PR explicitly defers the body's strictness/version fields from the sticky; github_sticky.py secondary row correctly omits them. No contradiction.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "int(metadata.token_usage.get('prompt', 0)) raises TypeError explicitly if a non-numeric value is present \u2014 not a silent cast; no unvalidated API response casts.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "format_badge_table consistently returns [] on empty and a 3-element list on non-empty; format_badge_tables consistently appends blank separators; no mixed return/throw paths.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "Pure string manipulation only; no file handles, sockets, or streams opened.",
+      "question": "Are connections, file handles, streams, or other resources closed on every exit path?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "No async code or concurrency in the diff.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "All branches in format_badge_tables are reachable: the 'if not table: continue' branch fires for empty rows (tested), 'if lines:' fires only after first table appended. No dead branches.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "No logging statements, error responses, or API payloads modified; metadata fields rendered are cost/token counts, not credentials.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "_PRIMARY_HEADER = '| model | est. cost | tokens in | tokens out |' mirrors production labels \u2014 if labels change, the test fails (not silently passes); it is a proper regression guard.",
+      "question": "Does a test assert field == \"literal\" where that literal is also defined in production code (wiring test that drifts silently)?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "Tests assert full rendered Markdown string values (table rows, cell contents, ~ prefixes) \u2014 not just type shapes or function signatures.",
+      "question": "Do bulk/planned-ahead tests assert signatures or data shapes instead of observable behavior?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "_escape_cell is private and not tested directly; renaming it would require updating format_badge_table's body but no test would break without also fixing behavior.",
+      "question": "Would renaming an internal function break tests even though user-visible behavior is unchanged?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "No noqa, type: ignore, or allow(dead_code) suppressions added in the diff.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "No HTTP request logic present.",
+      "question": "Does HTTP request logic live in fixtures instead of a dedicated client layer?"
+    },
+    {
+      "id": 26,
+      "answer": "no",
+      "evidence": "test_both_surfaces_render_the_same_primary_badge_table calls build_sticky_comment and build_review_body end-to-end, covering the call-site wiring not just the pure helpers.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 27,
+      "answer": "no",
+      "evidence": "Tests call the public build_* functions; no direct access to DB, internal state, or private modules.",
+      "question": "Do tests hit the wrong layer (e.g. DB directly instead of the public API under test)?"
+    },
+    {
+      "id": 28,
+      "answer": "no",
+      "evidence": "Every changed production path has a corresponding test: github_render.py new functions tested in test_github_badge_tables.py; github_sticky.py changes tested in both test files; github_review_body.py refactoring covered by the shared integration test.",
+      "question": "Does new or changed production code lack corresponding test updates in the same diff?"
+    },
+    {
+      "id": 29,
+      "answer": "no",
+      "evidence": "New logic paths (pipe escaping, backslash doubling, line-break flattening, blank-line between tables, empty-row skipping, tilde prefix) each have dedicated tests.",
+      "question": "Does new or changed logic lack tests covering the modified paths?"
+    },
+    {
+      "id": 30,
+      "answer": "no",
+      "evidence": "Empty cells ([]), empty row groups, pipe-in-value, backslash-before-pipe, and CRLF/LF/CR line breaks are all tested. Estimated and non-estimated token paths both covered.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 31,
+      "answer": "no",
+      "evidence": "Pipe injection (GFM table shearing) is covered by test_badge_table_escapes_pipes_so_a_row_cannot_shear. Backslash + pipe combination is tested separately.",
+      "question": "Are security edge cases untested (injection payloads, malformed input, oversized payloads)?"
+    },
+    {
+      "id": 32,
+      "answer": "no",
+      "evidence": "Estimated vs non-estimated runs are separate tests but each has distinct assertions; parameterization would add no new coverage given the simplicity of each case.",
+      "question": "Are parameterized cases missing where multiple inputs share the same behavior rule?"
+    },
+    {
+      "id": 33,
+      "answer": "no",
+      "evidence": "No @pytest.mark.parametrize used; the model string 'claude-sonnet-4-20250514' in snapshot assertions comes from the fixture, not a bumped version constant.",
+      "question": "Do parametrize/test IDs embed mutable version or data values that will churn on every bump?"
+    },
+    {
+      "id": 34,
+      "answer": "no",
+      "evidence": "format_badge_table and format_badge_tables added to __all__ in github_render.py; _badge_table was private and its two call sites in github_review_body.py are both updated in the same diff.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 35,
+      "answer": "no",
+      "evidence": "No credentials, tokens, or API keys appear in the diff.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 36,
+      "answer": "no",
+      "evidence": "No SQL or shell interpolation in the diff.",
+      "question": "Is user input interpolated into SQL/command strings instead of parameterized/safe APIs?"
+    },
+    {
+      "id": 37,
+      "answer": "no",
+      "evidence": "No # nosec suppressions added.",
+      "question": "Does a # nosec / security suppression lack an inline justification on the flagged line?"
+    },
+    {
+      "id": 38,
+      "answer": "no",
+      "evidence": "_badge_table was private; its callers are updated in the same diff. format_badge_table/format_badge_tables/run_stats_primary_cells are new additions with no prior callers to migrate.",
+      "question": "Does removing or renaming exported/public symbols lack migration or caller updates?"
+    },
+    {
+      "id": 39,
+      "answer": "no",
+      "evidence": "int() cast on dict.get() with a numeric default is safe; no `any` casts or broad type suppressions on changed lines.",
+      "question": "Is type safety bypassed with any, unchecked casts, or broad suppressions on changed lines?"
+    },
+    {
+      "id": 40,
+      "answer": "no",
+      "evidence": "github_render.py's new public surface (3 functions) is narrower than its implementation; the module is a rendering utility with clear, stable contracts.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    },
+    {
+      "id": 41,
+      "answer": "no",
+      "evidence": "Tests assert observable rendered output (GFM table strings, ~ prefix, pipe escaping) rather than internal implementation steps like function call order.",
+      "question": "Are tests written against implementation steps rather than user-/caller-visible behavior?"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P3",
+      "category": "logic-bug",
+      "file": "lintro/ai/review/github_render.py",
+      "line": 75,
+      "title": "Backslash doubling inside code-chipped model cell",
+      "description": "_escape_cell doubles all backslashes in its input before escaping pipes. The model cell is passed as the already-backtick-wrapped string '`{model_name}`', so any backslash in the model name gets doubled. Inside a GFM code span, content is rendered literally \u2014 '\\\\' in the source appears as '\\\\' (two visible characters) to the reader, not '\\'. This is a cosmetic regression from the old unescaped _badge_table for the unlikely case where an API returns a model name containing a backslash (e.g. a Windows-path-style identifier or a future provider's naming convention). sanitize_comment_text does not strip or escape backslashes.",
+      "cause": "The escape order (backslash \u2192 pipe \u2192 line-break) is correct for preventing a backslash from shielding a pipe, but it also doubles backslashes that are inside code spans where GFM does not process escape sequences \u2014 so the doubling is visible.",
+      "fix": "Confirm whether any supported provider can return a model name containing a backslash. If yes, apply _escape_cell only to the raw text before the backtick-chip wrapping, or strip backslashes from the model name inside sanitize_comment_text. If no provider ever does this, document that assumption in the _escape_cell docstring.",
+      "confidence": "low",
+      "checklist_ids": [],
+      "suggested_code": "",
+      "source": "",
+      "kind": "question",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "cross_file",
+      "occurrences": [
+        {
+          "file": "lintro/ai/review/github_render.py",
+          "line": 75
+        },
+        {
+          "file": "lintro/ai/review/github_render.py",
+          "line": 160
+        }
+      ],
+      "suggested_change": null
+    }
+  ]
+}

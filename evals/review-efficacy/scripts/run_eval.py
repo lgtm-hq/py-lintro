@@ -66,6 +66,22 @@ def _enable_ai(*, root: Path, max_cost_usd: float) -> Path:
         raise RuntimeError(
             f"enable_review_config failed: {result.stderr or result.stdout}"
         )
+    # Pin ai.review explicitly so we do not rely on the deprecated
+    # ai.enabled-implies-both-features compatibility path.
+    try:
+        import yaml
+
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        ai = data.setdefault("ai", {})
+        if isinstance(ai, dict):
+            ai["review"] = True
+            ai["lint"] = False
+            config.write_text(
+                yaml.safe_dump(data, sort_keys=False),
+                encoding="utf-8",
+            )
+    except Exception as exc:  # noqa: BLE001 - best-effort pin
+        print(f"warning: could not pin ai.review explicitly: {exc}", flush=True)
     return backup
 
 

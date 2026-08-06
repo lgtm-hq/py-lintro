@@ -83,7 +83,18 @@ def _normalize_body_finding(
         Normalized finding mapping.
     """
     text = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL).strip()
-    title = next((ln.strip("# ").strip() for ln in text.splitlines() if ln.strip()), "")
+    # Greptile wraps titles in badge <img alt="P1"> anchors; strip HTML first.
+    plain = re.sub(r"<[^>]+>", " ", text)
+    plain = re.sub(r"\s+", " ", plain).strip()
+    title = ""
+    for ln in text.splitlines():
+        cleaned = re.sub(r"<[^>]+>", " ", ln)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" #*-")
+        if cleaned:
+            title = cleaned
+            break
+    if not title:
+        title = plain
     title = title[:160]
     if path is None or line is None:
         match = FILE_LINE_RE.search(text)

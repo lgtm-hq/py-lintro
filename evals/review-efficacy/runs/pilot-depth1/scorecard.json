@@ -1,0 +1,371 @@
+{
+  "run_dir": "/workspace/evals/review-efficacy/runs/pilot-depth1",
+  "prs": {
+    "1186": {
+      "title": "docs(ai): complete config reference and correct privacy claims",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1186",
+      "competitor_counts": {
+        "coderabbit": 1,
+        "cursor_bugbot": 1,
+        "greptile": 16
+      },
+      "stats": {
+        "lintro_findings": 3,
+        "lintro_severity_hist": {
+          "P3": 2,
+          "P2": 1
+        },
+        "lintro_located": 3,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 0,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          },
+          "cursor_bugbot": {
+            "competitor_located": 0,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          },
+          "greptile": {
+            "competitor_located": 13,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 16
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-1186/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1186,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 258.08,
+          "finding_count": 1,
+          "cost_estimate_usd": 0.5610496,
+          "readiness_verdict": "nits_only",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1186/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 1186,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 390.66,
+          "finding_count": 2,
+          "cost_estimate_usd": 0.6977933999999999,
+          "readiness_verdict": "changes_requested",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1186/depth1_nolint_run2.json"
+        }
+      ]
+    },
+    "1928": {
+      "title": "fix(deps): bump fast-uri to 4.1.2 for CVE-2026-18446",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1928",
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      },
+      "stats": {
+        "lintro_findings": 1,
+        "lintro_severity_hist": {
+          "P3": 1
+        },
+        "lintro_located": 1,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 0,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          },
+          "lintro_dogfood": {
+            "competitor_located": 0,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-1928/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1928,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 187.47,
+          "finding_count": 1,
+          "cost_estimate_usd": 0.2821856,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1928/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 1928,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 102.69,
+          "finding_count": 0,
+          "cost_estimate_usd": 0.14202320000000002,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1928/depth1_nolint_run2.json"
+        }
+      ]
+    },
+    "1936": {
+      "title": "fix(deps): bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1936",
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      },
+      "stats": {
+        "lintro_findings": 0,
+        "lintro_severity_hist": {},
+        "lintro_located": 0,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 0,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": null,
+            "competitor_total_comments": 1
+          },
+          "lintro_dogfood": {
+            "competitor_located": 0,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": null,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-1936/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1936,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 107.06,
+          "finding_count": 0,
+          "cost_estimate_usd": 0.3225164,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1936/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 1936,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 68.3,
+          "finding_count": 0,
+          "cost_estimate_usd": 0.2088329,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1936/depth1_nolint_run2.json"
+        }
+      ]
+    },
+    "1958": {
+      "title": "fix(review): render the sticky This-run stats as badge tables",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1958",
+      "competitor_counts": {
+        "coderabbit": 4,
+        "lintro_dogfood": 1
+      },
+      "stats": {
+        "lintro_findings": 2,
+        "lintro_severity_hist": {
+          "P3": 2
+        },
+        "lintro_located": 1,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 1,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 4
+          },
+          "lintro_dogfood": {
+            "competitor_located": 0,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-1958/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1958,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 622.66,
+          "finding_count": 1,
+          "cost_estimate_usd": 0.9613955,
+          "readiness_verdict": "nits_only",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1958/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 1958,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 471.59,
+          "finding_count": 1,
+          "cost_estimate_usd": 0.6189697000000001,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-1958/depth1_nolint_run2.json"
+        }
+      ]
+    },
+    "916": {
+      "title": "chore(deps): update actions/cache to v6.1.0 (major) (major)",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/916",
+      "competitor_counts": {
+        "greptile": 10,
+        "macroscope": 1
+      },
+      "stats": {
+        "lintro_findings": 0,
+        "lintro_severity_hist": {},
+        "lintro_located": 0,
+        "per_competitor": {
+          "greptile": {
+            "competitor_located": 4,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 10
+          },
+          "macroscope": {
+            "competitor_located": 1,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-916/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 916,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 132.55,
+          "finding_count": 0,
+          "cost_estimate_usd": 0.4050361,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-916/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 916,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 120.04,
+          "finding_count": 0,
+          "cost_estimate_usd": 0.4010817,
+          "readiness_verdict": "ready",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-916/depth1_nolint_run2.json"
+        }
+      ]
+    },
+    "958": {
+      "title": "fix(astro-check): run non-interactively to prevent prompt hang and timeout",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/958",
+      "competitor_counts": {
+        "coderabbit": 5,
+        "cursor_bugbot": 1,
+        "greptile": 2,
+        "lintro_dogfood": 1,
+        "macroscope": 1
+      },
+      "stats": {
+        "lintro_findings": 4,
+        "lintro_severity_hist": {
+          "P2": 1,
+          "P3": 3
+        },
+        "lintro_located": 3,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 2,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 5
+          },
+          "cursor_bugbot": {
+            "competitor_located": 0,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          },
+          "greptile": {
+            "competitor_located": 2,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 2
+          },
+          "lintro_dogfood": {
+            "competitor_located": 0,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          },
+          "macroscope": {
+            "competitor_located": 1,
+            "lintro_located": 3,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1/pr-958/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 958,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 527.61,
+          "finding_count": 3,
+          "cost_estimate_usd": 0.8796635000000002,
+          "readiness_verdict": "changes_requested",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-958/depth1_nolint_run1.json"
+        },
+        {
+          "pr": 958,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 563.02,
+          "finding_count": 1,
+          "cost_estimate_usd": 1.1017739000000002,
+          "readiness_verdict": "nits_only",
+          "output": "evals/review-efficacy/runs/pilot-depth1/pr-958/depth1_nolint_run2.json"
+        }
+      ]
+    }
+  }
+}

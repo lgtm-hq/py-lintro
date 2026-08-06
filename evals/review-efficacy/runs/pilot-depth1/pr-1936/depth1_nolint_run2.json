@@ -1,0 +1,222 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 2,
+    "files_total": 2,
+    "checklist_items": 25,
+    "token_usage": {
+      "prompt": 2,
+      "completion": 3669,
+      "total": 3671
+    },
+    "cost_estimate_usd": 0.2088329,
+    "base_ref": "c3129e6d7807ab76274fff25727fc1a456815cfb",
+    "head_ref": "482442ffca34c00fa0291d456e23815dcc033898",
+    "timestamp": "2026-08-06T17:41:27.519890+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 67.24558075300001,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "pyproject.toml",
+      "uv.lock"
+    ],
+    "skipped_files": []
+  },
+  "summary": "Bumps the cryptography constraint floor from >=48.0.1 to >=50.0.0 in pyproject.toml and regenerates uv.lock to resolve GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle).",
+  "readiness_verdict": "ready",
+  "pr_summary": {
+    "headline": "Bumps the cryptography constraint floor from >=48.0.1 to >=50.0.0 in pyproject.toml and regenerates uv.lock to resolve GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle).",
+    "walkthrough": [
+      {
+        "text": "pyproject.toml raises the constraint-dependency floor from cryptography>=48.0.1 to >=50.0.0 and extends the inline advisory comment to document both GHSA-537c-gmf6-5ccf and GHSA-g6cj-pr64-35w5, consistent with the existing comment convention.",
+        "finding_ref": ""
+      },
+      {
+        "text": "uv.lock manifest section mirrors the new specifier (>=50.0.0) so the resolved constraint is consistent with pyproject.toml.",
+        "finding_ref": ""
+      },
+      {
+        "text": "uv.lock package block replaces all 49.0.0 wheel and sdist entries with their 50.0.0 counterparts, covering every supported platform (cp311-abi3, cp39-abi3, cp314-cp314t, pp311-pypy311) including macOS arm64, manylinux, musllinux, armv7l, ppc64le, and win_amd64.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "Nothing blocks the merge. Both files are updated in lockstep, the manifest constraint and resolved package version agree on 50.0.0, all wheel hashes are replaced with published PyPI entries, and the PR's full 8914-test suite run confirms no API breakage from the 49\u219250 major bump.",
+    "failure_mechanism": "",
+    "files_needing_attention": []
+  },
+  "file_assessments": [
+    {
+      "file": "pyproject.toml",
+      "overview": "Raises the cryptography constraint floor from >=48.0.1 to >=50.0.0 and appends the GHSA-g6cj-pr64-35w5 advisory to the inline comment."
+    },
+    {
+      "file": "uv.lock",
+      "overview": "Updates the manifest constraint specifier and replaces all cryptography 49.0.0 wheel/sdist entries with their 50.0.0 equivalents across every published platform."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "No control flow in this diff \u2014 purely declarative version constraints and lock hashes.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "No test fixture or setup code changed; the pip-audit skip is documented as a pre-existing environment failure unrelated to this bump.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "pyproject.toml:387 comment accurately documents both GHSA-537c-gmf6-5ccf and GHSA-g6cj-pr64-35w5 alongside the enforced floor >=50.0.0.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "No error paths or exit codes changed; this is a declarative dependency constraint change only.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "The cryptography>=50.0.0 constraint is in constraint-dependencies, not direct dependencies; the locked wheel is 50.0.0 which is API-compatible per the PR's full suite run.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "pyproject.toml:387 and uv.lock:14 both read >=50.0.0; uv.lock package block is 50.0.0 \u2014 all three are consistent.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "No logic is duplicated; this is a single-purpose version floor raise.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "PR claims bump from 49.0.0 to 50.0.0 with advisory comment; diff shows exactly that in both pyproject.toml and uv.lock.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No enum parsing or access-control code changed.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No client error-classification code changed.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server error-response code changed.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "No tests added or modified.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "No tests added or modified.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "No deferred scope items listed in the PR summary; the diff is confined to the stated change.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "No API client code changed.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "No branching or exception-handling code changed.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "No async or concurrent code changed.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "No control-flow code changed.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "No logging, error messages, or API responses changed.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "No lint suppressions added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "No tests added or modified; wiring is purely declarative version constraints.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "No tests added or modified; not applicable to a dependency floor change.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "No public interface changed; constraint-dependencies are a build/resolution concern only.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "No credentials or secrets in the diff; all hashes are published PyPI integrity hashes.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "No module interface changed.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    }
+  ],
+  "findings": []
+}

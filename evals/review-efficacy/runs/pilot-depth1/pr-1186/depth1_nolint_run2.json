@@ -1,0 +1,291 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 1,
+    "files_total": 1,
+    "checklist_items": 25,
+    "token_usage": {
+      "prompt": 508,
+      "completion": 21062,
+      "total": 21570
+    },
+    "cost_estimate_usd": 0.6977933999999999,
+    "base_ref": "1025c80296590d927c2a2c0fb28c6f2cbd570421",
+    "head_ref": "6ab8995b04d35bdf4d700c1569c91469ca384fc2",
+    "timestamp": "2026-08-06T17:33:41.990240+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 389.5607353180003,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "docs/ai-features.md"
+    ],
+    "skipped_files": []
+  },
+  "summary": "This PR expands the AI configuration reference to cover all AIConfig fields and corrects the privacy section to accurately reflect that fix mode can send whole source files.",
+  "readiness_verdict": "changes_requested",
+  "pr_summary": {
+    "headline": "This PR expands the AI configuration reference to cover all AIConfig fields and corrects the privacy section to accurately reflect that fix mode can send whole source files.",
+    "walkthrough": [
+      {
+        "text": "The Full Configuration Reference YAML block is reorganized into labeled groups (provider, budget, safety, output, cache, advanced) and newly documents 23 fields that were previously absent.",
+        "finding_ref": ""
+      },
+      {
+        "text": "The new text at docs/ai-features.md:358 claims the reference shows every AIConfig field with type, default, and range, but transcript_logging and transcript_retention (both valid AIConfig fields at config.py:283-300) are only mentioned as inline key references at line 1063-1068, not in the reference block.",
+        "finding_ref": "docs/ai-features.md:358"
+      },
+      {
+        "text": "The privacy section now correctly describes that fix mode can send whole source files rather than just a context window, verified against fix_context.py:203-221 and fix.py:359-373.",
+        "finding_ref": ""
+      },
+      {
+        "text": "The 'Files over 500 lines \u2014 only a window' bullet at line 1028 is stated as an unconditional rule, but fix.py:359-373 shows the batch path embeds the full file regardless of line count, making the rule false whenever multiple issues share one file and the batch prompt fits within max_prompt_tokens.",
+        "finding_ref": "docs/ai-features.md:1028"
+      },
+      {
+        "text": "The closing privacy caveat ('if sending whole files is unacceptable, keep fix mode off') is accurate but positioned after a bullet that overstates the windowing guarantee for large files.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "The P2 finding at line 1028 is the deciding factor. The 'Files over 500 lines \u2014 only a window' rule is stated without qualification, but the batch code path (fix.py:359-373) always embeds the full file for any file size when multiple issues are batched, overriding the stated windowing rule. Users making security decisions about enabling fix mode in sensitive codebases would rely on this rule incorrectly.",
+    "failure_mechanism": "A user with a 600-line file containing two fixable issues enables fix mode, trusting the 'Files over 500 lines \u2014 only a window' rule. The batch path builds a prompt with the full 600-line file and checks only whether the token count fits within max_prompt_tokens. If it does, the full file is sent to the AI provider \u2014 the windowing rule is never consulted. The user's private source code leaves the workspace unredacted despite the documented guarantee.",
+    "files_needing_attention": [
+      "docs/ai-features.md"
+    ]
+  },
+  "file_assessments": [
+    {
+      "file": "docs/ai-features.md",
+      "overview": "Expands the Full Configuration Reference to cover all AIConfig fields and rewrites the privacy section to accurately reflect that fix mode may send whole source files, but introduces one ambiguous rule about large-file windowing that is false in the batch path."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "Docs-only change; no control-flow or early-return logic is introduced.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "Docs-only change; no test setup or production defaults are altered.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "yes",
+      "evidence": "docs/ai-features.md:1028 \u2014 'Files over 500 lines \u2014 only a window' is stated as an unconditional rule but is overridden by the batch path at fix.py:359-373, which embeds the full file regardless of line count. Additionally, docs/ai-features.md:358 claims the reference shows every AIConfig field, but transcript_logging and transcript_retention (config.py:283-300) are absent from the reference block.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "Docs-only change; no error-path exit semantics are modified.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "Docs-only change; no defaults are altered in code.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "Docs-only; the reference cites implementation line numbers but no lockstep update requirement exists in this PR.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "Docs-only change; no logic is duplicated.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "yes",
+      "evidence": "PR description says the reference 'now documents every field in lintro/ai/config.py' but transcript_logging (config.py:283) and transcript_retention (config.py:292) are absent from the reference block; they appear only as inline key mentions at docs/ai-features.md:1063-1068.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "Docs-only change; no enum/status parsing logic is introduced.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "Docs-only change; no client error-classification logic is introduced.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "Docs-only change; no server error responses are defined.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "Docs-only change; no tests are added or modified.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "Docs-only change; no test mocking is introduced.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "The diff does not implement any behavior; it only updates documentation.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "Docs-only change; no API client code is modified.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "Docs-only change; no failure-handling branches are introduced.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "Docs-only change; no concurrent or async code is introduced.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "Docs-only change; no control-flow paths are introduced.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "Docs-only change; no PII logging or secret exposure is introduced.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "Docs-only change; no lint suppressions are added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "Docs-only change; no test coverage gaps are introduced.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "Docs-only change; no edge-case tests are required.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "Docs-only change; no public interfaces are modified.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "Docs-only change; no credentials are present.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "Docs-only change; no module interfaces are modified.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P2",
+      "category": "contract-drift",
+      "file": "docs/ai-features.md",
+      "line": 1028,
+      "title": "Large-file windowing rule false for batch path",
+      "description": "The bullet 'Files over 500 lines \u2014 only a window around the issue line is sent' is presented as an unconditional rule with no qualification. It is false whenever the batch path is used: fix.py:359-366 assembles a batch prompt with the full sanitized file content (no size check), then checks only whether the resulting token count exceeds max_prompt_tokens (line 368). If it fits, the entire file is sent to the provider regardless of line count. A 600-line file with two fixable issues will have its full content sent if the batch prompt is under 12 000 tokens, directly contradicting the stated rule. The 'Batch path' bullet does say 'full file regardless of line count,' but a reader who skims the size-based bullets and acts on the 'over 500 lines' rule will reach the wrong security conclusion.",
+      "cause": "The first two bullets describe the single-issue path only, but are not scoped as such. The batch path bullet implicitly overrides bullet two without marking bullet two as conditional.",
+      "fix": "Scope the first two bullets to the single-issue path explicitly, e.g. 'In single-issue mode, files at or under 500 lines\u2026' and 'In single-issue mode, files over 500 lines\u2026'. Alternatively add a parenthetical to bullet two: '(single-issue path only; the batch path below overrides this for multi-issue files)'.",
+      "confidence": "high",
+      "checklist_ids": [
+        3
+      ],
+      "suggested_code": "- **Files at or under 500 lines (single-issue path)** \u2014 the **entire file** is attempted first, so the model\n  can reason about the whole file when generating a fix. It is sent in full only if the\n  resulting prompt fits within `max_prompt_tokens`; otherwise lintro falls back to the\n  window below.\n- **Files over 500 lines (single-issue path)** \u2014 only a window around the issue line is sent\n  (`context_lines`, default 15 lines either side). The same windowing catches a small\n  file whose full contents would blow the prompt token budget.\n- **Batch path** \u2014 when several fixable issues share one file, the batch prompt embeds\n  the sanitized **full file regardless of line count**, falling back to per-issue\n  prompts only when the estimated batch prompt exceeds `max_prompt_tokens`.",
+      "source": "",
+      "kind": "finding",
+      "failure_scenario": "A developer with a 600-line secrets-adjacent config file reads 'Files over 500 lines \u2014 only a window' and concludes fix mode is safe. The file has 3 lint issues. The batch path embeds the full 600-line file in one prompt; at default max_prompt_tokens=12000 this comfortably fits. The full file \u2014 including any secrets not matched by the redaction patterns \u2014 is sent to the AI provider.",
+      "severity_downgraded": false,
+      "evidence_style": "cross_file",
+      "occurrences": [
+        {
+          "file": "docs/ai-features.md",
+          "line": 1028
+        },
+        {
+          "file": "lintro/ai/fix.py",
+          "line": 360
+        }
+      ],
+      "suggested_change": null
+    },
+    {
+      "severity": "P3",
+      "category": "contract-drift",
+      "file": "docs/ai-features.md",
+      "line": 358,
+      "title": "Reference block claims all-fields coverage but omits two fields",
+      "description": "Line 358 states 'Every key below maps 1:1 to a field on AIConfig in lintro/ai/config.py\u2026 All fields are optional; each is shown with its type, default, and accepted range.' transcript_logging (config.py:283-291, default false, enables NDJSON transcript writes) and transcript_retention (config.py:292-300, default 10, controls how many files are kept) are both valid AIConfig fields but are absent from the reference block. They appear only as inline key references in the narrative at lines 1063-1068, without type, default, or accepted-range documentation.",
+      "cause": "The PR added many previously undocumented fields but did not include these two, and the reference header was updated to assert completeness without verifying it.",
+      "fix": "Add a '\u2500\u2500 Transcript logging \u2500\u2500' group to the reference block documenting transcript_logging (bool, default: false) and transcript_retention (int >= 1, default: 10), or soften the header from 'Every key' to 'Most keys' (and list the omitted ones with a pointer to their dedicated section).",
+      "confidence": "high",
+      "checklist_ids": [
+        3,
+        8
+      ],
+      "suggested_code": "",
+      "source": "",
+      "kind": "finding",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "cross_file",
+      "occurrences": [
+        {
+          "file": "docs/ai-features.md",
+          "line": 358
+        },
+        {
+          "file": "lintro/ai/config.py",
+          "line": 283
+        }
+      ],
+      "suggested_change": null
+    }
+  ]
+}

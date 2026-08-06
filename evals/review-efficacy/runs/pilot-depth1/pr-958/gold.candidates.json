@@ -1,0 +1,136 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#issuecomment-4566990635",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "`@TurboCoder13` Sure, I'll review the changes now.",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#issuecomment-4932252408",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 152,
+    "title": "_⚠️ Potential issue_ | _🟠 Major_ | _⚡ Quick win_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3324739108",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+    "line": 64,
+    "title": "_🛠️ Refactor suggestion_ | _🟠 Major_ | _⚡ Quick win_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3324739121",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "**Actionable comments posted: 2**",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#pullrequestreview-4390048869",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "cursor_bugbot",
+    "file": null,
+    "line": null,
+    "title": "Bugbot is not enabled for your account, so this pull request was not reviewed.",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#issuecomment-4932251234",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 123,
+    "title": "<a href=\"#\"><img alt=\"P2\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9\" align=\"top\"></a> `local_astro.exists()` returns `True` for dir",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3319861233",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 347,
+    "title": "<a href=\"#\"><img alt=\"P2\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9\" align=\"top\"></a> The `get_subprocess_env` import is placed in ",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3319861371",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "macroscope",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 123,
+    "title": "🟡 **Medium** `definitions/astro_check.py:119`",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3319859217",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+    "line": 63,
+    "title": "stdin/env forwarding chain below _run_subprocess is untested",
+    "severity_guess": "P2",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 78,
+    "title": "Non-executable local shim causes PermissionError not graceful fallback",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+    "line": 63,
+    "title": "Regression tests coupled to private method _run_subprocess",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "lintro/plugins/subprocess_executor.py",
+    "line": 228,
+    "title": "stdin=stdin not covered by any test",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run2.json"
+  }
+]

@@ -1,0 +1,140 @@
+{
+  "stamp": "pilot-depth1",
+  "repo": "lgtm-hq/py-lintro",
+  "depth": 1,
+  "runs": 2,
+  "results": [
+    {
+      "pr": 916,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 132.55,
+      "finding_count": 0,
+      "cost_estimate_usd": 0.4050361,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-916/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 916,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 120.04,
+      "finding_count": 0,
+      "cost_estimate_usd": 0.4010817,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-916/depth1_nolint_run2.json"
+    },
+    {
+      "pr": 958,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 527.61,
+      "finding_count": 3,
+      "cost_estimate_usd": 0.8796635000000002,
+      "readiness_verdict": "changes_requested",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-958/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 958,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 563.02,
+      "finding_count": 1,
+      "cost_estimate_usd": 1.1017739000000002,
+      "readiness_verdict": "nits_only",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-958/depth1_nolint_run2.json"
+    },
+    {
+      "pr": 1186,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 258.08,
+      "finding_count": 1,
+      "cost_estimate_usd": 0.5610496,
+      "readiness_verdict": "nits_only",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1186/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 1186,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 390.66,
+      "finding_count": 2,
+      "cost_estimate_usd": 0.6977933999999999,
+      "readiness_verdict": "changes_requested",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1186/depth1_nolint_run2.json"
+    },
+    {
+      "pr": 1928,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 187.47,
+      "finding_count": 1,
+      "cost_estimate_usd": 0.2821856,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1928/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 1928,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 102.69,
+      "finding_count": 0,
+      "cost_estimate_usd": 0.14202320000000002,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1928/depth1_nolint_run2.json"
+    },
+    {
+      "pr": 1936,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 107.06,
+      "finding_count": 0,
+      "cost_estimate_usd": 0.3225164,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1936/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 1936,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 68.3,
+      "finding_count": 0,
+      "cost_estimate_usd": 0.2088329,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1936/depth1_nolint_run2.json"
+    },
+    {
+      "pr": 1958,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 622.66,
+      "finding_count": 1,
+      "cost_estimate_usd": 0.9613955,
+      "readiness_verdict": "nits_only",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1958/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 1958,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 471.59,
+      "finding_count": 1,
+      "cost_estimate_usd": 0.6189697000000001,
+      "readiness_verdict": "ready",
+      "output": "evals/review-efficacy/runs/pilot-depth1/pr-1958/depth1_nolint_run2.json"
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#issuecomment-4901674912",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "cursor_bugbot",
+    "file": null,
+    "line": null,
+    "title": "Bugbot is not enabled for your account, so this pull request was not reviewed.",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#issuecomment-4901673768",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 544,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3534788748",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 548,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3534788830",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 129,
+    "title": "<a href=\"#\"><img alt=\"P2\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=9\" align=\"top\"></a> **Transport Is Not Enforced**",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3534788923",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 129,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Transport not enforced**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560269028",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 545,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560269133",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 550,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560269215",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 169,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Transport Not Enforced**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560707978",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 585,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560708056",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 591,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3560708166",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 170,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Transport Fallback Overstated**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3561249700",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 173,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> <a href=\"#\"><img alt=\"security\" src=\"https://",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3561678893",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 173,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Cursor Transport Fallback**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3561863942",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 192,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Cursor Defaults Incorrectly**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3561864006",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 172,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Cursor Fallback Is Wrong**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3565164605",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 173,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Cursor Fallback Incorrect**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3565439883",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "docs/ai-features.md",
+    "line": 199,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Cursor Transport Fallback**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1186#discussion_r3598440118",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "docs/ai-features.md",
+    "line": 360,
+    "title": "Reference intro claims completeness but omits two fields",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "docs/ai-features.md",
+    "line": 1028,
+    "title": "Large-file windowing rule false for batch path",
+    "severity_guess": "P2",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run2.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "docs/ai-features.md",
+    "line": 358,
+    "title": "Reference block claims all-fields coverage but omits two fields",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run2.json"
+  }
+]
