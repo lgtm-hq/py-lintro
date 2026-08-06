@@ -53,3 +53,10 @@ uv run python evals/review-efficacy/scripts/score_eval.py \
 Competitor comments are **baselines**, not ground truth. `score_eval.py` reports
 location overlap and severity histograms, and emits a draft `gold.candidates.json`
 per PR for human adjudication (must-catch / should-catch / noise).
+
+## Pilot status
+
+See `reports/pilot-findings.md` for the first head-to-head read. Successful
+depth-1 runs live under `runs/pilot-depth1/` (N=2) and
+`runs/pilot-depth1-medlarge/` (#1939). Large-PR failure envelopes are kept under
+`runs/pilot-depth1-large/` and `runs/pilot-depth1-1886/` for the CLI-limit cases.
