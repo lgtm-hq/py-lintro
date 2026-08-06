@@ -192,21 +192,14 @@ def post_review_to_github(
     )
 
     if inline_findings:
-        # Built after the sticky upsert so the dedup pointer can resolve the
-        # sticky's real id — including on round 1, where it did not exist a
-        # moment ago and the pointer would otherwise render unlinked (#1910).
+        # The body is self-contained — it carries its own fix prompt inline
+        # (#1956) — so it needs nothing from the sticky upsert above and the
+        # ordering here is driven only by the inline-failure fallback.
         review_body = build_review_body(
             result=result,
             prior_state=prior_state,
             match=match,
             head_sha=head_sha,
-            sticky_url=_sticky_url(
-                reporter=gh_reporter,
-                comment_id=_sticky_comment_id(
-                    reporter=gh_reporter,
-                    known=comment_id,
-                ),
-            ),
             transport=transport,
             auth_mode=auth_mode,
             config_source=config_source,
@@ -616,30 +609,6 @@ def _sticky_comment_id(
         return known
     found = reporter.find_issue_comment(marker=STICKY_MARKER)
     return None if found is None else found[0]
-
-
-def _sticky_url(
-    *,
-    reporter: GitHubPRReporter,
-    comment_id: int | None,
-) -> str:
-    """Build the browser URL of the sticky comment, when its id is known.
-
-    Args:
-        reporter: GitHub reporter carrying repo and PR context.
-        comment_id: Sticky comment id as resolved after the upsert, or ``None``
-            when it could not be located at all.
-
-    Returns:
-        The comment's anchor URL, or an empty string when the id is unknown —
-        the pointer then renders unlinked rather than as a dead link.
-    """
-    if comment_id is None:
-        return ""
-    return (
-        f"https://github.com/{reporter.repo}/pull/{reporter.pr_number}"
-        f"#issuecomment-{comment_id}"
-    )
 
 
 def _count_new_commits(

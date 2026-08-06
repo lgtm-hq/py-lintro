@@ -8,11 +8,12 @@ scoped fix prompt), what the run cost (visible stats plus the config that
 produced them), and what it looked at (commits and files, with a reason for
 every file it did not look at).
 
-The fix panel is deliberately conditional. When this round's findings are
-*exactly* the PR's still-open findings — round 1, or a round where nothing was
-carried over — the panel would repeat the sticky comment's fix-all byte for
-byte, and two identical prompts on one PR is an invitation to copy the wrong
-one. In that case a one-line pointer to the sticky replaces it.
+The fix panel is unconditional. Even when this round's findings are *exactly*
+the PR's still-open findings — round 1, or a round where nothing was carried
+over — the panel renders in full rather than pointing at the sticky comment's
+fix-all: a reader on the review must be able to copy the prompt where the
+findings are announced, without a navigation hop (#1956). The panel's footer
+still names the sticky's fix-all for everything open across all rounds.
 """
 
 from __future__ import annotations
@@ -21,10 +22,8 @@ from lintro import __version__ as lintro_version
 from lintro.ai.review.agent_prompts import (
     prompt_findings,
     render_agent_prompt_panel,
-    render_sticky_prompt_pointer,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
-from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
     _fmt_cost,
@@ -60,7 +59,6 @@ def build_review_body(
     prior_state: ReviewState,
     match: FindingMatchResult,
     head_sha: str = "",
-    sticky_url: str = "",
     transport: str = "",
     auth_mode: str = "",
     config_source: str = "",
@@ -74,8 +72,6 @@ def build_review_body(
         match: Cross-round matching outcome for this round's findings.
         head_sha: Head commit sha reviewed in this round. Falls back to the
             metadata's head ref.
-        sticky_url: URL of the sticky status comment, used by the dedup
-            pointer and the footer. Empty renders unlinked text.
         transport: Provider transport used for this round (e.g. ``cli``).
         auth_mode: Authentication mode used by the transport.
         config_source: Human-readable description of where this run's settings
@@ -98,9 +94,7 @@ def build_review_body(
         ),
         _prompt_section(
             result=result,
-            match=match,
             round_number=round_number,
-            sticky_url=sticky_url,
         ),
         _run_stats_section(
             result=result,
@@ -192,41 +186,28 @@ def _header(
     return " · ".join(parts)
 
 
-def _open_keys(*, match: FindingMatchResult) -> set[str]:
-    """Return the identity keys of every finding still open after this round."""
-    return {
-        record.key for record in match.records if record.status is FindingStatus.OPEN
-    }
-
-
-def _round_keys(*, match: FindingMatchResult) -> set[str]:
-    """Return the identity keys of the findings reported in this round."""
-    return {record.key for record in (*match.new, *match.carried, *match.regressed)}
-
-
 def _prompt_section(
     *,
     result: ReviewResult,
-    match: FindingMatchResult,
     round_number: int,
-    sticky_url: str,
 ) -> str:
-    """Render the scoped fix prompt, or the sticky pointer when it would dupe.
+    """Render this round's scoped fix prompt panel.
+
+    The panel is rendered on every round, including one whose findings are
+    exactly the PR's still-open set: the review comment must be self-contained
+    (#1956). The panel's footer still sends readers to the sticky comment's
+    fix-all for everything open across all rounds.
 
     Args:
         result: This round's review result.
-        match: Cross-round matching outcome for this round.
         round_number: 1-based round number for this run.
-        sticky_url: URL of the sticky comment for the pointer variant.
 
     Returns:
-        Markdown for the prompt panel or the one-line pointer; empty when the
-        round produced nothing actionable to fix.
+        Markdown for the prompt panel; empty when the round produced nothing
+        actionable to fix.
     """
     if not prompt_findings(findings=result.findings):
         return ""
-    if _round_keys(match=match) == _open_keys(match=match):
-        return render_sticky_prompt_pointer(sticky_url=sticky_url)
     return render_agent_prompt_panel(
         findings=result.findings,
         scope=AgentPromptScope(

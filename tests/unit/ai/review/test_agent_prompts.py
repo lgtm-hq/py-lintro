@@ -16,7 +16,6 @@ from lintro.ai.review.agent_prompts import (
     render_finding_prompt,
     render_finding_prompt_panel,
     render_prompt_panel,
-    render_sticky_prompt_pointer,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
@@ -513,13 +512,20 @@ def test_non_int_round_number_is_rejected(round_number: object) -> None:
         )
 
 
-def test_sticky_pointer_links_back_instead_of_duplicating_the_prompt() -> None:
-    """When both scopes coincide the per-review body links to the sticky."""
-    pointer = render_sticky_prompt_pointer(sticky_url="https://example.test/c/1")
-    assert_that(pointer).contains(
-        "[sticky comment's fix-all](https://example.test/c/1)",
+def test_this_review_panel_footer_names_the_sticky_fix_all() -> None:
+    """The round-scoped panel still sends readers to the sticky for all-open."""
+    panel = render_agent_prompt_panel(
+        findings=(_finding(title="Real defect"),),
+        scope=AgentPromptScope(
+            kind=AgentPromptScopeKind.THIS_REVIEW,
+            round_number=1,
+        ),
     )
-    assert_that(pointer).does_not_contain("```")
+
+    assert_that(panel).contains(
+        "For everything still open across all rounds, use the sticky comment's "
+        "fix-all prompt",
+    )
 
 
 def test_questions_are_excluded_from_fix_all_prompts() -> None:
