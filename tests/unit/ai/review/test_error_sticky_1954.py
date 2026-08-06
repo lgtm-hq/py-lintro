@@ -7,8 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import AIAuthenticationError, AIProviderError
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.errors_taxonomy import KIND_COPY, ReviewErrorKind
 from lintro.ai.review.github import post_review_error_to_github
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
@@ -84,17 +85,62 @@ def test_failure_after_success_renders_the_banner(prior_state: ReviewState) -> N
     assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
 
 
+def test_banner_carries_the_kind_specific_guidance(prior_state: ReviewState) -> None:
+    """A permanent failure must not be dressed up as a transient one.
+
+    A rejected API key fails identically on every retry, so the banner has to
+    close with the same advice the error-only surface would give rather than a
+    blanket "retry shortly".
+    """
+    body = format_error_comment(
+        error=AIAuthenticationError("401 unauthorized"),
+        provider="anthropic",
+        prior_state=prior_state,
+    )
+    guidance = KIND_COPY[ReviewErrorKind.AUTH_FAILED][1]
+
+    assert_that(body).contains(f"> {_ROUND_2_FAILED}")
+    assert_that(body).contains(guidance)
+    assert_that(body).does_not_contain("This is usually transient")
+
+
+def test_legacy_prior_runs_also_render_the_board(prior_state: ReviewState) -> None:
+    """A v1 sticky's run mappings route to the board, not the error surface."""
+    body = format_error_comment(
+        error=AIProviderError("Overloaded"),
+        prior_runs=[run.to_dict() for run in prior_state.runs],
+    )
+
+    assert_that(body).contains(f"> {_ROUND_2_FAILED}")
+    assert_that(body).contains("showing round 1 results below")
+    assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
+    assert_that(parse_review_state_v2(body=body).runs).is_length(
+        len(prior_state.runs),
+    )
+
+
 def test_banner_sits_directly_under_the_header(prior_state: ReviewState) -> None:
-    """Nothing separates the failure notice from the sticky's title line."""
+    r"""Nothing separates the failure notice from the sticky's title line.
+
+    Asserted by line proximity rather than by index into the ``\\n\\n`` split:
+    the guarantee is that a reader meets the banner immediately after the
+    title, which must survive any section later gaining a blank line of its
+    own.
+    """
     body = format_error_comment(
         error=AIProviderError("Overloaded"),
         prior_state=prior_state,
     )
-    sections = body.split("\n\n")
+    lines = body.splitlines()
+    header_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("## 🔎 Lintro Review · round 1")
+    )
+    after_header = next(line for line in lines[header_index + 1 :] if line.strip())
 
-    assert_that(sections[0]).is_equal_to(STICKY_MARKER)
-    assert_that(sections[1]).starts_with("## 🔎 Lintro Review · round 1")
-    assert_that(sections[2]).starts_with(f"> {_ROUND_2_FAILED}")
+    assert_that(lines[0]).is_equal_to(STICKY_MARKER)
+    assert_that(after_header).starts_with(f"> {_ROUND_2_FAILED}")
 
 
 def test_failure_after_success_renders_the_full_layout(
@@ -242,12 +288,27 @@ def test_failure_body_respects_the_hard_comment_limit() -> None:
     assert_that(body).contains(STATE_MARKER_PREFIX)
 
 
-def test_posting_a_failure_updates_the_sticky_in_place(prior_body: str) -> None:
-    """The end-to-end error path edits the sticky and keeps the board."""
+def _reporter(*, prior_body: str) -> MagicMock:
+    """Build a mock reporter serving ``prior_body`` as the existing sticky.
+
+    Args:
+        prior_body: Sticky body the reporter reports as already posted.
+
+    Returns:
+        The configured mock.
+    """
     reporter = MagicMock()
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = (9, prior_body)
     reporter.update_issue_comment.return_value = True
+    reporter.repo = "owner/name"
+    reporter.pr_number = 7
+    return reporter
+
+
+def test_posting_a_failure_updates_the_sticky_in_place(prior_body: str) -> None:
+    """The end-to-end error path edits the sticky and keeps the board."""
+    reporter = _reporter(prior_body=prior_body)
 
     posted = post_review_error_to_github(
         error=AIProviderError("Overloaded"),
@@ -262,6 +323,29 @@ def test_posting_a_failure_updates_the_sticky_in_place(prior_body: str) -> None:
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
     assert_that(body).contains("### Open findings")
     assert_that(_state_block(body=body)).is_equal_to(_state_block(body=prior_body))
+
+
+def test_posting_falls_back_to_the_reporter_pr_context(prior_body: str) -> None:
+    """Omitting the overrides renders exactly what supplying them renders."""
+    explicit = _reporter(prior_body=prior_body)
+    implicit = _reporter(prior_body=prior_body)
+
+    post_review_error_to_github(
+        error=AIProviderError("Overloaded"),
+        provider="anthropic",
+        repo="owner/name",
+        pr_number=7,
+        reporter=explicit,
+    )
+    post_review_error_to_github(
+        error=AIProviderError("Overloaded"),
+        provider="anthropic",
+        reporter=implicit,
+    )
+
+    assert_that(implicit.update_issue_comment.call_args.kwargs["body"]).is_equal_to(
+        explicit.update_issue_comment.call_args.kwargs["body"],
+    )
 
 
 def test_render_state_sticky_without_a_banner(prior_state: ReviewState) -> None:

@@ -170,6 +170,11 @@ def _failure_banner(
     Counting attempts instead would mean recording failures in the state blob,
     which is exactly what a failed round must not do (#1954).
 
+    The closing sentence is the same kind-specific guidance the error-only
+    surface renders, not a fixed "retry shortly": a depleted balance or a
+    rejected API key will fail identically on every retry, and telling a
+    reviewer to try again is worse than saying nothing.
+
     Args:
         kind: Resolved canonical error kind.
         error: The exception raised during review.
@@ -178,9 +183,9 @@ def _failure_banner(
 
     Returns:
         A single-line Markdown blockquote naming the failed round, the cause,
-        and the round actually on screen.
+        the round actually on screen, and what to do about it.
     """
-    detail, _ = _render_error_copy(
+    detail, guidance = _render_error_copy(
         kind=kind,
         error=error,
         provider=provider,
@@ -189,8 +194,7 @@ def _failure_banner(
     shown = max(run.round for run in state.runs)
     headline = FAILURE_BANNER_HEADLINE.format(round_number=state.next_round)
     return (
-        f"> {headline} — {detail} · showing round {shown} results below. "
-        "This is usually transient — retry shortly."
+        f"> {headline} — {detail} · showing round {shown} results below. " f"{guidance}"
     )
 
 
