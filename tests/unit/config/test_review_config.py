@@ -358,6 +358,36 @@ def test_custom_agents_defaults_to_enabled(
     assert_that(config.review.custom_agents).is_equal_to(CustomAgentMode.ENABLED)
 
 
+def test_auto_resolve_defaults_to_true(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolving an addressed thread is the default; false is the opt-out."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("review:\n  depth: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.auto_resolve).is_true()
+
+
+def test_auto_resolve_can_be_opted_out(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A team that resolves threads by hand keeps the banner and nothing else."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("review:\n  auto_resolve: false\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.auto_resolve).is_false()
+
+
 def test_custom_agents_rejects_unknown_mode() -> None:
     """An unrecognized mode names the offending key in the error."""
     with pytest.raises(ValueError, match=escape("review.custom_agents must be")):

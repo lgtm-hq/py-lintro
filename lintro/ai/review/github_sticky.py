@@ -34,6 +34,7 @@ Two invariants the renderer enforces:
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
@@ -92,7 +93,38 @@ __all__ = [
     "build_sticky_comment",
     "parse_review_state",
     "parse_review_state_v2",
+    "stamp_comment_ids",
 ]
+
+
+def stamp_comment_ids(
+    *,
+    records: tuple[FindingRecord, ...],
+    comment_ids: Mapping[str, int] | None,
+) -> tuple[FindingRecord, ...]:
+    """Attach captured inline comment ids to the records about to be persisted.
+
+    Args:
+        records: Records produced by this round's matching.
+        comment_ids: Finding key to inline comment id, or ``None`` when no ids
+            were captured.
+
+    Returns:
+        The records, each carrying its comment id when one is known. A record
+        keeps the id it already had when the capture found none, so a failed
+        listing never erases the anchor a later round edits.
+    """
+    if not comment_ids:
+        return records
+    return tuple(
+        (
+            replace(record, inline_comment_id=comment_ids[record.key])
+            if record.key in comment_ids
+            else record
+        )
+        for record in records
+    )
+
 
 #: Emoji rendered next to each readiness verdict's label.
 VERDICT_EMOJI: dict[ReviewVerdict, str] = {
@@ -210,6 +242,7 @@ def build_sticky_comment(
     transport: str = "",
     auth_mode: str = "",
     inline_failure: InlinePostFailure | None = None,
+    inline_comment_ids: Mapping[str, int] | None = None,
 ) -> str:
     """Compose the full v5 "mission control" sticky PR comment body.
 
@@ -236,6 +269,10 @@ def build_sticky_comment(
         inline_failure: Findings whose inline comments could not be posted.
             When set, the sticky renders a warning row above the open-findings
             table and folds those findings' full detail back in.
+        inline_comment_ids: Finding key to the id of the inline comment that
+            carries it, captured after this round's review was submitted
+            (#1912). Stamped onto the persisted records so a later round can
+            edit those comments in place; rendering is unaffected.
 
     Returns:
         Complete Markdown body carrying the hidden marker and state block,
@@ -292,7 +329,10 @@ def build_sticky_comment(
     )
     new_state = ReviewState(
         runs=tuple(all_runs),
-        findings=match.records,
+        findings=stamp_comment_ids(
+            records=match.records,
+            comment_ids=inline_comment_ids,
+        ),
         truncated=state.truncated or runs_dropped,
     )
     return body + render_state_block(

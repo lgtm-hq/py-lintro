@@ -288,6 +288,30 @@ review:
   custom_agents: true # true | false | only
 ```
 
+### Addressed lifecycle on inline threads
+
+When `lintro review --post` runs again on a PR, every finding the new round no longer
+reproduces is stamped on its own inline comment rather than only in the sticky summary:
+
+- **Addressed** — the comment gets a `✔ Addressed in <sha> · round N` banner, its
+  copy-paste agent prompt is retitled `(historical)`, and the thread is resolved when
+  `review.auto_resolve` is true — which it is by default; set it to `false` to opt out
+  and resolve the thread by hand.
+- **Partially addressed** — a finding reported at several locations resolves only when
+  the whole pattern is gone. Progress shows as `✔ 14/20 addressed in <sha> · round N`
+  and the thread stays open.
+- **Regressed** — a finding that comes back is re-raised on a _fresh_ thread carrying
+  `regression · first raised round X, fixed round Y` plus a link to the original. The
+  old thread is stamped `↩ Regressed in <sha>` and is never reopened.
+
+Thread resolution is the only configurable half; the banner is always written.
+
+```yaml
+# .lintro-config.yaml
+review:
+  auto_resolve: true # default; set false to resolve threads by hand
+```
+
 ## Configuration
 
 ### Basic Setup

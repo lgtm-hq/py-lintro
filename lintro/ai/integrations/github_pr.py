@@ -22,6 +22,36 @@ from loguru import logger
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
+from lintro.ai.review.models.review_thread import ReviewThread
+
+#: Lists every review thread with its root comment's REST id, so a stored
+#: comment id can be joined to the thread node id the mutation requires.
+_REVIEW_THREADS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          comments(first: 1) { nodes { databaseId } }
+        }
+      }
+    }
+  }
+}
+"""
+
+#: Marks a thread resolved. There is deliberately no unresolve counterpart:
+#: a regression opens a new thread rather than reopening a settled one (#1912).
+_RESOLVE_THREAD_MUTATION = """
+mutation($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread { isResolved }
+  }
+}
+"""
 
 #: Commit shas are interpolated into a compare URL, so only hex refs are
 #: accepted — a branch name or user-supplied ref must not reach path building.
@@ -415,6 +445,196 @@ class GitHubPRReporter:
                 return None
             page += 1
 
+    def fetch_review_comments(self) -> list[dict[str, Any]] | None:
+        """Fetch the PR's inline review comments, oldest first.
+
+        Used to recover the comment id of a freshly posted inline finding: the
+        review-submission endpoint answers with the review, not with the
+        comments it created, so the ids are only discoverable by listing.
+
+        Returns:
+            The raw comment mappings, or ``None`` when the listing failed.
+            ``None`` is a refusal, not an empty PR: a caller must not read it
+            as "this PR has no inline comments".
+        """
+        base_url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/comments"
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "https":
+            return None
+
+        comments: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            url = f"{base_url}?per_page=100&page={page}"
+            req = self._authorized_request(url=url, method="GET")
+            try:
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                    req,
+                    timeout=30,
+                ) as resp:
+                    page_items = json.loads(resp.read().decode())
+            except (urllib.error.URLError, json.JSONDecodeError, OSError):
+                logger.debug("Failed to list PR review comments")
+                return None
+
+            if not isinstance(page_items, list) or not page_items:
+                break
+            comments.extend(item for item in page_items if isinstance(item, dict))
+            if len(page_items) < 100:
+                break
+            page += 1
+        return comments
+
+    def update_review_comment(self, *, comment_id: int, body: str) -> bool:
+        """Edit an existing inline review comment in place.
+
+        Args:
+            comment_id: Numeric id of the review comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            True if the update succeeded.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/pulls/comments/{comment_id}"
+        return self.api_request("PATCH", url, {"body": body})
+
+    @property
+    def graphql_url(self) -> str:
+        """Return the GraphQL endpoint matching this reporter's REST base.
+
+        Returns:
+            ``https://api.github.com/graphql`` for github.com; the sibling
+            ``/api/graphql`` endpoint for a GitHub Enterprise ``/api/v3`` base.
+        """
+        if self.api_base.endswith("/api/v3"):
+            return f"{self.api_base.removesuffix('/v3')}/graphql"
+        return f"{self.api_base}/graphql"
+
+    def graphql_request(
+        self,
+        *,
+        query: str,
+        variables: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Execute a GraphQL query or mutation against the GitHub API.
+
+        Args:
+            query: GraphQL document to execute.
+            variables: Variable bindings for the document.
+
+        Returns:
+            The ``data`` object of a successful response, or ``None`` when the
+            request failed, returned unparsable JSON, or carried GraphQL
+            ``errors`` — GraphQL answers 200 for a failed mutation, so the
+            error array is the only signal that it did not take effect.
+        """
+        url = self.graphql_url
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning("Refusing non-HTTPS GraphQL URL: {}", url)
+            return None
+
+        req = self._authorized_request(
+            url=url,
+            method="POST",
+            data=json.dumps({"query": query, "variables": variables}).encode(),
+            content_type="application/json",
+        )
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                req,
+                timeout=30,
+            ) as resp:
+                payload = json.loads(resp.read().decode())
+        except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+            logger.debug("GitHub GraphQL request failed: {}", exc)
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("errors"):
+            logger.warning(
+                "GitHub GraphQL request returned errors: {}",
+                payload["errors"],
+            )
+            return None
+        data = payload.get("data")
+        return data if isinstance(data, dict) else None
+
+    def fetch_review_threads(self) -> dict[int, ReviewThread] | None:
+        """Map each review thread's root comment id to the thread itself.
+
+        ``resolveReviewThread`` takes a thread node id, and the state blob only
+        stores REST comment ids, so the two must be joined. The join key is the
+        thread's *first* comment: that is the comment lintro posted to open the
+        thread, and it is the id persisted for the finding.
+
+        Returns:
+            Mapping of root comment database id to thread, or ``None`` when the
+            query failed — the caller then skips resolution rather than
+            guessing at thread identity.
+        """
+        if not self.repo or "/" not in self.repo:
+            return None
+        owner, _, name = self.repo.partition("/")
+
+        threads: dict[int, ReviewThread] = {}
+        cursor: str | None = None
+        while True:
+            data = self.graphql_request(
+                query=_REVIEW_THREADS_QUERY,
+                variables={
+                    "owner": owner,
+                    "name": name,
+                    "number": self.pr_number,
+                    "cursor": cursor,
+                },
+            )
+            if data is None:
+                return None
+            container = _dig(data, "repository", "pullRequest", "reviewThreads")
+            if container is None:
+                return None
+            for node in container.get("nodes") or []:
+                if not isinstance(node, dict):
+                    continue
+                node_id = node.get("id")
+                comments = (node.get("comments") or {}).get("nodes") or []
+                root = comments[0] if comments and isinstance(comments[0], dict) else {}
+                database_id = root.get("databaseId")
+                if isinstance(node_id, str) and isinstance(database_id, int):
+                    threads[database_id] = ReviewThread(
+                        node_id=node_id,
+                        is_resolved=bool(node.get("isResolved")),
+                    )
+            page_info = container.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                return threads
+            next_cursor = page_info.get("endCursor")
+            if not isinstance(next_cursor, str) or next_cursor == cursor:
+                # A server that repeats its cursor would loop forever; stop with
+                # what has been collected instead.
+                return threads
+            cursor = next_cursor
+
+    def resolve_review_thread(self, *, thread_id: str) -> bool:
+        """Resolve a PR review thread via the GraphQL mutation.
+
+        Args:
+            thread_id: GraphQL node id of the thread to resolve.
+
+        Returns:
+            True when GitHub reports the thread as resolved.
+        """
+        data = self.graphql_request(
+            query=_RESOLVE_THREAD_MUTATION,
+            variables={"threadId": thread_id},
+        )
+        if data is None:
+            return False
+        thread = _dig(data, "resolveReviewThread", "thread")
+        return bool(thread and thread.get("isResolved"))
+
     def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
         """Update an existing issue comment in place.
 
@@ -545,6 +765,25 @@ class GitHubPRReporter:
             stacklevel=2,
         )
         return self.api_request(method, url, payload)
+
+
+def _dig(payload: dict[str, Any], *keys: str) -> dict[str, Any] | None:
+    """Walk a chain of mapping keys in an untrusted GraphQL response.
+
+    Args:
+        payload: Decoded response object.
+        *keys: Successive keys to follow.
+
+    Returns:
+        The nested mapping, or ``None`` as soon as a level is missing or is not
+        a mapping — a partial GraphQL response must degrade, not raise.
+    """
+    current: Any = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, dict) else None
 
 
 def _detect_repo_root() -> Path | None:
