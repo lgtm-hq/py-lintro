@@ -682,6 +682,11 @@ def post_review_error_to_github(
 ) -> bool:
     """Post (or update) the sticky comment with a formatted API-error message.
 
+    When the sticky already carries a successful round, the failure is rendered
+    as a banner over a re-render of that round's board rather than replacing it
+    (#1954). The persisted state is passed through untouched either way, so a
+    failed round never advances the round counter or edits tracked findings.
+
     Args:
         error: The exception raised during review.
         provider: Provider identifier used for provider-aware classification.
@@ -703,6 +708,8 @@ def post_review_error_to_github(
         provider=provider,
         metadata=metadata,
         prior_state=prior_state,
+        repo=repo or gh_reporter.repo or "",
+        pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
     return _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
 

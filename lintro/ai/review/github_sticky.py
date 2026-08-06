@@ -95,6 +95,7 @@ __all__ = [
     "build_sticky_comment",
     "parse_review_state",
     "parse_review_state_v2",
+    "render_state_sticky",
     "stamp_comment_ids",
 ]
 
@@ -366,6 +367,129 @@ def build_sticky_comment(
     return body + render_state_block(
         state=prune_state_to_fit(state=new_state, body=body),
     )
+
+
+def render_state_sticky(
+    *,
+    state: ReviewState,
+    banner: str = "",
+    repo: str = "",
+    pr_number: int | None = None,
+) -> str:
+    """Re-render the mission-control layout from persisted state alone.
+
+    The sticky is rebuilt on every run from the state blob, so a round that
+    never produced a :class:`ReviewResult` — a provider outage, an aborted CLI
+    invocation — can still show the last good board instead of blanking it
+    (#1954). Only the sections that describe *this* round are omitted: the
+    summary, the model's reasoning, the fix-all prompt panel, and the ``This
+    run`` badges all belong to a run that did not happen. Everything a reviewer
+    navigates by — verdict, tiles, open findings, resolved findings, history —
+    is derived from state and rendered unchanged.
+
+    The state is re-emitted exactly as given: a failed round must not advance
+    the round counter or touch the tracked findings, so the caller's state
+    round-trips byte-identically unless size pruning has to intervene.
+
+    Args:
+        state: State decoded from the previous sticky comment. Must carry at
+            least one run; callers with an empty state have nothing to show and
+            should render their own first-failure surface instead.
+        banner: Optional blockquote rendered directly under the header, used to
+            explain why the board is not from the current round.
+        repo: ``owner/name`` slug used to link finding titles to their threads.
+        pr_number: Pull request number used for the same links.
+
+    Returns:
+        Complete Markdown body carrying the hidden marker and state block,
+        guaranteed to fit GitHub's comment size limit.
+    """
+    records = state.findings
+    runs = list(state.runs)
+    latest = runs[-1] if runs else None
+    open_count = sum(1 for record in records if record.status is FindingStatus.OPEN)
+
+    def assemble(*, limits: _RenderLimits) -> str:
+        """Render the whole state-only body at the given per-section limits."""
+        return _assemble_state_body(
+            state=state,
+            banner=banner,
+            round_number=latest.round if latest is not None else 1,
+            head_sha=latest.sha if latest is not None else "",
+            runs=runs,
+            limits=limits,
+            repo=repo,
+            pr_number=pr_number,
+        )
+
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=max(len(runs) - 1, 0),
+        open_count=open_count,
+        resolved_count=len(records) - open_count,
+    )
+    return body + render_state_block(state=prune_state_to_fit(state=state, body=body))
+
+
+def _assemble_state_body(
+    *,
+    state: ReviewState,
+    banner: str,
+    round_number: int,
+    head_sha: str,
+    runs: list[RunRecord],
+    limits: _RenderLimits,
+    repo: str,
+    pr_number: int | None,
+) -> str:
+    """Render the state-derived sticky sections and join the non-empty ones.
+
+    Args:
+        state: Persisted state to render.
+        banner: Optional blockquote rendered directly under the header.
+        round_number: Round number of the most recent successful run.
+        head_sha: Head commit sha reviewed by that run.
+        runs: Every retained run record, oldest first.
+        limits: Per-section render limits.
+        repo: ``owner/name`` slug used to link finding titles to their threads.
+        pr_number: Pull request number used for the same links.
+
+    Returns:
+        The assembled body, without the hidden state block.
+    """
+    records = state.findings
+    match = FindingMatchResult(records=records)
+    total_open = sum(1 for record in records if record.status is FindingStatus.OPEN)
+    total_resolved = len(records) - total_open
+
+    sections: list[str] = [
+        STICKY_MARKER,
+        _header(round_number=round_number, head_sha=head_sha),
+        banner,
+        _readiness_pill(verdict=derive_verdict(findings=records), records=records),
+        _verdict_explainer(),
+        _tiles_section(records=records),
+        _open_findings_section(
+            records=_sorted_open_records(records=records, limit=limits.open),
+            match=match,
+            total=total_open,
+            repo=repo,
+            pr_number=pr_number,
+        ),
+        _resolved_section(
+            records=_sorted_resolved_records(records=records, limit=limits.resolved),
+            total=total_resolved,
+        ),
+    ]
+    history = _history_section(
+        runs=runs,
+        limit=limits.history,
+        resolved_total=total_resolved,
+    )
+    if history:
+        sections.extend(["---", history])
+    sections.append(STICKY_FOOTER)
+    return "\n\n".join(section for section in sections if section)
 
 
 def _fit_body(
