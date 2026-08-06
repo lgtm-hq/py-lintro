@@ -140,6 +140,7 @@ exclude = ["tests*", "test_samples*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json", "py.typed"]
+"lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 [tool.ruff]
 line-length = 88
