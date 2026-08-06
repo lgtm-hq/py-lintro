@@ -7,7 +7,7 @@
     "file": null,
     "line": null,
     "severity_guess": "P1",
-    "title": "**Cumulative (this PR):** ~3,805 tok · ~$0.2154 · 1 runs (0 exact, 1 est.) · models: `claude-sonnet-4-6` ×1",
+    "title": "Cumulative (this PR):** ~3,805 tok · ~$0.2154 · 1 runs (0 exact, 1 est.) · models: `claude-sonnet-4-6` ×1",
     "body": "**Cumulative (this PR):** ~3,805 tok · ~$0.2154 · 1 runs (0 exact, 1 est.) · models: `claude-sonnet-4-6` ×1\n\n## 🔎 Lintro Review\n\n> **2 files** reviewed · depth 1 · `claude-sonnet-4-6` · ~$0.2154\n\n| 🔴 P1 | 🟠 P2 | 🟡 P3 |\n|:-:|:-:|:-:|\n| **0** | **0** | **0** |\n\n**TL;DR** — Bumps the cryptography floor from >=48.0.1 to >=50.0.0 and locks to 50.0.0 to remediate the high-severity PKCS#7 Bleichenbacher oracle (GHSA-g6cj-pr64-35w5).\n\n### Findings\n\n✅ No actionable findings.\n\n**Structured checks:** 25\n\n<details><summary>⚙️ Run mechanics (this run)</summary>\n\n**Model:** `claude-sonnet-4-6` · **Provider:** `anthropic` · **Depth:** 1 · **Tokens:** ~3,805 tok (in 3 / out 3,802, estimated) · **Est. cost:** ~$0.2154 · **Duration:** 72.7s\n\n</details>\n\n<sub>🤖 Automated review by lintro · not a substitute for human review · `~` = approximate (estimated locally; provider did not report token usage)</sub>"
   }
 ]

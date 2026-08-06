@@ -1,0 +1,19 @@
+{
+  "stamp": "pilot-depth1-1886",
+  "repo": "lgtm-hq/py-lintro",
+  "depth": 1,
+  "runs": 1,
+  "results": [
+    {
+      "pr": 1886,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 2,
+      "elapsed_sec": 1307.52,
+      "finding_count": 0,
+      "cost_estimate_usd": null,
+      "readiness_verdict": null,
+      "output": "evals/review-efficacy/runs/pilot-depth1-1886/pr-1886/depth1_nolint_run1.json"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+Usage: lintro review [OPTIONS]
+Try 'lintro review -h' for help.
+
+Error: AI review is disabled in configuration. Set ai.review: true (and ai.enabled: true) in .lintro-config.yaml

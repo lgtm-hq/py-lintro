@@ -1,0 +1,30 @@
+{
+  "stamp": "pilot-depth1-medlarge",
+  "repo": "lgtm-hq/py-lintro",
+  "depth": 1,
+  "runs": 1,
+  "results": [
+    {
+      "pr": 1939,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 0,
+      "elapsed_sec": 1037.48,
+      "finding_count": 1,
+      "cost_estimate_usd": 1.8539364,
+      "readiness_verdict": "nits_only",
+      "output": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1939/depth1_nolint_run1.json"
+    },
+    {
+      "pr": 1886,
+      "depth": 1,
+      "with_lint": false,
+      "exit_code": 2,
+      "elapsed_sec": 0.41,
+      "finding_count": null,
+      "cost_estimate_usd": null,
+      "readiness_verdict": null,
+      "output": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1886/depth1_nolint_run1.json"
+    }
+  ]
+}

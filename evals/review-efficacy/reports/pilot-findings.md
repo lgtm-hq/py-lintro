@@ -29,6 +29,17 @@ baselines.
 
 Approximate wave-1 spend (sum of `cost_estimate_usd`): **~$6.7**.
 
+## Medium / large follow-ups
+
+| PR | Size | Result | Notes |
+| --- | --- | --- | --- |
+| #1939 | +1522/−30 | **OK** — 1×P3, `nits_only`, ~$1.85, 1037s | Finding-model PR; quiet vs CodeRabbit’s 7 archived comments |
+| #1481 | +1889/−1551 | **FAIL** `E2BIG` | CLI argv too long for prompt+diff (`ARG_MAX` ~2MB) |
+| #1891 | +1577/−8 | **FAIL** timeout | Claude CLI timed out after 900s on chunk 0 |
+| #1886 | +1526/−80 | **FAIL** output cap | Sonnet hit 32k `output_tokens` and CLI exited `is_error` |
+
+Large-diff CLI transport is the main operational gap for this eval design — not finding quality.
+
 ## Early read vs competitors
 
 1. **Noise on trivial PRs.** On #916 Greptile posted multiple P1/P2 badges (and Macroscope a High) for a Renovate Actions cache pin. Lintro produced zero findings both runs. If the goal is signal/noise on dependency bumps, lintro looks better calibrated here.
@@ -36,7 +47,7 @@ Approximate wave-1 spend (sum of `cost_estimate_usd`): **~$6.7**.
 3. **Real overlap on substantive PRs.** On #958, CodeRabbit/Greptile/Macroscope all touched `astro_check.py` non-interactive behavior; lintro also focused there (test gaps / shim fallback). Same neighborhood, different framing.
 4. **Run-to-run variance is real.** #958 went 3 findings → 1 finding; #1186 flipped verdict nits↔changes_requested. Any comparison needs N≥3 and median stats before claiming wins.
 5. **Historical Bugbot is often unusable as a baseline** in this repo’s older PRs (account-not-enabled stubs). Prefer live Bugbot or drop it from the corpus.
-6. **CLI transport ceiling.** Large PR #1481 failed immediately with `Argument list too long` (`E2BIG`) spawning `claude` — prompt+diff exceeded `ARG_MAX` (~2MB). This is a product limitation for `--transport cli` on huge refactors, not just an eval issue.
+6. **CLI transport ceiling on large PRs.** Three failure modes showed up above ~1.5k-line diffs: `E2BIG` (argv), wall-clock timeout, and 32k output-token exhaustion while emitting the mandatory checklist JSON. For efficacy work, prefer path-filtered / chunked reviews — or API transport — on large PRs.
 
 ## What this does *not* prove yet
 

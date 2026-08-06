@@ -1,0 +1,83 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#issuecomment-5180695030",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "> [!CAUTION]",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#issuecomment-5180803936",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/ai/review/finding_matcher.py",
+    "line": 204,
+    "title": "_🎯 Functional Correctness_ | _🟠 Major_ | _🏗️ Heavy lift_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#discussion_r3713669666",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/ai/review/models/finding_occurrence.py",
+    "line": 77,
+    "title": "_🗄️ Data Integrity & Integration_ | _🟠 Major_ | _⚡ Quick win_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#discussion_r3713669673",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/ai/review/verdict.py",
+    "line": 138,
+    "title": "_🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#discussion_r3713669699",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "tests/unit/ai/prompts/test_review_prompts.py",
+    "line": 158,
+    "title": "_🗄️ Data Integrity & Integration_ | _🟠 Major_ | _⚡ Quick win_",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#discussion_r3713669706",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "a.py",
+    "line": 10,
+    "title": "**Actionable comments posted: 4**",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1939#pullrequestreview-4855898811",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "lintro/ai/review/github_sticky.py",
+    "line": 1516,
+    "title": "Questions/downgraded wiring in _run_record not tested",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  }
+]

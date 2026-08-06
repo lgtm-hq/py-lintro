@@ -1,0 +1,93 @@
+{
+  "run_dir": "/workspace/evals/review-efficacy/runs/pilot-depth1-medlarge",
+  "prs": {
+    "1886": {
+      "title": "feat(cli): move advisory AI finders out of chk into lintro review",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1886",
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      },
+      "stats": {
+        "lintro_findings": 0,
+        "lintro_severity_hist": {},
+        "lintro_located": 0,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 0,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": null,
+            "competitor_total_comments": 1
+          },
+          "lintro_dogfood": {
+            "competitor_located": 0,
+            "lintro_located": 0,
+            "location_overlap": 0,
+            "jaccard": null,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1886/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1886,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 2,
+          "elapsed_sec": 0.41,
+          "finding_count": null,
+          "cost_estimate_usd": null,
+          "readiness_verdict": null,
+          "output": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1886/depth1_nolint_run1.json"
+        }
+      ]
+    },
+    "1939": {
+      "title": "feat(review): add corpus-informed finding model to the review pipeline",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1939",
+      "competitor_counts": {
+        "coderabbit": 7,
+        "lintro_dogfood": 1
+      },
+      "stats": {
+        "lintro_findings": 1,
+        "lintro_severity_hist": {
+          "P3": 1
+        },
+        "lintro_located": 1,
+        "per_competitor": {
+          "coderabbit": {
+            "competitor_located": 5,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 7
+          },
+          "lintro_dogfood": {
+            "competitor_located": 1,
+            "lintro_located": 1,
+            "location_overlap": 0,
+            "jaccard": 0.0,
+            "competitor_total_comments": 1
+          }
+        }
+      },
+      "gold_candidates": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1939/gold.candidates.json",
+      "run_results": [
+        {
+          "pr": 1939,
+          "depth": 1,
+          "with_lint": false,
+          "exit_code": 0,
+          "elapsed_sec": 1037.48,
+          "finding_count": 1,
+          "cost_estimate_usd": 1.8539364,
+          "readiness_verdict": "nits_only",
+          "output": "evals/review-efficacy/runs/pilot-depth1-medlarge/pr-1939/depth1_nolint_run1.json"
+        }
+      ]
+    }
+  }
+}
