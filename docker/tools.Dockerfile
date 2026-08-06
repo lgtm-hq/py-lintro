@@ -53,6 +53,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     build-essential \
     git \
     libssl-dev \
+    default-jre-headless \
     pkg-config \
     unzip \
     jq && \
@@ -149,6 +150,7 @@ RUN echo "=== Verifying all tools ===" && \
     black --version && commitlint --version && gitleaks version && \
     golangci-lint version && \
     hadolint --version && \
+    ktlint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \

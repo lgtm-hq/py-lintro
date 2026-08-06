@@ -43,6 +43,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.GOLANGCI_LINT,
     ToolName.HADOLINT,
     ToolName.HTML_VALIDATE,
+    ToolName.KTLINT,
     ToolName.OSV_SCANNER,
     ToolName.OXFMT,
     ToolName.OXLINT,
