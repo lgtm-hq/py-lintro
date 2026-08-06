@@ -80,7 +80,7 @@ def test_failure_after_success_renders_the_banner(prior_state: ReviewState) -> N
 
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
     assert_that(body).contains("showing round 1 results below")
-    assert_that(body).contains("This is usually transient — retry shortly.")
+    assert_that(body).contains(KIND_COPY[ReviewErrorKind.SERVER_ERROR][1])
     assert_that(body).contains("Overloaded")
     assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
 
@@ -97,11 +97,9 @@ def test_banner_carries_the_kind_specific_guidance(prior_state: ReviewState) -> 
         provider="anthropic",
         prior_state=prior_state,
     )
-    guidance = KIND_COPY[ReviewErrorKind.AUTH_FAILED][1]
-
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
-    assert_that(body).contains(guidance)
-    assert_that(body).does_not_contain("This is usually transient")
+    assert_that(body).contains(KIND_COPY[ReviewErrorKind.AUTH_FAILED][1])
+    assert_that(body).does_not_contain(KIND_COPY[ReviewErrorKind.SERVER_ERROR][1])
 
 
 def test_legacy_prior_runs_also_render_the_board(prior_state: ReviewState) -> None:
