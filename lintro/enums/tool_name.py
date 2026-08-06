@@ -44,6 +44,7 @@ class ToolName(StrEnum):
     STYLELINT = auto()
     SVELTE_CHECK = auto()
     TAPLO = auto()
+    TRIVY = auto()
     TRUFFLEHOG = auto()
     TSC = auto()
     VALE = auto()
