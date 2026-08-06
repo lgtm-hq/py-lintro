@@ -9,12 +9,16 @@
   "packageRules": [
     {
       "description": "test_samples are fixed tool-test inputs; never update them",
-      "matchFileNames": ["test_samples/**"],
+      "matchFileNames": [
+        "test_samples/**"
+      ],
       "enabled": false
     },
     {
       "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
-      "matchPackageNames": ["prettier"],
+      "matchPackageNames": [
+        "prettier"
+      ],
       "allowedVersions": "<=3.9.4"
     },
     {
@@ -26,17 +30,25 @@
     },
     {
       "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
-      "matchPackageNames": ["typescript"],
+      "matchPackageNames": [
+        "typescript"
+      ],
       "allowedVersions": "<7"
     },
     {
       "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
-      "matchPackageNames": ["js-yaml"],
+      "matchPackageNames": [
+        "js-yaml"
+      ],
       "allowedVersions": "<5"
     },
     {
-      "matchDatasources": ["pypi"],
-      "matchUpdateTypes": ["minor"],
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
       "automerge": false
     },
     {
@@ -50,7 +62,9 @@
         "setup-py",
         "uv"
       ],
-      "matchPackageNames": ["python"],
+      "matchPackageNames": [
+        "python"
+      ],
       "rangeStrategy": "widen"
     },
     {
@@ -84,6 +98,8 @@
         "koalaman/shellcheck",
         "shfmt",
         "mvdan/sh",
+        "swiftlint",
+        "realm/SwiftLint",
         "taplo",
         "tamasfe/taplo",
         "trufflehog",
@@ -99,30 +115,40 @@
     },
     {
       "description": "Block malicious astro@7.1.0 (MAL-2026-10726); lift once a clean release ships",
-      "matchPackageNames": ["astro"],
+      "matchPackageNames": [
+        "astro"
+      ],
       "allowedVersions": "<7.1.0 || >7.1.0",
       "automerge": false
     },
     {
       "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "matchPackageNames": [
         "ghcr.io/lgtm-hq/lintro-tools"
       ],
-      "matchUpdateTypes": ["digest"],
+      "matchUpdateTypes": [
+        "digest"
+      ],
       "automerge": false
     },
     {
       "description": "lintro-ai-tools base image digest pin (FROM in the Dockerfile 'aitools' stage); full CI validates the bump",
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "matchPackageNames": [
         "ghcr.io/lgtm-hq/lintro-ai-tools"
       ],
-      "matchUpdateTypes": ["digest"],
+      "matchUpdateTypes": [
+        "digest"
+      ],
       "automerge": false
     },
     {
-      "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
+      "description": "Agent CLIs release close to daily; batch them into one weekly PR \u2014 the hybrid capability guard (#1612) tolerates the lag",
       "groupName": "ai agent CLIs",
       "groupSlug": "ai-agent-clis",
       "matchFileNames": [
@@ -133,7 +159,9 @@
         "@openai/codex",
         "node"
       ],
-      "schedule": ["before 5am on monday"],
+      "schedule": [
+        "before 5am on monday"
+      ],
       "automerge": false
     },
     {
@@ -175,13 +203,17 @@
     ]
   },
   "lockFileMaintenance": {
-    "schedule": ["before 5am on monday"],
+    "schedule": [
+      "before 5am on monday"
+    ],
     "commitMessageAction": "update lockfile"
   },
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG HADOLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -191,7 +223,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG ACTIONLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -399,6 +433,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "dotenv-linter/dotenv-linter",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update swiftlint version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.SWIFTLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "realm/SwiftLint",
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
       "description": "Update taplo version in _tool_versions.py",
