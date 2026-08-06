@@ -522,6 +522,8 @@ def test_this_review_panel_footer_names_the_sticky_fix_all() -> None:
         ),
     )
 
+    assert_that(panel).contains("⚡ **Fix prompt — this round's 1 finding only**")
+    assert_that(panel).contains("round 1")
     assert_that(panel).contains(
         "For everything still open across all rounds, use the sticky comment's "
         "fix-all prompt",
