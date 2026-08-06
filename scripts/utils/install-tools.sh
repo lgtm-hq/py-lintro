@@ -167,7 +167,7 @@ should_install() {
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
+	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
@@ -987,6 +987,84 @@ main() {
 		fi
 	fi # vale
 
+	if should_install "vale"; then
+		# Install vale (prose/documentation linter)
+		# Prebuilt binaries: https://github.com/errata-ai/vale/releases
+		echo -e "${BLUE}Installing vale...${NC}"
+		VALE_VERSION=$(get_tool_version "vale") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install vale v${VALE_VERSION}"
+		elif command -v vale &>/dev/null; then
+			echo -e "${GREEN}✓ vale already installed${NC}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$os" in
+			Darwin) os_name="macOS" ;;
+			Linux) os_name="Linux" ;;
+			*) os_name="Linux" ;;
+			esac
+			case "$arch" in
+			x86_64 | amd64) arch_name="64-bit" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && rm -rf "$tmpdir" && exit 1 ;;
+			esac
+			tgz_name="vale_${VALE_VERSION}_${os_name}_${arch_name}.tar.gz"
+			tgz_url="https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/${tgz_name}"
+			if download_with_retries "$tgz_url" "$tmpdir/vale.tgz" 3; then
+				# Require checksum verification before installing
+				checksum_url="https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_checksums.txt"
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for vale${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for vale...${NC}"
+				expected=$(grep "$tgz_name" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for ${tgz_name}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/vale.tgz" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/vale.tgz" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for vale (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				if ! tar -xzf "$tmpdir/vale.tgz" -C "$tmpdir" >/dev/null 2>&1; then
+					echo -e "${RED}✗ Failed to extract vale archive${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ -f "$tmpdir/vale" ]; then
+					cp "$tmpdir/vale" "$BIN_DIR/vale"
+					chmod +x "$BIN_DIR/vale"
+					echo -e "${GREEN}✓ vale installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Could not find extracted vale binary${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+			else
+				echo -e "${RED}✗ Failed to download vale prebuilt binary${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir" || true
+		fi
+	fi # vale
+
 	# Shared helper: ensure Rust toolchain is installed with the required component.
 	# Called by both the rustfmt and clippy blocks to avoid duplicating toolchain setup.
 	# Usage: ensure_rust_toolchain <component>  (e.g. "rustfmt" or "clippy")
@@ -1096,6 +1174,68 @@ main() {
 			ensure_rust_toolchain "clippy"
 		fi
 	fi # clippy
+
+
+	if should_install "buf"; then
+		# Install buf (Protocol Buffer linter and formatter)
+		echo -e "${BLUE}Installing buf...${NC}"
+		BUF_VERSION=$(get_tool_version "buf") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install buf v${BUF_VERSION}"
+		elif command -v buf &>/dev/null; then
+			echo -e "${GREEN}✓ buf already installed${NC}"
+		else
+			# buf release assets are named buf-$(uname -s)-$(uname -m), e.g.
+			# buf-Linux-x86_64, buf-Linux-aarch64, buf-Darwin-arm64.
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$arch" in
+			amd64) arch="x86_64" ;;
+			esac
+			tmpdir=$(mktemp -d)
+			asset="buf-${os}-${arch}"
+			binary_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/${asset}"
+			checksum_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/sha256.txt"
+			if download_with_retries "$binary_url" "$tmpdir/buf" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/sha256.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for buf${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for buf...${NC}"
+				expected=$(grep " ${asset}$" "$tmpdir/sha256.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ No checksum entry for ${asset}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/buf" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/buf" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for buf (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				mv "$tmpdir/buf" "$BIN_DIR/buf"
+				chmod +x "$BIN_DIR/buf"
+				echo -e "${GREEN}✓ buf installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download buf${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # buf
 
 	if should_install "cargo-audit"; then
 		# Install cargo-audit (Rust dependency vulnerability scanner)
@@ -1798,6 +1938,7 @@ main() {
 		["actionlint"]="GitHub Actions linting"
 		["astro"]="Astro type checking"
 		["bandit"]="Python security checks"
+		["buf"]="Protocol Buffer linting and formatting"
 		["black"]="Python formatting"
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
@@ -1839,7 +1980,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
