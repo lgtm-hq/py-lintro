@@ -155,6 +155,31 @@ def test_failed_round_does_not_advance_the_round_counter(
     assert_that(recovered.findings).is_equal_to(prior_state.findings)
 
 
+def test_consecutive_failures_name_the_same_attempted_round(
+    prior_state: ReviewState,
+) -> None:
+    """Repeated failures are repeated attempts at one round, not new rounds.
+
+    A round number is assigned when a review completes, so a failed attempt has
+    none to report and the banner names the round the next successful review
+    will carry. Counting attempts instead would mean recording failures in the
+    state blob, which a failed round must never do. The sticky is edited in
+    place, so a reader only ever sees the latest attempt's banner.
+    """
+    first = format_error_comment(
+        error=AIProviderError("Overloaded"),
+        prior_state=prior_state,
+    )
+    second = format_error_comment(
+        error=AIProviderError("Overloaded"),
+        prior_state=parse_review_state_v2(body=first),
+    )
+
+    assert_that(second).contains(f"> {_ROUND_2_FAILED}")
+    assert_that(second).contains("showing round 1 results below")
+    assert_that(_state_block(body=second)).is_equal_to(_state_block(body=first))
+
+
 def test_oversized_provider_error_is_truncated(prior_state: ReviewState) -> None:
     """A raw CLI payload is bounded and flattened onto the banner's one line."""
     payload = '{\n  "error": "' + ("x" * 20_000) + '"\n}'

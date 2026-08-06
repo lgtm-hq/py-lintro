@@ -161,6 +161,15 @@ def _failure_banner(
 ) -> str:
     """Render the blockquote explaining a failed round over the last good board.
 
+    The round it names is the one the *next successful* review will be numbered
+    with, because that is the only round number that exists: a round number is
+    assigned when a review completes, and a failed attempt deliberately writes
+    nothing to state. Consecutive failures therefore repeat the same number,
+    which is correct — they are repeated attempts at the same round, and the
+    sticky is edited in place so only the latest attempt is ever on screen.
+    Counting attempts instead would mean recording failures in the state blob,
+    which is exactly what a failed round must not do (#1954).
+
     Args:
         kind: Resolved canonical error kind.
         error: The exception raised during review.
