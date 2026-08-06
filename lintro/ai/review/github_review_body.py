@@ -27,8 +27,8 @@ from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
-    _fmt_cost,
-    _fmt_int,
+    format_badge_tables,
+    run_stats_primary_cells,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -236,23 +236,6 @@ def _prompt_section(
     )
 
 
-def _badge_table(*, cells: list[tuple[str, str]]) -> list[str]:
-    """Render key/value stats as a two-row Markdown table.
-
-    Args:
-        cells: Ordered ``(key, value)`` pairs.
-
-    Returns:
-        Markdown lines, or an empty list when there is nothing to render.
-    """
-    if not cells:
-        return []
-    keys = " | ".join(key for key, _ in cells)
-    dividers = " | ".join("---" for _ in cells)
-    values = " | ".join(value for _, value in cells)
-    return [f"| {keys} |", f"| {dividers} |", f"| {values} |"]
-
-
 def _run_stats_section(
     *,
     result: ReviewResult,
@@ -265,7 +248,8 @@ def _run_stats_section(
     Stats follow the epic's shared ordering rule: model, est. cost, tokens in,
     tokens out on the first line; mechanics on the second. ``~`` marks values
     estimated locally, so a subscription run never presents an estimate as a
-    billed figure.
+    billed figure. The badge tables come from the shared renderer, so this
+    surface and the sticky's ``This run`` section cannot drift (#1955).
 
     Args:
         result: This round's review result.
@@ -277,17 +261,7 @@ def _run_stats_section(
         Markdown for the run-stats section.
     """
     metadata = result.metadata
-    estimated = metadata.token_usage_estimated
-    prompt_tokens = int(metadata.token_usage.get("prompt", 0))
-    completion_tokens = int(metadata.token_usage.get("completion", 0))
-    tilde = "~" if estimated else ""
-
-    primary = [
-        ("model", f"`{sanitize_comment_text(metadata.model, limit=60)}`"),
-        ("est. cost", _fmt_cost(metadata.cost_estimate_usd, estimated=estimated)),
-        ("tokens in", f"{tilde}{_fmt_int(prompt_tokens)}"),
-        ("tokens out", f"{tilde}{_fmt_int(completion_tokens)}"),
-    ]
+    primary = run_stats_primary_cells(metadata=metadata)
 
     transport_label = sanitize_comment_text(transport, limit=40)
     if transport_label and auth_mode:
@@ -309,9 +283,7 @@ def _run_stats_section(
     )
 
     lines = ["**📊 Run stats**", ""]
-    lines.extend(_badge_table(cells=primary))
-    lines.append("")
-    lines.extend(_badge_table(cells=secondary))
+    lines.extend(format_badge_tables(rows=[primary, secondary]))
     if config_source:
         source = sanitize_comment_text(config_source, limit=300)
         lines.extend(["", f"<sub>Config source: {source}</sub>"])

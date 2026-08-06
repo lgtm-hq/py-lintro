@@ -19,7 +19,7 @@ Layout, top to bottom:
 6. ``Open findings`` — one line per finding, titles only
 7. the fix-all agent prompt panel, scoped to *all* still-open findings
 8. ``Resolved`` — struck-through titles with their fixing commit
-9. *This run* badges, two lines (model-first ordering)
+9. *This run* badges, two single-row tables (model-first ordering)
 10. ``---`` then exactly one ``🕘 Run history`` collapsible
 11. a one-line footer
 
@@ -68,6 +68,8 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_badge_tables,
+    run_stats_primary_cells,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -1015,12 +1017,13 @@ def _this_run_section(
     transport: str,
     auth_mode: str,
 ) -> str:
-    """Render the two-line badge block for the current run.
+    """Render the two badge tables describing the current run.
 
-    Ordering is fixed across every surface (epic #1905): model, est. cost,
-    tokens in, tokens out on line 1; transport and mechanics on line 2. No
-    figure is presented as billed — the ``transport`` badge and the ``~``
-    prefix carry that honesty.
+    The tables come from the same renderer as the per-review body's run stats
+    (#1955), so the two surfaces cannot drift. Ordering is fixed across every
+    surface (epic #1905): model, est. cost, tokens in, tokens out on row 1;
+    transport and mechanics on row 2. No figure is presented as billed — the
+    ``transport`` badge and the ``~`` prefix carry that honesty.
 
     Args:
         result: Current review result.
@@ -1031,27 +1034,20 @@ def _this_run_section(
         The ``This run`` section.
     """
     metadata = result.metadata
-    estimated = metadata.token_usage_estimated
-    prefix = "~" if estimated else ""
-    usage = metadata.token_usage
-    first = " · ".join(
-        [
-            f"model `{sanitize_comment_text(metadata.model, limit=60)}`",
-            f"est. cost `{_fmt_cost(metadata.cost_estimate_usd, estimated=estimated)}`",
-            f"tokens in `{prefix}{_fmt_int(int(usage.get('prompt', 0)))}`",
-            f"tokens out `{prefix}{_fmt_int(int(usage.get('completion', 0)))}`",
-        ],
-    )
-    second = " · ".join(
-        [
-            f"transport `{_transport_label(transport=transport, auth_mode=auth_mode)}`",
-            f"depth `{metadata.depth}`",
-            f"files `{metadata.files_reviewed}`",
-            f"checks `{metadata.checklist_items}`",
-            f"duration `{metadata.duration_seconds:.0f}s`",
-        ],
-    )
-    return f"**This run** — {first}\n\n{second}"
+    primary = run_stats_primary_cells(metadata=metadata)
+    secondary = [
+        (
+            "transport",
+            _transport_label(transport=transport, auth_mode=auth_mode),
+        ),
+        ("depth", str(metadata.depth)),
+        ("files", str(metadata.files_reviewed)),
+        ("checks", str(metadata.checklist_items)),
+        ("duration", f"{metadata.duration_seconds:.0f}s"),
+    ]
+    lines = ["**This run**", ""]
+    lines.extend(format_badge_tables(rows=[primary, secondary]))
+    return "\n".join(lines)
 
 
 def _history_section(
