@@ -21,12 +21,10 @@ from lintro.ai.review.github import (
     STICKY_MARKER,
     _cap_body,
     _count_new_commits,
-    _format_findings_section,
     _sticky_comment_id,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
-    format_review_summary,
     format_run_mechanics,
     parse_review_state,
     post_review_error_to_github,
@@ -107,32 +105,6 @@ def test_format_finding_comment_linked_includes_review_questions(
 
     assert_that(comment).contains("**Review questions:**")
     assert_that(comment).contains("Does unknown status fail closed?")
-
-
-def test_format_review_summary_has_counts_and_tldr(
-    sample_review_result: ReviewResult,
-) -> None:
-    """Summary renders a severity count table and TL;DR."""
-    summary = format_review_summary(result=sample_review_result)
-
-    assert_that(summary).contains("## 🔎 Lintro Review")
-    assert_that(summary).contains("| 🔴 P1 | 🟠 P2 | 🟡 P3 |")
-    assert_that(summary).contains("**TL;DR**")
-    assert_that(summary).contains("**Structured checks:** 3")
-
-
-def test_format_review_summary_all_includes_appendix(
-    sample_review_result: ReviewResult,
-) -> None:
-    """All mode appends cleared and orphan sections to the summary."""
-    summary = format_review_summary(
-        result=sample_review_result,
-        checklist_display=ChecklistDisplay.ALL,
-    )
-
-    assert_that(summary).contains("### Cleared checks (1)")
-    assert_that(summary).contains("Are access paths covered by tests?")
-    assert_that(summary).contains("### Checklist concerns without findings (1)")
 
 
 # --- per-run mechanics + exact/approximate labeling -------------------------
@@ -307,57 +279,6 @@ def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
 def test_parse_review_state_handles_missing_block() -> None:
     """A body with no state block yields an empty run list."""
     assert_that(parse_review_state(body="no state here")).is_empty()
-
-
-# --- partial state ----------------------------------------------------------
-
-
-def test_summary_renders_partial_state(
-    sample_review_result: ReviewResult,
-) -> None:
-    """A partial review renders an explicit partial note."""
-    metadata = replace(
-        sample_review_result.metadata,
-        partial=True,
-        stopped_reason="cost cap",
-        chunks_reviewed=2,
-        chunks_total=5,
-    )
-    result = ReviewResult(
-        metadata=metadata,
-        summary=sample_review_result.summary,
-        checklist=sample_review_result.checklist,
-        findings=sample_review_result.findings,
-    )
-    summary = format_review_summary(result=result)
-
-    assert_that(summary).contains("Partial review")
-    assert_that(summary).contains("cost cap")
-    assert_that(summary).contains("2 of 5 chunks")
-
-
-def test_summary_renders_partial_state_before_any_chunk(
-    sample_review_result: ReviewResult,
-) -> None:
-    """A cost cap tripping before any chunk renders an actionable note."""
-    metadata = replace(
-        sample_review_result.metadata,
-        partial=True,
-        stopped_reason="cost cap ($0.50) reached",
-        chunks_reviewed=0,
-        chunks_total=4,
-    )
-    result = ReviewResult(
-        metadata=metadata,
-        summary=sample_review_result.summary,
-        checklist=sample_review_result.checklist,
-        findings=(),
-    )
-    summary = format_review_summary(result=result)
-
-    assert_that(summary).contains("Partial review")
-    assert_that(summary).contains("before reviewing any of 4 chunks")
-    assert_that(summary).contains("ai.max_cost_usd")
 
 
 # --- posting: create, update, inline ----------------------------------------
@@ -627,47 +548,6 @@ def _result_with_findings(
     )
 
 
-def test_findings_section_orders_fallback_before_diff_mappable(
-    sample_review_result: ReviewResult,
-) -> None:
-    """Non-diff-mappable findings render ahead of diff-mappable ones."""
-    diff_lines = {"src/mapped.py": {10}}
-    mapped = ReviewFinding(
-        severity=Severity.P1,
-        category="security",
-        file="src/mapped.py",
-        line=10,
-        title="MappedInlineFinding",
-        description="d",
-        cause="c",
-        fix="f",
-        confidence="high",
-    )
-    fallback = ReviewFinding(
-        severity=Severity.P3,
-        category="style",
-        file="src/unmapped.py",
-        line=999,
-        title="FallbackOnlyFinding",
-        description="d",
-        cause="c",
-        fix="f",
-        confidence="low",
-    )
-    result = _result_with_findings(
-        base=sample_review_result,
-        findings=(mapped, fallback),
-    )
-
-    summary = format_review_summary(result=result, diff_lines=diff_lines)
-
-    fallback_at = summary.find("FallbackOnlyFinding")
-    mapped_at = summary.find("MappedInlineFinding")
-    assert_that(fallback_at).is_greater_than(-1)
-    # Fallback (P3) precedes the diff-mappable P1 despite lower severity.
-    assert_that(fallback_at).is_less_than(mapped_at)
-
-
 def test_sticky_indexes_every_finding_and_stays_under_the_cap(
     sample_review_result: ReviewResult,
 ) -> None:
@@ -699,52 +579,12 @@ def test_sticky_indexes_every_finding_and_stays_under_the_cap(
         findings=(*mapped, fallback),
     )
 
-    # The old detail-embedding renderer would blow past the cap on this input.
-    unbudgeted = format_review_summary(result=result, diff_lines=diff_lines)
-    assert_that(len(unbudgeted)).is_greater_than(MAX_COMMENT_CHARS)
-
     body = build_sticky_comment(result=result, diff_lines=diff_lines)
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Open findings (41)")
     assert_that(body).contains("FallbackOnlyFinding")
     assert_that(body).contains("MappedFinding1")
-
-
-def test_all_fallback_overflow_truncates_to_logs_not_inline() -> None:
-    """All-fallback overflow drops via an explicit *workflow-logs* marker.
-
-    When ``diff_lines`` is ``None`` every finding is fallback (no inline
-    surface). If they exceed GitHub's hard comment limit, truncation is
-    unavoidable — but it must be explicit and must NOT point readers to inline
-    comments that do not exist for fallback findings.
-    """
-    findings = tuple(
-        _bulky_finding(
-            severity=Severity.P2,
-            file=f"src/unmapped{index}.py",
-            line=900 + index,
-            title=f"FallbackFinding{index}",
-        )
-        for index in range(5)
-    )
-
-    lines = _format_findings_section(
-        findings=findings,
-        checklist_display=ChecklistDisplay.OFF,
-        question_map={},
-        diff_lines=None,
-        char_budget=200,  # forces overflow so the marker path is exercised
-    )
-    body = "\n".join(lines)
-
-    # At least the first fallback finding is always rendered.
-    assert_that(body).contains("FallbackFinding0")
-    # Overflow is explicit, and points at the logs — never at (nonexistent)
-    # inline comments for fallback findings.
-    assert_that(body).contains("more finding(s) truncated")
-    assert_that(body).contains("workflow logs")
-    assert_that(body).does_not_contain("inline comments")
 
 
 def test_sticky_state_round_trips_after_truncation(

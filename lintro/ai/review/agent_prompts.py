@@ -69,7 +69,7 @@ _PATH_LIMIT = 300
 
 _FOOTERS: dict[AgentPromptScopeKind, str] = {
     AgentPromptScopeKind.ALL_OPEN: (
-        "Regenerated every run · covers exactly the open findings above"
+        "Regenerated every run · covers exactly the open table above"
     ),
     AgentPromptScopeKind.THIS_REVIEW: (
         "For everything still open across all rounds, use the sticky comment's "

@@ -25,6 +25,7 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.glob_utils import path_matches_any_glob
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
@@ -40,6 +41,7 @@ def collect_review_context(
     pr_number: int | None = None,
     repo: str | None = None,
     paths: list[str] | None = None,
+    exclude_globs: list[str] | None = None,
 ) -> ReviewContext:
     """Collect git diff context for review.
 
@@ -51,6 +53,9 @@ def collect_review_context(
         pr_number: Pull request number to review via ``gh``.
         repo: Optional ``owner/name`` repository for ``--pr`` mode.
         paths: Optional path prefixes to filter changed files and diff hunks.
+        exclude_globs: Optional ``ai.exclude_paths`` globs. Matching files are
+            dropped from the review and recorded as skipped with that reason,
+            so a configured exclusion never reads as coverage.
 
     Returns:
         Parsed review context with unified diff and changed file metadata.
@@ -83,6 +88,11 @@ def collect_review_context(
 
     if paths:
         context = _filter_context_by_paths(context=context, paths=paths)
+    if exclude_globs:
+        context = _filter_context_by_excludes(
+            context=context,
+            exclude_globs=exclude_globs,
+        )
 
     context = _populate_post_image_files(context=context)
 
@@ -485,7 +495,7 @@ def _filter_context_by_paths(
         Filtered review context.
     """
     normalized_paths = [_normalize_path_prefix(path=path) for path in paths]
-    filtered_files = [
+    retained = [
         changed_file
         for changed_file in context.changed_files
         if _changed_file_matches_any_prefix(
@@ -493,42 +503,108 @@ def _filter_context_by_paths(
             prefixes=normalized_paths,
         )
     ]
+    return _restrict_context(
+        context=context,
+        retained=retained,
+        reason=FileSkipReason.PATH_FILTER,
+    )
+
+
+def _filter_context_by_excludes(
+    *,
+    context: ReviewContext,
+    exclude_globs: list[str],
+) -> ReviewContext:
+    """Drop changed files matching the configured exclusion globs.
+
+    ``ai.exclude_paths`` is how a repository says "never send this to a model"
+    — generated code, vendored trees, docs. Dropping those files silently would
+    make the review's file list claim coverage it never had, so each exclusion
+    is recorded with its own reason and surfaces in the skipped list.
+
+    A rename is excluded when *either* of its paths matches: the diff of a file
+    moved out of an excluded tree still carries the excluded content, and an
+    exclusion that a rename can defeat is not an exclusion.
+
+    Args:
+        context: Source review context.
+        exclude_globs: Glob patterns from ``ai.exclude_paths``.
+
+    Returns:
+        The context without the excluded files, carrying a skip record for each.
+    """
+    patterns = tuple(exclude_globs)
+    retained = [
+        changed_file
+        for changed_file in context.changed_files
+        if not any(
+            path_matches_any_glob(path=candidate, patterns=patterns)
+            for candidate in (changed_file.path, changed_file.previous_path)
+            if candidate is not None
+        )
+    ]
+    if len(retained) == len(context.changed_files):
+        return context
+    return _restrict_context(
+        context=context,
+        retained=retained,
+        reason=FileSkipReason.CONFIG_EXCLUDED,
+    )
+
+
+def _restrict_context(
+    *,
+    context: ReviewContext,
+    retained: list[ChangedFile],
+    reason: FileSkipReason,
+) -> ReviewContext:
+    """Rebuild a context around a retained subset of its changed files.
+
+    Args:
+        context: Source review context.
+        retained: Changed files the caller decided to keep.
+        reason: Why the dropped files were dropped, recorded per file.
+
+    Returns:
+        A context whose diff, post-image files and changed-file list cover only
+        the retained paths, with a skip record for every dropped one.
+    """
     per_file_diffs = split_unified_diff_by_file(unified_diff=context.unified_diff)
-    filtered_paths = {changed_file.path for changed_file in filtered_files}
-    filtered_diff_parts = [
+    retained_paths = {changed_file.path for changed_file in retained}
+    retained_diff_parts = [
         diff_text
         for path, diff_text in per_file_diffs.items()
-        if path in filtered_paths
+        if path in retained_paths
     ]
     preamble = (
         unified_diff_preamble(unified_diff=context.unified_diff)
-        if filtered_diff_parts
+        if retained_diff_parts
         else ""
     )
-    unified_diff = preamble + "".join(filtered_diff_parts)
-    filtered_post_image = {
+    unified_diff = preamble + "".join(retained_diff_parts)
+    retained_post_image = {
         path: content
         for path, content in context.post_image_files.items()
-        if path in filtered_paths
+        if path in retained_paths
     }
-    # Record the exclusions rather than letting them vanish: a `--path` filter
-    # is the difference between "the review saw nothing wrong here" and "the
-    # review never looked", and only the per-file reason distinguishes them.
+    # Record the exclusions rather than letting them vanish: a filter is the
+    # difference between "the review saw nothing wrong here" and "the review
+    # never looked", and only the per-file reason distinguishes them.
     skipped = [
         *context.skipped_files,
         *(
-            SkippedFile(path=changed_file.path, reason=FileSkipReason.PATH_FILTER)
+            SkippedFile(path=changed_file.path, reason=reason)
             for changed_file in context.changed_files
-            if changed_file.path not in filtered_paths
+            if changed_file.path not in retained_paths
         ),
     ]
     return ReviewContext(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
-        changed_files=filtered_files,
+        changed_files=retained,
         unified_diff=unified_diff,
         pr_metadata=context.pr_metadata,
-        post_image_files=filtered_post_image,
+        post_image_files=retained_post_image,
         skipped_files=skipped,
     )
 

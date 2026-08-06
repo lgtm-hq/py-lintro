@@ -42,7 +42,7 @@ __all__ = ["REVIEW_BODY_FOOTER", "build_review_body"]
 #: Footer cross-linking the two surfaces this body deliberately does not own.
 REVIEW_BODY_FOOTER = (
     "<sub>🤖 lintro · cumulative status &amp; history → sticky comment · "
-    "finding details → inline comments</sub>"
+    "finding details → inline comments below</sub>"
 )
 
 #: Characters of a commit sha rendered in prose.

@@ -439,7 +439,7 @@ def test_comment_has_no_footer() -> None:
     )
 
     assert_that(body).does_not_contain("<sub>lintro ·")
-    assert_that(body.rstrip().splitlines()[-1]).starts_with("**Fix:**")
+    assert_that(body.rstrip().splitlines()[-1]).starts_with("> **Fix:**")
 
 
 @pytest.mark.parametrize(

@@ -38,6 +38,7 @@ from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
+from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
 _DETAILS_TAG_RE = re.compile(r"</?details\b")
 _ROUND_RE = re.compile(r"\*\*Round (\d+)\*\*")
@@ -456,7 +457,7 @@ def test_summary_bullets_tied_to_blockers_are_severity_marked(
 def test_reasoning_section_carries_rubric_and_attention_files(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Model reasoning renders above the derivation fine-print."""
+    """Model reasoning and the attention files render in their own section."""
     body = _body_only(
         body=build_sticky_comment(
             result=_with(
@@ -474,8 +475,10 @@ def test_reasoning_section_carries_rubric_and_attention_files(
     assert_that(body).contains("### Why it's blocked")
     assert_that(body).contains("The credential is evaluated at import time.")
     assert_that(body).contains("Every importer holds the secret.")
-    assert_that(body).contains("Verdict is derived from open findings")
     assert_that(body).contains("**Files needing attention:** `src/example.py`")
+    # The rubric explains the pill and is rendered under it, not buried here.
+    reasoning_at = body.index("### Why it's blocked")
+    assert_that(body.index(VERDICT_RUBRIC_FINE_PRINT)).is_less_than(reasoning_at)
 
 
 # --- honesty and structure ---------------------------------------------------
