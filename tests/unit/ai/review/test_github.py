@@ -692,10 +692,10 @@ def test_post_review_uses_the_rich_review_body(
     assert_that(payload["body"]).does_not_contain("Lintro review findings")
 
 
-def test_post_review_body_links_the_pointer_to_an_existing_sticky(
+def test_post_review_body_carries_the_fix_prompt_inline(
     sample_review_result: ReviewResult,
 ) -> None:
-    """When the sticky already exists, the dedup pointer links straight to it."""
+    """The posted body carries its own prompt, not a pointer to the sticky (#1956)."""
     reporter = _fresh_reporter()
     reporter.find_issue_comment.return_value = (
         42,
@@ -706,9 +706,9 @@ def test_post_review_body_links_the_pointer_to_an_existing_sticky(
     post_review_to_github(result=sample_review_result, reporter=reporter)
 
     payload = reporter.api_request.call_args.args[2]
-    assert_that(payload["body"]).contains(
-        "https://github.com/owner/name/pull/7#issuecomment-42",
-    )
+    assert_that(payload["body"]).contains("Fix prompt — this round's")
+    assert_that(payload["body"]).contains("<details><summary>Show prompt</summary>")
+    assert_that(payload["body"]).does_not_contain("identical to the")
 
 
 # --- new-commit counting (#1910) -------------------------------------------
@@ -759,32 +759,6 @@ def test_count_new_commits_is_none_when_the_listing_fails() -> None:
     assert_that(
         _count_new_commits(reporter=reporter, prior_state=prior_state),
     ).is_none()
-
-
-def test_review_body_links_a_sticky_created_in_this_same_run(
-    sample_review_result: ReviewResult,
-) -> None:
-    """Round 1's pointer resolves the sticky that was just created (#1909/#1910).
-
-    The sticky is upserted before the inline review is posted, so by the time
-    the body is built the comment exists even on the first round — the pointer
-    must link to it rather than fall back to unlinked text.
-    """
-    reporter = _fresh_reporter()
-    reporter.fetch_pr_commit_shas.return_value = []
-    # First lookup loads prior state (no sticky yet); the second runs after the
-    # sticky has been created and finds it.
-    reporter.find_issue_comment.side_effect = [
-        None,
-        (99, build_sticky_comment(result=sample_review_result)),
-    ]
-
-    post_review_to_github(result=sample_review_result, reporter=reporter)
-
-    payload = reporter.api_request.call_args.args[2]
-    assert_that(payload["body"]).contains(
-        "https://github.com/owner/name/pull/7#issuecomment-99",
-    )
 
 
 def test_review_body_and_degraded_sticky_coexist(
