@@ -76,6 +76,11 @@ def check(
     # Determine project configuration strategy
     cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
 
+    # Optional per-tool early skip (e.g. tsc JS-only without checkJs).
+    early_skip = plugin._pre_run_skip(ctx, paths, cwd_path, merged_options)
+    if early_skip is not None:
+        return early_skip
+
     # Check if dependencies need installing
     from lintro.utils.node_deps import install_node_deps, should_install_deps
 
