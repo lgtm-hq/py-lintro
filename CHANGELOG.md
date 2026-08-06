@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.3] - 2026-08-06
+
+### Fixed
+
+- **review**: render the sticky This-run stats as badge tables (#1958) (b215467)
+
 ## [0.112.2] - 2026-08-06
 
 ### Fixed
