@@ -74,6 +74,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
     ToolName.TRUFFLEHOG: "3.96.0",
+    ToolName.TYPOS: "1.48.0",
     ToolName.VALE: "3.15.2",
 }
 

@@ -59,6 +59,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.SVELTE_CHECK,
     ToolName.TAPLO,
     ToolName.TRUFFLEHOG,
+    ToolName.TYPOS,
     ToolName.VALE,
     ToolName.VUE_TSC,
 }

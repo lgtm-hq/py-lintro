@@ -854,6 +854,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".prettierignore",
         ".prettierrc.json",
         ".stylelintrc.json",
+        ".typos.toml",
         ".vale.ini",
         ".yamllint",
         "apps",
