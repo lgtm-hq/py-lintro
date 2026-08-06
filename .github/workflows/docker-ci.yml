@@ -147,7 +147,7 @@ jobs:
               - 'docker-compose.yml'
               - '.dockerignore'
               # Build/packaging metadata feeding tool resolution.
-              - 'Makefile'
+              - 'justfile'
               - 'MANIFEST.in'
               # Tool configs and manifests at any depth (pyproject.toml
               # carries ruff/pydoclint/bandit config; package manifests and
