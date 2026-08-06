@@ -54,6 +54,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git \
     libssl-dev \
     pkg-config \
+    ruby \
+    ruby-dev \
     unzip \
     jq && \
     apt-get clean && \
@@ -151,7 +153,8 @@ RUN echo "=== Verifying all tools ===" && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
+    pydoclint --version && rubocop --version && ruff --version && \
+    semgrep --version && \
     pip-audit --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     dotenv-linter --version && \
