@@ -1,5 +1,9 @@
 # Configuration for actions/labeler
-# Maps file paths to labels for automatic PR labeling
+# Maps file paths to labels for automatic PR labeling.
+#
+# Size labels (size:XS … size:XL) are NOT path-based — they are applied by
+# `.github/workflows/pr-size.yml` via `scripts/ci/pr-size-label.py` (canonical
+# colors/descriptions live in SIZE_LABEL_DEFS in that script).
 ---
 enhancement:
   - changed-files:
