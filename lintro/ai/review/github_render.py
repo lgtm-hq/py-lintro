@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from lintro.ai.review.agent_prompts import render_finding_prompt_panel
@@ -37,6 +38,10 @@ REGRESSED_TITLE_SUFFIX = " (regressed)"
 #: none: the panel is an affordance, and one on every finding is wallpaper.
 _PROMPT_SEVERITIES: frozenset[Severity] = frozenset({Severity.P1, Severity.P2})
 
+#: Line breaks that would end a badge-table row early. ``\r\n`` is matched as
+#: one break so a Windows-style value collapses to a single space, not two.
+_LINE_BREAK_RE = re.compile(r"\r\n|[\r\n]")
+
 
 def _chip(text: str) -> str:
     """Render a value as an inline code chip, escaping backticks."""
@@ -68,13 +73,20 @@ def _fmt_tokens(total: int, *, estimated: bool) -> str:
 
 
 def _escape_cell(text: str) -> str:
-    r"""Escape a badge-table cell so a pipe cannot shear the row.
+    r"""Flatten and escape a badge-table cell so it cannot shear the row.
+
+    A table row is one line, so a carriage return or line feed in a value ends
+    the row and spills the rest of the cells into the document as prose. Line
+    breaks are therefore collapsed to spaces before escaping — GFM offers no
+    in-cell line break worth preserving here, and ``sanitize_comment_text``
+    caps length without touching them.
 
     Backslashes are doubled first: escaping only the pipe would turn an input
     of ``\|`` into ``\\|``, leaving the pipe with an even number of
     preceding backslashes and readable as a delimiter again.
     """
-    return text.replace("\\", "\\\\").replace("|", "\\|")
+    escaped = text.replace("\\", "\\\\").replace("|", "\\|")
+    return _LINE_BREAK_RE.sub(" ", escaped)
 
 
 def format_badge_table(*, cells: Sequence[tuple[str, str]]) -> list[str]:

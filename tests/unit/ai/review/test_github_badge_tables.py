@@ -56,13 +56,18 @@ def _body(*, result: ReviewResult) -> str:
 def _value_row(*, text: str, header: str) -> str:
     """Return the value row that follows ``header`` in ``text``.
 
-    The header is asserted rather than indexed blindly: a header-format
-    regression should fail as a named assertion, not as a bare ``ValueError``
-    from :meth:`list.index` that says nothing about what was being looked for.
+    Both the header's presence and the two lines that must follow it are
+    asserted rather than indexed blindly. A table regression should fail as a
+    named assertion naming the header, not as a bare ``ValueError`` or
+    ``IndexError`` that says nothing about what was being looked for.
     """
     lines = text.splitlines()
-    assert_that(lines).contains(header)
-    return lines[lines.index(header) + 2]
+    assert_that(lines).described_as(f"lines containing {header!r}").contains(header)
+    divider_and_value = lines[lines.index(header) + 1 : lines.index(header) + 3]
+    assert_that(divider_and_value).described_as(
+        f"divider and value rows after {header!r}",
+    ).is_length(2)
+    return divider_and_value[1]
 
 
 # --- helper contract ---------------------------------------------------------
@@ -89,6 +94,14 @@ def test_badge_table_escapes_a_backslash_before_the_pipe_it_precedes() -> None:
     lines = format_badge_table(cells=[("model", "a\\|b")])
 
     assert_that(lines[-1]).is_equal_to("| a\\\\\\|b |")
+
+
+def test_badge_table_flattens_line_breaks_into_the_row() -> None:
+    """A row is one line, so a line break in a value would end it early."""
+    lines = format_badge_table(cells=[("model", "a\r\nb\nc\rd")])
+
+    assert_that(lines).is_length(3)
+    assert_that(lines[-1]).is_equal_to("| a b c d |")
 
 
 def test_badge_table_renders_nothing_for_no_cells() -> None:
