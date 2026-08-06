@@ -124,6 +124,12 @@ system.
 <td><code>bun add -D html-validate</code><br><code>npm install -D html-validate</code></td>
 </tr>
 <tr>
+<td><a href="https://github.com/aristanetworks/j2lint"><img src="https://img.shields.io/badge/j2lint-B41717?logo=jinja&logoColor=white" alt="j2lint"></a></td>
+<td>🧩 Jinja2</td>
+<td>-</td>
+<td>📦</td>
+</tr>
+<tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
 <td>📝 Markdown</td>
 <td>-</td>

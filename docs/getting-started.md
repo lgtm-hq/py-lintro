@@ -78,6 +78,7 @@ are centrally managed in `manifest.json` and `pyproject.toml`:
   `--tool-options`)
 - `yamllint` - YAML linter
 - `pydoclint` - Python docstring linter
+- `j2lint` - Jinja2 template linter (non-HTML templates: `*.j2`, `*.jinja`, `*.jinja2`)
 
 ### Optional External Tools
 
