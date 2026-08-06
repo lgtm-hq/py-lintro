@@ -191,6 +191,11 @@ _DETAILS_TAG_RE = re.compile(r"<(/?)(details|summary)\b", re.IGNORECASE)
 #: Maximum characters of a finding title rendered in a table cell.
 _TITLE_LIMIT = 160
 
+#: End of the first sentence of a round narrative. Terminators other than the
+#: period are matched too: a headline ending in "?" or "!" is one sentence, and
+#: splitting on ". " alone would persist the whole paragraph after it.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+
 #: Maximum characters of a stored per-round narrative, on the way in (it is
 #: persisted in the state blob, which competes for the same size cap) and on
 #: the way out.
@@ -1537,8 +1542,12 @@ def _round_narrative(*, result: ReviewResult) -> str:
     text = headline or result.summary.strip()
     if not text:
         return ""
-    sentence, separator, _rest = text.partition(". ")
-    return (sentence + separator).strip()[:_NARRATIVE_LIMIT].strip()
+    # Whitespace is normalized first so a sentence broken across lines is still
+    # recognized as one boundary, and so the stored line cannot carry a newline
+    # into the recap.
+    normalized = " ".join(text.split())
+    sentence = _SENTENCE_BOUNDARY_RE.split(normalized, maxsplit=1)[0]
+    return sentence[:_NARRATIVE_LIMIT].strip()
 
 
 def _cap_body(*, body: str) -> str:

@@ -16,16 +16,15 @@ from unittest.mock import MagicMock
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.review.context.collection import _filter_context_by_excludes
-from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.file_skip_reason import (
     FileSkipReason,
     describe_skip_reason,
 )
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.github import _post_inline_findings
-from lintro.ai.review.github_constants import STATE_MARKER_PREFIX
+from lintro.ai.review.finding_matcher import fingerprint_for
+from lintro.ai.review.github import post_review_to_github
+from lintro.ai.review.github_constants import STATE_MARKER_PREFIX, STICKY_MARKER
 from lintro.ai.review.github_render import (
     REGRESSED_TITLE_SUFFIX,
     format_finding_comment,
@@ -33,29 +32,15 @@ from lintro.ai.review.github_render import (
 from lintro.ai.review.github_review_body import REVIEW_BODY_FOOTER
 from lintro.ai.review.github_sticky import build_sticky_comment, parse_review_state_v2
 from lintro.ai.review.inline_fix import plan_inline_fix
-from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.suggested_change import SuggestedChange
+from lintro.ai.review.review_state_codec import render_state_block
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
-
-_DIFF = """diff --git a/src/main.py b/src/main.py
---- a/src/main.py
-+++ b/src/main.py
-@@ -1,1 +1,1 @@
--old
-+new
-diff --git a/docs/guide.md b/docs/guide.md
---- a/docs/guide.md
-+++ b/docs/guide.md
-@@ -1,1 +1,1 @@
--old
-+new
-"""
 
 
 def _finding(
@@ -92,16 +77,6 @@ def _with(
 def _body_only(*, body: str) -> str:
     """Strip the hidden state blob so assertions only see rendered Markdown."""
     return body.split(STATE_MARKER_PREFIX, 1)[0]
-
-
-def _changed_file(*, path: str) -> ChangedFile:
-    """Build a modified changed-file entry."""
-    return ChangedFile(
-        path=path,
-        status=ChangedFileStatus.MODIFIED,
-        additions=1,
-        deletions=1,
-    )
 
 
 # --- 1. open findings link to their inline comment ---------------------------
@@ -311,52 +286,111 @@ def test_history_recap_falls_back_to_counts_without_a_narrative(
     assert_that(body).contains("🔴 1 · 🟠 2 · 🟡 3")
 
 
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        pytest.param(
+            "One sentence. And a second that must not be stored.",
+            "One sentence.",
+            id="period",
+        ),
+        pytest.param(
+            "Is this intentional? A second sentence follows.",
+            "Is this intentional?",
+            id="question-mark",
+        ),
+        pytest.param(
+            "It fails outright! A second sentence follows.",
+            "It fails outright!",
+            id="exclamation-mark",
+        ),
+        pytest.param(
+            "First sentence.\nSecond sentence.",
+            "First sentence.",
+            id="newline-boundary",
+        ),
+        pytest.param("No terminator at all", "No terminator at all", id="no-boundary"),
+    ],
+)
 def test_narrative_keeps_only_the_first_sentence(
     sample_review_result: ReviewResult,
+    summary: str,
+    expected: str,
 ) -> None:
     """A recap is one line; the rest of a paragraph is not persisted."""
     body = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(),
-            summary="One sentence. And a second one that must not be stored.",
-        ),
+        result=_with(base=sample_review_result, findings=(), summary=summary),
         head_sha="sha1",
     )
 
     stored = parse_review_state_v2(body=body).runs[-1]
 
-    assert_that(stored.narrative).is_equal_to("One sentence.")
+    assert_that(stored.narrative).is_equal_to(expected)
 
 
 # --- 4. a regression says it is one ------------------------------------------
 
 
-def test_regressed_thread_titles_say_regressed() -> None:
+def _resolved_state(*, finding: ReviewFinding) -> ReviewState:
+    """Build prior state in which ``finding`` was raised and already fixed."""
+    return ReviewState(
+        runs=(RunRecord(round=1, sha="sha1", model="m"),),
+        findings=(
+            FindingRecord(
+                fingerprint=fingerprint_for(
+                    file=finding.file,
+                    category=finding.category,
+                    title=finding.title,
+                ),
+                severity=finding.severity,
+                category=finding.category,
+                title=finding.title,
+                file=finding.file,
+                line=finding.line,
+                status=FindingStatus.RESOLVED,
+                since_round=1,
+                resolved_sha="sha1",
+                resolved_round=1,
+                inline_comment_id=11,
+            ),
+        ),
+    )
+
+
+def test_regressed_thread_titles_say_regressed(
+    sample_review_result: ReviewResult,
+) -> None:
     """The fresh thread's title carries the suffix, not just a provenance note."""
+    finding = _finding()
+    prior_body = STICKY_MARKER + render_state_block(
+        state=_resolved_state(finding=finding),
+    )
     reporter = MagicMock()
+    reporter.is_available.return_value = True
+    reporter.find_issue_comment.return_value = (5, prior_body)
+    reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
+    reporter.fetch_pr_commit_shas.return_value = []
+    reporter.fetch_review_comments.return_value = []
+    reporter.update_issue_comment.return_value = True
+    reporter.api_request.return_value = True
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
-    reporter.api_request.return_value = True
-    finding = _finding()
 
-    posted = _post_inline_findings(
+    posted = post_review_to_github(
+        result=_with(base=sample_review_result, findings=(finding,)),
         reporter=reporter,
-        findings=[finding],
-        checklist_display=ChecklistDisplay.OFF,
-        question_map={},
-        finding_keys=["abc#1"],
-        provenance={"abc#1": "> ↩ **regression**"},
     )
 
-    # Pinned explicitly: the payload is read positionally, so a call-shape
-    # change must fail here loudly rather than silently assert on the URL.
-    args = reporter.api_request.call_args.args
-    assert_that(args).is_length(3)
-    payload = args[2]
+    review_calls = [
+        call
+        for call in reporter.api_request.call_args_list
+        if len(call.args) == 3 and str(call.args[1]).endswith("/reviews")
+    ]
     assert_that(posted).is_true()
-    assert_that(payload["comments"][0]["body"]).contains(
+    assert_that(review_calls).is_length(1)
+    assert_that(review_calls[0].args[2]["comments"][0]["body"]).contains(
         f"**Leak{REGRESSED_TITLE_SUFFIX}**",
     )
 
@@ -380,70 +414,9 @@ def test_a_fresh_finding_title_carries_no_suffix() -> None:
 
 
 # --- 5. config-excluded files are reported as skipped ------------------------
-
-
-def test_config_excluded_files_are_dropped_with_their_reason() -> None:
-    """An ``ai.exclude_paths`` match leaves the review with a skip record."""
-    context = ReviewContext(
-        base_ref="main",
-        head_ref="feature",
-        changed_files=[
-            _changed_file(path="src/main.py"),
-            _changed_file(path="docs/guide.md"),
-        ],
-        unified_diff=_DIFF,
-    )
-
-    filtered = _filter_context_by_excludes(context=context, exclude_globs=["docs/**"])
-
-    assert_that([file.path for file in filtered.changed_files]).is_equal_to(
-        ["src/main.py"],
-    )
-    assert_that(filtered.unified_diff).does_not_contain("docs/guide.md")
-    assert_that(filtered.skipped_files).is_length(1)
-    assert_that(filtered.skipped_files[0].path).is_equal_to("docs/guide.md")
-    assert_that(filtered.skipped_files[0].reason).is_equal_to(
-        FileSkipReason.CONFIG_EXCLUDED,
-    )
-
-
-def test_a_rename_out_of_an_excluded_tree_is_still_excluded() -> None:
-    """The pre-image content is what the exclusion was protecting."""
-    context = ReviewContext(
-        base_ref="main",
-        head_ref="feature",
-        changed_files=[
-            ChangedFile(
-                path="src/main.py",
-                status=ChangedFileStatus.RENAMED,
-                additions=1,
-                deletions=1,
-                previous_path="docs/guide.md",
-            ),
-        ],
-        unified_diff=_DIFF,
-    )
-
-    filtered = _filter_context_by_excludes(context=context, exclude_globs=["docs/**"])
-
-    assert_that(filtered.changed_files).is_empty()
-    assert_that(filtered.skipped_files[0].reason).is_equal_to(
-        FileSkipReason.CONFIG_EXCLUDED,
-    )
-
-
-def test_config_exclusion_without_a_match_leaves_the_context_alone() -> None:
-    """Nothing excluded means nothing rewritten and no skip records."""
-    context = ReviewContext(
-        base_ref="main",
-        head_ref="feature",
-        changed_files=[_changed_file(path="src/main.py")],
-        unified_diff=_DIFF,
-    )
-
-    filtered = _filter_context_by_excludes(context=context, exclude_globs=["tests/**"])
-
-    assert_that(filtered).is_same_as(context)
+#
+# The filtering itself is exercised end to end through ``collect_review_context``
+# in ``test_context_collect.py``; only the rendered wording is pinned here.
 
 
 def test_config_excluded_reason_reads_as_a_configured_choice() -> None:

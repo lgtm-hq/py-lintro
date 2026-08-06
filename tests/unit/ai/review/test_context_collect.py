@@ -978,3 +978,157 @@ def test_collect_review_context_records_path_filter_skips(
     assert_that(context.skipped_files[0].reason).is_equal_to(
         FileSkipReason.PATH_FILTER,
     )
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_review_context_records_config_exclusion_skips(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """``ai.exclude_paths`` drops files and says so, rather than silently."""
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    queue_diff_snapshot(
+        dispatcher,
+        diff_ref="base123...head456",
+        unified=(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "+++ b/src/a.py\n"
+            "+a\n"
+            "diff --git a/docs/guide.md b/docs/guide.md\n"
+            "+++ b/docs/guide.md\n"
+            "+b\n"
+        ),
+        name_status="M\0src/a.py\0M\0docs/guide.md\0",
+        numstat="1\t0\tsrc/a.py\x001\t0\tdocs/guide.md\x00",
+    )
+    mock_run.side_effect = dispatcher
+
+    context = collect_review_context(base="main", exclude_globs=["docs/**"])
+
+    assert_that([file.path for file in context.changed_files]).is_equal_to(
+        ["src/a.py"],
+    )
+    assert_that(context.unified_diff).does_not_contain("docs/guide.md")
+    assert_that([entry.path for entry in context.skipped_files]).is_equal_to(
+        ["docs/guide.md"],
+    )
+    assert_that(context.skipped_files[0].reason).is_equal_to(
+        FileSkipReason.CONFIG_EXCLUDED,
+    )
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_review_context_excludes_a_rename_out_of_an_excluded_tree(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """A file moved out of an excluded tree stays excluded.
+
+    Its diff still carries the excluded pre-image content, so an exclusion a
+    rename can defeat is not an exclusion.
+    """
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    queue_diff_snapshot(
+        dispatcher,
+        diff_ref="base123...head456",
+        unified=(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "+++ b/src/a.py\n"
+            "+a\n"
+            "diff --git a/docs/guide.md b/src/moved.md\n"
+            "+++ b/src/moved.md\n"
+            "+b\n"
+        ),
+        name_status="M\0src/a.py\0R100\0docs/guide.md\0src/moved.md\0",
+        numstat="1\t0\tsrc/a.py\x001\t0\t\x00docs/guide.md\x00src/moved.md\x00",
+    )
+    mock_run.side_effect = dispatcher
+
+    unfiltered = collect_review_context(base="main")
+    renamed = next(
+        file for file in unfiltered.changed_files if file.path == "src/moved.md"
+    )
+    # Pin the fixture: without a parsed previous_path the exclusion below would
+    # pass for the wrong reason.
+    assert_that(renamed.previous_path).is_equal_to("docs/guide.md")
+
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    queue_diff_snapshot(
+        dispatcher,
+        diff_ref="base123...head456",
+        unified=(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "+++ b/src/a.py\n"
+            "+a\n"
+            "diff --git a/docs/guide.md b/src/moved.md\n"
+            "+++ b/src/moved.md\n"
+            "+b\n"
+        ),
+        name_status="M\0src/a.py\0R100\0docs/guide.md\0src/moved.md\0",
+        numstat="1\t0\tsrc/a.py\x001\t0\t\x00docs/guide.md\x00src/moved.md\x00",
+    )
+    mock_run.side_effect = dispatcher
+
+    context = collect_review_context(base="main", exclude_globs=["docs/**"])
+
+    assert_that([file.path for file in context.changed_files]).is_equal_to(
+        ["src/a.py"],
+    )
+    assert_that([entry.path for entry in context.skipped_files]).is_equal_to(
+        ["src/moved.md"],
+    )
+    assert_that(context.skipped_files[0].reason).is_equal_to(
+        FileSkipReason.CONFIG_EXCLUDED,
+    )
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_review_context_without_an_exclusion_match_skips_nothing(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """Configured globs that match nothing leave the context untouched."""
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    queue_diff_snapshot(
+        dispatcher,
+        diff_ref="base123...head456",
+        unified="diff --git a/src/a.py b/src/a.py\n+++ b/src/a.py\n+a\n",
+        name_status="M\0src/a.py\0",
+        numstat="1\t0\tsrc/a.py\0",
+    )
+    mock_run.side_effect = dispatcher
+
+    context = collect_review_context(base="main", exclude_globs=["vendor/**"])
+
+    assert_that([file.path for file in context.changed_files]).is_equal_to(
+        ["src/a.py"],
+    )
+    assert_that(context.skipped_files).is_empty()
