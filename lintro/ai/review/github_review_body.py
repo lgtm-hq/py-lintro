@@ -229,8 +229,12 @@ def _run_stats_section(
     Stats follow the epic's shared ordering rule: model, est. cost, tokens in,
     tokens out on the first line; mechanics on the second. ``~`` marks values
     estimated locally, so a subscription run never presents an estimate as a
-    billed figure. The badge tables come from the shared renderer, so this
-    surface and the sticky's ``This run`` section cannot drift (#1955).
+    billed figure. Both rows are drawn by the shared badge-table renderer, and
+    the primary row's cells come from the shared ``run_stats_primary_cells``,
+    so the model, cost, and token figures cannot drift from the sticky's
+    ``This run`` section (#1955). The secondary rows differ by design: this
+    surface carries ``strictness`` and the ``lintro`` version, which the
+    sticky's leaner status board omits.
 
     Args:
         result: This round's review result.

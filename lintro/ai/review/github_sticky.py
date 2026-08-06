@@ -1019,9 +1019,13 @@ def _this_run_section(
 ) -> str:
     """Render the two badge tables describing the current run.
 
-    The tables come from the same renderer as the per-review body's run stats
-    (#1955), so the two surfaces cannot drift. Ordering is fixed across every
-    surface (epic #1905): model, est. cost, tokens in, tokens out on row 1;
+    Both rows use the same badge-table renderer as the per-review body's run
+    stats, and the primary row's cells come from the shared
+    ``run_stats_primary_cells``, so the model, cost, and token figures cannot
+    drift between the two surfaces (#1955). The secondary row is this
+    surface's own: the status board omits the body's ``strictness`` and
+    ``lintro`` version. Ordering is fixed across every surface (epic #1905):
+    model, est. cost, tokens in, tokens out on row 1;
     transport and mechanics on row 2. No figure is presented as billed — the
     ``transport`` badge and the ``~`` prefix carry that honesty.
 
