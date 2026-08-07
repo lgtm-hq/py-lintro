@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.4] - 2026-08-07
+
+### Fixed
+
+- **deps**: bump js-yaml to 4.3.1 for GHSA-5p4m-2wfm-xmqj (#1964) (e98e010)
+
 ## [0.112.3] - 2026-08-06
 
 ### Fixed
