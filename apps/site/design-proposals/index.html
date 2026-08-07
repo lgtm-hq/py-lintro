@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Site Redesign Proposals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #161a21;
+    --ink: #eceef3;
+    --muted: #9aa0ae;
+    --line: #262c38;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body { background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; line-height: 1.6; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 64px 32px 80px; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-family: 'Inter Tight', sans-serif; font-size: clamp(40px, 5vw, 64px); font-weight: 800; letter-spacing: -0.035em; margin: 14px 0 12px; }
+  .sub { color: var(--muted); max-width: 64ch; font-size: 17px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 48px; }
+  a.opt {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 28px;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  a.opt:hover { border-color: #4b5568; transform: translateY(-2px); }
+  .opt .no { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: 0.16em; }
+  .opt h2 { font-family: 'Inter Tight', sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 10px 0 8px; }
+  .opt p { color: var(--muted); font-size: 14.5px; }
+  .opt .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .opt .tags span {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+  }
+  .swatches { display: flex; gap: 6px; margin-top: 16px; }
+  .swatches i { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); }
+  .open { font-family: var(--mono); font-size: 12px; color: #7c9cff; margin-top: 18px; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="kicker">Lintro docs site — redesign exploration</p>
+  <h1>Eleven directions, one winner.</h1>
+  <p class="sub">Standalone homepage mockups for a full redesign of the lintro GitHub Pages site. Each is a complete, self-contained HTML file — open them full-screen, compare the energy, and pick a direction to refine into the real Astro theme. All share the same content so the comparison is apples-to-apples.</p>
+
+  <p class="kicker" style="margin-top:56px">Round 2 — structurally distinct concepts (different layout grammars, not reskins)</p>
+  <div class="grid">
+    <a class="opt" href="./12-orbit-ide.html" style="border-color:#4de3c2">
+      <span class="no">OPTION 12 · HYBRID ★</span>
+      <h2>Orbit × IDE</h2>
+      <p>The direction taking shape from your feedback: Orbit's radial hero — now with 18 satellite chips on three slowly counter-rotating rings — transmissions, and uplink CTA, plus a 17-card tool constellation in the IDE's extension style. Docs page included: sidebar tree, transmission callouts, tiered tables, syntax-tinted code.</p>
+      <div class="swatches"><i style="background:#04040c"></i><i style="background:#ffb454"></i><i style="background:#4de3c2"></i></div>
+      <div class="tags"><span>dark</span><span>animated rings</span><span>extension cards</span><span>docs page</span></div>
+      <span class="open">Open homepage →</span>
+    </a>
+    <a class="opt" href="./12-orbit-ide-docs.html" style="border-color:#4de3c2">
+      <span class="no">OPTION 12 · DOCS PAGE ★</span>
+      <h2>Orbit × IDE — Docs</h2>
+      <p>The documentation side of the hybrid, shown on the real Configuration guide: grouped sidebar tree with teal active orbit-dot, breadcrumb, transmission-style TL;DR callout, the 5-tier config table, syntax-tinted YAML blocks, right-hand "on this page" rail, and prev/next navigation.</p>
+      <div class="swatches"><i style="background:#04040c"></i><i style="background:#0d1030"></i><i style="background:#4de3c2"></i></div>
+      <div class="tags"><span>dark</span><span>docs layout</span><span>prose</span><span>JetBrains Mono</span></div>
+      <span class="open">Open docs page →</span>
+    </a>
+    <a class="opt" href="./07-kinetic.html">
+      <span class="no">OPTION 07 · NEW</span>
+      <h2>Kinetic</h2>
+      <p>A motion-poster page. LINTRO in viewport-wide condensed type, a diagonal marquee band slicing the hero, giant outlined section words, asymmetric tilted content pockets, and a tool list set as a type specimen. Feels like it's moving even standing still.</p>
+      <div class="swatches"><i style="background:#e8e5de"></i><i style="background:#101010"></i><i style="background:#ff4d00"></i><i style="background:#2b3ff2"></i></div>
+      <div class="tags"><span>light</span><span>kinetic type</span><span>poster</span><span>Anton</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./08-ide.html">
+      <span class="no">OPTION 08 · NEW</span>
+      <h2>IDE</h2>
+      <p>The site as a code editor. Full IDE chrome — activity bar, file explorer with the docs tree, editor tabs, minimap, integrated terminal running lintro, status bar. Tools presented as installed extensions; the CTA is a command palette.</p>
+      <div class="swatches"><i style="background:#1a1b26"></i><i style="background:#7aa2f7"></i><i style="background:#9ece6a"></i></div>
+      <div class="tags"><span>dark</span><span>app chrome</span><span>meta</span><span>JetBrains Mono</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./09-orbit.html">
+      <span class="no">OPTION 09 · NEW</span>
+      <h2>Orbit</h2>
+      <p>A radial hero: lintro as a glowing core with tool chips on dashed orbit rings, telemetry readouts in the corners, star-field background. Below: transmissions as signal cards, a star-map tool grid, and an "establish uplink" install CTA.</p>
+      <div class="swatches"><i style="background:#04040c"></i><i style="background:#ffb454"></i><i style="background:#4de3c2"></i></div>
+      <div class="tags"><span>dark</span><span>radial</span><span>space</span><span>Space Grotesk</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./10-brand.html">
+      <span class="no">OPTION 10 · NEW</span>
+      <h2>Brand</h2>
+      <p>A brand-identity case study as the homepage. The lintro "L" mark constructed on a module grid with annotation labels, color chips with hex codes, pattern tiles, principles as numbered rows, and a hover-inverting tool registry.</p>
+      <div class="swatches"><i style="background:#f1ede4"></i><i style="background:#c2410c"></i><i style="background:#2545d3"></i></div>
+      <div class="tags"><span>light</span><span>identity</span><span>geometric</span><span>Archivo Black</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./11-showcase.html">
+      <span class="no">OPTION 11 · NEW</span>
+      <h2>Showcase</h2>
+      <p>Product-led marketing in the Greptile/fintech mold: mesh-gradient hero with terminal + report cards floating at 3D angles, tool logo cloud, bracketed section labels, numbered steps, diff-style example cards, dark stats band.</p>
+      <div class="swatches"><i style="background:#f6f7f9"></i><i style="background:#4f46e5"></i><i style="background:#0e1116"></i></div>
+      <div class="tags"><span>light</span><span>product-led</span><span>3D depth</span><span>Inter Tight</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+  </div>
+
+  <p class="kicker" style="margin-top:64px">Round 1 — classic marketing structures</p>
+  <div class="grid">
+    <a class="opt" href="./01-swiss.html">
+      <span class="no">OPTION 01</span>
+      <h2>Swiss Grid</h2>
+      <p>International Typographic Style. Massive grotesque type on white, visible 12-column grid, Swiss-red accents, numbered sections, tabular tool matrix. Precise, confident, timeless.</p>
+      <div class="swatches"><i style="background:#ffffff"></i><i style="background:#111111"></i><i style="background:#e2001a"></i></div>
+      <div class="tags"><span>light</span><span>minimal</span><span>typographic</span><span>Inter Tight</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./02-editorial.html">
+      <span class="no">OPTION 02</span>
+      <h2>Editorial</h2>
+      <p>Literary magazine on cream paper. Fraunces serif with italic swashes, masthead with volume number, drop caps, pull quotes, dotted tool index. Rust accent echoes the lintro logo dot.</p>
+      <div class="swatches"><i style="background:#f6f1e7"></i><i style="background:#211a13"></i><i style="background:#b7410e"></i></div>
+      <div class="tags"><span>light</span><span>serif</span><span>print-inspired</span><span>Fraunces</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./03-neopop.html">
+      <span class="no">OPTION 03</span>
+      <h2>Neo-Pop</h2>
+      <p>Playful neo-brutalism. Thick black borders, hard offset shadows, highlighter-bright color blocks, rotated stickers, tilted marquee. Loud, fun, and impossible to confuse with anyone else.</p>
+      <div class="swatches"><i style="background:#fff6e5"></i><i style="background:#ffd02f"></i><i style="background:#ff8fd3"></i><i style="background:#7db4ff"></i></div>
+      <div class="tags"><span>light</span><span>bold color</span><span>playful</span><span>Archivo Black</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./04-midnight.html">
+      <span class="no">OPTION 04</span>
+      <h2>Midnight</h2>
+      <p>Premium dark SaaS in the Linear / Raycast lineage. Aurora gradient glows, glassmorphic cards, gradient headline, glowing CTAs, pill nav. Sleek and serious — the safe modern choice.</p>
+      <div class="swatches"><i style="background:#06070c"></i><i style="background:#7c5cff"></i><i style="background:#4cc9f0"></i></div>
+      <div class="tags"><span>dark</span><span>gradients</span><span>glass</span><span>Inter</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./05-bento.html">
+      <span class="no">OPTION 05</span>
+      <h2>Bento</h2>
+      <p>Soft, friendly, Apple-adjacent. Warm stone background, rounded bento cells of mixed sizes, terracotta accent from the lintro logo, pastel feature cards with live mini-visualizations.</p>
+      <div class="swatches"><i style="background:#f4f2ee"></i><i style="background:#1c1917"></i><i style="background:#c2410c"></i></div>
+      <div class="tags"><span>light</span><span>bento grid</span><span>friendly</span><span>Inter Tight</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+    <a class="opt" href="./06-blueprint.html">
+      <span class="no">OPTION 06</span>
+      <h2>Blueprint</h2>
+      <p>Engineering schematic on blueprint blue. White grid lines, dashed strokes, crosshairs, FIG. labels, bill-of-materials tool table, and an engineering title block as the footer. Distinctly "dev tool".</p>
+      <div class="swatches"><i style="background:#123a8f"></i><i style="background:#eaf1ff"></i><i style="background:#ffd23f"></i></div>
+      <div class="tags"><span>dark-ish</span><span>technical</span><span>mono</span><span>Space Grotesk</span></div>
+      <span class="open">Open mockup →</span>
+    </a>
+  </div>
+</div>
+</body>
+</html>

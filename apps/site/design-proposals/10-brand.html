@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 10: Brand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #f1ede4;
+    --ink: #16130f;
+    --terra: #c2410c;
+    --cobalt: #2545d3;
+    --sun: #f5b70a;
+    --line: #d5cfc0;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--cream);
+    color: var(--ink);
+    font-family: 'Archivo', sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  .mono { font-family: var(--mono); }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 36px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 24px 0;
+    border-bottom: 2px solid var(--ink);
+  }
+  .wordmark {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 24px; letter-spacing: -0.02em; text-transform: lowercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .wordmark .mark {
+    width: 28px; height: 28px;
+    background:
+      linear-gradient(var(--terra), var(--terra)) left bottom / 65% 35% no-repeat,
+      linear-gradient(var(--ink), var(--ink)) left top / 35% 100% no-repeat;
+  }
+  .nav-links { display: flex; gap: 28px; }
+  .nav-links a {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink); text-decoration: none;
+  }
+  .nav-links a:hover { color: var(--terra); }
+  .nav-cta {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+    background: var(--ink); color: var(--cream); text-decoration: none;
+    padding: 11px 20px;
+  }
+  .nav-cta:hover { background: var(--terra); }
+
+  /* ---------- hero collage ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 0;
+    border-bottom: 2px solid var(--ink);
+  }
+  .hero-left {
+    padding: 72px 48px 72px 0;
+    border-right: 2px solid var(--ink);
+    position: relative;
+  }
+  .hero-left .k {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--terra);
+  }
+  .hero-left h1 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(52px, 5.6vw, 84px);
+    line-height: 0.94; letter-spacing: -0.02em;
+    text-transform: lowercase;
+    margin-top: 22px;
+  }
+  .hero-left h1 .t { color: var(--terra); }
+  .hero-left h1 .c { color: var(--cobalt); }
+  .hero-left .sub {
+    margin-top: 28px; font-size: 18px; max-width: 42ch; font-weight: 500;
+  }
+  .hero-left .actions { margin-top: 34px; display: flex; gap: 14px; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+    text-decoration: none; padding: 15px 24px;
+  }
+  .btn-t { background: var(--terra); color: #fff; }
+  .btn-o { border: 2px solid var(--ink); color: var(--ink); }
+  .btn-o:hover { border-color: var(--terra); color: var(--terra); }
+
+  /* right: the mark, constructed */
+  .hero-right {
+    position: relative;
+    display: grid; place-items: center;
+    padding: 48px;
+    background:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 36px 36px;
+    overflow: hidden;
+  }
+  .construct {
+    position: relative;
+    width: 300px; height: 300px;
+  }
+  .construct .block-l {
+    position: absolute; left: 0; top: 0;
+    width: 96px; height: 300px;
+    background: var(--ink);
+  }
+  .construct .block-foot {
+    position: absolute; left: 0; bottom: 0;
+    width: 300px; height: 96px;
+    background: var(--terra);
+  }
+  .construct .block-dot {
+    position: absolute; right: 0; top: 0;
+    width: 96px; height: 96px;
+    background: var(--cobalt);
+    border-radius: 50%;
+  }
+  .construct .circle-guide {
+    position: absolute; right: -24px; top: -24px;
+    width: 144px; height: 144px;
+    border: 1.5px dashed var(--ink);
+    border-radius: 50%;
+    opacity: 0.5;
+  }
+  .construct .guide-v {
+    position: absolute; left: 96px; top: -30px; bottom: -30px;
+    width: 1.5px; background: repeating-linear-gradient(var(--ink) 0 6px, transparent 6px 12px);
+    opacity: 0.4;
+  }
+  .construct .label {
+    position: absolute;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    background: var(--cream); border: 1.5px solid var(--ink); padding: 3px 9px;
+  }
+  .construct .l1 { left: -14px; top: 32%; }
+  .construct .l2 { right: -38px; bottom: 26px; }
+  .construct .l3 { right: -14px; top: 108px; }
+  .hero-right .caption {
+    position: absolute; bottom: 22px; left: 0; right: 0;
+    text-align: center;
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+    color: #6b6558;
+  }
+
+  /* ---------- color chips ---------- */
+  .chips {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-bottom: 2px solid var(--ink);
+  }
+  .chip { padding: 26px 28px 22px; border-right: 2px solid var(--ink); min-height: 150px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .chip:last-child { border-right: 0; }
+  .chip .hex { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.1em; }
+  .chip .name { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 4px; opacity: 0.75; }
+  .chip-ink { background: var(--ink); color: var(--cream); }
+  .chip-terra { background: var(--terra); color: #fff; }
+  .chip-cobalt { background: var(--cobalt); color: #fff; }
+  .chip-cream { background: var(--cream); color: var(--ink); }
+
+  /* ---------- values ---------- */
+  .values { border-bottom: 2px solid var(--ink); }
+  .values .vhead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 40px 0 30px;
+  }
+  .values .vhead .k { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--terra); }
+  .values .vhead h2 { font-family: 'Archivo Black', sans-serif; font-size: clamp(30px, 3.4vw, 48px); text-transform: lowercase; letter-spacing: -0.01em; }
+  .vrow { display: grid; grid-template-columns: 90px 1fr 1.4fr; border-top: 2px solid var(--ink); }
+  .vrow .num {
+    font-family: 'Archivo Black', sans-serif; font-size: 34px;
+    padding: 30px 0;
+    color: transparent; -webkit-text-stroke: 1.5px var(--ink);
+  }
+  .vrow h3 {
+    font-family: 'Archivo Black', sans-serif; font-size: clamp(24px, 2.6vw, 38px); text-transform: lowercase;
+    padding: 26px 24px 26px 0; letter-spacing: -0.01em;
+  }
+  .vrow p { padding: 30px 0 30px 24px; border-left: 2px solid var(--ink); font-size: 16px; max-width: 52ch; }
+  .vrow p b { color: var(--terra); }
+  .vrow .plink {
+    display: block; margin-top: 14px;
+    font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--cobalt); text-decoration: none;
+  }
+
+  /* ---------- pattern band ---------- */
+  .pattern {
+    display: grid; grid-template-columns: repeat(8, 1fr);
+    border-bottom: 2px solid var(--ink);
+    height: 120px;
+  }
+  .pattern i { border-right: 2px solid var(--ink); }
+  .pattern i:last-child { border-right: 0; }
+  .pt-ink { background: var(--ink); }
+  .pt-terra { background: var(--terra); }
+  .pt-cobalt { background: var(--cobalt); }
+  .pt-sun { background: var(--sun); }
+  .pt-half { background: linear-gradient(135deg, var(--terra) 50%, var(--cream) 50%); }
+  .pt-dot { background: radial-gradient(circle at center, var(--cobalt) 32%, var(--cream) 34%); }
+  .pt-stripe { background: repeating-linear-gradient(-45deg, var(--ink) 0 10px, var(--cream) 10px 20px); }
+  .pt-ring { background: radial-gradient(circle at center, transparent 30%, var(--terra) 32% 44%, transparent 46%); }
+
+  /* ---------- registry ---------- */
+  .registry { border-bottom: 2px solid var(--ink); padding: 40px 0 48px; }
+  .registry .rhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 28px; }
+  .registry .rhead .k { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--terra); }
+  .registry .rhead h2 { font-family: 'Archivo Black', sans-serif; font-size: clamp(30px, 3.4vw, 48px); text-transform: lowercase; }
+  .reg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 2px solid var(--ink); }
+  .reg {
+    padding: 18px 22px;
+    border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono);
+  }
+  .reg:nth-child(4n) { border-right: 0; }
+  .reg:nth-last-child(-n+4) { border-bottom: 0; }
+  .reg .n { font-size: 14px; font-weight: 600; }
+  .reg .c { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: #6b6558; }
+  .reg:hover { background: var(--ink); color: var(--cream); }
+  .reg:hover .c { color: var(--terra); }
+
+  /* ---------- cta block ---------- */
+  .cta { display: grid; grid-template-columns: 1.4fr 1fr; border-bottom: 2px solid var(--ink); }
+  .cta .left {
+    background: var(--ink); color: var(--cream);
+    padding: 64px 48px;
+  }
+  .cta .left .k { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--terra); }
+  .cta .left h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(38px, 4.4vw, 64px); text-transform: lowercase; line-height: 0.96; letter-spacing: -0.015em;
+    margin-top: 18px;
+  }
+  .cta .left h2 .t { color: var(--terra); }
+  .cta .right {
+    padding: 64px 48px;
+    display: flex; flex-direction: column; justify-content: center; gap: 16px;
+    border-left: 2px solid var(--ink);
+  }
+  .cta .install {
+    font-family: var(--mono); font-size: 15px; font-weight: 500;
+    border: 2px solid var(--ink); padding: 16px 20px;
+    display: flex; justify-content: space-between;
+  }
+  .cta .install .copy { color: var(--terra); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; align-self: center; }
+  .cta .btn { text-align: center; }
+
+  footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 26px 0 40px;
+    font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  footer nav a { color: var(--ink); text-decoration: none; margin-left: 22px; }
+  footer nav a:hover { color: var(--terra); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <span class="wordmark"><span class="mark"></span>lintro</span>
+    <div class="nav-links">
+      <a href="#">Docs</a><a href="#">Tools</a><a href="#">Coverage</a>
+    </div>
+    <a class="nav-cta" href="#">GitHub ↗</a>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-left">
+      <span class="k">Brand system — v0.40</span>
+      <h1>one cli.<br><span class="t">every tool.</span><br><span class="c">no ceremony.</span></h1>
+      <p class="sub">Lintro is the unified interface for code quality — 32 linters, formatters, and test runners behind a single command, with your native configs left exactly where they are.</p>
+      <div class="actions">
+        <a class="btn btn-t" href="#">$ lintro check .</a>
+        <a class="btn btn-o" href="#">Read the docs</a>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="construct">
+        <span class="circle-guide"></span>
+        <span class="guide-v"></span>
+        <span class="block-l"></span>
+        <span class="block-foot"></span>
+        <span class="block-dot"></span>
+        <span class="label l1">stem / 1x</span>
+        <span class="label l2">foot / terra</span>
+        <span class="label l3">dot / cobalt</span>
+      </div>
+      <p class="caption">Fig. 01 — the mark, constructed on a 3×3 module</p>
+    </div>
+  </header>
+
+  <section class="chips">
+    <div class="chip chip-ink"><span class="hex">#16130F</span><span class="name">Ink / primary text</span></div>
+    <div class="chip chip-terra"><span class="hex">#C2410C</span><span class="name">Terra / action</span></div>
+    <div class="chip chip-cobalt"><span class="hex">#2545D3</span><span class="name">Cobalt / information</span></div>
+    <div class="chip chip-cream"><span class="hex">#F1EDE4</span><span class="name">Cream / canvas</span></div>
+  </section>
+
+  <section class="values">
+    <div class="vhead">
+      <span class="k">Principles — 03</span>
+      <h2>what we believe</h2>
+    </div>
+    <div class="vrow">
+      <span class="num">01</span>
+      <h3>unified, not uniform</h3>
+      <p>One command surface for <b>32 ecosystem tools</b> — but every tool stays native underneath. No rewrites, no wrappers that swallow flags.
+        <a class="plink" href="#">→ browse the tool matrix</a></p>
+    </div>
+    <div class="vrow">
+      <span class="num">02</span>
+      <h3>your configs stay</h3>
+      <p><b>pyproject.toml, .prettierrc, .yamllint</b> — detected in place, respected as-found. Migration theatre is a bug, not a feature.
+        <a class="plink" href="#">→ read the config guide</a></p>
+    </div>
+    <div class="vrow">
+      <span class="num">03</span>
+      <h3>reports for everyone</h3>
+      <p>Grid for humans, <b>JSON &amp; SARIF for machines</b>, HTML for stakeholders. One run, six formats, zero extra work.
+        <a class="plink" href="#">→ see ci integration</a></p>
+    </div>
+  </section>
+
+  <div class="pattern" aria-hidden="true">
+    <i class="pt-ink"></i><i class="pt-half"></i><i class="pt-cobalt"></i><i class="pt-stripe"></i>
+    <i class="pt-terra"></i><i class="pt-dot"></i><i class="pt-sun"></i><i class="pt-ring"></i>
+  </div>
+
+  <section class="registry">
+    <div class="rhead">
+      <span class="k">Registry — 32 entries</span>
+      <h2>the tool matrix</h2>
+    </div>
+    <div class="reg-grid">
+      <div class="reg"><span class="n">ruff</span><span class="c">lint</span></div>
+      <div class="reg"><span class="n">black</span><span class="c">fmt</span></div>
+      <div class="reg"><span class="n">mypy</span><span class="c">types</span></div>
+      <div class="reg"><span class="n">bandit</span><span class="c">sec</span></div>
+      <div class="reg"><span class="n">prettier</span><span class="c">fmt</span></div>
+      <div class="reg"><span class="n">oxc</span><span class="c">lint</span></div>
+      <div class="reg"><span class="n">tsc</span><span class="c">types</span></div>
+      <div class="reg"><span class="n">stylelint</span><span class="c">css</span></div>
+      <div class="reg"><span class="n">pytest</span><span class="c">test</span></div>
+      <div class="reg"><span class="n">yamllint</span><span class="c">cfg</span></div>
+      <div class="reg"><span class="n">hadolint</span><span class="c">docker</span></div>
+      <div class="reg"><span class="n">vale</span><span class="c">prose</span></div>
+      <div class="reg"><span class="n">trufflehog</span><span class="c">sec</span></div>
+      <div class="reg"><span class="n">clippy</span><span class="c">rust</span></div>
+      <div class="reg"><span class="n">actionlint</span><span class="c">ci</span></div>
+      <div class="reg"><span class="n">+ 17 more</span><span class="c">→ docs</span></div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="left">
+      <span class="k">Begin — 10 seconds</span>
+      <h2>install once.<br><span class="t">lint everything.</span></h2>
+    </div>
+    <div class="right">
+      <div class="install"><span>$ uv pip install lintro</span><span class="copy">copy</span></div>
+      <a class="btn btn-t" href="#">Get started →</a>
+      <a class="btn btn-o" href="#">★ Star on GitHub</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>lintro — a brand for clean code</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+  </footer>
+</div>
+</body>
+</html>

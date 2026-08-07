@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 12: Orbit × IDE — Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space: #04040c;
+    --panel: rgba(10,12,32,0.55);
+    --ink: #dfe6ff;
+    --dim: #6b7499;
+    --amber: #ffb454;
+    --teal: #4de3c2;
+    --line: rgba(223,230,255,0.14);
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background:
+      radial-gradient(1px 1px at 12% 22%, rgba(255,255,255,0.6) 50%, transparent 50%),
+      radial-gradient(1px 1px at 78% 12%, rgba(255,255,255,0.45) 50%, transparent 50%),
+      radial-gradient(1.5px 1.5px at 88% 64%, rgba(255,255,255,0.5) 50%, transparent 50%),
+      radial-gradient(1px 1px at 32% 78%, rgba(255,255,255,0.4) 50%, transparent 50%),
+      radial-gradient(1px 1px at 56% 34%, rgba(255,255,255,0.45) 50%, transparent 50%),
+      radial-gradient(1000px 500px at 50% -10%, #0d1030 0%, var(--space) 60%);
+    background-attachment: fixed;
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px; line-height: 1.7;
+  }
+  .mono { font-family: var(--mono); }
+
+  /* ---------- nav (same as homepage) ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 40px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    background: rgba(4,4,12,0.8);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .brand { display: flex; align-items: center; gap: 12px; font-weight: 500; color: var(--ink); text-decoration: none; }
+  nav .brand .core { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); }
+  nav .links a { color: var(--dim); text-decoration: none; margin-left: 26px; }
+  nav .links a:hover, nav .links a.on { color: var(--ink); }
+  nav .links a.on { color: var(--teal); }
+
+  /* ---------- docs shell ---------- */
+  .shell {
+    max-width: 1340px; margin: 0 auto;
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr) 190px;
+    gap: 48px;
+    padding: 40px 40px 80px;
+  }
+
+  /* ---------- sidebar ---------- */
+  .sidebar { position: sticky; top: 96px; align-self: start; font-family: var(--mono); font-size: 12.5px; }
+  .sidebar .search {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel);
+    color: var(--dim);
+    padding: 10px 14px; margin-bottom: 26px;
+    font-size: 12px;
+  }
+  .sidebar .search .kbd { margin-left: auto; border: 1px solid var(--line); border-radius: 5px; padding: 1px 7px; font-size: 10.5px; }
+  .sidebar .group { margin-bottom: 22px; }
+  .sidebar .g-title {
+    font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim);
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sidebar .g-title::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .sidebar a {
+    display: flex; align-items: center; gap: 9px;
+    color: #9aa3c7; text-decoration: none;
+    padding: 5px 10px; border-radius: 7px;
+    border-left: 2px solid transparent;
+  }
+  .sidebar a:hover { color: var(--ink); background: rgba(223,230,255,0.04); }
+  .sidebar a.on {
+    color: var(--teal);
+    background: rgba(77,227,194,0.07);
+    border-left-color: var(--teal);
+  }
+  .sidebar a .d { width: 5px; height: 5px; border-radius: 50%; background: var(--dim); opacity: 0.6; flex-shrink: 0; }
+  .sidebar a.on .d { background: var(--teal); box-shadow: 0 0 6px var(--teal); opacity: 1; }
+  .sidebar .more { color: var(--dim); padding: 5px 10px; font-style: italic; }
+
+  /* ---------- article ---------- */
+  .crumbs {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 26px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .crumbs a { color: var(--dim); text-decoration: none; }
+  .crumbs a:hover { color: var(--teal); }
+  .crumbs .sep { color: var(--line); }
+  .crumbs .here { color: var(--amber); }
+
+  .doc-head { position: relative; padding-bottom: 34px; border-bottom: 1px solid var(--line); margin-bottom: 38px; }
+  .doc-head .sig {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--teal);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .doc-head .sig::before { content: ''; width: 26px; height: 1px; background: var(--teal); }
+  .doc-head h1 {
+    font-weight: 300; font-size: clamp(38px, 4.4vw, 58px); letter-spacing: -0.01em; line-height: 1.05;
+    margin-top: 16px;
+  }
+  .doc-head h1 b { font-weight: 600; }
+  .doc-head .desc { margin-top: 16px; color: var(--dim); font-size: 17.5px; max-width: 62ch; }
+  .doc-head .orbit-mark {
+    position: absolute; right: -30px; top: -60px;
+    width: 220px; height: 220px;
+    border: 1px dashed var(--line); border-radius: 50%;
+    pointer-events: none;
+  }
+  .doc-head .orbit-mark::after {
+    content: ''; position: absolute; right: 26px; top: 26px;
+    width: 60px; height: 60px;
+    border: 1px dashed rgba(255,180,84,0.3); border-radius: 50%;
+  }
+  .doc-head .orbit-mark i {
+    position: absolute; left: 50%; top: -3px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--teal); box-shadow: 0 0 10px var(--teal);
+  }
+
+  .prose { max-width: 720px; }
+  .prose h2 {
+    font-weight: 600; font-size: 26px; letter-spacing: -0.01em;
+    margin: 48px 0 16px;
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  .prose h2 .anchor { font-family: var(--mono); font-size: 12px; color: var(--dim); font-weight: 400; }
+  .prose h2 .anchor:hover { color: var(--teal); }
+  .prose h3 { font-weight: 600; font-size: 19px; margin: 34px 0 12px; }
+  .prose p { color: #b6bee0; margin-bottom: 16px; }
+  .prose p b, .prose li b { color: var(--ink); }
+  .prose a { color: var(--teal); text-decoration: none; border-bottom: 1px solid rgba(77,227,194,0.35); }
+  .prose a:hover { border-bottom-color: var(--teal); }
+  .prose code {
+    font-family: var(--mono); font-size: 13px;
+    background: rgba(223,230,255,0.07);
+    border: 1px solid var(--line);
+    border-radius: 6px; padding: 1px 7px;
+    color: var(--amber);
+  }
+  .prose ol, .prose ul { margin: 0 0 18px 22px; color: #b6bee0; }
+  .prose li { margin-bottom: 10px; }
+  .prose li::marker { color: var(--teal); font-family: var(--mono); }
+
+  /* TL;DR callout = transmission box */
+  .callout {
+    position: relative;
+    border: 1px solid rgba(255,180,84,0.35);
+    background: rgba(255,180,84,0.06);
+    border-radius: 14px;
+    padding: 20px 24px 20px 58px;
+    margin: 26px 0;
+    color: #d8c9ae;
+    font-size: 15px;
+  }
+  .callout::before {
+    content: '//';
+    position: absolute; left: 20px; top: 18px;
+    font-family: var(--mono); color: var(--amber); font-weight: 500;
+  }
+  .callout .c-title {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--amber); margin-bottom: 6px;
+  }
+  .callout code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: rgba(255,180,84,0.12); border: 1px solid rgba(255,180,84,0.25);
+    border-radius: 5px; padding: 0 6px; color: #ffd9a0;
+  }
+
+  /* tier table */
+  .tablewrap {
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    margin: 24px 0 28px;
+    background: var(--panel);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    font-family: var(--mono); font-weight: 400; font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--dim); text-align: left;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(223,230,255,0.03);
+  }
+  td { padding: 13px 18px; border-bottom: 1px solid var(--line); color: #b6bee0; vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td .tier {
+    font-family: var(--mono); font-size: 12px; color: var(--teal);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  td .tier::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+  td .when { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+
+  /* code block */
+  .codeblock {
+    border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    margin: 24px 0 28px;
+    background: #070818;
+  }
+  .codeblock .cb-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--dim);
+  }
+  .codeblock .cb-head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .codeblock .cb-head .lang { margin-left: auto; color: var(--teal); text-transform: uppercase; }
+  .codeblock pre {
+    font-family: var(--mono); font-size: 13px; line-height: 1.8;
+    padding: 18px 20px;
+    overflow-x: auto;
+    color: #b6bee0;
+  }
+  .codeblock .cm { color: #565f89; font-style: italic; }
+  .codeblock .kw { color: var(--teal); }
+  .codeblock .st { color: var(--amber); }
+  .codeblock .nm { color: #8b9bff; }
+
+  /* prev / next */
+  .prevnext {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    margin-top: 64px; max-width: 720px;
+  }
+  .pn {
+    border: 1px solid var(--line); border-radius: 14px;
+    background: var(--panel);
+    padding: 18px 22px;
+    text-decoration: none;
+    transition: border-color 0.15s ease;
+  }
+  .pn:hover { border-color: rgba(77,227,194,0.5); }
+  .pn .dir { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  .pn .t { font-family: var(--mono); font-size: 14px; color: var(--ink); margin-top: 8px; display: block; }
+  .pn.next { text-align: right; }
+  .pn.next .dir { color: var(--teal); }
+
+  /* ---------- right toc ---------- */
+  .toc { position: sticky; top: 96px; align-self: start; font-family: var(--mono); font-size: 12px; }
+  .toc .t-title {
+    font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim);
+    margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .toc .t-title::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .toc a {
+    display: block;
+    color: var(--dim); text-decoration: none;
+    padding: 5px 0 5px 14px;
+    border-left: 1px solid var(--line);
+  }
+  .toc a:hover { color: var(--ink); }
+  .toc a.on { color: var(--teal); border-left-color: var(--teal); }
+  .toc a.sub { padding-left: 28px; font-size: 11.5px; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 26px 40px 34px;
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+  footer nav a { color: var(--dim); text-decoration: none; margin-left: 22px; }
+  footer nav a:hover { color: var(--teal); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="./12-orbit-ide.html"><span class="core"></span>lintro</a>
+  <div class="links">
+    <a href="#" class="on">Docs</a><a href="#">Tools</a><a href="#">Coverage</a><a href="#">GitHub ↗</a>
+  </div>
+</nav>
+
+<div class="shell">
+  <!-- left sidebar -->
+  <aside class="sidebar">
+    <div class="search"><span>⌕</span> Search docs <span class="kbd">⌘K</span></div>
+    <div class="group">
+      <div class="g-title">Getting started</div>
+      <a href="#"><span class="d"></span>Hub</a>
+      <a href="#"><span class="d"></span>Getting started</a>
+    </div>
+    <div class="group">
+      <div class="g-title">Usage</div>
+      <a href="#"><span class="d"></span>Usage</a>
+      <a href="#" class="on"><span class="d"></span>Configuration</a>
+      <a href="#"><span class="d"></span>Docker</a>
+      <a href="#"><span class="d"></span>GitHub integration</a>
+      <a href="#"><span class="d"></span>AI features</a>
+      <a href="#"><span class="d"></span>Plugins</a>
+      <a href="#"><span class="d"></span>Library API</a>
+      <a href="#"><span class="d"></span>Troubleshooting</a>
+    </div>
+    <div class="group">
+      <div class="g-title">Tools</div>
+      <a href="#"><span class="d"></span>Overview</a>
+      <div class="more">… 32 tool pages</div>
+    </div>
+    <div class="group">
+      <div class="g-title">Architecture</div>
+      <a href="#"><span class="d"></span>Overview</a>
+      <a href="#"><span class="d"></span>Vision</a>
+      <a href="#"><span class="d"></span>Roadmap</a>
+    </div>
+    <div class="group">
+      <div class="g-title">Security · Contributing</div>
+      <a href="#"><span class="d"></span>Assurance</a>
+      <a href="#"><span class="d"></span>Contributing</a>
+      <a href="#"><span class="d"></span>Style guide</a>
+    </div>
+  </aside>
+
+  <!-- article -->
+  <main>
+    <div class="crumbs">
+      <a href="#">docs</a><span class="sep">/</span><a href="#">usage</a><span class="sep">/</span><span class="here">configuration</span>
+    </div>
+
+    <header class="doc-head">
+      <div class="orbit-mark" aria-hidden="true"><i></i></div>
+      <p class="sig">usage · signal 02</p>
+      <h1>Configuration <b>Guide</b></h1>
+      <p class="desc">All configuration options for Lintro and the tools it integrates — how to customize behavior, set tool-specific options, and optimize Lintro for your project.</p>
+    </header>
+
+    <div class="prose">
+      <div class="callout">
+        <div class="c-title">Transmission — tl;dr</div>
+        Lintro uses your existing tool configs (<code>.prettierrc</code>, <code>pyproject.toml</code>, etc.) automatically. It only provides fallback defaults when no native config exists. Use <code>enforce.line_length</code> to keep settings consistent across all tools via CLI injection.
+      </div>
+
+      <h2>Configuration Model: 5-Tier System <span class="anchor">#</span></h2>
+      <p>Lintro uses a clear 5-tier configuration model that separates concerns:</p>
+
+      <div class="tablewrap">
+        <table>
+          <tr><th>Tier</th><th>Purpose</th><th>When applied</th></tr>
+          <tr><td><span class="tier">execution</span></td><td>What tools run and how</td><td><span class="when">always</span></td></tr>
+          <tr><td><span class="tier">enforce</span></td><td>Cross-cutting settings (line_length, target_python)</td><td><span class="when">always · via CLI flags</span></td></tr>
+          <tr><td><span class="tier">defaults</span></td><td>Fallback config when no native config exists</td><td><span class="when">only when no native config</span></td></tr>
+          <tr><td><span class="tier">tools</span></td><td>Per-tool enable/disable and config source</td><td><span class="when">always</span></td></tr>
+          <tr><td><span class="tier">ai</span></td><td>AI-powered summaries and fixes</td><td><span class="when">when enabled + API key set</span></td></tr>
+        </table>
+      </div>
+
+      <h3>Key Principles</h3>
+      <ol>
+        <li><b>Native configs are respected by default</b> — tools use their own <code>.prettierrc</code>, <code>pyproject.toml [tool.ruff]</code>, etc.</li>
+        <li><b><code>enforce</code> settings override via CLI flags</b> — line length and target Python are injected as CLI arguments to ensure consistency.</li>
+        <li><b><code>defaults</code> provide fallbacks</b> — only used when a tool has no native config file.</li>
+        <li><b>Simple and transparent</b> — you always know exactly which config is in use.</li>
+      </ol>
+
+      <h2>Lintro Configuration <span class="anchor">#</span></h2>
+      <p>The optional <code>.lintro-config.yaml</code> file controls all five tiers from one place:</p>
+
+      <div class="codeblock">
+        <div class="cb-head"><span class="dot"></span>.lintro-config.yaml<span class="lang">yaml</span></div>
+        <pre><span class="cm"># Tier 1: EXECUTION — what tools run and how</span>
+<span class="nm">execution</span>:
+  <span class="kw">parallel</span>: <span class="st">true</span>
+  <span class="kw">max_workers</span>: <span class="st">8</span>
+  <span class="kw">fail_fast</span>: <span class="st">false</span>
+
+<span class="cm"># Tier 2: ENFORCE — overrides native configs via CLI flags</span>
+<span class="nm">enforce</span>:
+  <span class="kw">line_length</span>: <span class="st">88</span>
+  <span class="kw">target_python</span>: <span class="st">"3.11"</span>
+
+<span class="cm"># Tier 4: TOOLS — per-tool enable/disable</span>
+<span class="nm">tools</span>:
+  <span class="kw">ruff</span>:
+    <span class="kw">enabled</span>: <span class="st">true</span>
+  <span class="kw">vale</span>:
+    <span class="kw">enabled</span>: <span class="st">false</span></pre>
+      </div>
+
+      <h3>Configuration Report Command</h3>
+      <p>Run <code>lintro config report</code> to see exactly which configuration each tool resolved — native file, enforced value, or fallback default — and where it came from. Add <code>--verbose</code> to include native config contents, or <code>--output-format json</code> for scripting.</p>
+    </div>
+
+    <div class="prevnext">
+      <a class="pn" href="#"><span class="dir">← previous</span><span class="t">usage</span></a>
+      <a class="pn next" href="#"><span class="dir">next →</span><span class="t">docker</span></a>
+    </div>
+  </main>
+
+  <!-- right toc -->
+  <aside class="toc">
+    <div class="t-title">On this page</div>
+    <a href="#" class="on">5-Tier System</a>
+    <a href="#" class="sub">Key Principles</a>
+    <a href="#">Lintro Configuration</a>
+    <a href="#" class="sub">Config Report</a>
+    <a href="#">Health Score</a>
+    <a href="#">Tool Timeouts</a>
+  </aside>
+</div>
+
+<footer>
+  <span>lintro — unified code quality</span>
+  <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+</footer>
+
+</body>
+</html>

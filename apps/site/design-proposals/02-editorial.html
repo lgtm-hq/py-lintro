@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 02: Editorial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f6f1e7;
+    --paper-deep: #efe8da;
+    --ink: #211a13;
+    --ink-soft: #4a4036;
+    --rust: #b7410e;
+    --rule: #d8cfbd;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 40px; }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding-top: 26px; }
+  .mast-top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-soft);
+    padding-bottom: 14px;
+  }
+  .mast-top a { color: var(--ink-soft); text-decoration: none; margin-left: 22px; }
+  .mast-top a:hover { color: var(--rust); }
+  .mast-name {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: clamp(56px, 8.5vw, 106px);
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    text-align: center;
+    white-space: nowrap;
+    padding: 26px 0 30px;
+  }
+  .mast-name i { font-style: italic; font-weight: 300; color: var(--rust); }
+  .rule-double { border-top: 3px solid var(--ink); border-bottom: 1px solid var(--ink); height: 4px; }
+  .mast-sub {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--ink);
+    color: var(--ink-soft);
+  }
+
+  /* ---------- hero article ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 56px;
+    padding: 72px 0 64px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--rust);
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 26px;
+  }
+  .kicker::before { content: ''; width: 36px; height: 1px; background: var(--rust); }
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: clamp(44px, 5vw, 68px);
+    line-height: 1.04;
+    letter-spacing: -0.015em;
+  }
+  h1 em { font-style: italic; font-weight: 300; color: var(--rust); }
+  .lede {
+    margin-top: 28px;
+    font-size: 21px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    max-width: 46ch;
+  }
+  .lede::first-letter {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 74px;
+    line-height: 0.8;
+    float: left;
+    padding: 6px 12px 0 0;
+    color: var(--rust);
+  }
+  .byline {
+    margin-top: 30px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex; gap: 18px; align-items: center;
+  }
+  .byline .actions { display: flex; gap: 12px; }
+  .btn {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    text-decoration: none; padding: 12px 20px;
+    border: 1px solid var(--ink);
+  }
+  .btn-solid { background: var(--ink); color: var(--paper); }
+  .btn-solid:hover { background: var(--rust); border-color: var(--rust); }
+  .btn-ghost { color: var(--ink); }
+  .btn-ghost:hover { color: var(--rust); border-color: var(--rust); }
+
+  figure.exhibit {
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    padding: 18px;
+    align-self: start;
+    transform: rotate(0.6deg);
+    box-shadow: 0 18px 40px -22px rgba(33,26,19,0.35);
+  }
+  .exhibit .term {
+    background: #221c15;
+    color: #ede4d3;
+    font-family: var(--mono);
+    font-size: 13.5px; line-height: 1.75;
+    padding: 22px 22px 18px;
+  }
+  .term .dim { color: #8d8172; }
+  .term .ok { color: #a3be8c; }
+  .term .pass { color: #221c15; background: #e0a458; padding: 0 8px; }
+  figcaption {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft);
+    padding-top: 12px;
+    display: flex; justify-content: space-between;
+  }
+
+  /* ---------- pull quote ---------- */
+  .pull {
+    padding: 56px 0;
+    border-bottom: 1px solid var(--rule);
+    text-align: center;
+  }
+  .pull p {
+    font-family: 'Fraunces', serif;
+    font-style: italic; font-weight: 300;
+    font-size: clamp(26px, 3vw, 38px);
+    line-height: 1.3;
+    max-width: 26ch;
+    margin: 0 auto;
+  }
+  .pull p b { font-style: normal; font-weight: 600; color: var(--rust); }
+  .pull span {
+    display: block; margin-top: 18px;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- features ---------- */
+  .features { padding: 64px 0; border-bottom: 1px solid var(--rule); }
+  .sec-label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--rust); margin-bottom: 8px;
+  }
+  .features h2, .tools h2, .install-sec h2 {
+    font-family: 'Fraunces', serif; font-weight: 500;
+    font-size: clamp(34px, 3.6vw, 48px); letter-spacing: -0.01em;
+    margin-bottom: 44px;
+  }
+  .features h2 i, .tools h2 i, .install-sec h2 i { font-style: italic; font-weight: 300; color: var(--rust); }
+  .feat-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+  .feat { padding: 0 36px; border-left: 1px solid var(--rule); }
+  .feat:first-child { border-left: 0; padding-left: 0; }
+  .feat:last-child { padding-right: 0; }
+  .feat .no {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 300;
+    font-size: 44px; color: var(--rust); line-height: 1;
+  }
+  .feat h3 {
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px;
+    margin: 14px 0 12px;
+  }
+  .feat p { font-size: 16.5px; color: var(--ink-soft); }
+  .feat a {
+    display: inline-block; margin-top: 16px;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink); text-decoration: none;
+    border-bottom: 1px solid var(--rust); padding-bottom: 3px;
+  }
+
+  /* ---------- tools index ---------- */
+  .tools { padding: 64px 0; border-bottom: 1px solid var(--rule); }
+  .tool-index { column-count: 4; column-gap: 40px; }
+  .tool-index span {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 13px;
+    padding: 9px 0;
+    border-bottom: 1px dotted var(--rule);
+    break-inside: avoid;
+  }
+  .tool-index i { font-style: normal; color: var(--rust); }
+
+  /* ---------- install ---------- */
+  .install-sec { padding: 72px 0 80px; text-align: center; }
+  .install-card {
+    margin: 0 auto; max-width: 620px;
+    background: var(--paper-deep);
+    border: 1px solid var(--rule);
+    padding: 40px 48px 36px;
+  }
+  .install-card .cmd {
+    font-family: var(--mono); font-size: 17px;
+    background: #221c15; color: #ede4d3;
+    padding: 18px 24px;
+    display: flex; justify-content: space-between;
+  }
+  .install-card .cmd .c { color: #e0a458; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; align-self: center; }
+  .install-card .alt {
+    margin-top: 16px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+    color: var(--ink-soft); text-transform: uppercase;
+  }
+  .install-sec .btn { display: inline-block; margin-top: 28px; }
+
+  footer {
+    border-top: 3px solid var(--ink);
+    padding: 22px 0 44px;
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  footer a { color: var(--ink-soft); text-decoration: none; margin-left: 20px; }
+  footer a:hover { color: var(--rust); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mast-top">
+      <span>Vol. II — No. 08</span>
+      <nav>
+        <a href="#">Docs</a><a href="#">Tools</a><a href="#">Reports</a><a href="#">GitHub ↗</a>
+      </nav>
+    </div>
+    <div class="rule-double"></div>
+    <div class="mast-name">Lintro<i>.</i></div>
+    <div class="mast-sub">
+      <span>The code-quality gazette</span>
+      <span>Published on PyPI — MIT License</span>
+      <span>Sunday, August 2, 2026</span>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div>
+      <p class="kicker">The unification issue</p>
+      <h1>Every linter in your stack, finally speaking <em>one language.</em></h1>
+      <p class="lede">Lintro is a comprehensive CLI that unifies formatting, linting, and testing under a single interface. It reads the configs you already keep — nothing to migrate, nothing to relearn — and answers in six report formats.</p>
+      <div class="byline">
+        <div class="actions">
+          <a class="btn btn-solid" href="#">$ lintro check .</a>
+          <a class="btn btn-ghost" href="#">Read the docs</a>
+        </div>
+      </div>
+    </div>
+    <figure class="exhibit">
+      <div class="term">
+        <span class="dim">$</span> lintro check .<br>
+        <span class="ok">✓</span> ruff&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0 issues<br>
+        <span class="ok">✓</span> black&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0 issues<br>
+        <span class="ok">✓</span> mypy&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0 issues<br>
+        <span class="ok">✓</span> prettier&nbsp;&nbsp;0 issues<br>
+        <span class="ok">✓</span> yamllint&nbsp;&nbsp;0 issues<br>
+        <span class="dim">──────────────────────────</span><br>
+        <span class="pass">PASS</span> 32 tools · 0 issues · 1.8s
+      </div>
+      <figcaption><span>Fig. 1 — The grid report</span><span>Exhibit A</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="pull">
+    <p>“One command to learn. <b>Thirty-two tools</b> already fluent.”</p>
+    <span>— The Editorial Board</span>
+  </section>
+
+  <section class="features">
+    <p class="sec-label">In this issue</p>
+    <h2>Three reasons to <i>retire the Makefile.</i></h2>
+    <div class="feat-cols">
+      <article class="feat">
+        <div class="no">I.</div>
+        <h3>A unified surface</h3>
+        <p>Check, fix, and test through one command. The interface stays constant while the tools underneath remain the native binaries you trust.</p>
+        <a href="#">Continue reading →</a>
+      </article>
+      <article class="feat">
+        <div class="no">II.</div>
+        <h3>Your configs, honored</h3>
+        <p>.prettierrc, pyproject.toml, .yamllint — detected and respected as-is. Or set line_length once and watch it enforced everywhere.</p>
+        <a href="#">Continue reading →</a>
+      </article>
+      <article class="feat">
+        <div class="no">III.</div>
+        <h3>Reports for every reader</h3>
+        <p>Grid for humans at the terminal, JSON and SARIF for machines, HTML for the stakeholders. One run, six formats, zero extra work.</p>
+        <a href="#">Continue reading →</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="tools">
+    <p class="sec-label">The directory</p>
+    <h2>Thirty-two tools, <i>alphabetically yours.</i></h2>
+    <div class="tool-index">
+      <span>actionlint <i>ci</i></span><span>astro-check <i>web</i></span><span>bandit <i>sec</i></span><span>black <i>fmt</i></span>
+      <span>cargo-deny <i>rust</i></span><span>clippy <i>rust</i></span><span>commitlint <i>git</i></span><span>dotenv-linter <i>cfg</i></span>
+      <span>golangci-lint <i>go</i></span><span>hadolint <i>docker</i></span><span>html-validate <i>web</i></span><span>markdownlint <i>docs</i></span>
+      <span>mypy <i>types</i></span><span>osv-scanner <i>sec</i></span><span>oxc <i>web</i></span><span>pip-audit <i>sec</i></span>
+      <span>prettier <i>fmt</i></span><span>pydoclint <i>docs</i></span><span>pytest <i>test</i></span><span>ruff <i>lint</i></span>
+      <span>stylelint <i>css</i></span><span>svelte-check <i>web</i></span><span>trufflehog <i>sec</i></span><span>tsc <i>types</i></span>
+      <span>vale <i>prose</i></span><span>vue-tsc <i>types</i></span><span>yamllint <i>cfg</i></span><span>+ 5 more <i>→</i></span>
+    </div>
+  </section>
+
+  <section class="install-sec">
+    <p class="sec-label">Classifieds</p>
+    <h2>Installed in <i>ten seconds flat.</i></h2>
+    <div class="install-card">
+      <div class="cmd"><span>$ uv pip install lintro</span><span class="c">copy</span></div>
+      <p class="alt">or — bun add -g @lgtm-hq/lintro · docker · pre-commit</p>
+    </div>
+    <a class="btn btn-solid" href="#">Begin at the docs →</a>
+  </section>
+
+  <footer>
+    <span>© 2026 Lintro — All rights reserved</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">Coverage</a></nav>
+  </footer>
+</div>
+</body>
+</html>
