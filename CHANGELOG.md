@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.5] - 2026-08-07
+
+### Fixed
+
+- **review**: keep the mission-control sticky when a run fails (#1960) (b817258)
+
 ## [0.112.4] - 2026-08-07
 
 ### Fixed
