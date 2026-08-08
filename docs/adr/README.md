@@ -18,14 +18,14 @@ ingestion evaluation) and the resulting decision is distilled here.
 
 ## Index
 
-| ADR                                                      | Title                                              | Status   |
-| -------------------------------------------------------- | -------------------------------------------------- | -------- |
-| [0001](0001-native-parser-per-tool.md)                   | A dedicated native parser per tool                 | Accepted |
-| [0002](0002-per-execution-tool-isolation.md)             | Per-execution tool isolation                       | Accepted |
-| [0003](0003-sarif-partial-adoption.md)                   | Partial adoption of SARIF                          | Accepted |
-| [0004](0004-release-automation-version-pr-flow.md)       | Automated release via a version-PR flow            | Accepted |
-| [0005](0005-uv-and-bun-toolchain.md)                     | uv for Python and bun for JavaScript               | Accepted |
-| [0006](0006-ai-effective-config-and-review-execution.md) | One effective AI config and shared review path     | Accepted |
+| ADR                                                      | Title                                          | Status   |
+| -------------------------------------------------------- | ---------------------------------------------- | -------- |
+| [0001](0001-native-parser-per-tool.md)                   | A dedicated native parser per tool             | Accepted |
+| [0002](0002-per-execution-tool-isolation.md)             | Per-execution tool isolation                   | Accepted |
+| [0003](0003-sarif-partial-adoption.md)                   | Partial adoption of SARIF                      | Accepted |
+| [0004](0004-release-automation-version-pr-flow.md)       | Automated release via a version-PR flow        | Accepted |
+| [0005](0005-uv-and-bun-toolchain.md)                     | uv for Python and bun for JavaScript           | Accepted |
+| [0006](0006-ai-effective-config-and-review-execution.md) | One effective AI config and shared review path | Accepted |
 
 ## Writing a new ADR
 

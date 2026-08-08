@@ -7,15 +7,15 @@ normative decision record is
 
 ## Ownership boundaries
 
-| Concern | Owner today | Target |
-| --- | --- | --- |
-| Typed `AIConfig` from raw `ai:` mapping | `resolve_ai_config()` in `lintro.ai.interface` | `ResolvedAIConfig` (+ provenance) via #1970 |
-| Invocation transport / timeout overrides | CLI adapter (`apply_transport_override`, `model_copy`) | Same resolver pipeline (#1970 / #1923) |
-| Monotonic cost-cap clamp | MCP adapter (`resolve_budget_policy`) | Shared domain prep; adapters keep policy |
-| Diff review preparation | Duplicated in CLI + MCP | `prepare_review` / `execute_review` (Phase 3) |
-| Review execution facade | `run_review` / `run_review_async` | Unchanged facade; internals split (Phase 4) |
-| Provider client `aclose()` API | Not yet (#1885) | Provider-side only in #1885 |
-| Provider close call-site wiring | N/A until #1885 | Phase 5 of #1972 |
+| Concern                                  | Owner today                                            | Target                                        |
+| ---------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
+| Typed `AIConfig` from raw `ai:` mapping  | `resolve_ai_config()` in `lintro.ai.interface`         | `ResolvedAIConfig` (+ provenance) via #1970   |
+| Invocation transport / timeout overrides | CLI adapter (`apply_transport_override`, `model_copy`) | Same resolver pipeline (#1970 / #1923)        |
+| Monotonic cost-cap clamp                 | MCP adapter (`resolve_budget_policy`)                  | Shared domain prep; adapters keep policy      |
+| Diff review preparation                  | Duplicated in CLI + MCP                                | `prepare_review` / `execute_review` (Phase 3) |
+| Review execution facade                  | `run_review` / `run_review_async`                      | Unchanged facade; internals split (Phase 4)   |
+| Provider client `aclose()` API           | Not yet (#1885)                                        | Provider-side only in #1885                   |
+| Provider close call-site wiring          | N/A until #1885                                        | Phase 5 of #1972                              |
 
 ## Shared preparation (current duplicated steps)
 
@@ -33,16 +33,14 @@ Adapter-only policy that must stay out of the shared layer:
 - CLI: Click errors, progress UI, JSON/terminal rendering, GitHub posting, exit
   `0`/`1`/`2`.
 - MCP: workspace locking, budget clamp, structured tool envelopes, no posting.
-- Advisory-only CLI mode: master-switch semantics without the diff-review
-  sub-toggle.
+- Advisory-only CLI mode: master-switch semantics without the diff-review sub-toggle.
 
 ## Orchestrator phase plan
 
 `run_review` remains the stable facade. Phase 4 decomposes internals into
-runner/session, planning/chunks, prompts/passes, response pipeline,
-merge/filter, and metadata modules without changing prompts, findings,
-severity, or exit semantics. Every provider call continues through `call_ai`;
-prompt redaction remains mandatory.
+runner/session, planning/chunks, prompts/passes, response pipeline, merge/filter, and
+metadata modules without changing prompts, findings, severity, or exit semantics. Every
+provider call continues through `call_ai`; prompt redaction remains mandatory.
 
 ## Exit and error contracts
 
@@ -58,6 +56,5 @@ CLI JSON failures and MCP review failures both build diagnosis fields through
 Phase 1 locks the gaps listed in ADR-0006:
 
 - `tests/unit/test_core_ai_import_boundary.py` — AC10 / #724 import edge.
-- `tests/unit/ai/review/test_architecture_characterization.py` — CLI/MCP
-  preparation, effective-config parity, metadata keys, error mapping, exit
-  `0`/`1`/`2`.
+- `tests/unit/ai/review/test_architecture_characterization.py` — CLI/MCP preparation,
+  effective-config parity, metadata keys, error mapping, exit `0`/`1`/`2`.
