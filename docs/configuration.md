@@ -2757,7 +2757,7 @@ ai:
 | `auto_apply_safe_fixes` | bool   | `true`      | Auto-apply safe-style fixes in non-interactive   |
 | `max_tokens`            | int    | `4096`      | Max tokens per request                           |
 | `max_fix_attempts`      | int    | `20`        | Max issues to attempt fixing per run             |
-| `max_parallel_calls`    | int    | `5`         | Concurrent API calls (1-20)                      |
+| `max_parallel_calls`    | int    | `5`         | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible |
 | `max_retries`           | int    | `2`         | Max retries for transient errors (0-10)          |
 | `api_timeout`           | float  | `60.0`      | API request timeout in seconds                   |
 | `validate_after_group`  | bool   | `false`     | Validate immediately after each accepted group   |

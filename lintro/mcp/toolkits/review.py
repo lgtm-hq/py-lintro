@@ -37,6 +37,7 @@ and callers should expect a single long-running call.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -640,7 +641,9 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         ).lower(),
     )
 
+    context_started = time.monotonic()
     context = _collect_context(arguments=arguments, workspace=workspace)
+    context_collection_seconds = time.monotonic() - context_started
     if context is None:
         return _no_changes_payload(
             ai_config=ai_config,
@@ -686,6 +689,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             ),
             force_semantic_chunking=lintro_config.review.force_semantic_chunking,
             workspace_root=workspace,
+            context_collection_seconds=context_collection_seconds,
         )
     except (AIError, ValueError) as exc:
         failure = _review_failure(provider_name=str(provider.name), error=exc)
