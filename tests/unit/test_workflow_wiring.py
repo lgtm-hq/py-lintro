@@ -2615,6 +2615,7 @@ def test_ai_contract_tier1_is_required_check_safe() -> None:
     for event in (_GITHUB_PULL_REQUEST_EVENT, "merge_group"):
         assert_that(triggers[event] or {}).does_not_contain_key("paths")
         assert_that(triggers[event] or {}).does_not_contain_key("paths-ignore")
+    assert_that(triggers["merge_group"]["types"]).contains("checks_requested")
 
     job = _ai_contract_tier1_job()
     assert_that(job["name"]).is_equal_to(_AI_CONTRACT_TIER1_CONTEXT)
@@ -2623,6 +2624,13 @@ def test_ai_contract_tier1_is_required_check_safe() -> None:
     # must stay a plain job that always reports its own check run.
     assert_that(job).does_not_contain_key("uses")
     assert_that(job).contains_key("runs-on")
+
+    # The README's admin PUT recipe is the third copy of the context string;
+    # pin it to the constant so a job rename cannot leave the recipe stale.
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    assert_that(readme).contains(_AI_CONTRACT_TIER1_CONTEXT)
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

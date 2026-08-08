@@ -48,7 +48,9 @@ comments so Renovate can track digest updates. Policy is enforced by
             conditions: $r.conditions,
             rules: [
               $r.rules[]
-              | if .type == "required_status_checks" then
+              | if .type == "required_status_checks"
+                  and ([.parameters.required_status_checks[]
+                        | select(.context == $ctx)] | length == 0) then
                   .parameters.required_status_checks += [{context: $ctx}]
                 else . end
             ]
