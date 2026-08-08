@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.7] - 2026-08-08
+
+### Fixed
+
+- **ci**: bump lintro-tools digest for markdownlint-cli2 0.23.2 (#1987) (72e9a51)
+
 ## [0.112.6] - 2026-08-08
 
 ### Fixed
