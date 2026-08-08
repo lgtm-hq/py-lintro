@@ -55,7 +55,12 @@ from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-from lintro.ai.transport import apply_transport_override
+from lintro.ai.transport import (
+    apply_resolved_transport,
+    apply_transport_override,
+    format_resolved_profile_log,
+    resolve_transport_settings,
+)
 from lintro.config.config_loader import get_config
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
@@ -365,6 +370,22 @@ def review_command(
         effective_ai_config = effective_ai_config.model_copy(
             update={"api_timeout": timeout},
         )
+        # Explicit --timeout wins over the transport profile for this run.
+        if effective_ai_config.transport is not None:
+            transports = effective_ai_config.transports.model_copy(deep=True)
+            if effective_ai_config.transport.value == "cli":
+                transports.cli.timeout = timeout
+            else:
+                transports.api.timeout = timeout
+            effective_ai_config = effective_ai_config.model_copy(
+                update={"transports": transports},
+            )
+    effective_ai_config = apply_resolved_transport(effective_ai_config)
+    resolved_profile = resolve_transport_settings(effective_ai_config)
+    logger.info(
+        "AI review transport profile: {}",
+        format_resolved_profile_log(resolved_profile),
+    )
 
     provider = get_provider(effective_ai_config, workspace_root=workspace_root)
     effective_depth = depth if depth is not None else lintro_config.review.depth
