@@ -26,6 +26,37 @@ comments so Renovate can track digest updates. Policy is enforced by
   (`reusable-quality-lint.yml`, pinned release image) backstopping changed-files PR
   linting; failures open/ping a deduplicated issue via
   `reusable-main-failure-notifier.yml`
+- **ai-contract-tests.yml** — Two-tier AI CLI contract suite (#1609 / #1119). Tier 1
+  (`🧾 AI CLI Flag Surface (Tier 1)`) runs `--version`/`--help` on every
+  `pull_request` / `push` / `merge_group` with no path filter, so the context always
+  reports and is safe to require on `checks-py-lintro` (16132640). Tier 2
+  (`🔥 AI CLI Invocation Smoke (Tier 2)`) is schedule/`workflow_dispatch` only and
+  must stay non-required (live credentials). Admin ruleset PUT (not PATCH; preserve
+  `bypass_actors` from a live GET):
+
+  ```bash
+  gh api orgs/lgtm-hq/rulesets/16132640 \
+    | jq --arg ctx '🧾 AI CLI Flag Surface (Tier 1)' '
+        . as $r
+        | {
+            name: $r.name,
+            target: $r.target,
+            enforcement: $r.enforcement,
+            bypass_actors: ($r.bypass_actors // []),
+            conditions: $r.conditions,
+            rules: [
+              $r.rules[]
+              | if .type == "required_status_checks" then
+                  .parameters.required_status_checks += [{context: $ctx}]
+                else . end
+            ]
+          }
+      ' \
+    | gh api -X PUT orgs/lgtm-hq/rulesets/16132640 --input -
+  ```
+
+  Resulting `required_status_checks` must be the previous twelve contexts plus
+  `🧾 AI CLI Flag Surface (Tier 1)` — never Tier 2.
 
 ## Release
 
