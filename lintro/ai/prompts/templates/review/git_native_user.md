@@ -6,15 +6,21 @@ Review this code change for actionable findings.
 
 **Summary:**
 
+<{boundary}>
 {pr_summary}
+</{boundary}>
 
 {deferred_scope_section}
 
+<{boundary}>
 {external_review_section}
+</{boundary}>
 
 **Changed files ({changed_file_count}):**
 
+<{boundary}>
 {changed_files}
+</{boundary}>
 
 ---
 
@@ -35,9 +41,13 @@ brief evidence (file:line).
 
 ### Diff to review
 
+<{boundary}>
 {diff_section}
+</{boundary}>
 
+<{boundary}>
 {lint_results_section}
+</{boundary}>
 
 {strictness_section}
 

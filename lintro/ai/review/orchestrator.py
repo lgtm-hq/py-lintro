@@ -92,6 +92,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
@@ -1005,6 +1006,7 @@ def build_review_prompt(
             1 if extra_checklist.strip() else 0
         )
 
+    boundary = make_boundary_marker()
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=context.base_ref,
@@ -1017,6 +1019,7 @@ def build_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
+        boundary=boundary,
         diff=redacted_diff,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
@@ -1082,9 +1085,11 @@ def build_git_native_review_prompt(
             1 if extra_checklist.strip() else 0
         )
 
+    boundary = make_boundary_marker()
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
+            boundary=boundary,
             diff=redact_prompt_text(text=chunk.diff, source="diff"),
         )
     elif context.head_ref == "WORKTREE":
@@ -1110,6 +1115,7 @@ def build_git_native_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
+        boundary=boundary,
         diff_section=diff_section,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
@@ -1647,6 +1653,7 @@ async def _generate_extra_checklist(
         files=[file for file in context.changed_files if file.path in chunk.files],
     )
     prompt = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
+        boundary=make_boundary_marker(),
         diff=redact_prompt_text(text=chunk.diff, source="diff"),
         changed_files=changed_files,
     )
@@ -1742,6 +1749,7 @@ async def _run_adversarial_pass(
     )
     prompt = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json=prior_json,
+        boundary=make_boundary_marker(),
         diff=redact_prompt_text(text=chunk.diff, source="diff"),
     )
     budget.check()
