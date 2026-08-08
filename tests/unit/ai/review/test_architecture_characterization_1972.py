@@ -1,9 +1,12 @@
 """Phase 1 characterization gaps for epic #1972.
 
 Pins behaviours that lacked golden coverage before the effective-config /
-shared-prep refactor (Phases 2–3). Existing orchestrator, pipeline, prompt,
-merge, and taxonomy suites are intentionally not duplicated — see the gap
-list in ``docs/adr/0006-ai-effective-config-and-review-execution.md``.
+shared-prep refactor (Phases 2–3): config-resolution idempotence, the shared
+``run_review`` kwarg surface, CLI/MCP error-contract body parity, and MCP
+error mapping. Exit-code and metadata key-set behaviour is pinned in
+``test_architecture_characterization.py`` and intentionally not repeated
+here — see the gap list in
+``docs/adr/0006-ai-effective-config-and-review-execution.md``.
 """
 
 from __future__ import annotations
@@ -25,7 +28,6 @@ from lintro.ai.interface import resolve_ai_config
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_contract import (
-    REVIEW_ERROR_EXIT_CODE,
     build_error_contract,
 )
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -271,77 +273,6 @@ def _write_review_workspace(tmp_path: Path) -> Path:
 # --- exit behaviour 0 / 1 / 2 -------------------------------------------------
 
 
-def test_cli_review_exits_zero_when_only_p2_findings_present() -> None:
-    """Exit 0: successful review with no P1 findings (below threshold)."""
-    result = _invoke_review_with_result(
-        _result_with(findings=(_finding(severity=Severity.P2),)),
-    )
-
-    assert_that(result.exit_code).is_equal_to(0)
-
-
-def test_cli_review_exits_one_when_p1_findings_present() -> None:
-    """Exit 1: successful review that found P1 issues (#1972 AC8 / #1826)."""
-    result = _invoke_review_with_result(
-        _result_with(findings=(_finding(severity=Severity.P1),)),
-    )
-
-    assert_that(result.exit_code).is_equal_to(1)
-
-
-def test_cli_review_exits_two_when_no_review_is_produced() -> None:
-    """Exit 2: provider/execution failure — no review produced."""
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
-    mock_config = _enabled_review_config()
-
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_provider",
-            return_value=MagicMock(model_name="gpt-4o", name="openai"),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            side_effect=AIAuthenticationError("401 authentication_error"),
-        ),
-        patch("lintro.cli_utils.commands.review.render_review_error"),
-    ):
-        result = runner.invoke(cli, ["review"])
-
-    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
-    assert_that(REVIEW_ERROR_EXIT_CODE).is_equal_to(2)
-
-
-# --- effective-config parity --------------------------------------------------
-
-
 def test_resolve_ai_config_matches_for_identical_raw_mapping() -> None:
     """CLI and MCP both resolve AI config through ``resolve_ai_config``.
 
@@ -487,7 +418,9 @@ def test_cli_json_and_mcp_error_detail_share_the_error_contract_body() -> None:
     envelope = mcp_review._review_failure(provider_name="anthropic", error=error)
 
     assert_that(envelope.code).is_equal_to(McpErrorCode.TOOL_UNAVAILABLE)
-    assert_that(envelope.detail["review_error"]).is_equal_to(contract["error"])
+    assert_that((envelope.detail or {})["review_error"]).is_equal_to(
+        contract["error"],
+    )
     assert_that(json.loads(json.dumps(contract))["error"]["kind"]).is_equal_to(
         "auth_failed",
     )
@@ -507,28 +440,13 @@ def test_mcp_maps_non_unavailable_provider_errors_to_execution_error() -> None:
     envelope = mcp_review._review_failure(provider_name="anthropic", error=error)
 
     assert_that(envelope.code).is_equal_to(McpErrorCode.EXECUTION_ERROR)
-    assert_that(envelope.detail["review_error"]).is_equal_to(contract["error"])
+    assert_that((envelope.detail or {})["review_error"]).is_equal_to(
+        contract["error"],
+    )
     assert_that(contract["error"]["kind"]).is_equal_to("invalid_response")
 
 
 # --- review metadata projection -----------------------------------------------
-
-
-def test_mcp_run_metadata_projection_key_set_is_stable() -> None:
-    """MCP ``run`` block projects a fixed subset of ``ReviewMetadata`` fields."""
-    metadata = _metadata(model="test-model", provider="anthropic")
-    projected = mcp_review._run_metadata(metadata=metadata)
-
-    assert_that(set(projected)).is_equal_to(_MCP_RUN_METADATA_KEYS)
-    assert_that(projected["model"]).is_equal_to("test-model")
-    assert_that(projected["provider"]).is_equal_to("anthropic")
-    assert_that(projected["cost_usd"]).is_equal_to(metadata.cost_estimate_usd)
-    assert_that(projected["chunks"]).is_equal_to(
-        {"total": metadata.chunks_total, "reviewed": metadata.chunks_reviewed},
-    )
-    assert_that(projected["files"]).is_equal_to(
-        {"reviewed": metadata.files_reviewed, "total": metadata.files_total},
-    )
 
 
 def test_mcp_review_disabled_maps_to_tool_unavailable(tmp_path: Path) -> None:
@@ -554,6 +472,7 @@ def test_mcp_review_disabled_maps_to_tool_unavailable(tmp_path: Path) -> None:
     assert_that(raised).is_not_none()
     assert_that(raised.code).is_equal_to(McpErrorCode.TOOL_UNAVAILABLE)  # type: ignore[union-attr]
     assert_that(raised.envelope.detail).is_not_none()  # type: ignore[union-attr]
-    assert_that(raised.envelope.detail["reason"]).is_equal_to(  # type: ignore[union-attr]
+    detail = raised.envelope.detail or {}  # type: ignore[union-attr]
+    assert_that(detail["reason"]).is_equal_to(
         "review_disabled",
     )
