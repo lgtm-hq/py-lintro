@@ -30,6 +30,8 @@ class RunRecord:
         transport: Provider transport used (for example ``api`` or ``cli``).
         auth_mode: Authentication mode used by the transport (for example
             ``api-key`` or ``subscription``).
+        cost_basis: How ``cost`` should be read (``billed``, ``estimated``,
+            or ``unpriceable``) (#1923).
         depth: Review depth level.
         strictness: Sensitivity preset applied.
         files_reviewed: Number of changed files included in the review.
@@ -75,6 +77,7 @@ class RunRecord:
     provider: str = ""
     transport: str = ""
     auth_mode: str = ""
+    cost_basis: str = ""
     depth: int = 0
     strictness: str = ""
     files_reviewed: int = 0
@@ -117,6 +120,7 @@ class RunRecord:
             "provider": self.provider,
             "transport": self.transport,
             "auth_mode": self.auth_mode,
+            "cost_basis": self.cost_basis,
             "depth": self.depth,
             "strictness": self.strictness,
             "files_reviewed": self.files_reviewed,
@@ -168,6 +172,7 @@ class RunRecord:
             provider=str(payload.get("provider", "")),
             transport=str(payload.get("transport", "")),
             auth_mode=str(payload.get("auth_mode", "")),
+            cost_basis=str(payload.get("cost_basis", "")),
             depth=coerce_int(payload.get("depth")),
             strictness=str(payload.get("strictness", "")),
             files_reviewed=coerce_int(payload.get("files_reviewed")),

@@ -625,7 +625,10 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.review.orchestrator import run_review
     from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 
+    from lintro.ai.transport import apply_resolved_transport
+
     lintro_config, ai_config = _resolve_ai_config(workspace=workspace)
+    ai_config = apply_resolved_transport(ai_config)
     budget = resolve_budget_policy(
         requested=arguments.get("max_cost_usd"),
         configured=ai_config.max_cost_usd,

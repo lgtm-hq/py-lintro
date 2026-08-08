@@ -87,6 +87,7 @@ NOT_INVOKED_STATUS=-2
 report_not_invoked() {
 	python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NOT_INVOKED_STATUS" \
+		--transport cli \
 		--reason "$1"
 	exit 1
 }
@@ -95,7 +96,8 @@ pr_number="${1:-${PR_NUMBER:-}}"
 
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
-		--status "$NO_CREDENTIAL_STATUS"
+		--status "$NO_CREDENTIAL_STATUS" \
+		--transport cli
 fi
 
 if [[ -z "$pr_number" ]]; then
@@ -105,10 +107,11 @@ fi
 echo "Running AI review on PR #${pr_number} (posts comment)..."
 
 # Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
-# reads ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch
-# it here rather than passing non-existent flags. The config comes from the base
-# ref, not the PR, so a PR cannot loosen the cost cap. Transport/provider are
-# pinned too.
+# reads ai.enabled only from .lintro-config.yaml (env/flag overrides for
+# provider/model/transport land separately in #1970), so patch it here rather
+# than passing non-existent flags. The config comes from the base ref, not the
+# PR, so a PR cannot loosen the cost cap. Transport/provider and the CLI
+# transport profile (timeout + advisory cost) are pinned too (#1923).
 if ! uv run python "${script_dir}/enable_review_config.py"; then
 	report_not_invoked "Could not enable AI review in .lintro-config.yaml; see the log above."
 fi
@@ -126,26 +129,31 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-# --timeout 900: the default ai.api_timeout (60s) is sized for streaming API
-# chunks; a CLI-transport turn runs the whole review in one `claude` invocation
-# and needs minutes (#1900). 600s proved too tight for large diffs — PR #1916's
-# review was killed at the boundary while smaller PRs completed — so the cap is
-# sized for the biggest diffs this repo reviews.
+# Timeout comes from ai.transports.cli.timeout (default 900s), written by
+# enable_review_config.py — no hand-tuned --timeout at this call site (#1923).
+# The default ai.api_timeout (60s) is sized for streaming API chunks; a CLI
+# turn runs the whole review in one `claude` invocation and needs minutes.
 #
-# COUPLED to ai-review.yml's `timeout-minutes`: this timeout must fire BEFORE
-# the Actions runner kills the job, or the review dies without a JSON envelope
-# and classify_review_outcome.py reads a truncated file. Invariant (enforced by
-# tests/scripts/test_run_ai_review.py): ceil(--timeout / 60) + setup overhead
-# (~7 min: harden-runner, checkout, Node+claude install, uv sync) + posting
-# margin < timeout-minutes. Bump both together.
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --timeout 900 --post --output json >"$output_file" 2>&1
+# COUPLED to ai-review.yml's `timeout-minutes`: the resolved CLI timeout must
+# fire BEFORE the Actions runner kills the job, or the review dies without a
+# JSON envelope and classify_review_outcome.py reads a truncated file.
+# Invariant (enforced by tests/scripts/test_run_ai_review.py):
+# ceil(cli_timeout / 60) + setup overhead (~7 min) + posting margin
+# < timeout-minutes. Bump both together.
+#
+# CLI_REVIEW_TIMEOUT_SECONDS documents the profile default the job budget
+# must cover (keep in sync with lintro.ai.transport.DEFAULT_CLI_TIMEOUT and
+# enable_review_config.DEFAULT_CLI_TIMEOUT).
+CLI_REVIEW_TIMEOUT_SECONDS=900
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
 review_status=$?
 set -e
 
 cat "$output_file"
 
 # Exits 0 only when a review was produced; the classifier writes the annotation
-# and job summary either way.
+# and job summary either way. --transport names the failure vocabulary (#1923).
 python3 "${script_dir}/classify_review_outcome.py" \
 	--status "$review_status" \
+	--transport cli \
 	--output-file "$output_file"

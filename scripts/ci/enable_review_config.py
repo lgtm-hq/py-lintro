@@ -2,22 +2,27 @@
 """Enable AI review in ``.lintro-config.yaml`` for a single CI invocation.
 
 ``lintro review`` reads its configuration from ``.lintro-config.yaml`` and
-exposes no CLI flag or environment override for ``ai.enabled`` or
-``ai.max_cost_usd``. The dogfood workflow therefore patches the checked-out
-(ephemeral) config in place before invoking the review command: it turns AI on,
-pins the CLI transport and the Anthropic provider, and bounds spend with
-``ai.max_cost_usd``. The checkout is the PR's trusted base ref (main), not the
-PR head, so the patched config is trusted and a PR cannot raise the cost cap.
+exposes no CLI flag or environment override for ``ai.enabled`` or cost caps
+(env/flag overrides for provider/model/transport land separately in #1970).
+The dogfood workflow therefore patches the checked-out (ephemeral) config in
+place before invoking the review command: it turns AI on, pins the CLI
+transport and the Anthropic provider, and writes the CLI transport profile
+(``ai.transports.cli``) with a whole-turn timeout and an advisory cost bound.
+
+The checkout is the PR's trusted base ref (main), not the PR head, so the
+patched config is trusted and a PR cannot raise the cost cap.
 
 The transport is ``cli``, not ``api`` (#1894): CI authenticates through the
 ``claude`` binary's OAuth session (``CLAUDE_CODE_OAUTH_TOKEN``), because the
 ``ANTHROPIC_API_KEY`` account the API transport would bill has no balance left.
-``ai.max_cost_usd`` is kept regardless — it is API-path accounting, so under the
-CLI transport it is an advisory bound rather than enforced spend control.
+``max_cost_usd_advisory`` is kept regardless — it is API-path accounting under
+the CLI transport, so it is an advisory bound rather than enforced spend
+control (#1923).
 
-Only ``ai.enabled``, ``ai.transport``, ``ai.provider``, and ``ai.max_cost_usd``
-are touched; every other configured value is preserved. This script never edits
-a committed file in normal use — it runs against the throwaway CI checkout.
+Only ``ai.enabled``, ``ai.transport``, ``ai.provider``, and
+``ai.transports.cli`` are touched; every other configured value is preserved.
+This script never edits a committed file in normal use — it runs against the
+throwaway CI checkout.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ import yaml
 
 DEFAULT_CONFIG_FILENAME = ".lintro-config.yaml"
 DEFAULT_MAX_COST_USD = 0.50
+DEFAULT_CLI_TIMEOUT = 900.0
 TRANSPORT = "cli"
 PROVIDER = "anthropic"
 MAX_COST_ENV_VAR = "AI_REVIEW_MAX_COST_USD"
@@ -59,11 +65,11 @@ def resolve_max_cost_usd(*, raw_value: str | None) -> float:
 
 
 def patch_config(*, data: dict[str, Any], max_cost_usd: float) -> dict[str, Any]:
-    """Return config data with AI review enabled and cost-bounded.
+    """Return config data with AI review enabled and a CLI transport profile.
 
     Args:
         data: Parsed ``.lintro-config.yaml`` contents.
-        max_cost_usd: Maximum total spend in USD for the review session.
+        max_cost_usd: Advisory maximum total spend in USD for the review.
 
     Returns:
         The mutated configuration mapping (mutated in place and returned).
@@ -76,7 +82,24 @@ def patch_config(*, data: dict[str, Any], max_cost_usd: float) -> dict[str, Any]
     ai_section["enabled"] = True
     ai_section["transport"] = TRANSPORT
     ai_section["provider"] = PROVIDER
-    ai_section["max_cost_usd"] = max_cost_usd
+
+    # Prefer the transport profile over legacy scalars so the CLI whole-turn
+    # default (900s) applies without a hand-tuned --timeout (#1923).
+    transports = ai_section.get("transports")
+    if not isinstance(transports, dict):
+        transports = {}
+        ai_section["transports"] = transports
+    cli_profile = transports.get("cli")
+    if not isinstance(cli_profile, dict):
+        cli_profile = {}
+        transports["cli"] = cli_profile
+    cli_profile["timeout"] = DEFAULT_CLI_TIMEOUT
+    cli_profile["max_cost_usd_advisory"] = max_cost_usd
+
+    # Drop legacy scalars that would otherwise shadow the profile for readers
+    # still looking at ai.max_cost_usd, and avoid leaving a stale api_timeout
+    # that looks like the CLI budget.
+    ai_section.pop("max_cost_usd", None)
     return data
 
 
@@ -134,7 +157,9 @@ def main(*, argv: list[str] | None = None) -> int:
 
     print(
         f"Enabled AI review: ai.enabled=true, ai.transport={TRANSPORT}, "
-        f"ai.provider={PROVIDER}, ai.max_cost_usd={max_cost_usd}",
+        f"ai.provider={PROVIDER}, "
+        f"ai.transports.cli.timeout={DEFAULT_CLI_TIMEOUT:g}, "
+        f"ai.transports.cli.max_cost_usd_advisory={max_cost_usd}",
     )
     return 0
 
