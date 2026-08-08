@@ -158,10 +158,11 @@ In the spirit of honesty:
 ### A note on speed
 
 Lintro runs its tools in parallel and is built for fast local iteration, but we are not
-going to quote a speed number we have not measured. Reproducible benchmarks are in
-progress ([#597](https://github.com/lgtm-hq/py-lintro/issues/597) /
-[#598](https://github.com/lgtm-hq/py-lintro/issues/598)); this page will link them once
-published. Until then, treat any speed comparison as unproven.
+going to quote a speed number we have not measured on _your_ machine. Reproducible
+hyperfine CLI-overhead benchmarks live in [`benchmarks/`](../benchmarks/README.md)
+([#598](https://github.com/lgtm-hq/py-lintro/issues/598); tracking epic
+[#597](https://github.com/lgtm-hq/py-lintro/issues/597)). Run `make bench` locally and
+prefer relative overhead over absolute milliseconds.
 
 ## Summary
 
