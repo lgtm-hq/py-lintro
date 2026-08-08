@@ -455,6 +455,7 @@ def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
         "strictness": metadata.strictness,
         "cost_usd": metadata.cost_estimate_usd,
         "duration_seconds": metadata.duration_seconds,
+        "phase_timings": dict(metadata.phase_timings),
         "chunks": {
             "total": metadata.chunks_total,
             "reviewed": metadata.chunks_reviewed,

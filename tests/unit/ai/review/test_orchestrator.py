@@ -123,10 +123,12 @@ def test_run_review_marks_cli_transport_tokens_estimated() -> None:
 
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
-            max_tokens=kwargs.get("max_tokens", 1024),
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+            )
         ),
     ):
         result = run_review(
@@ -197,6 +199,9 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
                 enabled=True,
                 transport=AITransport.API,
                 max_cost_usd=0.01,
+                # Keep this mid-run stop deterministic under the patched
+                # recorder; parallel > 1 accepts n−1 overshoot (#1969).
+                max_parallel_calls=1,
             ),
             depth=1,
             checklist_items=[],
@@ -347,10 +352,12 @@ def test_run_review_depth1_returns_review_result() -> None:
 
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
-            max_tokens=kwargs.get("max_tokens", 1024),
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+            )
         ),
     ):
         result = run_review(
@@ -433,10 +440,12 @@ def test_run_review_depth2_calls_provider_twice() -> None:
 
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
-            max_tokens=kwargs.get("max_tokens", 1024),
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+            )
         ),
     ):
         result = run_review(
@@ -1353,9 +1362,11 @@ def _run_single_chunk_review(provider: MagicMock) -> None:
     """
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+            )
         ),
     ):
         run_review(
@@ -1399,10 +1410,12 @@ def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
 
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
-            max_tokens=kwargs.get("max_tokens", 1024),
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+            )
         ),
     ):
         result = run_review(
@@ -1430,10 +1443,12 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
 
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
-        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
-            user_prompt,
-            system=system_prompt,
-            max_tokens=kwargs.get("max_tokens", 1024),
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
+            provider.complete(
+                user_prompt,
+                system=system_prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+            )
         ),
     ):
         result = run_review(
