@@ -434,6 +434,23 @@ ai:
   # see "Data & Privacy". (int >= 1000, default: 12000)
   max_prompt_tokens: 12000
 
+  # ── CLI-transport review limits (#1967) ───────────────────────
+  # Per-chunk diff token budget under --transport cli; forces the semantic
+  # chunker to split diffs a single CLI turn cannot finish.
+  # (int >= 1000, default: 24000)
+  cli_max_diff_tokens: 24000
+
+  # Hard ceiling on the full unified-diff byte size under --transport cli;
+  # larger diffs fail fast with a --paths / --transport api advisory.
+  # (int >= 10000, default: 1500000)
+  cli_max_diff_bytes: 1500000
+
+  # Max findings one CLI review call may emit, so a response cannot hit the
+  # 32k output-token cap mid-JSON; overflow is summarized, and a chunk that
+  # still exhausts output retries once with a tighter cap.
+  # (int 1–50, default: 12)
+  cli_max_findings_per_call: 12
+
   # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
   max_refinement_attempts: 1
 

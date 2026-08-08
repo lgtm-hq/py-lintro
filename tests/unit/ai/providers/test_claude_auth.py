@@ -383,7 +383,7 @@ class TestProviderBareFlag:
             cli_bare=CliBareMode.AUTO,
         )
         assert_that(argv).does_not_contain("--bare")
-        assert_that(argv).contains("-p", "--output-format", "json")
+        assert_that(argv).contains("--print", "--output-format", "json")
 
     async def test_never_override_omits_bare_with_api_key(
         self,

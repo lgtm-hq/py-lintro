@@ -371,11 +371,13 @@ class AnthropicProvider(BaseAIProvider):
         # sent when the binary can reach an API key. Forcing it locked every
         # subscription-authenticated user out of this transport (#1838).
         bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
+        # Prompt rides on stdin (#1967): a single argv element on Linux is
+        # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not
+        # be passed as the ``-p``/``--print`` value.
         cmd = [
             self._cli._binary_path,
             *(("--bare",) if bare else ()),
-            "-p",
-            prompt,
+            "--print",
             "--output-format",
             "json",
             "--permission-mode",
@@ -415,6 +417,7 @@ class AnthropicProvider(BaseAIProvider):
         result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
+            input_text=prompt,
             timeout=timeout,
             cwd=working_dir,
         )

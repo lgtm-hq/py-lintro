@@ -318,7 +318,7 @@ async def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).contains("--output-schema")
     # The prompt stays the trailing positional even after optional flags.
-    assert_that(cmd[-1]).is_equal_to("hello")
+    assert_that(cmd[-1]).is_equal_to("-")
 
 
 async def test_codex_omits_output_schema_when_not_advertised(
@@ -338,7 +338,7 @@ async def test_codex_omits_output_schema_when_not_advertised(
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).does_not_contain("--output-schema")
-    assert_that(cmd[-1]).is_equal_to("hello")
+    assert_that(cmd[-1]).is_equal_to("-")
 
 
 async def test_codex_backstop_retries_without_output_schema(
@@ -364,5 +364,5 @@ async def test_codex_backstop_retries_without_output_schema(
     completions = _completion_calls(calls)
     assert_that(completions).is_length(2)
     assert_that(completions[-1]).does_not_contain("--output-schema")
-    assert_that(completions[-1][-1]).is_equal_to("hello")
+    assert_that(completions[-1][-1]).is_equal_to("-")
     assert_that(response.content).is_equal_to("ok")

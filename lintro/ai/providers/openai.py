@@ -350,8 +350,10 @@ class OpenAIProvider(BaseAIProvider):
             )
 
         optional_args = await self._cli.apply_optional_args(cmd, candidates)
-        # The prompt is a trailing positional, so it must follow every flag.
-        cmd.append(prompt)
+        # Prompt rides on stdin (#1967): a trailing positional would be a
+        # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
+        # review diffs. The ``-`` sentinel forces stdin-as-prompt.
+        cmd.append("-")
 
         logger.debug(
             f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
@@ -360,6 +362,7 @@ class OpenAIProvider(BaseAIProvider):
         result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
+            input_text=prompt,
             timeout=timeout,
             cwd=repo_root or os.getcwd(),
         )

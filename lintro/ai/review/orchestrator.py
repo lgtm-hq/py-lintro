@@ -17,7 +17,10 @@ from loguru import logger
 from lintro.ai.budget import CostBudget
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+)
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
 from lintro.ai.model_pricing import (
@@ -41,6 +44,13 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.cli_limits import (
+    assert_cli_diff_within_ceiling,
+    is_cli_output_exhaustion,
+    resolve_cli_diff_budget,
+    resolve_cli_findings_cap,
+    tighter_findings_cap,
+)
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassResult,
     run_custom_agent_passes,
@@ -708,6 +718,18 @@ async def run_review_async(
         context_window=context_window,
         prompt_overhead=prompt_overhead,
     )
+    if ai_config.transport == AITransport.CLI:
+        # Context-window budgets are transport-blind and leave ~1.5k-line PRs
+        # as a single CLI chunk (#1967). Tighten before the chunker runs, and
+        # refuse outright when the full diff exceeds the hard ceiling.
+        assert_cli_diff_within_ceiling(
+            context=context,
+            cli_max_diff_bytes=ai_config.cli_max_diff_bytes,
+        )
+        diff_budget = resolve_cli_diff_budget(
+            context_window_budget=diff_budget,
+            cli_max_diff_tokens=ai_config.cli_max_diff_tokens,
+        )
     chunk_skips: list[SkippedFile] = []
     chunks = (
         resolve_review_chunks(
@@ -997,6 +1019,7 @@ def build_review_prompt(
     lint_results: str | None = None,
     extra_checklist: str = "",
     strictness_section: str = "",
+    max_findings: int | None = None,
 ) -> tuple[str, str]:
     """Build system and user prompts for a review chunk.
 
@@ -1009,6 +1032,7 @@ def build_review_prompt(
         lint_results: Optional lint digest for prompt injection.
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
+        max_findings: Optional per-call findings ceiling for CLI transport.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -1042,7 +1066,10 @@ def build_review_prompt(
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(
+            checklist_count=checklist_count,
+            max_findings=max_findings,
+        ),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -1059,6 +1086,7 @@ def build_git_native_review_prompt(
     strictness_section: str = "",
     embed_diff: bool = False,
     allow_unredacted_git_native: bool = False,
+    max_findings: int | None = None,
 ) -> tuple[str, str]:
     """Build git-native prompts for CLI-backed review (all providers).
 
@@ -1083,6 +1111,7 @@ def build_git_native_review_prompt(
             ``git diff`` command path (which bypasses secret redaction) when
             ``embed_diff`` is False. Defaults to False so redaction always
             wins and the diff is embedded and redacted instead.
+        max_findings: Optional per-call findings ceiling for CLI transport.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -1135,7 +1164,10 @@ def build_git_native_review_prompt(
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(
+            checklist_count=checklist_count,
+            max_findings=max_findings,
+        ),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -1417,42 +1449,26 @@ async def _review_chunk(
     # Gate before the main provider call so intra-chunk (depth-2/3) work
     # cannot overshoot the budget between the per-chunk checks.
     budget.check()
-    use_git_native = ai_config.transport == AITransport.CLI
-    if use_git_native:
-        embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
-        system_prompt, user_prompt = build_git_native_review_prompt(
-            chunk=chunk,
-            context=context,
-            checklist_text=checklist_text,
-            checklist_count=checklist_count,
-            interaction_paths=interaction_paths,
-            lint_results=lint_results,
-            extra_checklist=extra_checklist,
-            strictness_section=strictness_section,
-            embed_diff=embed_diff,
-            allow_unredacted_git_native=ai_config.review_allow_unredacted_git_native,
-        )
-    else:
-        system_prompt, user_prompt = build_review_prompt(
-            chunk=chunk,
-            context=context,
-            checklist_text=checklist_text,
-            checklist_count=checklist_count,
-            interaction_paths=interaction_paths,
-            lint_results=lint_results,
-            extra_checklist=extra_checklist,
-            strictness_section=strictness_section,
-        )
-    started = time.monotonic()
-    response = await call_ai(
+    findings_cap = resolve_cli_findings_cap(
+        transport_is_cli=ai_config.transport == AITransport.CLI,
+        cli_max_findings_per_call=ai_config.cli_max_findings_per_call,
+    )
+    response, elapsed = await _invoke_chunk_review(
+        chunk=chunk,
+        context=context,
         provider=provider,
         ai_config=ai_config,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
+        checklist_text=checklist_text,
+        checklist_count=checklist_count,
+        interaction_paths=interaction_paths,
+        lint_results=lint_results,
+        extra_checklist=extra_checklist,
+        strictness_section=strictness_section,
         budget=budget,
-        repo_root=repo_root or None,
+        repo_root=repo_root,
         use_one_shot=use_one_shot,
-        cli_schema=cli_schema_for_review(transport=ai_config.transport),
+        diff_budget=diff_budget,
+        max_findings=findings_cap,
     )
     response, payload = await _parse_review_payload_with_recovery(
         response=response,
@@ -1462,7 +1478,7 @@ async def _review_chunk(
         budget=budget,
         repo_root=repo_root,
         use_one_shot=use_one_shot,
-        elapsed=time.monotonic() - started,
+        elapsed=elapsed,
     )
     partial = _payload_to_partial(response=response, payload=payload)
 
@@ -1496,6 +1512,121 @@ async def _review_chunk(
         )
 
     return partial, next_generated_checklist_id
+
+
+async def _invoke_chunk_review(
+    *,
+    chunk: ReviewChunk,
+    context: ReviewContext,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    checklist_text: str,
+    checklist_count: int,
+    interaction_paths: str,
+    lint_results: str | None,
+    extra_checklist: str,
+    strictness_section: str,
+    budget: CostBudget,
+    repo_root: str,
+    use_one_shot: bool,
+    diff_budget: int,
+    max_findings: int | None,
+) -> tuple[AIResponse, float]:
+    """Build the chunk prompt, call the provider, and retry on output exhaustion.
+
+    When CLI transport hits the ~32k output-token cap mid-JSON, retry once with
+    a tighter findings ceiling so the call can finish a complete object (#1967).
+
+    Args:
+        chunk: The chunk under review.
+        context: Collected review diff context.
+        provider: Configured AI provider instance.
+        ai_config: AI configuration for retries, budget, and timeouts.
+        checklist_text: Pre-formatted checklist prompt text.
+        checklist_count: Number of checklist items in the prompt.
+        interaction_paths: Domain-triggered interaction path text.
+        lint_results: Optional lint digest for prompt injection.
+        extra_checklist: Additional generated checklist rows for depth 2.
+        strictness_section: Pre-formatted strictness prompt section.
+        budget: Session cost budget tracker.
+        repo_root: Absolute path to the repository under review.
+        use_one_shot: When True, avoid durable provider sessions.
+        diff_budget: Token budget available for embedded diffs.
+        max_findings: Optional per-call findings ceiling.
+
+    Returns:
+        The provider response and wall-clock seconds spent on the successful
+        (or final) call attempt.
+
+    Raises:
+        AICostBudgetExceededError: When the session cost ceiling is hit.
+        AIError: When the provider call fails for a non-retryable reason, or
+            when an output-exhaustion retry still fails.
+    """
+    use_git_native = ai_config.transport == AITransport.CLI
+    findings_cap = max_findings
+    allow_output_retry = findings_cap is not None and findings_cap > 1
+    started = time.monotonic()
+    while True:
+        if use_git_native:
+            embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
+            system_prompt, user_prompt = build_git_native_review_prompt(
+                chunk=chunk,
+                context=context,
+                checklist_text=checklist_text,
+                checklist_count=checklist_count,
+                interaction_paths=interaction_paths,
+                lint_results=lint_results,
+                extra_checklist=extra_checklist,
+                strictness_section=strictness_section,
+                embed_diff=embed_diff,
+                allow_unredacted_git_native=(
+                    ai_config.review_allow_unredacted_git_native
+                ),
+                max_findings=findings_cap,
+            )
+        else:
+            system_prompt, user_prompt = build_review_prompt(
+                chunk=chunk,
+                context=context,
+                checklist_text=checklist_text,
+                checklist_count=checklist_count,
+                interaction_paths=interaction_paths,
+                lint_results=lint_results,
+                extra_checklist=extra_checklist,
+                strictness_section=strictness_section,
+                max_findings=findings_cap,
+            )
+        try:
+            response = await call_ai(
+                provider=provider,
+                ai_config=ai_config,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                budget=budget,
+                repo_root=repo_root or None,
+                use_one_shot=use_one_shot,
+                cli_schema=cli_schema_for_review(transport=ai_config.transport),
+            )
+        except AICostBudgetExceededError:
+            raise
+        except AIError as exc:
+            if (
+                allow_output_retry
+                and findings_cap is not None
+                and is_cli_output_exhaustion(exc)
+            ):
+                next_cap = tighter_findings_cap(current=findings_cap)
+                if next_cap < findings_cap:
+                    logger.warning(
+                        "CLI review hit an output-token ceiling; retrying "
+                        f"chunk with findings cap {findings_cap} → {next_cap}.",
+                    )
+                    findings_cap = next_cap
+                    allow_output_retry = False
+                    continue
+            raise
+        return response, time.monotonic() - started
 
 
 async def _parse_review_payload_with_recovery(
