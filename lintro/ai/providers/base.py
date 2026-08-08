@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.liveness import (
@@ -200,6 +202,10 @@ class BaseAIProvider(ABC):
         with HTTP SDK clients override to close those clients. Call-site
         ownership of *when* to close is #1972 Phase 5 — this method only
         provides the provider-side API (#1885).
+
+        Teardown is best-effort: one client's failing ``close`` must not
+        orphan the remaining clients, so per-client errors are logged and
+        swallowed.
         """
         clients = list(self._superseded_clients)
         if self._client is not None:
@@ -208,7 +214,13 @@ class BaseAIProvider(ABC):
         self._client_loop = None
         self._superseded_clients = []
         for client in clients:
-            await self._close_sdk_client(client)
+            try:
+                await self._close_sdk_client(client)
+            except Exception as exc:  # noqa: BLE001 - best-effort teardown
+                logger.debug(
+                    f"Ignoring error while closing {self._provider_name} "
+                    f"SDK client: {exc}",
+                )
 
     def close(self) -> None:
         """Synchronously close open SDK clients.
