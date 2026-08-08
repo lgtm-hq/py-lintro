@@ -245,6 +245,35 @@ class _RenderLimits:
     open: int | None = None
 
 
+#: When estimating how much of ``MAX_COMMENT_CHARS`` the state block may claim
+#: before the visible body is fitted (#1866), leave at least this fraction of
+#: the budget for the mission-control board so a huge finding history cannot
+#: reserve the entire comment and blank the sticky.
+_STATE_RESERVATION_BODY_FLOOR_FRACTION = 2
+
+
+def _reservation_for_state(*, state: ReviewState) -> int:
+    """Return how many characters to reserve for ``state`` when fitting a body.
+
+    Renders the state block first (after pruning it against a body-floor
+    placeholder) so ``build_sticky_comment`` can pass ``reserved=`` into the
+    body cap and keep ``body + state_block <= MAX_COMMENT_CHARS`` (#1866).
+
+    Args:
+        state: State that will be appended after the visible body.
+
+    Returns:
+        Character count to reserve for the trailing state block.
+    """
+    body_floor = MAX_COMMENT_CHARS // _STATE_RESERVATION_BODY_FLOOR_FRACTION
+    pruned = prune_state_to_fit(
+        state=state,
+        body="x" * body_floor,
+        limit=MAX_COMMENT_CHARS,
+    )
+    return len(render_state_block(state=pruned))
+
+
 def build_sticky_comment(
     *,
     result: ReviewResult,
@@ -355,19 +384,27 @@ def build_sticky_comment(
             pr_number=pr_number,
         )
 
-    body = _fit_body(
-        assemble=assemble,
-        prior_run_count=len(all_runs) - 1,
-        open_count=open_count,
-        resolved_count=len(match.records) - open_count,
-    )
     new_state = ReviewState(
         runs=tuple(all_runs),
         findings=match.records,
         truncated=state.truncated or runs_dropped,
     )
+    # Render/prune the state block first and reserve its length when fitting
+    # the visible body so body + state is always <= MAX_COMMENT_CHARS (#1866).
+    reserved = _reservation_for_state(state=new_state)
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=len(all_runs) - 1,
+        open_count=open_count,
+        resolved_count=len(match.records) - open_count,
+        reserved=reserved,
+    )
     return body + render_state_block(
-        state=prune_state_to_fit(state=new_state, body=body),
+        state=prune_state_to_fit(
+            state=new_state,
+            body=body,
+            limit=MAX_COMMENT_CHARS,
+        ),
     )
 
 
@@ -424,13 +461,21 @@ def render_state_sticky(
             pr_number=pr_number,
         )
 
+    reserved = _reservation_for_state(state=state)
     body = _fit_body(
         assemble=assemble,
         prior_run_count=max(len(runs) - 1, 0),
         open_count=open_count,
         resolved_count=len(records) - open_count,
+        reserved=reserved,
     )
-    return body + render_state_block(state=prune_state_to_fit(state=state, body=body))
+    return body + render_state_block(
+        state=prune_state_to_fit(
+            state=state,
+            body=body,
+            limit=MAX_COMMENT_CHARS,
+        ),
+    )
 
 
 def _assemble_state_body(
@@ -500,34 +545,41 @@ def _fit_body(
     prior_run_count: int,
     open_count: int,
     resolved_count: int,
+    reserved: int = 0,
 ) -> str:
-    """Shrink the rendered body until it fits ``MAX_COMMENT_CHARS``.
+    """Shrink the rendered body until it fits the budget left for it.
 
-    Pruning order is deliberate: history is the least valuable content on the
-    comment, resolved findings are already fixed, and open findings are what a
-    reader is actually here for, so they are trimmed last. Each stage leaves a
-    visible marker, so nothing is ever dropped silently.
+    The budget is ``MAX_COMMENT_CHARS - reserved`` so the caller can hold space
+    for the trailing state block (#1866). Pruning order is deliberate: history
+    is the least valuable content on the comment, resolved findings are already
+    fixed, and open findings are what a reader is actually here for, so they
+    are trimmed last. Each stage leaves a visible marker, so nothing is ever
+    dropped silently.
 
     Args:
         assemble: Callable taking ``limits`` and returning the rendered body.
         prior_run_count: Number of prior runs available to the history table.
         open_count: Number of open findings, bounding that section's search.
         resolved_count: Number of resolved findings, likewise.
+        reserved: Characters already claimed by the state block (or any other
+            trailer) that must remain outside this body.
 
     Returns:
-        A body at or under the cap when that is reachable by pruning, else the
-        smallest body pruning can produce, hard-truncated as a last resort.
+        A body at or under the remaining budget when that is reachable by
+        pruning, else the smallest body pruning can produce, hard-truncated as
+        a last resort.
     """
+    limit = _body_char_limit(reserved=reserved)
     limits = _RenderLimits()
     body = assemble(limits=limits)
-    if len(body) <= MAX_COMMENT_CHARS:
+    if len(body) <= limit:
         return body
 
     # 1. Drop the oldest run history first, one round at a time.
     for history in range(prior_run_count - 1, -1, -1):
         limits = replace(limits, history=history)
         body = assemble(limits=limits)
-        if len(body) <= MAX_COMMENT_CHARS:
+        if len(body) <= limit:
             return body
 
     # 2. Then the oldest resolved findings — they are already fixed.
@@ -536,6 +588,7 @@ def _fit_body(
         limits=limits,
         field="resolved",
         ceiling=resolved_count,
+        reserved=reserved,
     )
     if fitted is not None:
         return fitted
@@ -551,10 +604,11 @@ def _fit_body(
         field="open",
         ceiling=open_count,
         minimum=1,
+        reserved=reserved,
     )
     if fitted is None:
         fitted = assemble(limits=replace(limits, open=1))
-    return _cap_body(body=fitted)
+    return _cap_body(body=fitted, reserved=reserved)
 
 
 def _largest_fitting(
@@ -564,6 +618,7 @@ def _largest_fitting(
     field: str,
     ceiling: int,
     minimum: int = 0,
+    reserved: int = 0,
 ) -> str | None:
     """Binary-search the largest value of one limit whose body still fits.
 
@@ -581,22 +636,37 @@ def _largest_fitting(
         minimum: Smallest count the section may be rendered at. Sections whose
             absence would hollow out the comment pass ``1`` so the search can
             never settle on showing none of them.
+        reserved: Characters already claimed by the trailing state block.
 
     Returns:
         The body rendered at the largest fitting count, or ``None`` when not
         even ``minimum`` entries of that section make the body fit.
     """
+    limit = _body_char_limit(reserved=reserved)
     best: str | None = None
     lower, upper = minimum, min(ceiling, _PRUNE_SEARCH_CEILING)
     while lower <= upper:
         middle = (lower + upper) // 2
         candidate = assemble(limits=replace(limits, **{field: middle}))
-        if len(candidate) <= MAX_COMMENT_CHARS:
+        if len(candidate) <= limit:
             best = candidate
             lower = middle + 1
         else:
             upper = middle - 1
     return best
+
+
+def _body_char_limit(*, reserved: int) -> int:
+    """Return the visible-body budget after reserving the state block.
+
+    Args:
+        reserved: Characters claimed by the trailing state block (or any other
+            trailer that will be concatenated after the body).
+
+    Returns:
+        Non-negative character budget for the visible body alone.
+    """
+    return max(MAX_COMMENT_CHARS - max(reserved, 0), 0)
 
 
 def _assemble_body(
@@ -1674,23 +1744,26 @@ def _round_narrative(*, result: ReviewResult) -> str:
     return sentence[:_NARRATIVE_LIMIT].strip()
 
 
-def _cap_body(*, body: str) -> str:
+def _cap_body(*, body: str, reserved: int = 0) -> str:
     """Hard-truncate an over-long body as the final size safety net.
 
     Section-aware pruning in :func:`_fit_body` handles every realistic
     overflow. This exists so a pathological single section (one enormous
     finding title, say) can still never produce a comment GitHub rejects.
+    ``reserved`` leaves room for the trailing state block (#1866).
 
     Args:
         body: Sticky comment body without the state block.
+        reserved: Characters already claimed by the trailing state block.
 
     Returns:
         The body unchanged when it fits, else truncated with a visible notice.
     """
-    if len(body) <= MAX_COMMENT_CHARS:
+    limit = _body_char_limit(reserved=reserved)
+    if len(body) <= limit:
         return body
     notice = "\n\n> ✂️ Comment truncated to fit GitHub's size limit."
-    keep = MAX_COMMENT_CHARS - len(notice)
+    keep = max(limit - len(notice), 0)
     return body[:keep].rstrip() + notice
 
 
