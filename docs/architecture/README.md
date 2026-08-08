@@ -9,6 +9,7 @@ This directory contains the foundational documents that guide Lintro's developme
 | [VISION.md](./VISION.md)             | Project mission, core principles (DRY, SOLID), and success criteria    |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Technical architecture, design decisions, and component relationships  |
 | [ROADMAP.md](./ROADMAP.md)           | Prioritized improvements, phased development plan, and success metrics |
+| [AI-REVIEW-EXECUTION.md](./AI-REVIEW-EXECUTION.md) | AI effective-config contract, shared review preparation, orchestrator phases, provider ownership |
 
 ## Quick Reference
 
