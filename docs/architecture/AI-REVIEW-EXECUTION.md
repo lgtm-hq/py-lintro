@@ -58,3 +58,6 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/test_core_ai_import_boundary.py` — AC10 / #724 import edge.
 - `tests/unit/ai/review/test_architecture_characterization.py` — CLI/MCP preparation,
   effective-config parity, metadata keys, error mapping, exit `0`/`1`/`2`.
+- `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
+  config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
+  MCP error mapping.

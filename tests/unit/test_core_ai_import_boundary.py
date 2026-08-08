@@ -76,7 +76,10 @@ def _absolute_module(*, path: Path, node: ast.ImportFrom) -> str:
     if node.level == 0:
         return module
     package = ["lintro", *path.relative_to(LINTRO_ROOT).parts[:-1]]
-    base = package[: len(package) - (node.level - 1)]
+    # An over-deep relative import is an ImportError at runtime; clamp to
+    # the package root so the scan still yields a stable (harmless) name
+    # instead of silently producing an empty base.
+    base = package[: max(len(package) - (node.level - 1), 1)]
     return ".".join([*base, module]) if module else ".".join(base)
 
 
@@ -162,6 +165,7 @@ def test_config_package_loads_without_ai_modules() -> None:
     )
     completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
         [sys.executable, "-c", snippet],
+        cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
         check=True,
