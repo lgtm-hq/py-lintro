@@ -592,3 +592,6 @@ subprocess.run(
 - [ROADMAP.md](./ROADMAP.md) - Prioritized improvements
 - [../style-guide.md](../style-guide.md) - Coding standards
 - [../contributing.md](../contributing.md) - Contribution guidelines
+- [../adr/0006-ai-effective-config-and-review-execution.md](../adr/0006-ai-effective-config-and-review-execution.md) —
+  Effective AI configuration, shared review preparation, and ownership boundaries
+  (epic #1972)
