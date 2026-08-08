@@ -16,7 +16,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
+from lintro.utils.lazy_logger import logger
 
 from lintro.config.lintro_config import (
     EnforceConfig,

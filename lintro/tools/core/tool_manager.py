@@ -205,3 +205,7 @@ class ToolManager:
         """
         self._ensure_initialized()
         return ToolRegistry.is_registered(name)
+
+
+# Process-wide singleton used by CLI execution paths.
+tool_manager = ToolManager()
