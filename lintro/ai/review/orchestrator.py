@@ -46,7 +46,7 @@ from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.cli_limits import (
     assert_cli_diff_within_ceiling,
-    is_output_exhaustion_error,
+    is_cli_output_exhaustion,
     resolve_cli_diff_budget,
     resolve_cli_findings_cap,
     tighter_findings_cap,
@@ -1556,6 +1556,7 @@ async def _invoke_chunk_review(
     """
     use_git_native = ai_config.transport == AITransport.CLI
     findings_cap = max_findings
+    allow_output_retry = findings_cap is not None and findings_cap > 1
     started = time.monotonic()
     while True:
         if use_git_native:
@@ -1602,9 +1603,9 @@ async def _invoke_chunk_review(
             raise
         except AIError as exc:
             if (
-                findings_cap is not None
-                and findings_cap > 1
-                and is_output_exhaustion_error(str(exc))
+                allow_output_retry
+                and findings_cap is not None
+                and is_cli_output_exhaustion(exc)
             ):
                 next_cap = tighter_findings_cap(current=findings_cap)
                 if next_cap < findings_cap:
@@ -1613,6 +1614,7 @@ async def _invoke_chunk_review(
                         f"chunk with findings cap {findings_cap} → {next_cap}.",
                     )
                     findings_cap = next_cap
+                    allow_output_retry = False
                     continue
             raise
         return response, time.monotonic() - started
