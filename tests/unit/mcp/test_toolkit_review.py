@@ -179,6 +179,11 @@ def _metadata(
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
         duration_seconds=12.5,
+        phase_timings={
+            "context_collection": 0.1,
+            "provider": 12.0,
+            "parse_merge": 0.4,
+        },
     )
 
 
@@ -429,6 +434,13 @@ def test_review_returns_findings_and_run_metadata(
     assert_that(run["model"]).is_equal_to("test-model")
     assert_that(run["cost_usd"]).is_equal_to(0.25)
     assert_that(run["duration_seconds"]).is_equal_to(12.5)
+    assert_that(run["phase_timings"]).is_equal_to(
+        {
+            "context_collection": 0.1,
+            "provider": 12.0,
+            "parse_merge": 0.4,
+        },
+    )
     assert_that(run["chunks"]).is_equal_to({"total": 2, "reviewed": 1})
     assert_that(run["partial"]).is_false()
     assert_that(payload["budget"]["exceeded"]).is_false()

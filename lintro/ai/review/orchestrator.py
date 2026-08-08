@@ -358,8 +358,7 @@ async def _review_all_chunks(
             The chunk index paired with its partial or the exception raised.
         """
         chunk_checklist_id = (
-            next_generated_checklist_id
-            + chunk_index * _GENERATED_CHECKLIST_ID_STRIDE
+            next_generated_checklist_id + chunk_index * _GENERATED_CHECKLIST_ID_STRIDE
         )
         async with semaphore:
             try:
@@ -654,6 +653,7 @@ async def run_review_async(
             depth=depth,
             checklist_items=checklist_items,
             context_window_override=context_window_override,
+            context_collection_seconds=context_collection_seconds,
         )
 
     context_window = get_context_window(
@@ -1988,6 +1988,7 @@ def _empty_review_result(
     depth: int,
     checklist_items: list[ChecklistItem],
     context_window_override: int | None,
+    context_collection_seconds: float = 0.0,
 ) -> ReviewResult:
     """Return an empty result when no changes are present."""
     context_window = get_context_window(
@@ -2009,6 +2010,11 @@ def _empty_review_result(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
+        phase_timings={
+            "context_collection": max(context_collection_seconds, 0.0),
+            "provider": 0.0,
+            "parse_merge": 0.0,
+        },
     )
     return ReviewResult(
         metadata=metadata,
