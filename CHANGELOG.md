@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.112.6] - 2026-08-08
+
+### Fixed
+
+- **deps**: remediate nanoid and js-yaml security advisories (#1983) (ea88a24)
+
 ## [0.112.5] - 2026-08-07
 
 ### Fixed
