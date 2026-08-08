@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -34,14 +35,19 @@ __all__ = [
     "tighter_findings_cap",
 ]
 
-#: Soft per-chunk budget for CLI transport (~96 KiB of diff text).
-CLI_TRANSPORT_DIFF_TOKEN_BUDGET = 24_000
-
-#: Absolute ceiling on the full unified-diff UTF-8 byte size for CLI reviews.
-CLI_DIFF_HARD_CEILING_BYTES = 1_500_000
-
-#: Prompt-contract cap so one CLI call cannot exhaust the 32k output budget.
-CLI_MAX_FINDINGS_PER_CALL = 12
+# Single source of truth for the CLI limit defaults is the AIConfig model
+# (cli_max_diff_tokens / cli_max_diff_bytes / cli_max_findings_per_call);
+# these module aliases exist for callers and tests that want the defaults
+# without building a config instance.
+CLI_TRANSPORT_DIFF_TOKEN_BUDGET = int(
+    AIConfig.model_fields["cli_max_diff_tokens"].default,
+)
+CLI_DIFF_HARD_CEILING_BYTES = int(
+    AIConfig.model_fields["cli_max_diff_bytes"].default,
+)
+CLI_MAX_FINDINGS_PER_CALL = int(
+    AIConfig.model_fields["cli_max_findings_per_call"].default,
+)
 
 #: Tighter findings cap used when retrying a chunk after output exhaustion.
 CLI_FINDINGS_RETRY_CAP = 6
@@ -172,22 +178,23 @@ def is_output_exhaustion_error(message: str) -> bool:
     Returns:
         True when the message matches known output-cap exhaustion signatures.
     """
-    text = message.lower()
+    # Normalize JSON spacing so needle matching is layout-independent.
+    text = message.lower().replace('": "', '":"')
+    # Restrictive on purpose: every Claude CLI failure envelope contains
+    # generic tokens like ``is_error``, ``output_tokens`` (usage block), and
+    # ``finish_reason`` — matching those would classify *any* provider error
+    # (auth, timeout, 4xx) as output exhaustion and trigger the tighter-cap
+    # retry on errors that a smaller response cannot fix.
     needles = (
-        "output token",
-        "output_tokens",
-        "max output",
-        "maximum output",
-        "max_tokens",
-        "token limit",
-        "length limit",
+        'stop_reason":"max_tokens',
+        'stop_reason":"length',
+        'finish_reason":"length',
+        "max output tokens",
+        "maximum output tokens",
+        "output token limit",
         "response truncated",
         "hit the token limit",
         "exceeded the maximum number of tokens",
-        "finish_reason",
-        'stop_reason": "length',
-        'stop_reason": "max_tokens',
-        "is_error",
     )
     return any(needle in text for needle in needles)
 
