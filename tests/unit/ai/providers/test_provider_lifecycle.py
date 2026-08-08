@@ -81,7 +81,7 @@ async def test_base_aclose_is_noop_without_client() -> None:
 async def test_aclose_closes_current_sdk_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """aclose closes the active SDK client and clears the cache."""
+    """Aclose closes the active SDK client and clears the cache."""
     monkeypatch.setenv("LIFECYCLE_TEST_KEY", "test-key")
     provider = _LifecycleProvider()
     client = provider._get_client()
@@ -119,14 +119,14 @@ async def test_stale_loop_rebuild_does_not_orphan_client(
     monkeypatch.setattr(
         BaseAIProvider,
         "_current_loop",
-        staticmethod(lambda: loop_a),  # type: ignore[arg-type,return-value]
+        staticmethod(lambda: loop_a),
     )
     first = provider._get_client()
 
     monkeypatch.setattr(
         BaseAIProvider,
         "_current_loop",
-        staticmethod(lambda: loop_b),  # type: ignore[arg-type,return-value]
+        staticmethod(lambda: loop_b),
     )
     second = provider._get_client()
 
@@ -208,3 +208,24 @@ def test_sync_close_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert_that(client.closed).is_true()
     assert_that(provider._client).is_none()
+
+
+class _ExplodingClient:
+    """SDK-client stand-in whose ``close`` always raises."""
+
+    async def close(self) -> None:
+        """Raise to simulate a failing pool teardown."""
+        raise RuntimeError("pool teardown failed")
+
+
+async def test_aclose_survives_failing_client_and_closes_the_rest() -> None:
+    """One client's failing close must not orphan the remaining clients."""
+    provider = _LifecycleProvider()
+    survivor = _FakeAsyncClient()
+    provider._superseded_clients = [_ExplodingClient(), survivor]
+    provider._client = None
+
+    await provider.aclose()
+
+    assert_that(survivor.closed).is_true()
+    assert_that(provider._superseded_clients).is_empty()
