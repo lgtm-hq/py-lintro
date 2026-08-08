@@ -1686,6 +1686,16 @@ async def _generate_extra_checklist(
     lines: list[str] = []
     next_id = next_generated_checklist_id
     for item in questions:
+        # The prompt asks for 5-10 questions, but the count is model-controlled.
+        # Parallel chunks get disjoint id ranges of _GENERATED_CHECKLIST_ID_STRIDE,
+        # so accepting more than the stride would collide with the next chunk's
+        # range and corrupt merge_checklist_answers.
+        if next_id - next_generated_checklist_id >= _GENERATED_CHECKLIST_ID_STRIDE:
+            logger.warning(
+                "Generated checklist overflow: keeping the first "
+                f"{_GENERATED_CHECKLIST_ID_STRIDE} of {len(questions)} questions",
+            )
+            break
         if not isinstance(item, dict):
             continue
         question = item.get("question")

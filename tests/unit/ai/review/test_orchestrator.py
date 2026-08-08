@@ -1466,3 +1466,62 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
     assert_that(result.metadata.skipped_files[0].reason).is_equal_to(
         FileSkipReason.AGENT_SCOPE,
     )
+
+
+async def test_generated_checklist_ids_capped_at_stride() -> None:
+    """Model-controlled question counts cannot cross the per-chunk id stride.
+
+    Parallel chunks get disjoint id ranges of ``_GENERATED_CHECKLIST_ID_STRIDE``;
+    accepting more generated questions than the stride would collide with the
+    next chunk's range and corrupt the checklist merge (#1969).
+    """
+    from lintro.ai.budget import CostBudget
+    from lintro.ai.review.orchestrator import (
+        _GENERATED_CHECKLIST_ID_STRIDE,
+        _generate_extra_checklist,
+    )
+
+    oversized = [
+        {"id": f"G{i}", "question": f"Question {i}?"}
+        for i in range(_GENERATED_CHECKLIST_ID_STRIDE + 10)
+    ]
+    payload = json.dumps({"generated_questions": oversized})
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff="diff --git a/a.py b/a.py\n+x",
+        pr_metadata=None,
+    )
+    chunk = ReviewChunk(
+        id=1,
+        files=["a.py"],
+        diff="+x",
+        relationship=REL_SINGLE_FILE,
+    )
+    response = AIResponse(
+        content=payload,
+        model="m",
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        provider="anthropic",
+    )
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        return_value=response,
+    ):
+        text, next_id, _usage = await _generate_extra_checklist(
+            chunk=chunk,
+            context=context,
+            provider=_mock_provider(content=payload),
+            ai_config=AIConfig(),
+            budget=CostBudget(max_cost_usd=None),
+            next_generated_checklist_id=100,
+        )
+
+    assert_that(next_id).is_equal_to(100 + _GENERATED_CHECKLIST_ID_STRIDE)
+    assert_that(text.splitlines()).is_length(_GENERATED_CHECKLIST_ID_STRIDE)
