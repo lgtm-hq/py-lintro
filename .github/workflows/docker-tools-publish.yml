@@ -130,6 +130,7 @@ jobs:
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443
+        releases.hashicorp.com:443
         sh.rustup.rs:443
         registry.npmjs.org:443
         crates.io:443
