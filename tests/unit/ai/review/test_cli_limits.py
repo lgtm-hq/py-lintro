@@ -101,9 +101,18 @@ def test_tighter_findings_cap_steps_down() -> None:
 def test_is_output_exhaustion_error_matches_known_signatures() -> None:
     """Known 32k / length-limit messages are classified as exhaustion."""
     assert_that(
-        is_output_exhaustion_error("hit the output_tokens cap mid JSON"),
+        is_output_exhaustion_error('... "stop_reason": "max_tokens" ...'),
     ).is_true()
     assert_that(is_output_exhaustion_error("connection reset")).is_false()
+    # Every CLI failure envelope carries is_error/output_tokens/finish_reason;
+    # generic envelope noise must NOT classify as exhaustion (auth 403 shown).
+    assert_that(
+        is_output_exhaustion_error(
+            'Claude CLI exited with code 1: {"is_error":true,'
+            '"usage":{"input_tokens":0,"output_tokens":0},'
+            '"api_error_status":403,"result":"subscription disabled"}',
+        ),
+    ).is_false()
     assert_that(
         is_cli_output_exhaustion(
             AIProviderError("maximum output tokens exceeded"),
