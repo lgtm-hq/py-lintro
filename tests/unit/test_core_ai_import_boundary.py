@@ -1,14 +1,14 @@
-"""AC10 guard: core configuration/execution packages must not import ``lintro.ai``.
+"""Pin the #724 / AC10 core → AI import boundary.
 
-Epic #1972 acceptance criterion 10 and the #724 boundary: core packages resolve
-and execute without pulling AI internals. ``tests/unit/test_package_imports.py``
-only checks that packages are importable and listed in ``pyproject.toml``; it
-does not enforce the import edge.
+Epic #1972 acceptance criterion 10: no new import edge from core configuration
+or execution packages into AI internals. ``tests/unit/test_package_imports.py``
+only checks that packages import; it does not enforce the direction of the
+edge. ``tests/unit/utils/test_output_ai_import_isolation.py`` already pins the
+output / tool-executor seams at import time.
 
-Narrower guards already exist for the execute/render path
-(``tests/unit/utils/output/test_sarif_ai_seam.py``,
-``tests/unit/utils/test_output_ai_import_isolation.py``). This module extends
-the same AST check to the remaining core packages named by AC10.
+This module statically rejects *runtime* ``lintro.ai`` imports under the core
+packages listed below. ``TYPE_CHECKING``-only imports remain allowed because
+they do not load the AI layer at runtime.
 """
 
 from __future__ import annotations
@@ -18,114 +18,126 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-import lintro
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LINTRO_ROOT = PROJECT_ROOT / "lintro"
 
-_PACKAGE_ROOT = Path(lintro.__file__).parent
-
-# Core packages that must stay free of runtime ``lintro.ai`` imports. Adapter
-# surfaces (CLI review/doctor, MCP, API pipeline, idiom-review tool) and
-# doctor_report's lazy AI probes are intentionally excluded — they *are* AI
-# consumers.
-_GUARDED_RELATIVE_PATHS: tuple[str, ...] = (
-    "config",
-    "models",
-    "parsers",
-    "enums",
-    "formatters",
-    "plugins",
+# Packages / modules that form the core configuration and execution surface.
+# Adapters (CLI commands, MCP toolkits, doctor report) may import AI; these
+# packages must not.
+_CORE_PREFIXES: tuple[str, ...] = (
+    "config/",
+    "models/",
+    "enums/",
+    "plugins/",
+    "parsers/",
+    "formatters/",
+    "utils/execution/",
+    "utils/output/",
+    "utils/console/",
+    "utils/unified_config.py",
     "utils/tool_executor.py",
-    "utils/json_output.py",
-    "utils/execution",
-    "utils/output",
+    "utils/tool_metadata.py",
 )
 
 
-def _is_type_checking(test: ast.expr) -> bool:
-    """Whether an ``if`` test is the ``TYPE_CHECKING`` guard.
+def _is_core_path(relative: str) -> bool:
+    """Return whether ``relative`` is under a guarded core package.
 
     Args:
-        test: The condition expression of an ``if`` statement.
+        relative: Path relative to ``lintro/`` using forward slashes.
 
     Returns:
-        True when the branch only runs for static type checkers.
+        True when the path is in the AC10 core surface.
     """
-    if isinstance(test, ast.Name):
-        return test.id == "TYPE_CHECKING"
-    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-
-
-def _is_ai_module(name: str) -> bool:
-    """Whether a dotted module name is the AI package or lives inside it.
-
-    Args:
-        name: Dotted module name from an import statement.
-
-    Returns:
-        True when the name refers to the AI package.
-    """
-    return name == "lintro.ai" or name.startswith("lintro.ai.")
-
-
-def _imports_ai(node: ast.AST) -> bool:
-    """Whether an AST node is a runtime import of :mod:`lintro.ai`.
-
-    Args:
-        node: Any node from the parsed module.
-
-    Returns:
-        True when the node imports from the AI package.
-    """
-    if isinstance(node, ast.ImportFrom):
-        module = node.module or ""
-        if _is_ai_module(module):
+    for prefix in _CORE_PREFIXES:
+        if prefix.endswith(".py"):
+            if relative == prefix:
+                return True
+        elif relative == prefix.rstrip("/") or relative.startswith(prefix):
             return True
-        return module == "lintro" and any(alias.name == "ai" for alias in node.names)
-    if isinstance(node, ast.Import):
-        return any(_is_ai_module(alias.name) for alias in node.names)
     return False
 
 
-def _guarded_source_files() -> list[Path]:
-    """Collect Python source files under the AC10-guarded core packages.
+def _runtime_ai_imports(path: Path) -> list[tuple[int, str]]:
+    """Collect runtime (non-TYPE_CHECKING) imports of ``lintro.ai`` from ``path``.
+
+    Args:
+        path: Python source file to scan.
 
     Returns:
-        Sorted list of source paths to scan.
+        List of ``(lineno, module)`` pairs for forbidden runtime imports.
     """
-    files: list[Path] = []
-    for relative in _GUARDED_RELATIVE_PATHS:
-        path = _PACKAGE_ROOT / relative
-        if path.is_file():
-            files.append(path)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    hits: list[tuple[int, str]] = []
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self._in_type_checking = False
+
+        def visit_If(self, node: ast.If) -> None:
+            test = node.test
+            is_type_checking = (
+                isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+            ) or (
+                isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+            )
+            if is_type_checking:
+                previous = self._in_type_checking
+                self._in_type_checking = True
+                for child in node.body:
+                    self.visit(child)
+                self._in_type_checking = previous
+                for child in node.orelse:
+                    self.visit(child)
+                return
+            self.generic_visit(node)
+
+        def visit_Import(self, node: ast.Import) -> None:
+            if self._in_type_checking:
+                return
+            for alias in node.names:
+                if alias.name == "lintro.ai" or alias.name.startswith("lintro.ai."):
+                    hits.append((node.lineno, alias.name))
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            if self._in_type_checking:
+                return
+            module = node.module or ""
+            if module == "lintro.ai" or module.startswith("lintro.ai."):
+                hits.append((node.lineno, module))
+
+    _Visitor().visit(tree)
+    return hits
+
+
+def test_core_packages_have_no_runtime_ai_imports() -> None:
+    """Core configuration/execution packages must not import ``lintro.ai``."""
+    violations: list[str] = []
+    for path in sorted(LINTRO_ROOT.rglob("*.py")):
+        relative = path.relative_to(LINTRO_ROOT).as_posix()
+        if not _is_core_path(relative):
             continue
-        files.extend(sorted(path.rglob("*.py")))
-    return files
+        for lineno, module in _runtime_ai_imports(path):
+            violations.append(f"{relative}:{lineno} imports {module}")
+
+    assert_that(violations).is_empty()
 
 
-def test_core_configuration_and_execution_packages_never_import_ai() -> None:
-    """No runtime import edge from core config/execution packages into AI.
+def test_config_package_loads_without_ai_modules() -> None:
+    """Importing ``lintro.config`` must not load any ``lintro.ai`` module."""
+    import subprocess  # nosec B404 - fixed argv against this interpreter
+    import sys
 
-    TYPE_CHECKING-only imports are allowed (annotations); every other import of
-    ``lintro.ai`` under the guarded trees is an AC10 violation.
-    """
-    offenders: list[str] = []
-
-    for source_path in _guarded_source_files():
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
-        type_only = {
-            child
-            for node in ast.walk(tree)
-            if isinstance(node, ast.If) and _is_type_checking(node.test)
-            for statement in node.body
-            for child in ast.walk(statement)
-        }
-        for node in ast.walk(tree):
-            if node in type_only:
-                continue
-            if not _imports_ai(node):
-                continue
-            line = getattr(node, "lineno", 0)
-            offenders.append(f"{source_path.relative_to(_PACKAGE_ROOT)}:{line}")
-
-    assert_that(offenders).described_as(
-        "core modules importing lintro.ai (AC10 / #724)",
-    ).is_empty()
+    snippet = (
+        "import sys, lintro.config; "
+        "print(','.join(sorted(m for m in sys.modules "
+        "if m.startswith('lintro.ai'))))"
+    )
+    completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [sys.executable, "-c", snippet],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    loaded = [name for name in completed.stdout.strip().split(",") if name]
+    assert_that(loaded).is_empty()
