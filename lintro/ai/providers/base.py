@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.liveness import (
@@ -109,6 +111,9 @@ class BaseAIProvider(ABC):
         self._transport = transport
         self._client: Any = None
         self._client_loop: asyncio.AbstractEventLoop | None = None
+        # Clients discarded by a stale-loop rebuild are kept here until
+        # ``aclose`` so their HTTP pools are not orphaned (#1885).
+        self._superseded_clients: list[Any] = []
 
     # -- Client management -------------------------------------------------
 
@@ -123,6 +128,15 @@ class BaseAIProvider(ABC):
             return asyncio.get_running_loop()
         except RuntimeError:
             return None
+
+    def _retire_client(self, client: Any) -> None:
+        """Queue a superseded client for later ``aclose``.
+
+        Args:
+            client: SDK client instance to close when the provider shuts down.
+        """
+        if client is not None and client not in self._superseded_clients:
+            self._superseded_clients.append(client)
 
     def _get_client(self) -> Any:
         """Get or lazily create the SDK client for the running event loop.
@@ -144,6 +158,11 @@ class BaseAIProvider(ABC):
         if self._client is not None and not stale:
             return self._client
 
+        if self._client is not None and stale:
+            self._retire_client(self._client)
+            self._client = None
+            self._client_loop = None
+
         api_key = os.environ.get(self._api_key_env) or ""
         if not api_key and not self._base_url:
             raise AIAuthenticationError(
@@ -157,6 +176,68 @@ class BaseAIProvider(ABC):
         self._client = self._create_client(api_key=api_key)
         self._client_loop = loop
         return self._client
+
+    @staticmethod
+    async def _close_sdk_client(client: Any) -> None:
+        """Await an SDK client's ``close``/``aclose`` when present.
+
+        Args:
+            client: SDK client instance, or ``None``.
+        """
+        if client is None:
+            return
+        close = getattr(client, "aclose", None)
+        if close is None:
+            close = getattr(client, "close", None)
+        if close is None:
+            return
+        result = close()
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def aclose(self) -> None:
+        """Close open SDK clients. Idempotent; safe to call more than once.
+
+        Concrete no-op for providers that hold no poolable client. Subclasses
+        with HTTP SDK clients override to close those clients. Call-site
+        ownership of *when* to close is #1972 Phase 5 — this method only
+        provides the provider-side API (#1885).
+
+        Teardown is best-effort: one client's failing ``close`` must not
+        orphan the remaining clients, so per-client errors are logged and
+        swallowed.
+        """
+        clients = list(self._superseded_clients)
+        if self._client is not None:
+            clients.append(self._client)
+        self._client = None
+        self._client_loop = None
+        self._superseded_clients = []
+        for client in clients:
+            try:
+                await self._close_sdk_client(client)
+            except Exception as exc:  # noqa: BLE001 - best-effort teardown
+                logger.debug(
+                    f"Ignoring error while closing {self._provider_name} "
+                    f"SDK client: {exc}",
+                )
+
+    def close(self) -> None:
+        """Synchronously close open SDK clients.
+
+        Raises:
+            RuntimeError: If called from a running event loop; use
+                ``await aclose()`` instead.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.aclose())
+            return
+        raise RuntimeError(
+            "close() cannot be called from a running event loop; "
+            "use `await aclose()` instead.",
+        )
 
     @abstractmethod
     def _create_client(self, *, api_key: str) -> Any:
