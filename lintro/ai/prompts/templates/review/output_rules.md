@@ -51,7 +51,4 @@
   written out verbatim — a described fix is better than a wrong one-click commit. Keep
   `replacement` to at most 4,000 characters and the range to at most 200 lines; anything
   larger is dropped and rendered as a described fix anyway.
-- There is no cap on findings, but **do not report the same problem twice**. When one
-  problem repeats across locations, report it once and list every location in
-  `occurrences` as `file`/`line` pairs — including the primary one. It renders as a
-  single collapsed thread, and its fix prompt enumerates every location.
+{findings_cap_rule}

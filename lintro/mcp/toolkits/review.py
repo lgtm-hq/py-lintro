@@ -152,6 +152,7 @@ _INVALID_INPUT_CONTEXT_CODES: Final[frozenset[str]] = frozenset(
         "invalid-review-mode",
         "diff-desync",
         "no-parseable-diff",
+        "diff-too-large",
     },
 )
 

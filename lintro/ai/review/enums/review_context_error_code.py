@@ -25,3 +25,4 @@ class ReviewContextErrorCode(StrEnum):
     INVALID_CHUNK_BUDGET = "invalid-chunk-budget"
     INVALID_REVIEW_MODE = "invalid-review-mode"
     BASH_UNAVAILABLE = "bash-unavailable"
+    DIFF_TOO_LARGE = "diff-too-large"
