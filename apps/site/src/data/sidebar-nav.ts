@@ -41,6 +41,7 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'usage/docker': 'setup',
   'usage/github-integration': 'ci',
   'usage/ai-features': 'extend',
+  'usage/ai-review-transports': 'extend',
   'usage/troubleshooting': 'extend',
   'usage/debugging': 'extend',
   'usage/plugins': 'extend',
