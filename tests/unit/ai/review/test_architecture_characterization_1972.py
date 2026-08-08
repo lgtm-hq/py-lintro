@@ -16,7 +16,7 @@ import subprocess  # nosec B404 - fixed git argv against a temp repo
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -26,7 +26,6 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError
 from lintro.ai.interface import resolve_ai_config
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_contract import (
     build_error_contract,
@@ -173,76 +172,6 @@ def _result_with(*, findings: tuple[ReviewFinding, ...]) -> ReviewResult:
     )
 
 
-def _enabled_review_config() -> MagicMock:
-    """Build a minimal Lintro config mock with AI review enabled.
-
-    Returns:
-        Config mock suitable for CLI review pipeline stubs.
-    """
-    mock_config = MagicMock(ai={"enabled": True, "review": True})
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
-    mock_config.config_path = None
-    return mock_config
-
-
-def _invoke_review_with_result(result: ReviewResult) -> Any:
-    """Run ``lintro review`` with collaborators stubbed to return ``result``.
-
-    Args:
-        result: ReviewResult returned by the stubbed orchestrator.
-
-    Returns:
-        CliRunner result.
-    """
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
-    mock_config = _enabled_review_config()
-
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_provider",
-            return_value=MagicMock(model_name="gpt-4o", name="openai"),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=result,
-        ),
-        patch("lintro.cli_utils.commands.review.render_review_output"),
-    ):
-        return runner.invoke(cli, ["review"])
-
-
 def _write_review_workspace(tmp_path: Path) -> Path:
     """Create a git workspace with AI review enabled and one changed file.
 
@@ -373,6 +302,10 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
         patch(
             "lintro.cli_utils.commands.review.get_provider",
             return_value=_FakeProvider(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review._execute_advisory",
+            return_value=[],
         ),
     ):
         cli_result = runner.invoke(cli, ["review", "--base", "main"])
