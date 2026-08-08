@@ -1,0 +1,13 @@
+[
+  {
+    "source": "macroscope",
+    "comment_id": 3319859217,
+    "created_at": "2026-05-28T18:20:55Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/958#discussion_r3319859217",
+    "file": "lintro/tools/definitions/astro_check.py",
+    "line": 123,
+    "severity_guess": "P2",
+    "title": "🟡 **Medium** `definitions/astro_check.py:119`",
+    "body": "🟡 **Medium** `definitions/astro_check.py:119`\n\nOn Windows, `local_astro.exists()` returns `True` for the shell script at `node_modules/.bin/astro`, but Windows cannot execute this file without a shell interpreter. This causes a runtime failure when the code returns `[str(local_astro), \"check\"]` instead of falling back to the Windows-compatible `.cmd` wrapper or global alternatives.\n\n✅ Resolved in a0eabeca50828cde169021d06660fb175557553c"
+  }
+]

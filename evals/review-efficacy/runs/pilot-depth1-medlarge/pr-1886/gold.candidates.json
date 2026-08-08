@@ -1,0 +1,12 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "> [!WARNING]",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1886#issuecomment-5148877604",
+    "label": "unreviewed",
+    "notes": ""
+  }
+]

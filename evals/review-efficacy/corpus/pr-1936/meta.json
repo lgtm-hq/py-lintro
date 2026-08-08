@@ -1,0 +1,21 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1936,
+  "title": "fix(deps): bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1936",
+  "base_ref": "main",
+  "base_oid": "c3129e6d7807ab76274fff25727fc1a456815cfb",
+  "head_oid": "482442ffca34c00fa0291d456e23815dcc033898",
+  "merged_at": "2026-08-04T09:18:54Z",
+  "additions": 52,
+  "deletions": 51,
+  "changed_files": 2,
+  "files": [
+    "pyproject.toml",
+    "uv.lock"
+  ],
+  "competitor_counts": {
+    "coderabbit": 1,
+    "lintro_dogfood": 1
+  }
+}

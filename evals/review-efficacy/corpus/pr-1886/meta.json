@@ -1,0 +1,40 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1886,
+  "title": "feat(cli): move advisory AI finders out of chk into lintro review",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1886",
+  "base_ref": "main",
+  "base_oid": "0f2cf25cb77940535eecd26c191355d8d1b01c48",
+  "head_oid": "31714af6bba221b4f5624aca59b8e2823a3b4a91",
+  "merged_at": "2026-08-01T03:05:41Z",
+  "additions": 1526,
+  "deletions": 80,
+  "changed_files": 21,
+  "files": [
+    "docs/ai-features.md",
+    "docs/configuration.md",
+    "docs/tool-analysis/idiom-review-analysis.md",
+    "lintro/cli_utils/commands/list_tools.py",
+    "lintro/cli_utils/commands/review.py",
+    "lintro/enums/advisory_tools_value.py",
+    "lintro/enums/execution_class.py",
+    "lintro/enums/idiom_review_mode.py",
+    "lintro/plugins/protocol.py",
+    "lintro/tools/definitions/idiom_review.py",
+    "lintro/tools/idiom_review/__init__.py",
+    "lintro/tools/idiom_review/engine.py",
+    "lintro/utils/execution/advisory.py",
+    "lintro/utils/execution/tool_configuration.py",
+    "tests/unit/cli/test_cli_commands.py",
+    "tests/unit/cli/test_review_command.py",
+    "tests/unit/tools/executor/test_advisory_tool_selection.py",
+    "tests/unit/tools/executor/test_tool_configuration_enabled.py",
+    "tests/unit/tools/idiom_review/test_idiom_review_engine.py",
+    "tests/unit/tools/idiom_review/test_idiom_review_plugin.py",
+    "tests/unit/utils/execution/test_advisory.py"
+  ],
+  "competitor_counts": {
+    "coderabbit": 1,
+    "lintro_dogfood": 1
+  }
+}

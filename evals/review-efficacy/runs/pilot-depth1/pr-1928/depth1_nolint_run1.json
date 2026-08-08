@@ -1,0 +1,266 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 4,
+    "files_total": 4,
+    "checklist_items": 25,
+    "token_usage": {
+      "prompt": 5,
+      "completion": 9718,
+      "total": 9723
+    },
+    "cost_estimate_usd": 0.2821856,
+    "base_ref": "d6f459f709f4b2b7d8ad8db61c8c6371723652d0",
+    "head_ref": "20cd91395cf668b685d9ef0d95b9e556d37a1242",
+    "timestamp": "2026-08-06T17:36:49.466423+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 186.28507994999973,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "apps/site/bun.lock",
+      "apps/site/package.json",
+      "bun.lock",
+      "package.json"
+    ],
+    "skipped_files": []
+  },
+  "summary": "Bumps the fast-uri override pin from 4.1.1 to 4.1.2 across both workspace package manifests and their bun lock files to remediate CVE-2026-18446.",
+  "readiness_verdict": "ready",
+  "pr_summary": {
+    "headline": "Bumps the fast-uri override pin from 4.1.1 to 4.1.2 across both workspace package manifests and their bun lock files to remediate CVE-2026-18446.",
+    "walkthrough": [
+      {
+        "text": "Root package.json overrides section updated from the exact pin '4.1.1' to '4.1.2' (package.json:39).",
+        "finding_ref": ""
+      },
+      {
+        "text": "Root bun.lock reflects the new pin in both the overrides block (line 30) and the resolved package entry with an updated sha512 integrity hash (line 672).",
+        "finding_ref": "bun.lock:672"
+      },
+      {
+        "text": "apps/site/package.json receives the identical override change (line 44), keeping the nested workspace in sync with the root.",
+        "finding_ref": ""
+      },
+      {
+        "text": "apps/site/bun.lock mirrors the same dual update \u2014 overrides block (line 31) and resolved entry with the same sha512 (line 524) \u2014 confirming the two lock files are consistent with each other.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "Nothing blocks the merge. All four files that require lockstep updates (both package.json manifests and both bun.lock files) were updated consistently to fast-uri@4.1.2, and both lock files record the same sha512 integrity hash. There are no logic, contract, or test-coverage concerns \u2014 the diff is a pure version-pin substitution with no code or interface changes.",
+    "failure_mechanism": "",
+    "files_needing_attention": []
+  },
+  "file_assessments": [
+    {
+      "file": "package.json",
+      "overview": "Overrides entry for fast-uri bumped from exact pin 4.1.1 to 4.1.2."
+    },
+    {
+      "file": "bun.lock",
+      "overview": "Overrides block and resolved package entry for fast-uri updated to 4.1.2 with a new sha512 integrity hash."
+    },
+    {
+      "file": "apps/site/package.json",
+      "overview": "Overrides entry for fast-uri bumped from exact pin 4.1.1 to 4.1.2, mirroring the root manifest."
+    },
+    {
+      "file": "apps/site/bun.lock",
+      "overview": "Overrides block and resolved package entry for fast-uri updated to 4.1.2 with the same sha512 hash as the root lockfile."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "No control flow exists in the diff; only version strings and integrity hashes in package.json and bun.lock files are modified.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "No test fixtures or CI defaults are modified; pure dependency pin bump with no code changes.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "No documentation files are changed in the diff.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "No error-path code is introduced; the diff only updates version pins in manifests and lock files.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "fast-uri 4.1.2 is a patch release; no callers of fast-uri's public API are touched in this repo.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "All four files requiring lockstep update (package.json:39, bun.lock:30, apps/site/package.json:44, apps/site/bun.lock:31) were updated consistently to 4.1.2.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "No logic is duplicated; each file fulfils its distinct role (manifest vs. lockfile) for its respective workspace.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "Both package.json overrides and both bun.lock resolved entries (bun.lock:672, apps/site/bun.lock:524) now show fast-uri@4.1.2, matching the PR description.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No enum parsing or access-control code is modified.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No client error-classification code is modified.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server code is modified.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "No test files are modified.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "No test files are modified; no mocking changes.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "The PR summary has no deferred items; the diff is confined to the stated fast-uri version bump.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "No API client or type-cast code is modified.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "No application code or error-handling branches are modified.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "No async or concurrent code is introduced.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "No control-flow code is introduced.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "No logging, error serialization, or API response code is modified.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "No lint suppressions are added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "No new logic is introduced; no call-site wiring exists to cover.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "No new code paths are introduced that would require edge-case tests.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "fast-uri is a transitive dependency; its public API surface as consumed by this repo is unchanged by the patch version bump.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "No credentials, tokens, or keys appear in the diff.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "No new module interfaces are created.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P3",
+      "category": "security",
+      "file": "bun.lock",
+      "line": 672,
+      "title": "Verify fast-uri 4.1.2 registry integrity hash",
+      "description": "The lock files record sha512-TyGmBcbDTZXcb2cj5MV89DrF42DKvb3y5DDUNh95iO+IMeAzMkVSxK1PZRrRIpc9yg8U2GhGdbofNa0LS/a4Bw== for fast-uri@4.1.2. For a CVE-motivated upgrade it is worth confirming this hash matches the tarball published on the npm registry rather than a tampered or mis-cached version.",
+      "cause": "bun computes and stores the integrity hash during `bun install`; if the install ran against a poisoned local cache or a mirror that served a modified tarball, the wrong hash could be committed.",
+      "fix": "Run `npm view fast-uri@4.1.2 dist.integrity` (or check registry.npmjs.org) and confirm the sha512 value matches both lock files. The hash is identical in bun.lock:672 and apps/site/bun.lock:524, which rules out a per-workspace discrepancy but does not confirm registry authenticity.",
+      "confidence": "low",
+      "checklist_ids": [],
+      "suggested_code": "",
+      "source": "",
+      "kind": "question",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "speculative",
+      "occurrences": [
+        {
+          "file": "bun.lock",
+          "line": 672
+        },
+        {
+          "file": "apps/site/bun.lock",
+          "line": 524
+        }
+      ],
+      "suggested_change": null
+    }
+  ]
+}

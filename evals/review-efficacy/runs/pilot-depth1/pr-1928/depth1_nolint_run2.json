@@ -1,0 +1,232 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 4,
+    "files_total": 4,
+    "checklist_items": 25,
+    "token_usage": {
+      "prompt": 5,
+      "completion": 4920,
+      "total": 4925
+    },
+    "cost_estimate_usd": 0.14202320000000002,
+    "base_ref": "d6f459f709f4b2b7d8ad8db61c8c6371723652d0",
+    "head_ref": "20cd91395cf668b685d9ef0d95b9e556d37a1242",
+    "timestamp": "2026-08-06T17:38:32.170610+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 101.59311925899965,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "apps/site/bun.lock",
+      "apps/site/package.json",
+      "bun.lock",
+      "package.json"
+    ],
+    "skipped_files": []
+  },
+  "summary": "Bumps the fast-uri override pin from 4.1.1 to 4.1.2 in both workspace package.json files and their corresponding bun.lock files to patch CVE-2026-18446.",
+  "readiness_verdict": "ready",
+  "pr_summary": {
+    "headline": "Bumps the fast-uri override pin from 4.1.1 to 4.1.2 in both workspace package.json files and their corresponding bun.lock files to patch CVE-2026-18446.",
+    "walkthrough": [
+      {
+        "text": "apps/site/package.json and package.json both update the overrides.fast-uri pin from 4.1.1 to 4.1.2.",
+        "finding_ref": ""
+      },
+      {
+        "text": "Both bun.lock files update the overrides section and the resolved package entry with the new 4.1.2 integrity hash.",
+        "finding_ref": ""
+      },
+      {
+        "text": "The 4.1.2 hash (sha512-TyGmBcbDTZXcb2cj5MV89DrF42DKvb3y5DDUNh95iO+IMeAzMkVSxK1PZRrRIpc9yg8U2GhGdbofNa0LS/a4Bw==) is identical across both lockfiles, confirming a single canonical artifact was resolved.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "Nothing blocks this merge. All four files are updated in lockstep, the 4.1.2 integrity hash matches across both lockfiles, and the change is mechanically correct: every location that previously pinned 4.1.1 now pins 4.1.2.",
+    "failure_mechanism": "",
+    "files_needing_attention": []
+  },
+  "file_assessments": [
+    {
+      "file": "package.json",
+      "overview": "Updates the overrides.fast-uri pin from 4.1.1 to 4.1.2 to force the patched version across all transitive consumers in the root workspace."
+    },
+    {
+      "file": "bun.lock",
+      "overview": "Updates both the overrides section and the resolved package entry for fast-uri to 4.1.2 with the new integrity hash."
+    },
+    {
+      "file": "apps/site/package.json",
+      "overview": "Updates the overrides.fast-uri pin from 4.1.1 to 4.1.2 in the site app workspace."
+    },
+    {
+      "file": "apps/site/bun.lock",
+      "overview": "Updates both the overrides section and the resolved package entry for fast-uri to 4.1.2 with the new integrity hash."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "No application logic changes; no early returns or conditional flows exist in this diff.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "No test setup or fixture changes; this is a pure dependency version bump.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "No documentation files changed.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "No error paths or exit conditions added.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "Patch-level bump (4.1.1\u21924.1.2) with no API or behavioral changes exposed to callers.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "All four files (package.json, bun.lock, apps/site/package.json, apps/site/bun.lock) are correctly updated in lockstep within this PR.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "No logic is introduced; the change is a version string replacement.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "PR claims to bump fast-uri to 4.1.2 in both package.json overrides and both bun.lock files; the diff does exactly that with matching hashes.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No enum or access-control logic changed.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No client error-classification code changed.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server response-shaping code changed.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "No test files changed.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "No test files changed.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "The diff is scoped entirely to the version bump described in the PR summary.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "No API client code changed.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "No control-flow code changed.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "No async or concurrent code changed.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "No control-flow code changed.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "No logging or response serialization code changed.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "No lint suppressions added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "No functions or call-site wiring changed.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "No logic or input-handling code changed.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "No public interfaces changed; this is a transitive dependency override.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "No credentials or secrets in the diff.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "No module interfaces changed.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    }
+  ],
+  "findings": []
+}

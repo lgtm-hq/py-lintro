@@ -1,0 +1,458 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 4,
+    "files_total": 4,
+    "checklist_items": 41,
+    "token_usage": {
+      "prompt": 9,
+      "completion": 31011,
+      "total": 31020
+    },
+    "cost_estimate_usd": 0.8796635000000002,
+    "base_ref": "a69fbe5a63847ab21f5ae7fc20600565e4f43b04",
+    "head_ref": "f72afcbb269e4c244be1318c753510543d8cb903",
+    "timestamp": "2026-08-06T17:13:30.238125+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 526.5005619280003,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      "lintro/plugins/base.py",
+      "lintro/plugins/subprocess_executor.py",
+      "lintro/tools/definitions/astro_check.py",
+      "tests/unit/tools/astro_check/test_non_interactive.py"
+    ],
+    "skipped_files": []
+  },
+  "summary": "This change prevents `astro check` from hanging by closing stdin and setting CI environment variables, while also preferring the project-local Astro binary to avoid the interactive install prompt.",
+  "readiness_verdict": "changes_requested",
+  "pr_summary": {
+    "headline": "This change prevents `astro check` from hanging by closing stdin and setting CI environment variables, while also preferring the project-local Astro binary to avoid the interactive install prompt.",
+    "walkthrough": [
+      {
+        "text": "`base.py` threads an optional `stdin: int | None` parameter through `_run_subprocess` \u2192 `_run_subprocess_result` \u2192 `run_subprocess`, and `subprocess_executor.py` passes it to `subprocess.run`, defaulting to `None` to preserve existing behavior.",
+        "finding_ref": "lintro/plugins/base.py:409"
+      },
+      {
+        "text": "`_local_astro_binary` is added to return `node_modules/.bin/astro` (or `astro.cmd` on Windows) when present, using only `is_file()` without an executability check on POSIX.",
+        "finding_ref": "lintro/tools/definitions/astro_check.py:78"
+      },
+      {
+        "text": "`_get_astro_command` is extended with an optional `cwd` parameter and now prefers the local binary before falling back to global `astro`, `bunx`, or `npx`.",
+        "finding_ref": ""
+      },
+      {
+        "text": "In `check()`, `get_subprocess_env()` is called (returns an os.environ copy), augmented with `CI=1` and `ASTRO_TELEMETRY_DISABLED=1`, and passed alongside `stdin=subprocess.DEVNULL` to `_run_subprocess`; a timeout now logs the closed-stdin context.",
+        "finding_ref": ""
+      },
+      {
+        "text": "Nine regression tests are added, all mocking `_run_subprocess` at the plugin level to capture kwargs and assert correct env and stdin wiring \u2014 without covering the forwarding chain below that boundary.",
+        "finding_ref": "tests/unit/tools/astro_check/test_non_interactive.py:63"
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "No P1 issues block the merge. The most significant gap is a P2: all nine regression tests mock `_run_subprocess` (a private plugin method), so the critical `stdin=DEVNULL` and `env` values are verified only at the top of the call stack. The chain through `base.py:_run_subprocess_result` \u2192 `subprocess_executor.py:run_subprocess` \u2192 `subprocess.run` is unexercised, and `tests/unit/plugins/base/test_subprocess.py` contains zero stdin coverage. A future refactor that accidentally drops `stdin` from that chain would not be caught by any test, meaning issue #940 could silently recur in production.",
+    "failure_mechanism": "If `_run_subprocess_result` were modified to call `run_subprocess(cmd, effective_timeout, cwd, env)` \u2014 omitting `stdin` \u2014 `subprocess.run` would receive `stdin=None` (inherit parent), the interactive `@astrojs/check` install prompt would block again, and the plugin would time out as before. The astro-check unit tests would still pass because they intercept at `_run_subprocess` before the forwarding chain runs.",
+    "files_needing_attention": [
+      "tests/unit/tools/astro_check/test_non_interactive.py",
+      "lintro/plugins/base.py",
+      "lintro/plugins/subprocess_executor.py"
+    ]
+  },
+  "file_assessments": [
+    {
+      "file": "lintro/plugins/base.py",
+      "overview": "Adds an optional `stdin` parameter to `_run_subprocess` and `_run_subprocess_result`, threading it positionally through to `run_subprocess`."
+    },
+    {
+      "file": "lintro/plugins/subprocess_executor.py",
+      "overview": "Adds an optional `stdin` parameter to `run_subprocess` and passes it directly to `subprocess.run`, after merging `env` with os.environ."
+    },
+    {
+      "file": "lintro/tools/definitions/astro_check.py",
+      "overview": "Adds `_local_astro_binary` for local binary discovery (is_file() only), updates command building to prefer it, and forces non-interactive execution via CI=1, ASTRO_TELEMETRY_DISABLED=1, and stdin=DEVNULL."
+    },
+    {
+      "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+      "overview": "Adds nine regression tests for non-interactive behavior, local binary preference, Windows handling, fallback logic, and timeout handling, all mocking at the `_run_subprocess` private-method boundary."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "Early returns for missing astro config and missing node_modules are intentional guards, not skipped independent work.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "The astro_project fixture deliberately omits node_modules/.bin so the no-local-binary path is the default; tests that need a local binary create it explicitly.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "PR description accurately matches implementation: CI=1, ASTRO_TELEMETRY_DISABLED=1, stdin=DEVNULL, local-binary preference, and fallback chain are all present.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "Timeout raises subprocess.TimeoutExpired which is caught and returns a ToolResult with success=False via create_timeout_result; no silent success on failure.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "All new parameters (stdin, cwd) default to None, preserving existing caller behavior.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "All four changed files are updated in lockstep in this PR; no dependent file is missing an update.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "Local binary preference is a new priority level not duplicated elsewhere in the plugin.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "The diff implements exactly what the PR description claims: CI=1, ASTRO_TELEMETRY_DISABLED=1, stdin=DEVNULL, local binary resolution, and fallback chain.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No enum or security gate is involved in this change.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No client-server error classification in this change.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server error shape changes.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "All assertions check specific values: env keys, cmd elements, result.success, output content.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "yes",
+      "evidence": "All behavioral tests mock _run_subprocess (private method); the stdin/env forwarding through _run_subprocess_result \u2192 run_subprocess \u2192 subprocess.run is never exercised \u2014 confirmed by tests/unit/plugins/base/test_subprocess.py having no stdin coverage.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "PR scope is exclusively the #940 fix; no deferred items are contradicted.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "No API response parsing in this change.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "TimeoutExpired is caught and returns a failure ToolResult; other subprocess errors propagate naturally.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "subprocess.DEVNULL is managed by the subprocess module; no explicit file handle to close.",
+      "question": "Are connections, file handles, streams, or other resources closed on every exit path?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "All subprocess calls are synchronous; no concurrency introduced.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "All branches in _local_astro_binary and _get_astro_command are reachable.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "Timeout log emits cwd and cmd (file paths and command tokens); no secrets or PII.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "Assertions on CI='1' and ASTRO_TELEMETRY_DISABLED='1' mirror production literals; a production change to these would correctly cause test failures, not silent drift.",
+      "question": "Does a test assert field == \"literal\" where that literal is also defined in production code (wiring test that drifts silently)?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "No bulk/signature-only tests; all tests assert observable values.",
+      "question": "Do bulk/planned-ahead tests assert signatures or data shapes instead of observable behavior?"
+    },
+    {
+      "id": 23,
+      "answer": "yes",
+      "evidence": "Seven of nine tests use patch.object(plugin, '_run_subprocess', ...); renaming that private method breaks all coverage without any behavioral change.",
+      "question": "Would renaming an internal function break tests even though user-visible behavior is unchanged?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "Existing '# nosec B404' suppression with inline justification is not modified; no new suppressions are added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "No HTTP request logic; change is subprocess-only.",
+      "question": "Does HTTP request logic live in fixtures instead of a dedicated client layer?"
+    },
+    {
+      "id": 26,
+      "answer": "yes",
+      "evidence": "Tests verify kwargs arrive at _run_subprocess but not that they propagate through base.py:_run_subprocess_result \u2192 subprocess_executor.py:run_subprocess \u2192 subprocess.run.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 27,
+      "answer": "no",
+      "evidence": "Tests mock at the plugin boundary (_run_subprocess), the correct abstraction layer for plugin-level behavior.",
+      "question": "Do tests hit the wrong layer (e.g. DB directly instead of the public API under test)?"
+    },
+    {
+      "id": 28,
+      "answer": "yes",
+      "evidence": "base.py and subprocess_executor.py gain new stdin threading with no corresponding test updates in this PR; tests/unit/plugins/base/test_subprocess.py has zero stdin coverage.",
+      "question": "Does new or changed production code lack corresponding test updates in the same diff?"
+    },
+    {
+      "id": 29,
+      "answer": "yes",
+      "evidence": "The stdin forwarding path in _run_subprocess_result \u2192 run_subprocess \u2192 subprocess.run has no direct test coverage anywhere in the test suite.",
+      "question": "Does new or changed logic lack tests covering the modified paths?"
+    },
+    {
+      "id": 30,
+      "answer": "yes",
+      "evidence": "_local_astro_binary:78 uses shim.is_file() without os.access(shim, os.X_OK); a non-executable file at node_modules/.bin/astro is selected and causes PermissionError at subprocess.run instead of falling back to global astro.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 31,
+      "answer": "no",
+      "evidence": "No security-relevant input handling introduced; cwd is path-joined, not shell-interpolated.",
+      "question": "Are security edge cases untested (injection payloads, malformed input, oversized payloads)?"
+    },
+    {
+      "id": 32,
+      "answer": "no",
+      "evidence": "Each fallback scenario (local, global, Windows, directory, no-binary) has an explicit test; parameterization would not add coverage.",
+      "question": "Are parameterized cases missing where multiple inputs share the same behavior rule?"
+    },
+    {
+      "id": 33,
+      "answer": "no",
+      "evidence": "No parameterized tests with version-embedded IDs.",
+      "question": "Do parametrize/test IDs embed mutable version or data values that will churn on every bump?"
+    },
+    {
+      "id": 34,
+      "answer": "no",
+      "evidence": "All new parameters have default values; no callers need updating.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 35,
+      "answer": "no",
+      "evidence": "No hardcoded credentials; only CI='1' and telemetry flags.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 36,
+      "answer": "no",
+      "evidence": "cwd is resolved via Path operations and validated by validate_subprocess_command; no shell interpolation.",
+      "question": "Is user input interpolated into SQL/command strings instead of parameterized/safe APIs?"
+    },
+    {
+      "id": 37,
+      "answer": "no",
+      "evidence": "Existing '# nosec B404' has inline justification; no new suppressions added.",
+      "question": "Does a # nosec / security suppression lack an inline justification on the flagged line?"
+    },
+    {
+      "id": 38,
+      "answer": "no",
+      "evidence": "No exported symbols removed or renamed.",
+      "question": "Does removing or renaming exported/public symbols lack migration or caller updates?"
+    },
+    {
+      "id": 39,
+      "answer": "no",
+      "evidence": "stdin: int | None correctly types subprocess.DEVNULL (-1); no unsafe casts.",
+      "question": "Is type safety bypassed with any, unchecked casts, or broad suppressions on changed lines?"
+    },
+    {
+      "id": 40,
+      "answer": "no",
+      "evidence": "The stdin threading is shallow parameter forwarding; interface complexity is proportional to implementation.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    },
+    {
+      "id": 41,
+      "answer": "yes",
+      "evidence": "Tests assert kwargs to _run_subprocess (implementation step) rather than verifiable end-state (stdin=DEVNULL reaching subprocess.run, no prompt, no hang).",
+      "question": "Are tests written against implementation steps rather than user-/caller-visible behavior?"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P2",
+      "category": "test-gap",
+      "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+      "line": 63,
+      "title": "stdin/env forwarding chain below _run_subprocess is untested",
+      "description": "All nine regression tests for issue #940 mock `_run_subprocess` and verify that `stdin=subprocess.DEVNULL` and `env['CI']='1'` are passed to it. But the fix depends on those values reaching `subprocess.run` three call frames deeper. The forwarding chain `_run_subprocess_result \u2192 run_subprocess \u2192 subprocess.run` has no test coverage anywhere: `tests/unit/plugins/base/test_subprocess.py` contains zero `stdin` assertions, and no other test file exercises it. A silent regression dropping `stdin` in that chain would cause issue #940 to recur without any failing test.",
+      "cause": "Tests anchor at the plugin's private `_run_subprocess` method, but the observable behavior that fixes #940 \u2014 `subprocess.run` receiving `stdin=subprocess.DEVNULL` \u2014 lives in `base.py:_run_subprocess_result` and `subprocess_executor.py:run_subprocess`, neither of which received new tests in this PR.",
+      "fix": "Add a test in `tests/unit/plugins/base/test_subprocess.py` that calls `_run_subprocess_result(cmd, timeout, cwd, env, stdin=subprocess.DEVNULL)` on a concrete plugin instance and asserts `subprocess.run` is called with `stdin=subprocess.DEVNULL` (patch `subprocess.run` directly). Alternatively, replace one of the existing astro-check tests with a version that patches `subprocess.run` instead of `_run_subprocess`, verifying end-to-end that stdin=DEVNULL survives the full call stack.",
+      "confidence": "high",
+      "checklist_ids": [
+        13,
+        26,
+        28,
+        29
+      ],
+      "suggested_code": "",
+      "source": "",
+      "kind": "finding",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "cross_file",
+      "occurrences": [
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 63
+        },
+        {
+          "file": "lintro/plugins/base.py",
+          "line": 434
+        },
+        {
+          "file": "lintro/plugins/subprocess_executor.py",
+          "line": 228
+        }
+      ],
+      "suggested_change": null
+    },
+    {
+      "severity": "P3",
+      "category": "logic-bug",
+      "file": "lintro/tools/definitions/astro_check.py",
+      "line": 78,
+      "title": "Non-executable local shim causes PermissionError not graceful fallback",
+      "description": "On non-Windows, `_local_astro_binary` returns any path that satisfies `is_file()`, including files without execute permission. If `node_modules/.bin/astro` exists but lacks the execute bit (e.g., a corrupted install, a freshly-extracted tarball, or a manually placed placeholder), `subprocess.run` raises `PermissionError` rather than falling back to the global `astro` or `bunx`/`npx`. The function's own docstring promises 'an executable project-local binary', but the implementation does not enforce that on POSIX.",
+      "cause": "`shim if shim.is_file() else None` (line 78) omits `os.access(shim, os.X_OK)` on the POSIX branch. The Windows branch has no equivalent problem because `.cmd` files are invoked via `cmd.exe` which does not require the execute bit.",
+      "fix": "Add an executability check on the POSIX branch: `return shim if shim.is_file() and os.access(shim, os.X_OK) else None`. This also requires adding `import os` to the file's imports.",
+      "confidence": "medium",
+      "checklist_ids": [
+        30
+      ],
+      "suggested_code": "    shim = bin_dir / \"astro\"\n    return shim if shim.is_file() and os.access(shim, os.X_OK) else None",
+      "source": "",
+      "kind": "finding",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "diff_local",
+      "occurrences": [
+        {
+          "file": "lintro/tools/definitions/astro_check.py",
+          "line": 78
+        }
+      ],
+      "suggested_change": null
+    },
+    {
+      "severity": "P3",
+      "category": "test-gap",
+      "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+      "line": 63,
+      "title": "Regression tests coupled to private method _run_subprocess",
+      "description": "Seven of the nine new tests use `patch.object(astro_check_plugin, '_run_subprocess', side_effect=capture)`. If `_run_subprocess` is renamed, or if the call site in `check()` is refactored to call `_run_subprocess_result` directly (both are valid internal changes), all seven mocks silently stop intercepting anything. The tests would still pass \u2014 `capture` would never be called, `captured` would remain empty \u2014 and the real subprocess call would fire against the system, producing an error unrelated to the behavior under test.",
+      "cause": "Tests assert on kwargs passed to a private implementation method rather than to a stable observable boundary (the tool result, a public API, or `subprocess.run`).",
+      "fix": "Document the intentional mock boundary in a module-level comment (cheapest), or move the mock target to `subprocess.run` / `run_subprocess` so that the tests survive internal plugin refactors without silently losing coverage.",
+      "confidence": "high",
+      "checklist_ids": [
+        23,
+        41
+      ],
+      "suggested_code": "",
+      "source": "",
+      "kind": "finding",
+      "failure_scenario": "",
+      "severity_downgraded": false,
+      "evidence_style": "diff_local",
+      "occurrences": [
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 63
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 94
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 128
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 203
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 235
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 263
+        },
+        {
+          "file": "tests/unit/tools/astro_check/test_non_interactive.py",
+          "line": 284
+        }
+      ],
+      "suggested_change": null
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1958#issuecomment-5203521972",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 115,
+    "title": "_🎯 Functional Correctness_ | _🟡 Minor_ | _⚡ Quick win_",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1958#discussion_r3728505001",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 115,
+    "title": "<details>",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1958#discussion_r3728793163",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "**Actionable comments posted: 1**",
+    "severity_guess": "P3",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1958#pullrequestreview-4874269433",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 75,
+    "title": "Pipe escape in code-span values produces backslash display artifact",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 75,
+    "title": "Backslash doubling inside code-chipped model cell",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run2.json"
+  }
+]

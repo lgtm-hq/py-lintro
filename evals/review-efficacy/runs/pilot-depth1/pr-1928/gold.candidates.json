@@ -1,0 +1,23 @@
+[
+  {
+    "origin": "coderabbit",
+    "file": null,
+    "line": null,
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1928#issuecomment-5171255203",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "lintro_eval",
+    "file": "bun.lock",
+    "line": 672,
+    "title": "Verify fast-uri 4.1.2 registry integrity hash",
+    "severity_guess": "P3",
+    "url": null,
+    "label": "unreviewed",
+    "notes": "",
+    "run_file": "depth1_nolint_run1.json"
+  }
+]

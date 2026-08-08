@@ -1,0 +1,20 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 916,
+  "title": "chore(deps): update actions/cache to v6.1.0 (major) (major)",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/916",
+  "base_ref": "main",
+  "base_oid": "827277b1af286fbee2e0136feb8c01f313526d83",
+  "head_oid": "7792837296a6ff3cadc3de7b31f7d75252ba8dd1",
+  "merged_at": "2026-07-14T21:32:53Z",
+  "additions": 1,
+  "deletions": 1,
+  "changed_files": 1,
+  "files": [
+    ".github/workflows/test-built-package.yml"
+  ],
+  "competitor_counts": {
+    "greptile": 10,
+    "macroscope": 1
+  }
+}

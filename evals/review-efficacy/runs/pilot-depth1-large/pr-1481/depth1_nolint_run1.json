@@ -1,0 +1,10 @@
+{
+  "error": {
+    "kind": "unknown",
+    "provider": "anthropic",
+    "status": null,
+    "retryable": false,
+    "provider_unavailable": false,
+    "message": "[Errno 7] Argument list too long: '/home/ubuntu/.local/bin/claude'"
+  }
+}

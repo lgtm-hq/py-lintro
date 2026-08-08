@@ -1,0 +1,366 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "prs": [
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 916,
+      "title": "chore(deps): update actions/cache to v6.1.0 (major) (major)",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/916",
+      "base_ref": "main",
+      "base_oid": "827277b1af286fbee2e0136feb8c01f313526d83",
+      "head_oid": "7792837296a6ff3cadc3de7b31f7d75252ba8dd1",
+      "merged_at": "2026-07-14T21:32:53Z",
+      "additions": 1,
+      "deletions": 1,
+      "changed_files": 1,
+      "files": [
+        ".github/workflows/test-built-package.yml"
+      ],
+      "competitor_counts": {
+        "greptile": 10,
+        "macroscope": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 958,
+      "title": "fix(astro-check): run non-interactively to prevent prompt hang and timeout",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/958",
+      "base_ref": "main",
+      "base_oid": "a69fbe5a63847ab21f5ae7fc20600565e4f43b04",
+      "head_oid": "f72afcbb269e4c244be1318c753510543d8cb903",
+      "merged_at": "2026-07-10T05:59:42Z",
+      "additions": 377,
+      "deletions": 7,
+      "changed_files": 4,
+      "files": [
+        "lintro/plugins/base.py",
+        "lintro/plugins/subprocess_executor.py",
+        "lintro/tools/definitions/astro_check.py",
+        "tests/unit/tools/astro_check/test_non_interactive.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 5,
+        "cursor_bugbot": 1,
+        "greptile": 2,
+        "lintro_dogfood": 1,
+        "macroscope": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1186,
+      "title": "docs(ai): complete config reference and correct privacy claims",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1186",
+      "base_ref": "main",
+      "base_oid": "1025c80296590d927c2a2c0fb28c6f2cbd570421",
+      "head_oid": "6ab8995b04d35bdf4d700c1569c91469ca384fc2",
+      "merged_at": "2026-07-30T06:01:27Z",
+      "additions": 162,
+      "deletions": 29,
+      "changed_files": 1,
+      "files": [
+        "docs/ai-features.md"
+      ],
+      "competitor_counts": {
+        "coderabbit": 1,
+        "cursor_bugbot": 1,
+        "greptile": 16
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1481,
+      "title": "refactor: split oversized modules under the size gate",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1481",
+      "base_ref": "main",
+      "base_oid": "a369677039ba9d6268991759781181989773a823",
+      "head_oid": "e6119c92a9d0d85e51fe6b6c0db321e640bb9c93",
+      "merged_at": "2026-07-30T21:06:16Z",
+      "additions": 1889,
+      "deletions": 1551,
+      "changed_files": 10,
+      "files": [
+        "lintro/ai/review/github.py",
+        "lintro/ai/review/github_constants.py",
+        "lintro/ai/review/github_errors.py",
+        "lintro/ai/review/github_render.py",
+        "lintro/ai/review/github_sticky.py",
+        "lintro/tools/definitions/_ts_checker_base.py",
+        "lintro/tools/definitions/_ts_checker_command.py",
+        "lintro/tools/definitions/_ts_checker_execution.py",
+        "lintro/utils/module_size.py",
+        "pyproject.toml"
+      ],
+      "competitor_counts": {
+        "coderabbit": 10,
+        "cursor_bugbot": 1,
+        "greptile": 2,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1928,
+      "title": "fix(deps): bump fast-uri to 4.1.2 for CVE-2026-18446",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1928",
+      "base_ref": "main",
+      "base_oid": "d6f459f709f4b2b7d8ad8db61c8c6371723652d0",
+      "head_oid": "20cd91395cf668b685d9ef0d95b9e556d37a1242",
+      "merged_at": "2026-08-03T22:16:49Z",
+      "additions": 6,
+      "deletions": 6,
+      "changed_files": 4,
+      "files": [
+        "apps/site/bun.lock",
+        "apps/site/package.json",
+        "bun.lock",
+        "package.json"
+      ],
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1936,
+      "title": "fix(deps): bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1936",
+      "base_ref": "main",
+      "base_oid": "c3129e6d7807ab76274fff25727fc1a456815cfb",
+      "head_oid": "482442ffca34c00fa0291d456e23815dcc033898",
+      "merged_at": "2026-08-04T09:18:54Z",
+      "additions": 52,
+      "deletions": 51,
+      "changed_files": 2,
+      "files": [
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1958,
+      "title": "fix(review): render the sticky This-run stats as badge tables",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1958",
+      "base_ref": "main",
+      "base_oid": "ac24f2079bc77bb8394c40f40e167fdff0e3f0d4",
+      "head_oid": "32341b7379aaa49fc67e4ee5a6e431a6e1bcc525",
+      "merged_at": "2026-08-06T14:09:25Z",
+      "additions": 385,
+      "deletions": 65,
+      "changed_files": 5,
+      "files": [
+        "lintro/ai/review/github_render.py",
+        "lintro/ai/review/github_review_body.py",
+        "lintro/ai/review/github_sticky.py",
+        "tests/unit/ai/review/test_github_badge_tables.py",
+        "tests/unit/ai/review/test_github_sticky_mission_control.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 4,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1891,
+      "title": "feat(mcp): add review toolkit exposing AI diff review",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1891",
+      "base_ref": "main",
+      "base_oid": "a5e650df842ae69e888b13e67a6045e980fd1641",
+      "head_oid": "2dfcca1710691f58c81cc3516ac6dbfe18c4852f",
+      "merged_at": "2026-08-01T09:50:21Z",
+      "additions": 1577,
+      "deletions": 8,
+      "changed_files": 6,
+      "files": [
+        "docs/mcp.md",
+        "lintro/mcp/enums/mcp_error_code.py",
+        "lintro/mcp/server.py",
+        "lintro/mcp/toolkits/__init__.py",
+        "lintro/mcp/toolkits/review.py",
+        "tests/unit/mcp/test_toolkit_review.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1939,
+      "title": "feat(review): add corpus-informed finding model to the review pipeline",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1939",
+      "base_ref": "main",
+      "base_oid": "748a56e25ade4bf193af6ca60873e7d599bc2eea",
+      "head_oid": "4307c107f35c2d84588dfaef887412b002151076",
+      "merged_at": "2026-08-04T17:24:27Z",
+      "additions": 1522,
+      "deletions": 30,
+      "changed_files": 27,
+      "files": [
+        "lintro/ai/cli_schemas.py",
+        "lintro/ai/prompts/templates/review/output_rules.md",
+        "lintro/ai/prompts/templates/review/output_schema.json",
+        "lintro/ai/prompts/templates/review/system.md",
+        "lintro/ai/review/agent_prompts.py",
+        "lintro/ai/review/enums/__init__.py",
+        "lintro/ai/review/enums/evidence_style.py",
+        "lintro/ai/review/enums/finding_kind.py",
+        "lintro/ai/review/finding_matcher.py",
+        "lintro/ai/review/finding_parser.py",
+        "lintro/ai/review/github_render.py",
+        "lintro/ai/review/github_sticky.py",
+        "lintro/ai/review/models/__init__.py",
+        "lintro/ai/review/models/finding_occurrence.py",
+        "lintro/ai/review/models/finding_record.py",
+        "lintro/ai/review/models/review_finding.py",
+        "lintro/ai/review/models/run_record.py",
+        "lintro/ai/review/severity_gate.py",
+        "lintro/ai/review/verdict.py",
+        "tests/unit/ai/prompts/test_review_prompts.py",
+        "tests/unit/ai/review/test_agent_prompts.py",
+        "tests/unit/ai/review/test_finding_matcher.py",
+        "tests/unit/ai/review/test_orchestrator.py",
+        "tests/unit/ai/review/test_orchestrator_hardening.py",
+        "tests/unit/ai/review/test_severity_gate.py",
+        "tests/unit/ai/review/test_verdict.py",
+        "tests/unit/ai/test_cli_schemas.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 7,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1916,
+      "title": "feat(review): state schema v2 with per-run stats history and cross-run finding matching",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1916",
+      "base_ref": "main",
+      "base_oid": "5446da1a3ec12908281f99fd6ffdc8b6650e5abc",
+      "head_oid": "37fee501ffff015f8939f5f808a201f827f267b5",
+      "merged_at": "2026-08-03T18:01:54Z",
+      "additions": 2641,
+      "deletions": 93,
+      "changed_files": 20,
+      "files": [
+        "lintro/ai/review/enums/__init__.py",
+        "lintro/ai/review/enums/finding_match_outcome.py",
+        "lintro/ai/review/enums/finding_status.py",
+        "lintro/ai/review/enums/review_verdict.py",
+        "lintro/ai/review/finding_matcher.py",
+        "lintro/ai/review/github.py",
+        "lintro/ai/review/github_constants.py",
+        "lintro/ai/review/github_errors.py",
+        "lintro/ai/review/github_sticky.py",
+        "lintro/ai/review/models/__init__.py",
+        "lintro/ai/review/models/_coerce.py",
+        "lintro/ai/review/models/finding_match_result.py",
+        "lintro/ai/review/models/finding_record.py",
+        "lintro/ai/review/models/review_state.py",
+        "lintro/ai/review/models/run_record.py",
+        "lintro/ai/review/review_state_codec.py",
+        "tests/unit/ai/review/test_finding_matcher.py",
+        "tests/unit/ai/review/test_github.py",
+        "tests/unit/ai/review/test_github_sticky_state.py",
+        "tests/unit/ai/review/test_review_state_codec.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 22,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1878,
+      "title": "feat(review): add user-defined review agents as markdown files",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1878",
+      "base_ref": "main",
+      "base_oid": "90cb42764be7b01069ae2ece6d7228946f0d37e5",
+      "head_oid": "1c837398c9f0efd17235a8758e34363033930624",
+      "merged_at": "2026-07-31T22:33:13Z",
+      "additions": 2945,
+      "deletions": 180,
+      "changed_files": 26,
+      "files": [
+        ".lintro-config.yaml",
+        "docs/ai-features.md",
+        "lintro/ai/prompts/review.py",
+        "lintro/ai/prompts/templates/review/custom_agent_output_schema.json",
+        "lintro/ai/prompts/templates/review/custom_agent_system.md",
+        "lintro/ai/prompts/templates/review/custom_agent_user.md",
+        "lintro/ai/review/custom_agent_runner.py",
+        "lintro/ai/review/custom_agents.py",
+        "lintro/ai/review/display.py",
+        "lintro/ai/review/enums/custom_agent_mode.py",
+        "lintro/ai/review/finding_parser.py",
+        "lintro/ai/review/github_render.py",
+        "lintro/ai/review/models/review_finding.py",
+        "lintro/ai/review/models/review_metadata.py",
+        "lintro/ai/review/orchestrator.py",
+        "lintro/ai/review/prompt_redaction.py",
+        "lintro/cli_utils/commands/review.py",
+        "lintro/config/review_config.py",
+        "lintro/enums/custom_agent_mode.py",
+        "tests/unit/ai/review/test_custom_agent_runner.py",
+        "tests/unit/ai/review/test_custom_agents.py",
+        "tests/unit/ai/review/test_display.py",
+        "tests/unit/ai/review/test_orchestrator_hardening.py",
+        "tests/unit/ai/review/test_output.py",
+        "tests/unit/cli/test_review_command.py",
+        "tests/unit/config/test_review_config.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 21,
+        "lintro_dogfood": 1
+      }
+    },
+    {
+      "repo": "lgtm-hq/py-lintro",
+      "number": 1886,
+      "title": "feat(cli): move advisory AI finders out of chk into lintro review",
+      "url": "https://github.com/lgtm-hq/py-lintro/pull/1886",
+      "base_ref": "main",
+      "base_oid": "0f2cf25cb77940535eecd26c191355d8d1b01c48",
+      "head_oid": "31714af6bba221b4f5624aca59b8e2823a3b4a91",
+      "merged_at": "2026-08-01T03:05:41Z",
+      "additions": 1526,
+      "deletions": 80,
+      "changed_files": 21,
+      "files": [
+        "docs/ai-features.md",
+        "docs/configuration.md",
+        "docs/tool-analysis/idiom-review-analysis.md",
+        "lintro/cli_utils/commands/list_tools.py",
+        "lintro/cli_utils/commands/review.py",
+        "lintro/enums/advisory_tools_value.py",
+        "lintro/enums/execution_class.py",
+        "lintro/enums/idiom_review_mode.py",
+        "lintro/plugins/protocol.py",
+        "lintro/tools/definitions/idiom_review.py",
+        "lintro/tools/idiom_review/__init__.py",
+        "lintro/tools/idiom_review/engine.py",
+        "lintro/utils/execution/advisory.py",
+        "lintro/utils/execution/tool_configuration.py",
+        "tests/unit/cli/test_cli_commands.py",
+        "tests/unit/cli/test_review_command.py",
+        "tests/unit/tools/executor/test_advisory_tool_selection.py",
+        "tests/unit/tools/executor/test_tool_configuration_enabled.py",
+        "tests/unit/tools/idiom_review/test_idiom_review_engine.py",
+        "tests/unit/tools/idiom_review/test_idiom_review_plugin.py",
+        "tests/unit/utils/execution/test_advisory.py"
+      ],
+      "competitor_counts": {
+        "coderabbit": 1,
+        "lintro_dogfood": 1
+      }
+    }
+  ]
+}

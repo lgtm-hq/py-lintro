@@ -1,0 +1,1 @@
+[33m[1mai.enabled without ai.lint/ai.review is deprecated; both AI lint summarization and AI review were enabled for backward compatibility. Set ai.lint and/or ai.review explicitly.[0m

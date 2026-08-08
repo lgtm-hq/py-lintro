@@ -1,0 +1,247 @@
+{
+  "metadata": {
+    "model": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "context_window": 200000,
+    "depth": 1,
+    "chunks_total": 1,
+    "chunks_current": 1,
+    "files_reviewed": 1,
+    "files_total": 1,
+    "checklist_items": 30,
+    "token_usage": {
+      "prompt": 4,
+      "completion": 6343,
+      "total": 6347
+    },
+    "cost_estimate_usd": 0.4050361,
+    "base_ref": "827277b1af286fbee2e0136feb8c01f313526d83",
+    "head_ref": "7792837296a6ff3cadc3de7b31f7d75252ba8dd1",
+    "timestamp": "2026-08-06T17:02:42.601191+00:00",
+    "strictness": "balanced",
+    "token_usage_estimated": true,
+    "partial": false,
+    "chunks_reviewed": 1,
+    "stopped_reason": "",
+    "duration_seconds": 131.15980929299985,
+    "custom_agents_run": 0,
+    "custom_agents_skipped": 0,
+    "reviewed_paths": [
+      ".github/workflows/test-built-package.yml"
+    ],
+    "skipped_files": []
+  },
+  "summary": "Bumps the actions/cache GitHub Action from the v5 commit SHA to the v6.1.0 commit SHA in the built-package test workflow.",
+  "readiness_verdict": "ready",
+  "pr_summary": {
+    "headline": "Bumps the actions/cache GitHub Action from the v5 commit SHA to the v6.1.0 commit SHA in the built-package test workflow.",
+    "walkthrough": [
+      {
+        "text": "The single changed line at .github/workflows/test-built-package.yml:97 replaces the v5 pinned SHA (caa296126883cff596d87d8935842f9db880ef25) with the v6.1.0 pinned SHA (55cc8345863c7cc4c66a329aec7e433d2d1c52a9), preserving the inline version comment.",
+        "finding_ref": ""
+      },
+      {
+        "text": "The cache step inputs (path, key, restore-keys) are unchanged, so the cache hit/miss behavior for the uv dependency cache is unaffected.",
+        "finding_ref": ""
+      },
+      {
+        "text": "All other actions referenced in this workflow (actions/checkout, step-security/harden-runner) and across the rest of the repo are already at their current SHA-pinned major versions, confirming this PR applies the one remaining cache action update.",
+        "finding_ref": ""
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "Nothing blocks the merge: the change is a single-line SHA swap for actions/cache, the new SHA is properly pinned to an immutable commit with an accurate version comment, the step inputs are unchanged, and the action is only used in this one workflow file.",
+    "failure_mechanism": "",
+    "files_needing_attention": []
+  },
+  "file_assessments": [
+    {
+      "file": ".github/workflows/test-built-package.yml",
+      "overview": "Replaces the actions/cache v5 commit SHA with the v6.1.0 commit SHA; all other steps and inputs are unchanged."
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "no",
+      "evidence": "Cache step failure causes a cache miss, not a skipped job step; subsequent steps proceed normally and the cache non-restore is non-blocking.",
+      "question": "Does any early return skip independent work that could proceed when an optional step fails?"
+    },
+    {
+      "id": 2,
+      "answer": "no",
+      "evidence": "No test setup or fixture defaults are involved in this workflow-only change.",
+      "question": "Do test setup/fixture defaults match production/workflow/script defaults?"
+    },
+    {
+      "id": 3,
+      "answer": "no",
+      "evidence": "No documentation files are modified by this diff.",
+      "question": "Does documentation claim behavior the implementation does not provide?"
+    },
+    {
+      "id": 4,
+      "answer": "no",
+      "evidence": "actions/cache does not exit with success when a cache miss or network block occurs; it logs a warning and the workflow continues, which is the established behavior from v5.",
+      "question": "Does any error path exit or return success when callers expect failure?"
+    },
+    {
+      "id": 5,
+      "answer": "no",
+      "evidence": "No new default values are introduced that affect external callers; the key/restore-keys patterns at .github/workflows/test-built-package.yml:100-102 are unchanged.",
+      "question": "Do new defaults break existing callers without migration guidance?"
+    },
+    {
+      "id": 6,
+      "answer": "no",
+      "evidence": "actions/cache is only referenced in test-built-package.yml (confirmed by grep); no lockstep partner file exists.",
+      "question": "Must two or more files be updated in lockstep for the change to stay correct?"
+    },
+    {
+      "id": 7,
+      "answer": "no",
+      "evidence": "The bump replaces the existing single call site with no duplication of logic.",
+      "question": "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+    },
+    {
+      "id": 8,
+      "answer": "no",
+      "evidence": "The PR title claims 'update actions/cache to v6.1.0 (major)'; the diff changes exactly that one SHA at .github/workflows/test-built-package.yml:97.",
+      "question": "Does the diff actually do what the PR description claims?"
+    },
+    {
+      "id": 9,
+      "answer": "no",
+      "evidence": "No conditional dispatch or enum handling exists in this diff.",
+      "question": "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+    },
+    {
+      "id": 10,
+      "answer": "no",
+      "evidence": "No client error-classification code is present or changed.",
+      "question": "Does the client classify server errors using fragile substring matching on prose messages?"
+    },
+    {
+      "id": 11,
+      "answer": "no",
+      "evidence": "No server-side error shaping is changed.",
+      "question": "Does the server return prose-only errors without stable machine-readable error codes?"
+    },
+    {
+      "id": 12,
+      "answer": "no",
+      "evidence": "No test files are included in this diff.",
+      "question": "Are there visibility-only tests without asserting content, state, or copy?"
+    },
+    {
+      "id": 13,
+      "answer": "no",
+      "evidence": "No mocks or private-method stubs are present.",
+      "question": "Do tests mock internals/private methods such that behavior breaks could still pass?"
+    },
+    {
+      "id": 14,
+      "answer": "no",
+      "evidence": "No deferred or out-of-scope items are listed in the PR summary.",
+      "question": "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+    },
+    {
+      "id": 15,
+      "answer": "no",
+      "evidence": "No API response parsing or type-cast code is changed.",
+      "question": "Does API/client code use type casts on responses without runtime validation?"
+    },
+    {
+      "id": 16,
+      "answer": "no",
+      "evidence": "No error-handling branches exist in this diff.",
+      "question": "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+    },
+    {
+      "id": 17,
+      "answer": "no",
+      "evidence": "No concurrent or async code is introduced or modified.",
+      "question": "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+    },
+    {
+      "id": 18,
+      "answer": "no",
+      "evidence": "No control-flow constructs are present in this diff.",
+      "question": "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+    },
+    {
+      "id": 19,
+      "answer": "no",
+      "evidence": "No PII, secrets, or tokens are referenced by the changed line.",
+      "question": "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+    },
+    {
+      "id": 20,
+      "answer": "no",
+      "evidence": "No hand-maintained file pair comparison exists in this diff.",
+      "question": "Does CI verify two hand-maintained files agree instead of running a generator with --check?"
+    },
+    {
+      "id": 21,
+      "answer": "no",
+      "evidence": "No Renovate post-upgrade task or --check gate is relevant here.",
+      "question": "Does an automation hook (e.g. Renovate post-upgrade) silently fail while CI is supposed to catch drift\u2014is the --check gate still present?"
+    },
+    {
+      "id": 22,
+      "answer": "no",
+      "evidence": "No lint suppressions (noqa, type: ignore, allow(dead_code)) are added.",
+      "question": "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+    },
+    {
+      "id": 23,
+      "answer": "no",
+      "evidence": "Inline shell logic is minimal (egress audit); all substantive logic is delegated to scripts/ci/ external scripts.",
+      "question": "Is substantial shell logic inlined in workflow YAML instead of a dedicated script file?"
+    },
+    {
+      "id": 24,
+      "answer": "no",
+      "evidence": "No script references are added; existing script paths are unchanged.",
+      "question": "Are CI scripts referenced from workflows missing a shebang or executable bit?"
+    },
+    {
+      "id": 25,
+      "answer": "no",
+      "evidence": "Not applicable: this is a CI action version bump, not a function/module boundary change.",
+      "question": "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+    },
+    {
+      "id": 26,
+      "answer": "no",
+      "evidence": "Not applicable: no new code logic with edge cases is introduced.",
+      "question": "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+    },
+    {
+      "id": 27,
+      "answer": "no",
+      "evidence": "No public interface changes; the cache step inputs (path, key, restore-keys) are identical to the pre-diff state.",
+      "question": "Does a public interface change lack updates to callers, schemas, or contract tests?"
+    },
+    {
+      "id": 28,
+      "answer": "no",
+      "evidence": "No credentials or tokens are hardcoded; GITHUB_TOKEN is sourced from secrets at line 65.",
+      "question": "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+    },
+    {
+      "id": 29,
+      "answer": "no",
+      "evidence": "The updated reference uses commit SHA 55cc8345863c7cc4c66a329aec7e433d2d1c52a9 with a version comment; all other actions in the repo are also SHA-pinned (confirmed by grep).",
+      "question": "Are GitHub Actions referenced by mutable version tags instead of pinned commit SHAs?"
+    },
+    {
+      "id": 30,
+      "answer": "no",
+      "evidence": "Not applicable: this is a single-line action version substitution, not a module interface.",
+      "question": "Is the module interface nearly as complex as its implementation (shallow module)?"
+    }
+  ],
+  "findings": []
+}

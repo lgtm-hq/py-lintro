@@ -1,0 +1,23 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1928,
+  "title": "fix(deps): bump fast-uri to 4.1.2 for CVE-2026-18446",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1928",
+  "base_ref": "main",
+  "base_oid": "d6f459f709f4b2b7d8ad8db61c8c6371723652d0",
+  "head_oid": "20cd91395cf668b685d9ef0d95b9e556d37a1242",
+  "merged_at": "2026-08-03T22:16:49Z",
+  "additions": 6,
+  "deletions": 6,
+  "changed_files": 4,
+  "files": [
+    "apps/site/bun.lock",
+    "apps/site/package.json",
+    "bun.lock",
+    "package.json"
+  ],
+  "competitor_counts": {
+    "coderabbit": 1,
+    "lintro_dogfood": 1
+  }
+}

@@ -1,0 +1,112 @@
+[
+  {
+    "source": "coderabbit",
+    "comment_id": 5002272883,
+    "created_at": "2026-07-17T10:39:22Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#issuecomment-5002272883",
+    "file": null,
+    "line": null,
+    "severity_guess": "P2",
+    "title": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-",
+    "body": "[![Review Change Stack](https://storage.googleapis.com/coderabbit_public_assets/review-stack-in-coderabbit-ui.svg)](https://app.coderabbit.ai/change-stack/lgtm-hq/py-lintro/pull/1481?utm_source=github_walkthrough&utm_medium=github&utm_campaign=change_stack)\n\n\n\n\n<details>\n<summary>📝 Walkthrough</summary>\n\n## Walkthrough\n\nThe PR splits GitHub review rendering, sticky-state handling, and error formatting into sibling modules while preserving posting imports. It also extracts TypeScript checker command and execution orchestration, updates plugin delegation, and removes related module-size baselines.\n\n### Changes\n\n**GitHub review modularization**\n\n|Layer / File(s)|Summary|\n|---|---|\n|**GitHub rendering and formatting contracts** <br> `lintro/ai/review/github_constants.py`, `lintro/ai/review/github_render.py`, `lintro/ai/review/github_errors.py`|Shared constants, sanitization, finding and summary rendering, checklist formatting, partitioning, and classified error comments are introduced.|\n|**Sticky state and size management** <br> `lintro/ai/review/github_sticky.py`|Sticky comments combine cumulative telemetry, prior runs, hidden JSON state, and staged truncation with omission markers.|\n|**Posting adapter and stable exports** <br> `lintro/ai/review/github.py`|The posting module re-exports helpers, formats inline findings, and retains review and error posting entry points.|\n\n**TypeScript checker modularization**\n\n|Layer / File(s)|Summary|\n|---|---|\n|**Command and tsconfig helpers** <br> `lintro/tools/definitions/_ts_checker_command.py`|Executable resolution, tsconfig discovery, temporary configuration, command construction, and documentation URLs are centralized.|\n|**Checker execution orchestration** <br> `lintro/tools/definitions/_ts_checker_execution.py`|Checker execution handles dependencies, project selection, framework deferral, subprocess errors, project aggregation, and diagnostic guidance.|\n|**Plugin delegation and module-size gate** <br> `lintro/tools/definitions/_ts_checker_base.py`, `lintro/utils/module_size.py`, `pyproject.toml`|The plugin delegates to the new helpers, retains option validation, and removes related module-size baseline entries.|\n\n**Estimated code review effort:** 4 (Complex) | ~45 minutes\n\n**Possibly related PRs**\n\n- [lgtm-hq/py-lintro#1037](https://github.com/lgtm-hq/py-lintro/pull/1037): Refactors the same GitHub review posting and rendering flow into sibling modules.\n- [lgtm-hq/py-lintro#1107](https://github.com/lgtm-hq/py-lintro/pull/1107): Uses the same diff-mappable finding partitioning and sticky truncation behavior.\n\n**Suggested labels:** `documentation`, `enhancement`, `dependencies`, `ci`, `maintenance`\n\n**Poem**\n\n> A rabbit saw modules grow too wide,  \n> So split their paths and hopped inside.  \n> Reviews now render, states stay neat,  \n> TypeScript checks march on their feet.  \n> Baselines shrink beneath moonlight bright. 🐇\n\n</details>\n\n\n\n\n<details>\n<summary>🚥 Pre-merge checks | ✅ 4</summary>\n\n<details>\n<summary>✅ Passed checks (4 passed)</summary>\n\n|         Check name         | Status   | Explanation                                                                                                 |\n| :------------------------: | :------- | :---------------------------------------------------------------------------------------------------------- |\n|         Title check        | ✅ Passed | The title is concise, specific, and accurately describes the main refactor in the PR.                       |\n|      Description check     | ✅ Passed | The description mostly matches the template and includes summary, checklist, issue link, and details.       |\n|     Linked Issues check    | ✅ Passed | [`#1113`] The refactor splits both oversized modules, removes baseline entries, and preserves the public API. |\n| Out of Scope Changes check | ✅ Passed | The additional baseline cleanup is aligned with the refactor and no unrelated changes stand out.            |\n\n</details>\n\n</details>\n\n\n\n\n<details>\n<summary>✨ Finishing Touches</summary>\n\n<details>\n<summary>🧪 Generate unit tests (beta)</summary>\n\n- [ ]    Create PR with unit tests\n- [ ]    Commit unit tests in branch `refactor/1113-split-oversized-modules`\n\n</details>\n\n</details>\n\n\n\n\n---\n\n\n\n\n<sub>Comment `@coderabbitai help` to get the list of available commands.</sub>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686118221,
+    "created_at": "2026-07-30T20:43:21Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686118221",
+    "file": "lintro/ai/review/github_errors.py",
+    "line": 15,
+    "severity_guess": null,
+    "title": "_📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_",
+    "body": "_📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Cross-module private import couples error rendering to sticky assembly.**\n\n`_render_state_block` is the shared serialization contract for the hidden state block (also consumed by `github_sticky.build_sticky_comment`). Consider promoting it to a public helper (or moving it next to `parse_review_state`'s counterpart in a small state module) so `github_errors` doesn't reach into another module's private surface.\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@lintro/ai/review/github_errors.py` at line 15, Decouple github_errors from\nthe private _render_state_block import by promoting that shared state-block\nserializer to a public helper or moving it into the state module alongside\nparse_review_state. Update github_errors and github_sticky.build_sticky_comment\nto use the shared public symbol while preserving the existing serialization\ncontract.\n```\n\n</details>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686118227,
+    "created_at": "2026-07-30T20:43:21Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686118227",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 362,
+    "severity_guess": "P3",
+    "title": "_📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_",
+    "body": "_📐 Maintainability & Code Quality_ | _🔵 Trivial_ | _💤 Low value_\n\n**Docstring contradicts the implemented budget behavior.**\n\nLines 361-362 promise fallback findings are never budget-truncated, but the loop at Line 397 enforces the budget on *every* finding (as the inline comment at Lines 388-396 states). Align the `char_budget` doc with the actual behavior so the \"fallback always survives\" guarantee isn't over-claimed.\n\n<details>\n<summary>📝 Proposed docstring correction</summary>\n\n```diff\n         char_budget: Optional soft character budget for the finding blocks. When\n             exceeded, remaining *diff-mappable* findings are replaced by a\n-            truncation marker (they still exist as inline comments). Fallback\n-            findings are never budget-truncated — they have no other surface.\n+            truncation marker (they still exist as inline comments). The budget\n+            applies to every finding, but fallback findings sort first, so they\n+            are only dropped when fallback content alone exhausts the budget.\n```\n</details>\n\n\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n        char_budget: Optional soft character budget for the finding blocks. When\n            exceeded, remaining *diff-mappable* findings are replaced by a\n            truncation marker (they still exist as inline comments). The budget\n            applies to every finding, but fallback findings sort first, so they\n            are only dropped when fallback content alone exhausts the budget.\n```\n\n</details>\n\n\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@lintro/ai/review/github_render.py` around lines 359 - 362, Update the\nchar_budget documentation in the finding-block rendering docstring to remove the\nclaim that fallback findings are never budget-truncated, and describe the\nbehavior implemented by the finding-processing loop: the budget applies to every\nfinding, with over-budget findings replaced by the truncation marker while\nremaining inline comments.\n```\n\n</details>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686118238,
+    "created_at": "2026-07-30T20:43:22Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686118238",
+    "file": "lintro/ai/review/github_sticky.py",
+    "line": 110,
+    "severity_guess": "P2",
+    "title": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_",
+    "body": "_🩺 Stability & Availability_ | _🟠 Major_ | _⚡ Quick win_\n\n**The state block escapes the size cap and can push the comment past GitHub's hard limit.**\n\n`_cap_body` guarantees `body <= MAX_COMMENT_CHARS` (60,000), but `_render_state_block(runs=all_runs)` is concatenated *after* capping. With `MAX_STORED_RUNS = 30`, each run record serializes to roughly 300 chars, so the block can add ~9–10 KB — more than the 5,536-char slack to GitHub's 65,536 limit — and the update/create call then fails with a 422 exactly in the worst case (large review, long-lived PR).\n\nReserve the state block in the budget before capping:\n\n<details>\n<summary>🛠️ Proposed fix</summary>\n\n```diff\n-    body = _cap_body(body=body)\n-    return body + _render_state_block(runs=all_runs)\n+    state_block = _render_state_block(runs=all_runs)\n+    body = _cap_body(body=body, reserved=len(state_block))\n+    return body + state_block\n```\n\nand thread the reservation through the capping helpers, e.g.:\n\n```python\ndef _cap_body(*, body: str, reserved: int = 0) -> str:\n    limit = MAX_COMMENT_CHARS - reserved\n    ...\n```\n(applying `limit` in `_elide_low_value_sections`, `_cap_findings_section`, and the final tail truncation instead of the module constant).\n</details>\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@lintro/ai/review/github_sticky.py` around lines 91 - 110, Reserve the\nrendered state-block length before applying the comment size cap so the final\nconcatenated comment remains within MAX_COMMENT_CHARS. Update _cap_body to\naccept a reserved-size parameter and use the reduced limit throughout\n_elide_low_value_sections, _cap_findings_section, and final truncation; call it\nwith the length of _render_state_block(runs=all_runs), then append the state\nblock unchanged.\n```\n\n</details>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686118243,
+    "created_at": "2026-07-30T20:43:22Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686118243",
+    "file": "lintro/ai/review/github_sticky.py",
+    "line": 314,
+    "severity_guess": "P3",
+    "title": "_🗄️ Data Integrity & Integration_ | _🟡 Minor_ | _⚡ Quick win_",
+    "body": "_🗄️ Data Integrity & Integration_ | _🟡 Minor_ | _⚡ Quick win_\n\n**First-match marker lookup lets untrusted finding text hijack the parsed state.**\n\nModel-derived text is only sanitized for `@mentions`, so a finding body can embed ``. Since the real block is always appended last, searching from the end makes the parse unspoofable.\n\n<details>\n<summary>🛡️ Proposed fix</summary>\n\n```diff\n-    start = body.find(STATE_MARKER_PREFIX)\n+    start = body.rfind(STATE_MARKER_PREFIX)\n     if start < 0:\n         return []\n```\n</details>\n\n\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n    start = body.rfind(STATE_MARKER_PREFIX)\n    if start < 0:\n        return []\n    after = body[start + len(STATE_MARKER_PREFIX) :]\n    end = after.rfind(STATE_MARKER_SUFFIX)\n    raw = after[:end] if end >= 0 else after\n```\n\n</details>\n\n\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nIn `@lintro/ai/review/github_sticky.py` around lines 309 - 314, Update the\nstate-marker lookup in the parser around STATE_MARKER_PREFIX to search from the\nend of body rather than the first occurrence, so the appended real state block\nis selected over marker text embedded in findings. Preserve the existing suffix\nextraction and empty-result behavior.\n```\n\n</details>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686193506,
+    "created_at": "2026-07-30T20:57:01Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686193506",
+    "file": "lintro/ai/review/github_errors.py",
+    "line": 15,
+    "severity_guess": null,
+    "title": "`@TurboCoder13`, understood. Keeping the private helper untouched is reasonable for this mechanical refactor, given the compatibility ripple through the `github",
+    "body": "`@TurboCoder13`, understood. Keeping the private helper untouched is reasonable for this mechanical refactor, given the compatibility ripple through the `github.py` facade and private-name test imports. Thanks for tracking the optional cleanup in `#1866`.\n\n🐇\n\n---\n\n<details>\n<summary>✏️ Learnings added</summary>\n\n```\nLearnt from: TurboCoder13\nRepo: lgtm-hq/py-lintro PR: 1481\nFile: lintro/ai/review/github_errors.py:15-15\nTimestamp: 2026-07-30T20:56:57.215Z\nLearning: For the GitHub AI review modularization, the cross-module import of `lintro.ai.review.github_sticky._render_state_block` from `lintro.ai.review.github_errors` is an intentional cosmetic artifact of the mechanical split. Do not require renaming or promotion during this refactor; any cleanup is tracked separately in GitHub issue `#1866` because changing it would ripple through `lintro/ai/review/github.py` facade re-exports and tests that import private helper names.\n```\n\n> Note: Learnings are effective only in the context of similar code segments. To apply general coding guidelines, please configure [review instructions](https://docs.coderabbit.ai/guides/review-instructions). You can manage existing learnings in the [app](https://app.coderabbit.ai/learnings).\n\n</details>\n\n<sub>You are interacting with an AI system.</sub>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686193546,
+    "created_at": "2026-07-30T20:57:02Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686193546",
+    "file": "lintro/ai/review/github_sticky.py",
+    "line": 110,
+    "severity_guess": null,
+    "title": "`@TurboCoder13`, understood. Since this is a pre-existing behavior preserved by the mechanical split and is tracked in `#1866`, deferring the fix is appropriate",
+    "body": "`@TurboCoder13`, understood. Since this is a pre-existing behavior preserved by the mechanical split and is tracked in `#1866`, deferring the fix is appropriate.\n\n<sub>You are interacting with an AI system.</sub>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686193610,
+    "created_at": "2026-07-30T20:57:02Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686193610",
+    "file": "lintro/ai/review/github_render.py",
+    "line": 362,
+    "severity_guess": null,
+    "title": "`@TurboCoder13` Understood—this is pre-existing behavior/documentation and is already tracked in `#1866`, so it is out of scope for this mechanical split. Thank",
+    "body": "`@TurboCoder13` Understood—this is pre-existing behavior/documentation and is already tracked in `#1866`, so it is out of scope for this mechanical split. Thanks for the clarification.\n\n<sub>You are interacting with an AI system.</sub>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 3686194095,
+    "created_at": "2026-07-30T20:57:07Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#discussion_r3686194095",
+    "file": "lintro/ai/review/github_sticky.py",
+    "line": 314,
+    "severity_guess": null,
+    "title": "`@TurboCoder13`, thanks for the clarification. This is pre-existing behavior preserved by the module split and is already tracked in `#1866`, so it should not b",
+    "body": "`@TurboCoder13`, thanks for the clarification. This is pre-existing behavior preserved by the module split and is already tracked in `#1866`, so it should not be treated as a regression in this PR. Withdrawing the finding.\n\n\n\n---\n\n<details>\n<summary>✏️ Learnings added</summary>\n\n```\nLearnt from: TurboCoder13\nRepo: lgtm-hq/py-lintro PR: 1481\nFile: lintro/ai/review/github_sticky.py:309-314\nTimestamp: 2026-07-30T20:57:00.756Z\nLearning: In the GitHub AI review sticky-comment flow, `parse_review_state` in `lintro/ai/review/github_sticky.py` intentionally preserves the pre-split `body.find(STATE_MARKER_PREFIX)` behavior from `lintro/ai/review/github.py`; hardening state-marker selection and enforcing the state-block size cap are tracked separately in GitHub issue `#1866`.\n```\n\n> Note: Learnings are effective only in the context of similar code segments. To apply general coding guidelines, please configure [review instructions](https://docs.coderabbit.ai/guides/review-instructions). You can manage existing learnings in the [app](https://app.coderabbit.ai/learnings).\n\n</details>\n\n<sub>You are interacting with an AI system.</sub>"
+  },
+  {
+    "source": "coderabbit",
+    "comment_id": 4823079968,
+    "created_at": "2026-07-30T20:43:23Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/1481#pullrequestreview-4823079968",
+    "file": null,
+    "line": null,
+    "severity_guess": "P3",
+    "title": "Actionable comments posted: 4",
+    "body": "**Actionable comments posted: 4**\n\n<details>\n<summary>🤖 Prompt for all review comments with AI agents</summary>\n\n```\nVerify each finding against current code. Fix only still-valid issues, skip the\nrest with a brief reason, keep changes minimal, and validate.\n\nInline comments:\nIn `@lintro/ai/review/github_errors.py`:\n- Line 15: Decouple github_errors from the private _render_state_block import by\npromoting that shared state-block serializer to a public helper or moving it\ninto the state module alongside parse_review_state. Update github_errors and\ngithub_sticky.build_sticky_comment to use the shared public symbol while\npreserving the existing serialization contract.\n\nIn `@lintro/ai/review/github_render.py`:\n- Around line 359-362: Update the char_budget documentation in the finding-block\nrendering docstring to remove the claim that fallback findings are never\nbudget-truncated, and describe the behavior implemented by the\nfinding-processing loop: the budget applies to every finding, with over-budget\nfindings replaced by the truncation marker while remaining inline comments.\n\nIn `@lintro/ai/review/github_sticky.py`:\n- Around line 309-314: Update the state-marker lookup in the parser around\nSTATE_MARKER_PREFIX to search from the end of body rather than the first\noccurrence, so the appended real state block is selected over marker text\nembedded in findings. Preserve the existing suffix extraction and empty-result\nbehavior.\n- Around line 91-110: Reserve the rendered state-block length before applying\nthe comment size cap so the final concatenated comment remains within\nMAX_COMMENT_CHARS. Update _cap_body to accept a reserved-size parameter and use\nthe reduced limit throughout _elide_low_value_sections, _cap_findings_section,\nand final truncation; call it with the length of\n_render_state_block(runs=all_runs), then append the state block unchanged.\n```\n\n</details>\n\n<details>\n<summary>🪄 Autofix (Beta)</summary>\n\nFix all unresolved CodeRabbit comments on this PR:\n\n- [ ]  Push a commit to this branch (recommended)\n- [ ]  Create a new PR with the fixes\n\n</details>\n\n---\n\n<details>\n<summary>ℹ️ Review info</summary>\n\n<details>\n<summary>⚙️ Run configuration</summary>\n\n**Configuration used**: Organization UI\n\n**Review profile**: ASSERTIVE\n\n**Plan**: Pro\n\n**Run ID**: `3d2e6c64-83f5-4008-b051-6fc590e0618b`\n\n</details>\n\n<details>\n<summary>📥 Commits</summary>\n\nReviewing files that changed from the base of the PR and between a369677039ba9d6268991759781181989773a823 and e6119c92a9d0d85e51fe6b6c0db321e640bb9c93.\n\n</details>\n\n<details>\n<summary>📒 Files selected for processing (10)</summary>\n\n* `lintro/ai/review/github.py`\n* `lintro/ai/review/github_constants.py`\n* `lintro/ai/review/github_errors.py`\n* `lintro/ai/review/github_render.py`\n* `lintro/ai/review/github_sticky.py`\n* `lintro/tools/definitions/_ts_checker_base.py`\n* `lintro/tools/definitions/_ts_checker_command.py`\n* `lintro/tools/definitions/_ts_checker_execution.py`\n* `lintro/utils/module_size.py`\n* `pyproject.toml`\n\n</details>\n\n<details>\n<summary>💤 Files with no reviewable changes (2)</summary>\n\n* pyproject.toml\n* lintro/utils/module_size.py\n\n</details>\n\n</details>"
+  }
+]

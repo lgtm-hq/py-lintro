@@ -1,0 +1,39 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 1916,
+  "title": "feat(review): state schema v2 with per-run stats history and cross-run finding matching",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/1916",
+  "base_ref": "main",
+  "base_oid": "5446da1a3ec12908281f99fd6ffdc8b6650e5abc",
+  "head_oid": "37fee501ffff015f8939f5f808a201f827f267b5",
+  "merged_at": "2026-08-03T18:01:54Z",
+  "additions": 2641,
+  "deletions": 93,
+  "changed_files": 20,
+  "files": [
+    "lintro/ai/review/enums/__init__.py",
+    "lintro/ai/review/enums/finding_match_outcome.py",
+    "lintro/ai/review/enums/finding_status.py",
+    "lintro/ai/review/enums/review_verdict.py",
+    "lintro/ai/review/finding_matcher.py",
+    "lintro/ai/review/github.py",
+    "lintro/ai/review/github_constants.py",
+    "lintro/ai/review/github_errors.py",
+    "lintro/ai/review/github_sticky.py",
+    "lintro/ai/review/models/__init__.py",
+    "lintro/ai/review/models/_coerce.py",
+    "lintro/ai/review/models/finding_match_result.py",
+    "lintro/ai/review/models/finding_record.py",
+    "lintro/ai/review/models/review_state.py",
+    "lintro/ai/review/models/run_record.py",
+    "lintro/ai/review/review_state_codec.py",
+    "tests/unit/ai/review/test_finding_matcher.py",
+    "tests/unit/ai/review/test_github.py",
+    "tests/unit/ai/review/test_github_sticky_state.py",
+    "tests/unit/ai/review/test_review_state_codec.py"
+  ],
+  "competitor_counts": {
+    "coderabbit": 22,
+    "lintro_dogfood": 1
+  }
+}

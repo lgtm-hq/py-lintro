@@ -1,0 +1,2 @@
+[33m[1mai.enabled without ai.lint/ai.review is deprecated; both AI lint summarization and AI review were enabled for backward compatibility. Set ai.lint and/or ai.review explicitly.[0m
+[31m[1mReview aborted before all chunks completed on chunk 0 during reviewing — kind=unknown, cause: [Errno 7] Argument list too long: '/home/ubuntu/.local/bin/claude'[0m

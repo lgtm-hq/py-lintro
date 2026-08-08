@@ -1,0 +1,112 @@
+[
+  {
+    "origin": "greptile",
+    "file": null,
+    "line": null,
+    "title": "PR author is in the excluded authors list.",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#issuecomment-4813902260",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "package.json",
+    "line": 27,
+    "title": "<a href=\"#\"><img alt=\"P2\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg?v=7\" align=\"top\"></a> **TypeScript 6 peer-dependency compatibility*",
+    "severity_guess": "P2",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3249660367",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": ".github/workflows/build-binary.yml",
+    "line": 106,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Missing egress endpoint for `releases.astra",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3306479573",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "package.json",
+    "line": 28,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Astro peer conflict**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3446764019",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "package.json",
+    "line": 36,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **js-yaml override breaks tools**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3447180619",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": "package.json",
+    "line": 28,
+    "title": "<a href=\"#\"><img alt=\"P1\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg?v=9\" align=\"top\"></a> **Generated versions drift**",
+    "severity_guess": "P1",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3449454072",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": null,
+    "line": null,
+    "title": "`renovate[bot]` has reached the 50-review limit for trial accounts. To continue receiving code reviews, [upgrade your plan](https://app.greptile.com/review/gith",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#pullrequestreview-4307465540",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": null,
+    "line": null,
+    "title": "`renovate[bot]` has reached the 50-review limit for trial accounts. To continue receiving code reviews, [upgrade your plan](https://app.greptile.com/review/gith",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#pullrequestreview-4321519935",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": null,
+    "line": null,
+    "title": "`renovate[bot]` has reached the 50-review limit for trial accounts. To continue receiving code reviews, [upgrade your plan](https://app.greptile.com/review/gith",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#pullrequestreview-4321792801",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "greptile",
+    "file": null,
+    "line": null,
+    "title": "`renovate[bot]` has reached the 50-review limit for trial accounts. To continue receiving code reviews, [upgrade your plan](https://app.greptile.com/review/gith",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#pullrequestreview-4322419298",
+    "label": "unreviewed",
+    "notes": ""
+  },
+  {
+    "origin": "macroscope",
+    "file": ".github/workflows/vuln-suppression-check.yml",
+    "line": 1,
+    "title": "🟠 **High**",
+    "severity_guess": null,
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3306475139",
+    "label": "unreviewed",
+    "notes": ""
+  }
+]

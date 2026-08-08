@@ -1,0 +1,10 @@
+{
+  "error": {
+    "kind": "timeout",
+    "provider": "anthropic",
+    "status": null,
+    "retryable": true,
+    "provider_unavailable": true,
+    "message": "Claude CLI timed out after 900s"
+  }
+}

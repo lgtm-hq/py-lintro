@@ -1,0 +1,26 @@
+{
+  "repo": "lgtm-hq/py-lintro",
+  "number": 958,
+  "title": "fix(astro-check): run non-interactively to prevent prompt hang and timeout",
+  "url": "https://github.com/lgtm-hq/py-lintro/pull/958",
+  "base_ref": "main",
+  "base_oid": "a69fbe5a63847ab21f5ae7fc20600565e4f43b04",
+  "head_oid": "f72afcbb269e4c244be1318c753510543d8cb903",
+  "merged_at": "2026-07-10T05:59:42Z",
+  "additions": 377,
+  "deletions": 7,
+  "changed_files": 4,
+  "files": [
+    "lintro/plugins/base.py",
+    "lintro/plugins/subprocess_executor.py",
+    "lintro/tools/definitions/astro_check.py",
+    "tests/unit/tools/astro_check/test_non_interactive.py"
+  ],
+  "competitor_counts": {
+    "coderabbit": 5,
+    "cursor_bugbot": 1,
+    "greptile": 2,
+    "lintro_dogfood": 1,
+    "macroscope": 1
+  }
+}

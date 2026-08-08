@@ -1,0 +1,13 @@
+[
+  {
+    "source": "macroscope",
+    "comment_id": 3306475139,
+    "created_at": "2026-05-26T19:54:52Z",
+    "url": "https://github.com/lgtm-hq/py-lintro/pull/916#discussion_r3306475139",
+    "file": ".github/workflows/vuln-suppression-check.yml",
+    "line": 1,
+    "severity_guess": null,
+    "title": "🟠 **High",
+    "body": "🟠 **High**\n\nhttps://github.com/lgtm-hq/py-lintro/blob/b5d151a2881ce27550cd6692fadfc1c45df9336f/.github/workflows/vuln-suppression-check.yml#L34-L45\n\nUpgrading `astral-sh/setup-uv` to v8.1.0 adds a network request to `raw.githubusercontent.com:443` for version resolution, but this endpoint is missing from the harden-runner `allowed-endpoints` list. With `egress-policy: 'block'`, the \"Install uv\" step will fail when it tries to fetch the versions manifest.\n\n```diff\n            api.deps.dev:443\n            astral.sh:443\n            releases.astral.sh:443\n+            raw.githubusercontent.com:443\n```\n\n\n<details>\n<summary>🚀 Reply \"<strong>fix it for me</strong>\" or copy this <strong>AI Prompt</strong> for your agent:</summary>\n\n```text\nIn file .github/workflows/vuln-suppression-check.yml around lines 34-45:\n\nUpgrading `astral-sh/setup-uv` to v8.1.0 adds a network request to `raw.githubusercontent.com:443` for version resolution, but this endpoint is missing from the harden-runner `allowed-endpoints` list. With `egress-policy: 'block'`, the \"Install uv\" step will fail when it tries to fetch the versions manifest.\n```\n</details>"
+  }
+]
