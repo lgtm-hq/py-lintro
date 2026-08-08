@@ -33,6 +33,11 @@ name: AI - CLI Contract Tests
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  # Required before adding the Tier 1 context to checks-py-lintro (#1119 /
+  # #1196): a merge-queue ruleset would otherwise wait forever for a check that
+  # this workflow never schedules.
+  merge_group:
+    types: [checks_requested]
   schedule:
     # Weekly (Monday 05:17 UTC), after the ai-tools image rebuild at 03:47 so the
     # scheduled run exercises the freshly published CLIs.
