@@ -18,6 +18,7 @@ __all__ = [
     "apply_resolved_transport",
     "apply_transport_override",
     "format_resolved_profile_log",
+    "resolve_cost_basis",
     "resolve_transport_settings",
 ]
 
@@ -46,6 +47,29 @@ class ResolvedTransportSettings:
     cost_is_advisory: bool
     auth_mode: AuthMode
     cost_basis: CostBasis
+
+
+def resolve_cost_basis(*, auth_mode: str, estimated: bool) -> CostBasis | None:
+    """Resolve cost provenance for a recorded run.
+
+    Args:
+        auth_mode: Authentication mode used for the run (``api_key`` /
+            ``subscription`` / empty when unknown).
+        estimated: Whether token counts were priced locally.
+
+    Returns:
+        ``unpriceable`` under subscription billing; ``estimated`` or
+        ``billed`` for metered API-key paths; ``None`` when provenance
+        cannot be inferred (legacy blobs with neither auth nor estimate).
+    """
+    normalized = (auth_mode or "").strip().lower().replace("-", "_")
+    if normalized == "subscription":
+        return CostBasis.UNPRICEABLE
+    if normalized == "api_key":
+        return CostBasis.ESTIMATED if estimated else CostBasis.BILLED
+    if estimated:
+        return CostBasis.ESTIMATED
+    return None
 
 
 def apply_transport_override(
