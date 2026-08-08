@@ -27,9 +27,10 @@ Two invariants the renderer enforces:
 
 * **No nested ``<details>``.** Every collapsible is top level; the run history
   carries plain tables and the degraded fold-in flattens finding detail.
-* **The comment always fits GitHub's 65,536-char cap.** Oldest run history is
-  pruned first, then resolved findings, then open findings — each with a
-  visible marker, never a silent drop.
+* **The comment (body + state block) always fits ``MAX_COMMENT_CHARS``.**
+  Oldest run history is pruned first, then resolved findings, then open
+  findings — each with a visible marker, never a silent drop. The state block
+  is reserved when needed so appending it cannot push the total over the cap.
 """
 
 from __future__ import annotations
@@ -245,33 +246,51 @@ class _RenderLimits:
     open: int | None = None
 
 
-#: When estimating how much of ``MAX_COMMENT_CHARS`` the state block may claim
-#: before the visible body is fitted (#1866), leave at least this fraction of
-#: the budget for the mission-control board so a huge finding history cannot
-#: reserve the entire comment and blank the sticky.
-_STATE_RESERVATION_BODY_FLOOR_FRACTION = 2
+def _fit_body_with_state(
+    *,
+    assemble: _Assembler,
+    prior_run_count: int,
+    open_count: int,
+    resolved_count: int,
+    state: ReviewState,
+) -> str:
+    """Fit the visible body, then append state under ``MAX_COMMENT_CHARS``.
 
-
-def _reservation_for_state(*, state: ReviewState) -> int:
-    """Return how many characters to reserve for ``state`` when fitting a body.
-
-    Renders the state block first (after pruning it against a body-floor
-    placeholder) so ``build_sticky_comment`` can pass ``reserved=`` into the
-    body cap and keep ``body + state_block <= MAX_COMMENT_CHARS`` (#1866).
+    Renders the state block first (after pruning it against the fitted body)
+    and, when needed, refits the body with ``reserved=len(state_block)`` so the
+    final concatenation is always ``<= MAX_COMMENT_CHARS`` (#1866).
 
     Args:
-        state: State that will be appended after the visible body.
+        assemble: Callable taking ``limits`` and returning the rendered body.
+        prior_run_count: Number of prior runs available to the history table.
+        open_count: Number of open findings, bounding that section's search.
+        resolved_count: Number of resolved findings, likewise.
+        state: State to embed in the hidden trailing block.
 
     Returns:
-        Character count to reserve for the trailing state block.
+        Complete sticky body including the state block.
     """
-    body_floor = MAX_COMMENT_CHARS // _STATE_RESERVATION_BODY_FLOOR_FRACTION
-    pruned = prune_state_to_fit(
-        state=state,
-        body="x" * body_floor,
-        limit=MAX_COMMENT_CHARS,
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=prior_run_count,
+        open_count=open_count,
+        resolved_count=resolved_count,
     )
-    return len(render_state_block(state=pruned))
+    pruned = prune_state_to_fit(state=state, body=body, limit=MAX_COMMENT_CHARS)
+    state_block = render_state_block(state=pruned)
+    if len(body) + len(state_block) > MAX_COMMENT_CHARS:
+        # Body left no room for even the pruned-down state; refit with an
+        # explicit reservation so appending the block cannot overflow.
+        body = _fit_body(
+            assemble=assemble,
+            prior_run_count=prior_run_count,
+            open_count=open_count,
+            resolved_count=resolved_count,
+            reserved=len(state_block),
+        )
+        pruned = prune_state_to_fit(state=state, body=body, limit=MAX_COMMENT_CHARS)
+        state_block = render_state_block(state=pruned)
+    return body + state_block
 
 
 def build_sticky_comment(
@@ -389,22 +408,12 @@ def build_sticky_comment(
         findings=match.records,
         truncated=state.truncated or runs_dropped,
     )
-    # Render/prune the state block first and reserve its length when fitting
-    # the visible body so body + state is always <= MAX_COMMENT_CHARS (#1866).
-    reserved = _reservation_for_state(state=new_state)
-    body = _fit_body(
+    return _fit_body_with_state(
         assemble=assemble,
         prior_run_count=len(all_runs) - 1,
         open_count=open_count,
         resolved_count=len(match.records) - open_count,
-        reserved=reserved,
-    )
-    return body + render_state_block(
-        state=prune_state_to_fit(
-            state=new_state,
-            body=body,
-            limit=MAX_COMMENT_CHARS,
-        ),
+        state=new_state,
     )
 
 
@@ -461,20 +470,12 @@ def render_state_sticky(
             pr_number=pr_number,
         )
 
-    reserved = _reservation_for_state(state=state)
-    body = _fit_body(
+    return _fit_body_with_state(
         assemble=assemble,
         prior_run_count=max(len(runs) - 1, 0),
         open_count=open_count,
         resolved_count=len(records) - open_count,
-        reserved=reserved,
-    )
-    return body + render_state_block(
-        state=prune_state_to_fit(
-            state=state,
-            body=body,
-            limit=MAX_COMMENT_CHARS,
-        ),
+        state=state,
     )
 
 
