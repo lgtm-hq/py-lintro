@@ -58,6 +58,28 @@ def _is_core_path(relative: str) -> bool:
     return False
 
 
+def _absolute_module(*, path: Path, node: ast.ImportFrom) -> str:
+    """Resolve an ``ImportFrom`` to its absolute dotted module path.
+
+    Handles relative imports (``from .. import ai``, ``from ..ai import x``)
+    by walking ``node.level`` packages up from the importing file, so a
+    relative spelling cannot slip past the ``lintro.ai`` prefix check.
+
+    Args:
+        path: Source file containing the import.
+        node: The ``ImportFrom`` node.
+
+    Returns:
+        Absolute dotted module path the import resolves to.
+    """
+    module = node.module or ""
+    if node.level == 0:
+        return module
+    package = ["lintro", *path.relative_to(LINTRO_ROOT).parts[:-1]]
+    base = package[: len(package) - (node.level - 1)]
+    return ".".join([*base, module]) if module else ".".join(base)
+
+
 def _runtime_ai_imports(path: Path) -> list[tuple[int, str]]:
     """Collect runtime (non-TYPE_CHECKING) imports of ``lintro.ai`` from ``path``.
 
@@ -78,9 +100,7 @@ def _runtime_ai_imports(path: Path) -> list[tuple[int, str]]:
             test = node.test
             is_type_checking = (
                 isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
-            ) or (
-                isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-            )
+            ) or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING")
             if is_type_checking:
                 previous = self._in_type_checking
                 self._in_type_checking = True
@@ -102,9 +122,16 @@ def _runtime_ai_imports(path: Path) -> list[tuple[int, str]]:
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
             if self._in_type_checking:
                 return
-            module = node.module or ""
-            if module == "lintro.ai" or module.startswith("lintro.ai."):
-                hits.append((node.lineno, module))
+            base = _absolute_module(path=path, node=node)
+            if base == "lintro.ai" or base.startswith("lintro.ai."):
+                hits.append((node.lineno, base))
+                return
+            # ``from lintro import ai`` / ``from .. import ai`` bind the
+            # submodule through the alias, not the ``module`` field.
+            for alias in node.names:
+                candidate = f"{base}.{alias.name}" if base else alias.name
+                if candidate == "lintro.ai" or candidate.startswith("lintro.ai."):
+                    hits.append((node.lineno, candidate))
 
     _Visitor().visit(tree)
     return hits
