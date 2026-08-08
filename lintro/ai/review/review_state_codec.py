@@ -69,23 +69,39 @@ def render_state_block(*, state: ReviewState) -> str:
 def _extract_payload(*, body: str) -> dict[str, Any] | None:
     """Pull the JSON mapping out of a sticky comment body.
 
+    The authentic state block is always appended last. Model-derived finding
+    text is not stripped of our marker, so a forged ``STATE_MARKER_PREFIX`` can
+    appear earlier in the body — and, under schema v2, again as a substring
+    inside the serialized finding title of the authentic block. Walk candidate
+    markers from the end and accept the last one whose payload is a single
+    JSON object closed by ``STATE_MARKER_SUFFIX`` (#1866).
+
     Args:
         body: Existing sticky comment body.
 
     Returns:
         The decoded mapping, or ``None`` when absent or unparsable.
     """
-    start = body.find(STATE_MARKER_PREFIX)
-    if start < 0:
-        return None
-    after = body[start + len(STATE_MARKER_PREFIX) :]
-    end = after.rfind(STATE_MARKER_SUFFIX)
-    raw = after[:end] if end >= 0 else after
-    try:
-        payload = json.loads(raw.strip())
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
+    decoder = json.JSONDecoder()
+    search_end = len(body)
+    while search_end > 0:
+        start = body.rfind(STATE_MARKER_PREFIX, 0, search_end)
+        if start < 0:
+            return None
+        after = body[start + len(STATE_MARKER_PREFIX) :].lstrip()
+        try:
+            payload, index = decoder.raw_decode(after)
+        except (json.JSONDecodeError, ValueError):
+            search_end = start
+            continue
+        rest = after[index:].lstrip()
+        if not rest.startswith(STATE_MARKER_SUFFIX):
+            search_end = start
+            continue
+        if isinstance(payload, dict):
+            return payload
+        search_end = start
+    return None
 
 
 def _parse_runs(*, payload: dict[str, Any]) -> list[RunRecord]:
