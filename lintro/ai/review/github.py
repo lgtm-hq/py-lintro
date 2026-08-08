@@ -100,6 +100,7 @@ def post_review_to_github(
     question_map: dict[int, str] | None = None,
     transport: str = "",
     auth_mode: str = "",
+    cost_basis: str = "",
     config_source: str = "",
     auto_resolve: bool = True,
 ) -> bool:
@@ -120,6 +121,8 @@ def post_review_to_github(
         question_map: Prompt id to question text for linked display.
         transport: Provider transport used for this round (e.g. ``cli``).
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost
+            (``billed`` / ``estimated`` / ``unpriceable``).
         config_source: Human-readable description of where this run's settings
             came from, shown under the review body's run stats.
         auto_resolve: ``review.auto_resolve``. When false, an addressed thread
@@ -154,6 +157,7 @@ def post_review_to_github(
             diff_lines=diff_lines,
             transport=transport,
             auth_mode=auth_mode,
+            cost_basis=cost_basis,
             inline_failure=inline_failure,
             inline_comment_ids=comment_ids,
             repo=gh_reporter.repo or "",

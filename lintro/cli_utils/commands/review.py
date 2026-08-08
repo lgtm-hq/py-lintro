@@ -430,6 +430,17 @@ def review_command(
             run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
             workspace_root=workspace_root,
         )
+        from dataclasses import replace as dc_replace
+
+        result = dc_replace(
+            result,
+            metadata=dc_replace(
+                result.metadata,
+                transport=resolved_profile.transport.value,
+                auth_mode=resolved_profile.auth_mode,
+                cost_basis=resolved_profile.cost_basis.value,
+            ),
+        )
     except (AIError, ValueError) as exc:
         if post and resolved_pr is not None and effective_repo:
             from lintro.ai.review.github import post_review_error_to_github
@@ -499,7 +510,9 @@ def review_command(
             repo=effective_repo,
             checklist_display=checklist_display,
             question_map=question_map,
-            transport=str(effective_ai_config.transport),
+            transport=resolved_profile.transport.value,
+            auth_mode=resolved_profile.auth_mode,
+            cost_basis=resolved_profile.cost_basis.value,
             auto_resolve=lintro_config.review.auto_resolve,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,

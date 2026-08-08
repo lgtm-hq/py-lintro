@@ -76,6 +76,38 @@ def test_apply_resolved_transport_writes_legacy_scalars() -> None:
     assert_that(applied.max_cost_usd).is_equal_to(0.5)
 
 
+def test_api_profile_timeout_beats_legacy_scalar() -> None:
+    """API transport profile timeout wins over ai.api_timeout."""
+    from lintro.ai.config import ApiTransportProfile
+
+    config = AIConfig(
+        enabled=True,
+        transport=AITransport.API,
+        api_timeout=120.0,
+        transports=AITransportProfiles(
+            api=ApiTransportProfile(timeout=45.0),
+        ),
+    )
+    resolved = resolve_transport_settings(config)
+    assert_that(resolved.timeout).is_equal_to(45.0)
+
+
+def test_flag_timeout_via_profile_mutation_wins() -> None:
+    """Writing the active profile timeout (as --timeout does) is honored."""
+    config = AIConfig(
+        enabled=True,
+        transport=AITransport.CLI,
+        transports=AITransportProfiles(
+            cli=CliTransportProfile(timeout=900),
+        ),
+    )
+    transports = config.transports.model_copy(deep=True)
+    transports.cli.timeout = 42.0
+    config = config.model_copy(update={"transports": transports})
+    resolved = resolve_transport_settings(config)
+    assert_that(resolved.timeout).is_equal_to(42.0)
+
+
 def test_format_resolved_profile_log_names_advisory_cap() -> None:
     """Log line is self-describing for CI."""
     config = AIConfig(

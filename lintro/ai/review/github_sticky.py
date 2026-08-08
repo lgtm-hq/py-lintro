@@ -256,6 +256,7 @@ def build_sticky_comment(
     head_sha: str = "",
     transport: str = "",
     auth_mode: str = "",
+    cost_basis: str = "",
     inline_failure: InlinePostFailure | None = None,
     inline_comment_ids: Mapping[str, int] | None = None,
     repo: str = "",
@@ -283,6 +284,8 @@ def build_sticky_comment(
             resolved by this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost
+            (``billed`` / ``estimated`` / ``unpriceable``).
         inline_failure: Findings whose inline comments could not be posted.
             When set, the sticky renders a warning row above the open-findings
             table and folds those findings' full detail back in.
@@ -328,6 +331,7 @@ def build_sticky_comment(
         head_sha=head_sha,
         transport=transport,
         auth_mode=auth_mode,
+        cost_basis=cost_basis,
         verdict=verdict,
         resolved=len(match.resolved),
         open_after=open_count,
@@ -1592,6 +1596,7 @@ def _run_record(
     head_sha: str,
     transport: str,
     auth_mode: str,
+    cost_basis: str,
     verdict: ReviewVerdict,
     resolved: int,
     open_after: int,
@@ -1604,6 +1609,7 @@ def _run_record(
         head_sha: Head commit sha reviewed in this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost.
         verdict: Readiness verdict derived from the open findings.
         resolved: Number of findings this round resolved.
         open_after: Number of findings still open after this round.
@@ -1620,8 +1626,9 @@ def _run_record(
         sha=head_sha,
         model=metadata.model,
         provider=metadata.provider,
-        transport=transport,
-        auth_mode=auth_mode,
+        transport=transport or metadata.transport,
+        auth_mode=auth_mode or metadata.auth_mode,
+        cost_basis=cost_basis or metadata.cost_basis,
         depth=metadata.depth,
         strictness=metadata.strictness,
         files_reviewed=metadata.files_reviewed,

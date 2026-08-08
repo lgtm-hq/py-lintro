@@ -50,5 +50,23 @@ ai:
 - Prefer **`api`** when you need enforced spend caps, streaming, or non-Claude
   providers with API keys.
 
+## Credentials and `LINTRO_CLI_BARE`
+
+| Variable / setting | Transport | Role |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | api (required); cli optional | Metered API / bare-mode auth |
+| `CLAUDE_CODE_OAUTH_TOKEN` | cli | Subscription OAuth session for `claude` |
+| `ai.cli_bare` / `LINTRO_CLI_BARE` | cli | `auto` / `always` / `never` — whether to pass `--bare` |
+
+`--bare` disables OAuth session login and authenticates only against an API key
+(#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps
+`ANTHROPIC_API_KEY` out of scope so the subscription token is actually used.
+
+## Reported numbers
+
+Per-run sticky state records `transport`, `auth_mode`, and `cost_basis`
+(`billed` / `estimated` / `unpriceable`). Under subscription CLI, any `~$`
+figure is unpriceable — not a bill.
+
 See also `docs/ai-features.md` and the dogfood workflow helpers under
 `scripts/ci/`.
