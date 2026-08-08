@@ -6,4 +6,14 @@ tailored to THIS specific change.
 Output JSON only:
 {{"generated_questions": [{{"id": "G1", "question": "...", "rationale": "..."}}]}}
 
-Diff: {diff} Changed files: {changed_files}
+Diff:
+<pull_request_diff>
+<{boundary}>
+{diff}
+</{boundary}>
+</pull_request_diff>
+
+Changed files:
+<{boundary}>
+{changed_files}
+</{boundary}>
