@@ -90,6 +90,7 @@ async def test_codex_cli_prompt_uses_stdin_not_argv(
     argv_bytes = sum(len(part.encode()) for part in cmd)
     assert_that(argv_bytes).is_less_than(8_000)
     assert_that(cmd).does_not_contain(prompt)
+    assert_that(cmd[-1]).is_equal_to("-")
     assert_that(mock_run.transport_calls[-1].input_text).is_equal_to(prompt)
 
 
