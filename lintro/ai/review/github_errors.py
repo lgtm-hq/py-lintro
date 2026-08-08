@@ -11,7 +11,7 @@ from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
-from lintro.ai.review.github_constants import _FOOTER, STICKY_MARKER
+from lintro.ai.review.github_constants import MAX_COMMENT_CHARS, _FOOTER, STICKY_MARKER
 from lintro.ai.review.github_render import format_run_mechanics, sanitize_comment_text
 from lintro.ai.review.github_sticky import render_state_sticky
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -125,7 +125,13 @@ def format_error_comment(
     lines.extend(["", _FOOTER])
     body = "\n".join(lines)
     if state is not None and (state.findings or state.truncated):
-        body += render_state_block(state=prune_state_to_fit(state=state, body=body))
+        body += render_state_block(
+            state=prune_state_to_fit(
+                state=state,
+                body=body,
+                limit=MAX_COMMENT_CHARS,
+            ),
+        )
     return body
 
 
