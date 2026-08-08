@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn a ``lintro review`` run into an honest CI check outcome.
+r"""Turn a ``lintro review`` run into an honest CI check outcome.
 
 The dogfood AI review check reported ``success`` on every pull request while
 producing no review at all: a depleted Anthropic balance made every run abort,
@@ -31,7 +31,7 @@ and CLI-only failure vocabularies are distinguished so a subscription-CLI kill
 is never misread as "no credits". Every headline names the transport.
 
 Usage:
-    scripts/ci/classify_review_outcome.py --status <n> --output-file <path> \\
+    scripts/ci/classify_review_outcome.py --status <n> --output-file <path> \
         [--transport api|cli]
 
 Environment:
@@ -348,8 +348,7 @@ def classify(
             headline=_with_transport(
                 transport=transport,
                 headline=(
-                    f"review could not complete ({refined_kind}) — "
-                    "nothing was reviewed"
+                    f"review could not complete ({refined_kind}) — nothing was reviewed"
                 ),
             ),
             detail=message,
