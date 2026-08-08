@@ -66,19 +66,29 @@ def build_review_user_prompt(
     )
     pr_summary = context.pr_metadata.body if context.pr_metadata is not None else ""
     raw_diff = diff if diff is not None else context.unified_diff
+    boundary = make_boundary_marker()
+    deferred_section = format_deferred_scope_section(text=deferred_scope)
+    if deferred_section:
+        # Deferred scope derives from the PR summary — untrusted; fence it
+        # like the other PR-controlled fields (#1884).
+        deferred_section = (
+            f"<{boundary}>\n"
+            + redact_prompt_text(text=deferred_section, source="PR metadata")
+            + f"\n</{boundary}>"
+        )
     prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=redact_prompt_text(text=pr_title, source="PR title"),
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         pr_summary=redact_prompt_text(text=pr_summary, source="PR metadata"),
-        deferred_scope_section=format_deferred_scope_section(text=deferred_scope),
+        deferred_scope_section=deferred_section,
         external_review_section=format_external_review_section(flags=external_flags),
         changed_file_count=len(context.changed_files),
         changed_files=format_changed_files_for_prompt(files=context.changed_files),
         interaction_paths=interaction_paths,
         checklist_count=len(checklist_items),
         checklist=checklist_text,
-        boundary=make_boundary_marker(),
+        boundary=boundary,
         diff=redact_prompt_text(text=raw_diff, source="diff"),
         lint_results_section=format_lint_results_section(digest=lint_digest),
         strictness_section="",

@@ -41,9 +41,7 @@ brief evidence (file:line).
 
 ### Diff to review
 
-<{boundary}>
 {diff_section}
-</{boundary}>
 
 <{boundary}>
 {lint_results_section}
