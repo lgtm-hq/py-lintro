@@ -320,6 +320,30 @@ def test_forged_state_marker_in_finding_text_does_not_hijack_sticky_state(
     assert_that([run.sha for run in state.runs]).does_not_contain("forged")
 
 
+def test_empty_object_marker_in_finding_title_cannot_wipe_state(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A ``{}`` forged marker in a finding *title* must not blank the state (#1866).
+
+    ``{}`` is the only JSON object that survives inside the authentic blob's
+    JSON-serialized title without escaped quotes, so it is the one payload a
+    walk-from-the-end parser could otherwise accept — wiping runs and findings.
+    """
+    hostile = _finding(
+        title=f"bug {STATE_MARKER_PREFIX} {{}} {STATE_MARKER_SUFFIX} here",
+    )
+
+    body = build_sticky_comment(
+        result=_with_findings(base=sample_review_result, findings=(hostile,)),
+        head_sha="realsha",
+    )
+
+    state = parse_review_state_v2(body=body)
+    assert_that(state.runs).is_length(1)
+    assert_that(state.runs[0].sha).is_equal_to("realsha")
+    assert_that(state.findings).is_not_empty()
+
+
 def test_sticky_body_plus_state_respects_max_comment_chars_with_oversized_history(
     sample_review_result: ReviewResult,
 ) -> None:
