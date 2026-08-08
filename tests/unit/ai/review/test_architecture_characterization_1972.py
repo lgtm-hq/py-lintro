@@ -66,26 +66,6 @@ _CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
     },
 )
 
-_MCP_RUN_METADATA_KEYS: frozenset[str] = frozenset(
-    {
-        "model",
-        "provider",
-        "depth",
-        "strictness",
-        "cost_usd",
-        "duration_seconds",
-        "chunks",
-        "files",
-        "token_usage",
-        "token_usage_estimated",
-        "base_ref",
-        "head_ref",
-        "timestamp",
-        "partial",
-        "stopped_reason",
-    },
-)
-
 
 def _git(*args: str, cwd: Path) -> None:
     """Run one fixed git command in ``cwd``.
@@ -462,17 +442,11 @@ def test_mcp_review_disabled_maps_to_tool_unavailable(tmp_path: Path) -> None:
     with (
         patch("lintro.ai.availability.is_ai_available", return_value=True),
         patch("lintro.config.config_loader.get_config", return_value=loaded),
+        pytest.raises(McpError) as excinfo,
     ):
-        try:
-            mcp_review._resolve_ai_config(workspace=workspace)
-            raised: McpError | None = None
-        except McpError as exc:
-            raised = exc
+        mcp_review._resolve_ai_config(workspace=workspace)
 
-    assert_that(raised).is_not_none()
-    assert_that(raised.code).is_equal_to(McpErrorCode.TOOL_UNAVAILABLE)  # type: ignore[union-attr]
-    assert_that(raised.envelope.detail).is_not_none()  # type: ignore[union-attr]
-    detail = raised.envelope.detail or {}  # type: ignore[union-attr]
-    assert_that(detail["reason"]).is_equal_to(
-        "review_disabled",
-    )
+    raised = excinfo.value
+    assert_that(raised.code).is_equal_to(McpErrorCode.TOOL_UNAVAILABLE)
+    detail = raised.envelope.detail or {}
+    assert_that(detail["reason"]).is_equal_to("review_disabled")
