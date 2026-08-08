@@ -64,16 +64,13 @@ def build_review_user_prompt(
         if context.pr_metadata is not None
         else f"{context.base_ref}...{context.head_ref}"
     )
-    pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata is not None else ""
-    pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     raw_diff = diff if diff is not None else context.unified_diff
-    redacted_diff = redact_prompt_text(text=raw_diff, source="diff")
     prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
-        pr_title=pr_title,
+        pr_title=redact_prompt_text(text=pr_title, source="PR title"),
         base_ref=context.base_ref,
         head_ref=context.head_ref,
-        pr_summary=pr_summary,
+        pr_summary=redact_prompt_text(text=pr_summary, source="PR metadata"),
         deferred_scope_section=format_deferred_scope_section(text=deferred_scope),
         external_review_section=format_external_review_section(flags=external_flags),
         changed_file_count=len(context.changed_files),
@@ -82,7 +79,7 @@ def build_review_user_prompt(
         checklist_count=len(checklist_items),
         checklist=checklist_text,
         boundary=make_boundary_marker(),
-        diff=redacted_diff,
+        diff=redact_prompt_text(text=raw_diff, source="diff"),
         lint_results_section=format_lint_results_section(digest=lint_digest),
         strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,

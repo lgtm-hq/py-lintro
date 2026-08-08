@@ -39,11 +39,7 @@ brief evidence (file:line).
 
 ---
 
-<pull_request_diff>
-<{boundary}>
-{diff}
-</{boundary}>
-</pull_request_diff>
+<pull_request_diff> <{boundary}> {diff} </{boundary}> </pull_request_diff>
 
 <{boundary}>
 {lint_results_section}
