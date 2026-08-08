@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Any, Final
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
+from lintro.tools.core.update_channels import VersionAdvisory
+from lintro.tools.core.version_checking import build_version_advisory
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -75,6 +77,7 @@ class ToolCheckResult:
         path: Filesystem path where the tool was found.
         install_hint: Context-aware install command.
         upgrade_hint: Context-aware upgrade command for outdated tools.
+        advisory: Structured update advisory when outdated/incompatible.
     """
 
     tool: ManifestTool
@@ -85,6 +88,7 @@ class ToolCheckResult:
     path: str | None = None
     install_hint: str = ""
     upgrade_hint: str = ""
+    advisory: VersionAdvisory | None = None
 
     @property
     def installed(self) -> bool:
@@ -220,13 +224,27 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             recommended=tool.version,
             minimum=tool.min_version,
         )
+        advisory = None
+        final_upgrade = upgrade_hint
+        if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
+            advisory = build_version_advisory(
+                tool=tool.name,
+                installed=version,
+                latest_known=tool.version,
+                binary_path=tool_path,
+                install_package=tool.install_package,
+                install_type=tool.install_type,
+            )
+            if advisory and advisory.update_command:
+                final_upgrade = advisory.update_command
         return ToolCheckResult(
             tool=tool,
             status=status,
             installed_version=version,
             path=tool_path,
             install_hint=hint,
-            upgrade_hint=upgrade_hint,
+            upgrade_hint=final_upgrade,
+            advisory=advisory,
         )
     except subprocess.TimeoutExpired:
         return ToolCheckResult(

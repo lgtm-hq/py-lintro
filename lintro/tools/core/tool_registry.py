@@ -246,6 +246,7 @@ class ManifestRegistry:
             install_package=install.get("package"),
             install_bin=install.get("bin"),
             install_component=install.get("component"),
+            update_channel=install.get("update_channel"),
             tier=entry.get("tier", "tools"),
             category=category,
             version_command=tuple(version_command),

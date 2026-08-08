@@ -36,6 +36,7 @@ from lintro.tools.definitions.oxlint_doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
 )
+from lintro.tools.core.update_channels import format_advisory_line
 from lintro.utils.doctor_report import (
     ToolCheckResult,
     collect_tool_checks,
@@ -112,7 +113,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version:<10}", style="yellow")
         line.append(f"(>= {r.tool.min_version}, rec. {r.tool.version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        else:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.INCOMPATIBLE:
         line = Text("    ")
@@ -121,7 +125,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version or '?':<10}", style="red")
         line.append(f"(>= {r.tool.min_version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        else:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.DISABLED:
         line = Text("    ")
@@ -594,6 +601,21 @@ def doctor_command(
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
 
+    advisories = [
+        r.advisory
+        for r in prod_results
+        if r.advisory is not None
+        and r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
+    ]
+    if advisories:
+        display_console.print()
+        display_console.print("  [bold]Update advisories[/bold]")
+        for advisory in advisories:
+            line = Text("    ")
+            line.append("⚠ ", style="yellow")
+            line.append(format_advisory_line(advisory))
+            display_console.print(line)
+
     # Summary
     display_console.print()
     summary_parts: list[str] = []
@@ -680,7 +702,7 @@ def _output_json(
     issues: list[dict[str, str]] = []
 
     for r in all_results:
-        tools_json[r.tool.name] = {
+        tool_entry: dict[str, object] = {
             "recommended": r.tool.version,
             "min_version": r.tool.min_version,
             "expected": r.tool.min_version,
@@ -695,6 +717,9 @@ def _output_json(
             "install_hint": r.install_hint,
             "upgrade_hint": r.upgrade_hint,
         }
+        if r.advisory is not None:
+            tool_entry["advisory"] = r.advisory.to_dict()
+        tools_json[r.tool.name] = tool_entry
         if r.status == ToolStatus.MISSING and r.tool.tier != "dev":
             issues.append(
                 {

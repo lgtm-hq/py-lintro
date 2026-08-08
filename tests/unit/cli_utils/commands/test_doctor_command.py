@@ -22,7 +22,7 @@ from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.tool_registry import ManifestTool
-from lintro.utils.doctor_report import ToolCheckResult
+from lintro.utils.doctor_report import ToolCheckResult, check_tool
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -75,6 +75,37 @@ def _make_context(*, has_brew: bool = False) -> RuntimeContext:
         ),
         is_ci=False,
     )
+
+
+
+
+# ── check_tool advisories ────────────────────────────────────────────
+
+
+def test_check_tool_outdated_enriches_advisory_from_path() -> None:
+    """Outdated tools get a path-based update advisory."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    ctx = _make_context()
+
+    with (
+        patch(
+            "shutil.which",
+            return_value="/Users/me/.local/share/uv/tools/ruff/bin/ruff",
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert_that(result.advisory).is_not_none()
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("uv_tool")
+    assert_that(result.upgrade_hint).is_equal_to("uv tool upgrade ruff")
 
 
 # ── _output_json ─────────────────────────────────────────────────────
