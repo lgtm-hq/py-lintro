@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import os
 import re
@@ -672,6 +673,23 @@ class CliTransport(ABC):
             except FileNotFoundError as exc:
                 raise AINotAvailableError(
                     f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
+                ) from exc
+            except OSError as exc:
+                # Defense in depth for #1967: even after stdin prompt delivery,
+                # a leftover oversized argv element (or a huge env) can still
+                # raise E2BIG / "Argument list too long". Map it to a provider
+                # error instead of leaking a raw OSError to callers.
+                if exc.errno == errno.E2BIG or "argument list too long" in str(
+                    exc,
+                ).lower():
+                    raise AIProviderError(
+                        f"{self._binary_name} CLI could not spawn because the "
+                        "argument list is too long (E2BIG). Large prompts must "
+                        "be delivered via stdin, not argv. Narrow with --paths "
+                        "or use --transport api when available.",
+                    ) from exc
+                raise AIProviderError(
+                    f"{self._binary_name} CLI failed to start: {exc}",
                 ) from exc
 
             payload = input_text.encode() if input_text is not None else None
