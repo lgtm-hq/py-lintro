@@ -318,6 +318,14 @@ class OpenAIProvider(BaseAIProvider):
             supports_streaming=True,
         )
 
+    async def aclose(self) -> None:
+        """Close the OpenAI SDK client and any superseded loop-stale clients.
+
+        Idempotent. CLI transport holds no poolable HTTP client; this still
+        clears any API-transport client created earlier on this instance.
+        """
+        await super().aclose()
+
     async def _complete_cli(
         self,
         prompt: str,
