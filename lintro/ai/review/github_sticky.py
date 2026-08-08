@@ -256,8 +256,9 @@ def _fit_body_with_state(
 ) -> str:
     """Fit the visible body, then append state under ``MAX_COMMENT_CHARS``.
 
-    Renders the state block first (after pruning it against the fitted body)
-    and, when needed, refits the body with ``reserved=len(state_block)`` so the
+    Fits the visible body first, prunes and renders the state block against
+    that body, and, when needed, refits the body with
+    ``reserved=len(state_block)`` so the
     final concatenation is always ``<= MAX_COMMENT_CHARS`` (#1866).
 
     Args:
