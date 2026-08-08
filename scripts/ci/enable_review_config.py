@@ -100,6 +100,7 @@ def patch_config(*, data: dict[str, Any], max_cost_usd: float) -> dict[str, Any]
     # still looking at ai.max_cost_usd, and avoid leaving a stale api_timeout
     # that looks like the CLI budget.
     ai_section.pop("max_cost_usd", None)
+    ai_section.pop("api_timeout", None)
     return data
 
 

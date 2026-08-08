@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Literal
 
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.providers.claude_auth import should_send_bare
+from lintro.ai.registry import AIProvider
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -126,13 +128,20 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
             if profiles.cli.max_cost_usd_advisory is not None
             else ai_config.max_cost_usd
         )
+        # Anthropic's CLI switches to --bare when an API key is reachable
+        # (CliBareMode.AUTO, #1859): the call then bills the key, not the
+        # subscription, so report api_key/estimated instead of claiming
+        # subscription/unpriceable (#1923 cost provenance).
+        bare_billing = ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
+            configured=ai_config.cli_bare,
+        )
         return ResolvedTransportSettings(
             transport=transport,
             timeout=timeout,
             max_cost_usd=max_cost,
             cost_is_advisory=True,
-            auth_mode="subscription",
-            cost_basis=CostBasis.UNPRICEABLE,
+            auth_mode="api_key" if bare_billing else "subscription",
+            cost_basis=(CostBasis.ESTIMATED if bare_billing else CostBasis.UNPRICEABLE),
         )
 
     timeout = (

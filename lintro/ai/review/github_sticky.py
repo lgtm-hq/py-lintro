@@ -92,6 +92,7 @@ from lintro.ai.review.verdict import (
     resolve_bullet_finding,
     verdict_label,
 )
+from lintro.ai.transport import resolve_cost_basis
 
 __all__ = [
     "build_sticky_comment",
@@ -1620,6 +1621,19 @@ def _run_record(
     metadata = result.metadata
     counts = _severity_counts(findings=result.findings)
     usage = metadata.token_usage
+    effective_auth = auth_mode or metadata.auth_mode
+    effective_basis = cost_basis or metadata.cost_basis
+    if not effective_basis:
+        # Stamp provenance at creation so a fresh render and a re-render of
+        # parsed state serialize identically (parse derives the same value
+        # for legacy blobs; without this, an error-path re-render would
+        # rewrite the blob a "failed round persists state untouched"
+        # consumer expects byte-for-byte).
+        derived = resolve_cost_basis(
+            auth_mode=effective_auth,
+            estimated=bool(metadata.token_usage_estimated),
+        )
+        effective_basis = derived.value if derived is not None else ""
     return RunRecord(
         round=round_number,
         timestamp=metadata.timestamp,
@@ -1627,8 +1641,8 @@ def _run_record(
         model=metadata.model,
         provider=metadata.provider,
         transport=transport or metadata.transport,
-        auth_mode=auth_mode or metadata.auth_mode,
-        cost_basis=cost_basis or metadata.cost_basis,
+        auth_mode=effective_auth,
+        cost_basis=effective_basis,
         depth=metadata.depth,
         strictness=metadata.strictness,
         files_reviewed=metadata.files_reviewed,

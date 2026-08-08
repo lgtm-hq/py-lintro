@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig, AITransportProfiles, CliTransportProfile
@@ -123,3 +124,35 @@ def test_format_resolved_profile_log_names_advisory_cap() -> None:
     assert_that(line).contains("timeout=900")
     assert_that(line).contains("advisory:$0.50")
     assert_that(line).contains("cost_basis=unpriceable")
+
+
+def test_cli_auth_mode_reports_api_key_when_bare_billing_engages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI transport with a reachable Anthropic key bills the key, not the sub.
+
+    CliBareMode.AUTO sends --bare when ANTHROPIC_API_KEY is reachable (#1859),
+    so cost provenance must say api_key/estimated instead of
+    subscription/unpriceable (#1923).
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    config = AIConfig(transport=AITransport.CLI)
+
+    resolved = resolve_transport_settings(config)
+
+    assert_that(resolved.auth_mode).is_equal_to("api_key")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.ESTIMATED)
+
+
+def test_cli_auth_mode_reports_subscription_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI transport without a reachable key stays subscription/unpriceable."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+    config = AIConfig(transport=AITransport.CLI)
+
+    resolved = resolve_transport_settings(config)
+
+    assert_that(resolved.auth_mode).is_equal_to("subscription")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.UNPRICEABLE)
