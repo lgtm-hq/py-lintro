@@ -182,7 +182,7 @@ def test_assert_cli_diff_within_ceiling_raises_actionable_error() -> None:
         ],
         unified_diff=oversized,
         pr_metadata=None,
-        repo_root=None,
+        repo_root="",
     )
 
     with pytest.raises(ReviewContextError) as exc_info:
@@ -205,7 +205,7 @@ def test_cli_chunk_threshold_routes_large_diff_through_chunker() -> None:
         changed_files=changed,
         unified_diff=unified_diff,
         pr_metadata=None,
-        repo_root=None,
+        repo_root="",
     )
     window_budget = 190_000
     cli_budget = resolve_cli_diff_budget(
@@ -363,6 +363,7 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
     provider.capabilities.supports_sessions = False
     ai_config = AIConfig(
         enabled=True,
+        review=True,
         transport=AITransport.CLI,
         cli_max_diff_bytes=CLI_DIFF_HARD_CEILING_BYTES,
     )
@@ -404,7 +405,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
     provider = MagicMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
-    ai_config = AIConfig(enabled=True, transport=AITransport.CLI)
+    ai_config = AIConfig(enabled=True, review=True, transport=AITransport.CLI)
     budget = MagicMock()
     budget.check = MagicMock()
 

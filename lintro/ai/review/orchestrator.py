@@ -1553,6 +1553,11 @@ async def _invoke_chunk_review(
     Returns:
         The provider response and wall-clock seconds spent on the successful
         (or final) call attempt.
+
+    Raises:
+        AICostBudgetExceededError: When the session cost ceiling is hit.
+        AIError: When the provider call fails for a non-retryable reason, or
+            when an output-exhaustion retry still fails.
     """
     use_git_native = ai_config.transport == AITransport.CLI
     findings_cap = max_findings

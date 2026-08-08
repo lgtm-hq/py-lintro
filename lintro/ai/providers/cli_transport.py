@@ -679,9 +679,13 @@ class CliTransport(ABC):
                 # a leftover oversized argv element (or a huge env) can still
                 # raise E2BIG / "Argument list too long". Map it to a provider
                 # error instead of leaking a raw OSError to callers.
-                if exc.errno == errno.E2BIG or "argument list too long" in str(
-                    exc,
-                ).lower():
+                if (
+                    exc.errno == errno.E2BIG
+                    or "argument list too long"
+                    in str(
+                        exc,
+                    ).lower()
+                ):
                     raise AIProviderError(
                         f"{self._binary_name} CLI could not spawn because the "
                         "argument list is too long (E2BIG). Large prompts must "
