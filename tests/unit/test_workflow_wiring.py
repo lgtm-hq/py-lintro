@@ -2575,6 +2575,64 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
     assert_that(signatures).does_not_contain("context deadline exceeded")
 
 
+# --- AI CLI contract Tier 1 required-check safety (#1119 / #1609) -----------
+#
+# Epic #1609 shipped the free flag-surface check with the intent that it becomes
+# a required gate. Requiring the context before ``merge_group:`` exists arms the
+# #1196 absent-required-check merge-queue trap. These constants and the test
+# below pin the Tier 1 job to the same always-report shape as the dependency
+# vulnerability gate.
+
+_AI_CONTRACT_WORKFLOW = "ai-contract-tests.yml"
+_AI_CONTRACT_TIER1_JOB = "tier1-flag-surface"
+_AI_CONTRACT_TIER1_CONTEXT = "🧾 AI CLI Flag Surface (Tier 1)"
+
+
+def _ai_contract_tier1_job() -> dict[str, Any]:
+    """Return the Tier 1 AI CLI flag-surface job definition.
+
+    Returns:
+        The ``tier1-flag-surface`` job mapping.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_AI_CONTRACT_TIER1_JOB])
+
+
+def test_ai_contract_tier1_is_required_check_safe() -> None:
+    """Tier 1 must always report its context (#1119 / #1196).
+
+    A ``paths:`` filter, or a job-level ``if:``, would stop the context from
+    ever being created — which deadlocks the merge queue the moment the
+    context is added to the ``checks-py-lintro`` ruleset. Tier 1 is cheap
+    enough to run unconditionally (help probes only), so it stays a plain job
+    with no path filter and no job-level ``if:``.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key(_GITHUB_PULL_REQUEST_EVENT)
+    assert_that(triggers).contains_key("merge_group")
+    for event in (_GITHUB_PULL_REQUEST_EVENT, "merge_group"):
+        assert_that(triggers[event] or {}).does_not_contain_key("paths")
+        assert_that(triggers[event] or {}).does_not_contain_key("paths-ignore")
+    assert_that(triggers["merge_group"]["types"]).contains("checks_requested")
+
+    job = _ai_contract_tier1_job()
+    assert_that(job["name"]).is_equal_to(_AI_CONTRACT_TIER1_CONTEXT)
+    assert_that(job).does_not_contain_key("if")
+    # A skipped reusable *caller* collapses its nested contexts, so the gate
+    # must stay a plain job that always reports its own check run.
+    assert_that(job).does_not_contain_key("uses")
+    assert_that(job).contains_key("runs-on")
+
+    # The README's admin PUT recipe is the third copy of the context string;
+    # pin it to the constant so a job rename cannot leave the recipe stale.
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    assert_that(readme).contains(_AI_CONTRACT_TIER1_CONTEXT)
+
+
 # --- Tool-execution timeout classification wiring (#1653) --------------------
 
 
