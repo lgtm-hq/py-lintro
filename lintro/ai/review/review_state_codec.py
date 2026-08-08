@@ -76,6 +76,12 @@ def _extract_payload(*, body: str) -> dict[str, Any] | None:
     markers from the end and accept the last one whose payload is a single
     JSON object closed by ``STATE_MARKER_SUFFIX`` (#1866).
 
+    JSON string escaping defends the embedded-in-title case for any payload
+    containing a double quote — the serialized title carries backslash-escaped
+    quotes that fail ``raw_decode`` at that offset. The one quote-free object,
+    ``{}``, would still decode, so payloads must also carry a known state key
+    before they are accepted; anything else keeps walking.
+
     Args:
         body: Existing sticky comment body.
 
@@ -98,10 +104,25 @@ def _extract_payload(*, body: str) -> dict[str, Any] | None:
         if not rest.startswith(STATE_MARKER_SUFFIX):
             search_end = start
             continue
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and _has_state_shape(payload=payload):
             return payload
         search_end = start
     return None
+
+
+def _has_state_shape(*, payload: dict[str, Any]) -> bool:
+    """Return whether a decoded payload looks like an authentic state blob.
+
+    Args:
+        payload: Candidate decoded JSON mapping.
+
+    Returns:
+        True when the mapping carries at least one known state key. Rejects
+        ``{}`` — the only JSON object that survives inside a JSON-serialized
+        finding title without escaped quotes — so an embedded forged marker
+        cannot wipe the state (#1866).
+    """
+    return any(key in payload for key in ("version", "runs", "findings"))
 
 
 def _parse_runs(*, payload: dict[str, Any]) -> list[RunRecord]:
