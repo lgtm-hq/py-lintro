@@ -109,7 +109,8 @@ def build_custom_agent_prompt(
 
     The agent body is sanitized and fenced by a per-call unique boundary marker
     so maintainer-authored prose cannot impersonate prompt structure or forge
-    the fence that closes its own data block.
+    the fence that closes its own data block. The same marker fences the scoped
+    diff so workspace-derived content cannot terminate surrounding tags.
 
     Args:
         agent: The agent whose instructions are embedded.
@@ -134,13 +135,12 @@ def build_custom_agent_prompt(
         ),
     )
     policy = resolve_sensitivity_policy(strictness=agent.strictness)
-    boundary = make_boundary_marker()
     return REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
         agent_name=agent.name,
         agent_description=agent.description or "(none declared)",
         scoped_file_count=len(files),
         scoped_files="\n".join(f"- {path}" for path in files),
-        boundary=boundary,
+        boundary=make_boundary_marker(),
         agent_instructions=instructions,
         diff=redact_prompt_text(text=diff, source="diff"),
         strictness_section=format_strictness_prompt_section(policy=policy),
