@@ -458,6 +458,24 @@ def execute_run(
     tools_to_run = tools_result.to_run
     skipped_tools = tools_result.skipped
 
+    # On a no-config first run the toolset is scoped to detected languages;
+    # tell the user what was selected and how to customize. Suppressed for
+    # machine-readable output and score-only mode.
+    if (
+        tools_result.scoped_by_detection
+        and output_format.lower() not in {"json", "sarif"}
+        and not ctx.score_only
+    ):
+        from lintro.utils.execution.tool_configuration import format_detection_notice
+
+        logger.console_output(
+            text=format_detection_notice(
+                tools_result.detected_languages,
+                tools_to_run,
+            ),
+            color="cyan",
+        )
+
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
         return finalize_artifact(
