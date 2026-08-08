@@ -14,7 +14,7 @@ NPM_VERSIONS: dict[str, str] = {
     "@commitlint/config-conventional": "21.2.0",
     "astro": "7.1.3",
     "html-validate": "11.5.6",
-    "markdownlint-cli2": "0.23.1",
+    "markdownlint-cli2": "0.23.2",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
     "prettier": "3.9.4",
