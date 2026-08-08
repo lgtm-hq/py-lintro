@@ -7,8 +7,10 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
+from lintro.ai.transport import resolve_cost_basis
 
 __all__ = ["RunRecord"]
 
@@ -29,7 +31,9 @@ class RunRecord:
         provider: Provider name (anthropic, openai, …).
         transport: Provider transport used (for example ``api`` or ``cli``).
         auth_mode: Authentication mode used by the transport (for example
-            ``api-key`` or ``subscription``).
+            ``api_key`` or ``subscription``).
+        cost_basis: How ``cost`` should be read (``billed``, ``estimated``,
+            or ``unpriceable``) (#1923).
         depth: Review depth level.
         strictness: Sensitivity preset applied.
         files_reviewed: Number of changed files included in the review.
@@ -75,6 +79,7 @@ class RunRecord:
     provider: str = ""
     transport: str = ""
     auth_mode: str = ""
+    cost_basis: str = ""
     depth: int = 0
     strictness: str = ""
     files_reviewed: int = 0
@@ -139,6 +144,8 @@ class RunRecord:
             "chunks_reviewed": self.chunks_reviewed,
             "chunks_total": self.chunks_total,
         }
+        if self.cost_basis:
+            payload["cost_basis"] = self.cost_basis
         if self.resolved is not None:
             payload["resolved"] = self.resolved
         if self.open_after is not None:
@@ -160,6 +167,15 @@ class RunRecord:
         Returns:
             The parsed run record.
         """
+        auth_mode = str(payload.get("auth_mode", ""))
+        estimated = bool(payload.get("estimated", False))
+        if "cost_basis" in payload:
+            cost_basis = _parse_cost_basis(payload.get("cost_basis"))
+        else:
+            # Legacy records (pre-#1923) derive provenance from auth_mode +
+            # estimated so sticky consumers still get a truthful label.
+            derived = resolve_cost_basis(auth_mode=auth_mode, estimated=estimated)
+            cost_basis = derived.value if derived is not None else ""
         return cls(
             round=coerce_int(payload.get("round"), default=1) or 1,
             timestamp=str(payload.get("timestamp", "")),
@@ -167,7 +183,8 @@ class RunRecord:
             model=str(payload.get("model", "")),
             provider=str(payload.get("provider", "")),
             transport=str(payload.get("transport", "")),
-            auth_mode=str(payload.get("auth_mode", "")),
+            auth_mode=auth_mode,
+            cost_basis=cost_basis,
             depth=coerce_int(payload.get("depth")),
             strictness=str(payload.get("strictness", "")),
             files_reviewed=coerce_int(payload.get("files_reviewed")),
@@ -178,7 +195,7 @@ class RunRecord:
             completion=coerce_int(payload.get("completion")),
             total=coerce_int(payload.get("total")),
             cost=coerce_float(payload.get("cost")),
-            estimated=bool(payload.get("estimated", False)),
+            estimated=estimated,
             verdict=_parse_verdict(payload.get("verdict")),
             confidence=str(payload.get("confidence", "")),
             p1=coerce_int(payload.get("p1")),
@@ -193,6 +210,22 @@ class RunRecord:
             open_after=_optional_count(payload.get("open_after")),
             narrative=str(payload.get("narrative", "")),
         )
+
+
+def _parse_cost_basis(value: Any) -> str:
+    """Parse a stored cost-basis label from an untrusted state blob.
+
+    Args:
+        value: Raw cost_basis value decoded from the state blob.
+
+    Returns:
+        A canonical CostBasis value string, or empty when unrecognized.
+    """
+    try:
+        return CostBasis(str(value).lower()).value
+    except ValueError:
+        logger.debug("Unrecognized stored cost_basis {!r}; leaving empty", value)
+        return ""
 
 
 def _optional_count(value: Any) -> int | None:

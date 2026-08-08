@@ -74,20 +74,22 @@ def test_sticky_state_block_is_version_two(
     assert_that(state.findings).is_length(len(sample_review_result.findings))
 
 
-def test_sticky_records_transport_and_auth_mode(
+def test_sticky_records_transport_auth_and_cost_basis(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Transport and auth mode are persisted with the run record."""
+    """Transport, auth mode, and cost_basis are persisted with the run record."""
     body = build_sticky_comment(
         result=sample_review_result,
         transport="cli",
         auth_mode="subscription",
+        cost_basis="unpriceable",
     )
 
     run = parse_review_state_v2(body=body).runs[0]
 
     assert_that(run.transport).is_equal_to("cli")
     assert_that(run.auth_mode).is_equal_to("subscription")
+    assert_that(run.cost_basis).is_equal_to("unpriceable")
     assert_that(run.strictness).is_equal_to(sample_review_result.metadata.strictness)
     assert_that(run.files_reviewed).is_equal_to(
         sample_review_result.metadata.files_reviewed,

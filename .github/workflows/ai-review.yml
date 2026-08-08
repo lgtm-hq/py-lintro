@@ -19,9 +19,10 @@ name: AI Review - Dogfood
 # never): bare mode disables OAuth session login and authenticates only against
 # an API key, which is precisely the credential that does not work here (#1838).
 #
-# The AI_REVIEW_MAX_COST_USD cap below is API-path accounting: lintro can only
-# price tokens it billed itself. Under the CLI transport the call bills the
-# subscription, so the cap is advisory rather than enforced spend control.
+# The AI_REVIEW_MAX_COST_USD cap below feeds ai.transports.cli.max_cost_usd_advisory:
+# API-path accounting that lintro can only price from tokens it estimated
+# itself. Under the CLI transport the call bills the subscription, so the cap
+# is advisory rather than enforced spend control (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -93,8 +94,9 @@ jobs:
       # `--post` maintains the sticky review comment and posts inline review
       # comments, both of which require write access to pull requests.
       pull-requests: write
-    # COUPLED to run-ai-review.sh's `--timeout` (currently 900 s): the job
-    # budget must cover setup (~7 min) + the full review timeout (15 min) +
+    # COUPLED to ai.transports.cli.timeout (default 900 s, written by
+    # enable_review_config.py / lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
+    # job budget must cover setup (~7 min) + the full review timeout (15 min) +
     # posting margin, so lintro's own timeout always fires before the runner
     # kills the job — a runner kill truncates the JSON envelope the outcome
     # classifier reads. Invariant enforced by tests/scripts/
