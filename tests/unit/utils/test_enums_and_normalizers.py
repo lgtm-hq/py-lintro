@@ -29,6 +29,8 @@ def test_group_by_normalization() -> None:
     """Normalize group-by strings and enum instances consistently."""
     assert_that(normalize_group_by("file")).is_equal_to(GroupBy.FILE)
     assert_that(normalize_group_by(GroupBy.AUTO)).is_equal_to(GroupBy.AUTO)
+    assert_that(normalize_group_by("category")).is_equal_to(GroupBy.CATEGORY)
+    assert_that(normalize_group_by(GroupBy.CATEGORY)).is_equal_to(GroupBy.CATEGORY)
     assert_that(normalize_group_by("bad")).is_equal_to(GroupBy.FILE)
 
 

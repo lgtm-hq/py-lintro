@@ -40,6 +40,7 @@ class RunContext:
             readable document (json/sarif/csv/markdown), which routes all
             decorative console UI to stderr.
         score_only: Whether stdout must carry only the numeric health score.
+        group_by: How to group issues in formatted and JSON output.
     """
 
     action: Action
@@ -50,3 +51,4 @@ class RunContext:
     lintro_config: Any
     clean_stdout_output: bool
     score_only: bool
+    group_by: str = "auto"
