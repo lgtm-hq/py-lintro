@@ -377,7 +377,9 @@ def test_mcp_review_failure_reuses_cli_error_contract_fields() -> None:
     contract = build_error_contract(provider="anthropic", error=error)
     envelope = mcp_review._review_failure(provider_name="anthropic", error=error)
 
-    assert_that(envelope.detail["review_error"]).is_equal_to(contract["error"])
+    assert_that((envelope.detail or {})["review_error"]).is_equal_to(
+        contract["error"],
+    )
     assert_that(contract["error"]).contains_key(
         "kind",
         "provider",
@@ -415,7 +417,13 @@ def test_review_exit_one_for_successful_review_with_p1() -> None:
 
 
 def test_review_exit_two_when_orchestrator_raises() -> None:
-    """Provider/execution failure exits 2 so it is never confused with P1."""
+    """Provider/execution failure exits 2 so it is never confused with P1.
+
+    ``_execute_advisory`` is deliberately left unpatched: ``run_review``
+    raises first, and the command's exception handler exits before the
+    advisory pass is reached. If that ordering ever changes, this test
+    starts exercising the real advisory path and should gain a stub.
+    """
     runner = CliRunner()
     mock_context = MagicMock()
     mock_context.changed_files = []
