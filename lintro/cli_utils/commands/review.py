@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -313,6 +314,7 @@ def review_command(
     paths = list(path_filter) if path_filter else None
     context_pr = resolved_pr if post else pr
     context_repo = effective_repo if context_pr is not None else None
+    context_started = time.monotonic()
     try:
         context = collect_review_context(
             base=base,
@@ -324,6 +326,7 @@ def review_command(
         )
     except ReviewContextError as exc:
         raise click.ClickException(str(exc)) from exc
+    context_collection_seconds = time.monotonic() - context_started
 
     classifications = classify_changed_files(context.changed_files)
     checklist_items = get_all_checklist_items(config=lintro_config)
@@ -408,6 +411,7 @@ def review_command(
             custom_agents=custom_agents,
             run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
             workspace_root=workspace_root,
+            context_collection_seconds=context_collection_seconds,
         )
     except (AIError, ValueError) as exc:
         if post and resolved_pr is not None and effective_repo:
