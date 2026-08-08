@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - fixed git argv against a temp repo
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -65,6 +66,26 @@ _CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
         "run_builtin_checklist",
     },
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_cache() -> Iterator[None]:
+    """Clear the global config singleton around every test in this module.
+
+    The workspace-based tests chdir into a temp repo and exercise real
+    resolution paths; modules holding a ``from … import get_config`` binding
+    bypass the monkeypatch and populate ``config_loader._loaded_config`` with
+    the temp workspace's config, which then leaks into unrelated tests (the
+    doctor suite reads the poisoned singleton and exits non-zero).
+
+    Yields:
+        None: Cache is cleared on both sides of the test body.
+    """
+    from lintro.config import config_loader
+
+    config_loader.clear_config_cache()
+    yield
+    config_loader.clear_config_cache()
 
 
 def _git(*args: str, cwd: Path) -> None:
