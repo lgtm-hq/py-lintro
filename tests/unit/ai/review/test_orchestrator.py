@@ -704,6 +704,393 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
     assert_that(provider.complete.call_count).is_equal_to(4)
 
 
+def _multi_chunk_context(*, tmp_path: Path, count: int = 4) -> ReviewContext:
+    """Build a multi-file review context for fan-out tests.
+
+    Args:
+        tmp_path: Temporary repository root.
+        count: Number of changed files / chunks to synthesize.
+
+    Returns:
+        A ``ReviewContext`` with ``count`` modified files.
+    """
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path=f"src/file{index}.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            )
+            for index in range(count)
+        ],
+        unified_diff="diff",
+        pr_metadata=None,
+        repo_root=str(tmp_path),
+    )
+
+
+def _multi_chunks(*, count: int = 4) -> list[ReviewChunk]:
+    """Build ``count`` single-file review chunks.
+
+    Args:
+        count: Number of chunks.
+
+    Returns:
+        Ordered list of single-file chunks.
+    """
+    return [
+        ReviewChunk(
+            id=index + 1,
+            files=[f"src/file{index}.py"],
+            diff=f"+line{index}",
+            relationship="single-file",
+        )
+        for index in range(count)
+    ]
+
+
+def test_run_review_parallelizes_with_cost_cap(tmp_path: Path) -> None:
+    """A cost cap must not force serial chunk reviews (issue #1969)."""
+    context = _multi_chunk_context(tmp_path=tmp_path, count=4)
+    chunks = _multi_chunks(count=4)
+    provider = _mock_provider(content=_sample_response_json(include_finding=False))
+    active = 0
+    max_active = 0
+
+    async def _track_concurrency(
+        *,
+        provider: MagicMock,
+        budget: CostBudget | None = None,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Overlap chunk reviews and charge a tiny cost against the budget.
+
+        Args:
+            provider: Mock provider returning the canned response.
+            budget: Session cost budget; recorded when present.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            The provider's canned response.
+        """
+        del kwargs
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        response: AIResponse = provider.complete("prompt")
+        if budget is not None:
+            budget.record(0.001)
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_track_concurrency,
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=4,
+                max_cost_usd=1.0,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(max_active).is_greater_than(1)
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(4)
+
+
+def test_run_review_parallelizes_depth_two_chunks(tmp_path: Path) -> None:
+    """Depth ≥ 2 chunk refinement fans out under max_parallel_calls."""
+    context = _multi_chunk_context(tmp_path=tmp_path, count=4)
+    chunks = _multi_chunks(count=4)
+    provider = _mock_provider(content=_sample_response_json(include_finding=False))
+    active = 0
+    max_active = 0
+
+    async def _track_concurrency(
+        *,
+        provider: MagicMock,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Track overlapping depth-2 provider calls across chunks.
+
+        Args:
+            provider: Mock provider returning the canned response.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            The provider's canned response.
+        """
+        del kwargs
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        response: AIResponse = provider.complete("prompt")
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_track_concurrency,
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=4,
+                max_cost_usd=5.0,
+            ),
+            depth=2,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(max_active).is_greater_than(1)
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(4)
+
+
+def test_run_review_merges_chunks_in_index_order(tmp_path: Path) -> None:
+    """Findings merge in chunk-index order even when slow chunks finish last."""
+    context = _multi_chunk_context(tmp_path=tmp_path, count=3)
+    chunks = _multi_chunks(count=3)
+
+    async def _slow_first_chunk(
+        *,
+        provider: MagicMock,
+        user_prompt: str,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Delay the first chunk so later chunks complete first.
+
+        Args:
+            provider: Unused mock provider.
+            user_prompt: Prompt text used to identify the chunk.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            A review payload whose finding file matches the chunk.
+        """
+        del provider, kwargs
+        if "+line0" in user_prompt:
+            await asyncio.sleep(0.08)
+            path = "src/file0.py"
+        elif "+line1" in user_prompt:
+            path = "src/file1.py"
+        else:
+            path = "src/file2.py"
+        payload = {
+            "summary": f"Summary for {path}",
+            "checklist": [],
+            "findings": [
+                {
+                    "severity": "P2",
+                    "category": "logic",
+                    "file": path,
+                    "line": 1,
+                    "title": f"Issue in {path}",
+                    "description": "x",
+                    "cause": "y",
+                    "fix": "z",
+                    "failure_scenario": "w",
+                    "confidence": "high",
+                    "checklist_ids": [],
+                },
+            ],
+        }
+        return AIResponse(
+            content=json.dumps(payload),
+            model="auto",
+            input_tokens=10,
+            output_tokens=10,
+            cost_estimate=0.0,
+            provider="anthropic",
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_slow_first_chunk,
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=_mock_provider(content=_sample_response_json()),
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=3,
+                max_cost_usd=1.0,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    finding_files = [finding.file for finding in result.findings]
+    assert_that(finding_files).is_equal_to(
+        ["src/file0.py", "src/file1.py", "src/file2.py"],
+    )
+
+
+def test_run_review_records_phase_timings(tmp_path: Path) -> None:
+    """Review metadata includes context_collection/provider/parse_merge timings."""
+    context = _multi_chunk_context(tmp_path=tmp_path, count=2)
+    chunks = _multi_chunks(count=2)
+    provider = _mock_provider(content=_sample_response_json(include_finding=False))
+
+    async def _fast_call(
+        *,
+        provider: MagicMock,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Return the canned provider response without sleeping.
+
+        Args:
+            provider: Mock provider under test.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            The provider's canned response.
+        """
+        del kwargs
+        response: AIResponse = provider.complete("prompt")
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_fast_call,
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            context_collection_seconds=0.123,
+        )
+
+    timings = result.metadata.phase_timings
+    assert_that(timings).contains_key("context_collection")
+    assert_that(timings).contains_key("provider")
+    assert_that(timings).contains_key("parse_merge")
+    assert_that(timings["context_collection"]).is_close_to(0.123, 0.001)
+    assert_that(timings["provider"]).is_greater_than_or_equal_to(0.0)
+    assert_that(timings["parse_merge"]).is_greater_than_or_equal_to(0.0)
+    assert_that(result.metadata.duration_seconds).is_greater_than_or_equal_to(0.0)
+
+
+def test_run_review_budget_cutoff_keeps_completed_under_parallelism(
+    tmp_path: Path,
+) -> None:
+    """Mid-flight cost-cap stops scheduling; completed chunks survive merge."""
+    context = _multi_chunk_context(tmp_path=tmp_path, count=4)
+    chunks = _multi_chunks(count=4)
+    call_count = 0
+
+    async def _expensive_call(
+        *,
+        provider: MagicMock,
+        budget: CostBudget | None = None,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Charge enough that later chunks trip the cost cap.
+
+        Args:
+            provider: Unused mock provider.
+            budget: Session cost budget charged per call.
+            **kwargs: Ignored call arguments.
+
+        Returns:
+            A finding-free review payload.
+        """
+        del provider, kwargs
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.01)
+        if budget is not None:
+            budget.record(0.4)
+        return AIResponse(
+            content=_sample_response_json(include_finding=False),
+            model="auto",
+            input_tokens=10,
+            output_tokens=10,
+            cost_estimate=0.4,
+            provider="anthropic",
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_expensive_call,
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=_mock_provider(content=_sample_response_json()),
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=2,
+                max_cost_usd=0.5,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.chunks_reviewed).is_greater_than(0)
+    assert_that(result.metadata.chunks_reviewed).is_less_than(4)
+    assert_that(result.metadata.stopped_reason).contains("cost cap")
+    assert_that(call_count).is_less_than(4)
+
+
 def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
     """Progress tracker receives on_abort when a chunk review raises."""
     context = ReviewContext(

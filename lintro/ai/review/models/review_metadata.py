@@ -37,6 +37,10 @@ class ReviewMetadata:
         stopped_reason (str): Human-readable reason a partial review stopped
             (e.g. "cost cap"). Empty for a complete review.
         duration_seconds (float): Wall-clock duration of the review run.
+        phase_timings (dict[str, float]): Per-phase wall-clock seconds for
+            regression visibility. Keys include ``context_collection``,
+            ``provider`` (chunk + custom-agent provider calls), and
+            ``parse_merge``.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -67,6 +71,7 @@ class ReviewMetadata:
     chunks_reviewed: int = 0
     stopped_reason: str = ""
     duration_seconds: float = 0.0
+    phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
