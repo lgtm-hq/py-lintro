@@ -17,6 +17,7 @@ enhancement run it between the two phases; see
 
 from __future__ import annotations
 
+import contextlib
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +69,8 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from lintro.plugins.base import BaseToolPlugin
+
 # Re-export constants and internals for backwards compatibility. The private
 # names stay importable from here because they were part of this module before
 # the execute/render split (issue #1823).
@@ -77,6 +80,7 @@ __all__ = [
     "DEFAULT_REMAINING_COUNT",
     "_enrich_issues_with_doc_urls",
     "_filter_result_to_fixable",
+    "_finalize_template_aware_result",
     "_run_fix_with_retry",
     "_write_artifacts",
     "build_run_context",
@@ -84,6 +88,36 @@ __all__ = [
     "refresh_artifact",
     "run_lint_tools_simple",
 ]
+
+
+
+def _finalize_template_aware_result(
+    tool: BaseToolPlugin,
+    result: ToolResult,
+) -> ToolResult:
+    """Remap template-aware issues onto original ``*.jinja`` coordinates.
+
+    Args:
+        tool: Plugin that produced the result (may hold an active session).
+        result: Raw tool result.
+
+    Returns:
+        ToolResult with translated issues when template-aware mode is active.
+    """
+    from lintro.template_aware.api import TemplateAwareSession
+
+    # Look at the session directly. MagicMock tools auto-create
+    # ``_finalize_template_aware_result`` as a Mock, so we must not call
+    # getattr(tool, "_finalize_...") blindly.
+    session = getattr(tool, "_template_aware_session", None)
+    if not isinstance(session, TemplateAwareSession):
+        return result
+    try:
+        return session.translate_result(result)
+    finally:
+        session.cleanup()
+        with contextlib.suppress(AttributeError, TypeError):
+            tool._template_aware_session = None
 
 
 def build_run_context(
@@ -327,7 +361,10 @@ def _execute_tools_sequential(
                     max_retries=ctx.lintro_config.execution.max_fix_retries,
                 )
             else:
-                result = tool.check(paths, {})
+                result = _finalize_template_aware_result(
+                    tool=tool,
+                    result=tool.check(paths, {}),
+                )
             result.duration_seconds = time.monotonic() - started
 
             # Populate doc_url on each issue from the plugin

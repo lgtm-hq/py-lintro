@@ -31,6 +31,7 @@ from lintro.config.review_config import (
     ReviewConfig,
 )
 from lintro.config.score_config import ScoreConfig
+from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.utils.path_utils import find_file_upward
 
@@ -437,6 +438,35 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     return ScoreConfig(**filtered)
 
 
+def _parse_template_aware_config(data: Any) -> TemplateAwareConfig:
+    """Parse the template-aware preprocessing configuration section.
+
+    Args:
+        data: Raw ``template_aware`` section from config.
+
+    Returns:
+        TemplateAwareConfig: Parsed configuration (disabled by default).
+
+    Raises:
+        ValueError: When the section is not a mapping.
+    """
+    if data is None or data == {}:
+        return TemplateAwareConfig()
+    if not isinstance(data, dict):
+        msg = f"template_aware config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+
+    known_fields = set(TemplateAwareConfig.model_fields.keys())
+    unknown = set(data.keys()) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown template_aware config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return TemplateAwareConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -458,6 +488,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "review": {},
         "score": {},
         "output": {},
+        "template_aware": {},
     }
 
     # Inline imports: ToolName is a static StrEnum that does not trigger
@@ -514,6 +545,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             "output",
             "review",
             "score",
+            "template_aware",
             "tool",
             "tools",
             ConfigKey.POST_CHECKS.value.lower(),
@@ -584,6 +616,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
+        elif key_lower == "template_aware" and isinstance(value, dict):
+            result["template_aware"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -666,6 +700,9 @@ def load_config(
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
+    template_aware_config = _parse_template_aware_config(
+        data.get("template_aware", {}),
+    )
 
     return LintroConfig(
         execution=execution_config,
@@ -676,6 +713,7 @@ def load_config(
         review=review_config,
         score=score_config,
         output=output_config,
+        template_aware=template_aware_config,
         config_path=resolved_path,
     )
 
