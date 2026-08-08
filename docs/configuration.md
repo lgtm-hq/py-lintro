@@ -2759,7 +2759,8 @@ ai:
 | `max_fix_attempts`      | int    | `20`        | Max issues to attempt fixing per run             |
 | `max_parallel_calls`    | int    | `5`         | Concurrent API calls (1-20)                      |
 | `max_retries`           | int    | `2`         | Max retries for transient errors (0-10)          |
-| `api_timeout`           | float  | `60.0`      | API request timeout in seconds                   |
+| `api_timeout`           | float  | `60.0`      | Legacy timeout (s); prefer `transports.*.timeout` |
+| `transports`            | object | unset       | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
 | `validate_after_group`  | bool   | `false`     | Validate immediately after each accepted group   |
 | `show_cost_estimate`    | bool   | `true`      | Show token/cost info in output                   |
 | `context_lines`         | int    | `15`        | Lines of context sent for fix generation (1-100) |
