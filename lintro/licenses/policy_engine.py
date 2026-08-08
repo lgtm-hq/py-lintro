@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from license_expression import (
+    AND,
+    OR,
+    LicenseExpression,
+    LicenseSymbol,
+    LicenseWithExceptionSymbol,
+)
+
 from lintro.config.licenses_config import LicensesConfig
 from lintro.licenses.models import (
     LicenseResult,
@@ -14,6 +22,7 @@ from lintro.licenses.spdx import (
     STRONG_COPYLEFT_LICENSES,
     WEAK_COPYLEFT_LICENSES,
     normalize_to_spdx,
+    parse_license_expression,
 )
 
 
@@ -54,7 +63,9 @@ class LicensePolicyEngine:
     The engine combines a named preset with any explicit ``allowed`` and
     ``denied`` SPDX identifiers from the configuration, applies per-package
     exceptions, and classifies unknown licenses according to
-    ``unknown_policy``.
+    ``unknown_policy``. Compound SPDX expressions are evaluated per-branch:
+    ``OR`` passes if any branch is allowed, ``AND`` requires every branch
+    allowed, and ``WITH`` is evaluated as the base license.
     """
 
     def __init__(self, config: LicensesConfig) -> None:
@@ -98,18 +109,38 @@ class LicensePolicyEngine:
         if effective_id is None:
             return self._classify_unknown(package)
 
-        if effective_id in self.denied:
+        return self._evaluate_expression(
+            package=package,
+            license_id=effective_id,
+        )
+
+    def _classify_single(
+        self,
+        *,
+        package: PackageLicense,
+        license_id: str,
+    ) -> LicenseResult:
+        """Classify a single SPDX license identifier.
+
+        Args:
+            package: Package under evaluation (for result attachment).
+            license_id: Canonical SPDX identifier.
+
+        Returns:
+            LicenseResult: Classification for this license id.
+        """
+        if license_id in self.denied:
             return LicenseResult(
                 package=package,
                 status=LicenseStatus.DENIED,
-                reason=f"License {effective_id} is denied by policy",
+                reason=f"License {license_id} is denied by policy",
             )
 
-        if effective_id in self.allowed:
+        if license_id in self.allowed:
             return LicenseResult(
                 package=package,
                 status=LicenseStatus.ALLOWED,
-                reason=f"License {effective_id} is allowed by policy",
+                reason=f"License {license_id} is allowed by policy",
             )
 
         # Recognized SPDX id, but not in allow or deny sets.
@@ -118,14 +149,123 @@ class LicensePolicyEngine:
                 package=package,
                 status=LicenseStatus.DENIED,
                 reason=(
-                    f"License {effective_id} is not explicitly allowed (strict policy)"
+                    f"License {license_id} is not explicitly allowed (strict policy)"
                 ),
             )
         return LicenseResult(
             package=package,
             status=LicenseStatus.ALLOWED,
-            reason=f"License {effective_id} is not restricted by policy",
+            reason=f"License {license_id} is not restricted by policy",
         )
+
+    def _evaluate_expression(
+        self,
+        *,
+        package: PackageLicense,
+        license_id: str,
+    ) -> LicenseResult:
+        """Evaluate a (possibly compound) SPDX expression against the policy.
+
+        Args:
+            package: Package under evaluation.
+            license_id: Normalized SPDX id or expression string.
+
+        Returns:
+            LicenseResult: Per-branch evaluation result.
+        """
+        expression = parse_license_expression(license_id)
+        if expression is None:
+            # Policy-only markers (e.g. Commons-Clause) may be allow/deny listed
+            # without being parseable SPDX; everything else follows unknown_policy.
+            if license_id in self.allowed or license_id in self.denied:
+                return self._classify_single(package=package, license_id=license_id)
+            return self._classify_unknown(package)
+
+        return self._evaluate_parsed(
+            package=package,
+            expression=expression,
+            display=license_id,
+        )
+
+    def _evaluate_parsed(
+        self,
+        *,
+        package: PackageLicense,
+        expression: LicenseExpression,
+        display: str,
+    ) -> LicenseResult:
+        """Recursively evaluate a parsed SPDX expression tree.
+
+        Args:
+            package: Package under evaluation.
+            expression: Parsed ``license-expression`` tree.
+            display: Human-readable expression for reasons.
+
+        Returns:
+            LicenseResult: Combined status for the expression.
+        """
+        if isinstance(expression, LicenseWithExceptionSymbol):
+            # Conservative: WITH exceptions evaluate as the base license only.
+            base = str(expression.license_symbol)
+            return self._classify_single(package=package, license_id=base)
+
+        if isinstance(expression, LicenseSymbol):
+            return self._classify_single(
+                package=package,
+                license_id=str(expression),
+            )
+
+        if isinstance(expression, OR):
+            branch_results = [
+                self._evaluate_parsed(
+                    package=package,
+                    expression=arg,
+                    display=str(arg),
+                )
+                for arg in expression.args
+            ]
+            for result in branch_results:
+                if result.status is LicenseStatus.ALLOWED:
+                    return LicenseResult(
+                        package=package,
+                        status=LicenseStatus.ALLOWED,
+                        reason=(
+                            f"Expression {display} allowed via branch "
+                            f"({result.reason})"
+                        ),
+                    )
+            return LicenseResult(
+                package=package,
+                status=LicenseStatus.DENIED,
+                reason=f"Expression {display} has no allowed OR branch",
+            )
+
+        if isinstance(expression, AND):
+            branch_results = [
+                self._evaluate_parsed(
+                    package=package,
+                    expression=arg,
+                    display=str(arg),
+                )
+                for arg in expression.args
+            ]
+            for result in branch_results:
+                if result.status is LicenseStatus.DENIED:
+                    return LicenseResult(
+                        package=package,
+                        status=LicenseStatus.DENIED,
+                        reason=(
+                            f"Expression {display} denied via branch "
+                            f"({result.reason})"
+                        ),
+                    )
+            return LicenseResult(
+                package=package,
+                status=LicenseStatus.ALLOWED,
+                reason=f"Expression {display} allowed (all AND branches)",
+            )
+
+        return self._classify_single(package=package, license_id=display)
 
     def _classify_unknown(self, package: PackageLicense) -> LicenseResult:
         """Classify a package whose license could not be determined.

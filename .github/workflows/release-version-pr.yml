@@ -29,12 +29,10 @@ jobs:
       auto-merge: true
       max-bump: minor
       # Finalize the generated version PR before it is committed: reflow
-      # CHANGELOG.md to lintro's 88-column markdown budget so release PRs pass
-      # dogfooding-lint without CHANGELOG.md being ignored (#1117), and stamp
-      # every SECURITY.md supported-versions table to the current major.minor
-      # line so minor/major bumps do not go stale and block the unattended
-      # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
-      version-update-script: scripts/ci/finalize-version-pr.py
+      # CHANGELOG.md (#1117), stamp SECURITY.md support tables (#1372), refresh
+      # embedded SPDX license data (#1306), and sync the pinned release image
+      # (#1590). Logic lives in dedicated scripts, not inline runs.
+      version-update-script: scripts/release/prepare_version_artifacts.py
       tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
@@ -44,7 +42,7 @@ jobs:
       # preset resolution, so the preset's extra hosts never reach it and
       # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
       # complete list explicitly; harden-runner splits on spaces, so keep
-      # the folded scalar.
+      # the folded scalar. spdx.org is needed to refresh SPDX license data.
       allowed-endpoints: >-
         github.com:443
         api.github.com:443
@@ -55,6 +53,8 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
+        spdx.org:443
+
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

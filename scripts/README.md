@@ -12,6 +12,7 @@ scripts/
 ├── ci/           # CI/CD and GitHub Actions scripts
 ├── docker/       # Docker-related scripts
 ├── local/        # Local development scripts
+├── release/      # Release Version-PR artifact generators
 └── utils/        # Utility scripts and shared functions
 ```
 
@@ -141,6 +142,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating          | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                                                    |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown             | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                       |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown                  | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                                                                  |
+| `prepare_version_artifacts.py`       | Version-PR hook: CHANGELOG, SECURITY.md, SPDX refresh                      | `python3 scripts/release/prepare_version_artifacts.py`                             |
+| `generate_spdx_data.py`              | Generate `lintro/licenses/_spdx_data.py` from SPDX licenses.json           | `python3 scripts/release/generate_spdx_data.py [--check] [--from-file PATH]`       |
 | `update-security-support.py`         | Stamp `SECURITY.md` support table to the current `major.minor` line        | `python3 scripts/ci/update-security-support.py 0.81.0`                                                                 |
 | `finalize-version-pr.py`             | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)        | `python3 scripts/ci/finalize-version-pr.py`                                                                            |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                          | `./scripts/ci/test-install-package.sh wheel`                                                                           |
