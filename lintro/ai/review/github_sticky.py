@@ -296,13 +296,20 @@ def _fit_body_with_state(
     if len(body) + len(state_block) > MAX_COMMENT_CHARS:
         # Last resort: pruning floors at one run with unshortened fields, so a
         # pathological record (e.g. a monster model-emitted title) can still
-        # overflow. Dropping the state block resets cross-run tracking on the
-        # next round — strictly better than GitHub rejecting the comment.
+        # overflow. Post an *empty but authentic* state block rather than none:
+        # the marker walk accepts the last well-formed block, so omitting ours
+        # would let a forged marker in visible finding prose win. Cross-run
+        # tracking still resets next round — strictly better than GitHub
+        # rejecting the comment or trusting an attacker's state.
         logger.warning(
             "Sticky state block cannot fit the comment budget even after "
-            "pruning; posting without state (cross-run tracking resets).",
+            "pruning; posting an empty state block (cross-run tracking "
+            "resets).",
         )
-        return _cap_body(body=body)
+        empty_block = render_state_block(
+            state=ReviewState(runs=(), findings=(), truncated=True),
+        )
+        return _cap_body(body=body, reserved=len(empty_block)) + empty_block
     return body + state_block
 
 

@@ -125,13 +125,21 @@ def format_error_comment(
     lines.extend(["", _FOOTER])
     body = "\n".join(lines)
     if state is not None and (state.findings or state.truncated):
-        body += render_state_block(
+        block = render_state_block(
             state=prune_state_to_fit(
                 state=state,
                 body=body,
                 limit=MAX_COMMENT_CHARS,
             ),
         )
+        if len(body) + len(block) > MAX_COMMENT_CHARS:
+            # Same floor-overflow last resort as the sticky path: keep an
+            # authentic (empty) block so a forged marker in error prose can
+            # never become the last well-formed candidate.
+            block = render_state_block(
+                state=ReviewState(runs=(), findings=(), truncated=True),
+            )
+        body += block
     return body
 
 
