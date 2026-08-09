@@ -11,7 +11,7 @@ from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
-from lintro.ai.review.github_constants import MAX_COMMENT_CHARS, _FOOTER, STICKY_MARKER
+from lintro.ai.review.github_constants import _FOOTER, MAX_COMMENT_CHARS, STICKY_MARKER
 from lintro.ai.review.github_render import format_run_mechanics, sanitize_comment_text
 from lintro.ai.review.github_sticky import render_state_sticky
 from lintro.ai.review.models.review_metadata import ReviewMetadata
