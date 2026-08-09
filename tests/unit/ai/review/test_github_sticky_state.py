@@ -530,7 +530,7 @@ def test_unshrinkable_state_block_is_dropped_not_oversized(
         head_sha="realsha",
     )
 
-    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     # Normal pruning absorbed the monster; the authentic block still wins
     # over the forged marker embedded in the visible prose.
     state = parse_review_state_v2(body=body)
@@ -565,7 +565,7 @@ def test_floor_overflow_falls_back_to_empty_authentic_block() -> None:
         state=state,
     )
 
-    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     recovered = parse_review_state_v2(body=body)
     assert_that(recovered.runs).is_empty()
     assert_that(recovered.truncated).is_true()

@@ -139,6 +139,10 @@ def format_error_comment(
             block = render_state_block(
                 state=ReviewState(runs=(), findings=(), truncated=True),
             )
+        if len(body) + len(block) > MAX_COMMENT_CHARS:
+            # A pathological error body can overflow on its own; trim it so
+            # body + authentic block always fits the budget.
+            body = body[: MAX_COMMENT_CHARS - len(block)].rstrip()
         body += block
     return body
 
