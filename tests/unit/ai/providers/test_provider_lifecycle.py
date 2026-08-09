@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -131,12 +132,16 @@ async def test_stale_loop_rebuild_does_not_orphan_client(
     second = provider._get_client()
 
     assert_that(first).is_not_equal_to(second)
-    assert_that(provider._superseded_clients).contains(first)
+    assert_that(
+        [client for client, _loop in provider._superseded_clients],
+    ).contains(first)
     assert_that(first.closed).is_false()
 
     await provider.aclose()
 
-    assert_that(first.closed).is_true()
+    # A client from an idle foreign loop is consciously released, never
+    # awaited on the wrong loop; only the current-loop client closes.
+    assert_that(first.closed).is_false()
     assert_that(second.closed).is_true()
     assert_that(provider._superseded_clients).is_empty()
 
@@ -222,10 +227,65 @@ async def test_aclose_survives_failing_client_and_closes_the_rest() -> None:
     """One client's failing close must not orphan the remaining clients."""
     provider = _LifecycleProvider()
     survivor = _FakeAsyncClient()
-    provider._superseded_clients = [_ExplodingClient(), survivor]
+    provider._superseded_clients = [
+        (_ExplodingClient(), None),
+        (survivor, None),
+    ]
     provider._client = None
 
     await provider.aclose()
 
     assert_that(survivor.closed).is_true()
     assert_that(provider._superseded_clients).is_empty()
+
+
+async def test_aclose_skips_client_whose_creating_loop_is_closed() -> None:
+    """A client from a dead loop is skipped, not awaited on the wrong loop.
+
+    Async pools must close on their creating loop; when that loop is gone the
+    pool is left to garbage collection and the remaining clients still close.
+    """
+    dead_loop = asyncio.new_event_loop()
+    dead_loop.close()
+    stranded = _FakeAsyncClient()
+    survivor = _FakeAsyncClient()
+    provider = _LifecycleProvider()
+    provider._superseded_clients = [(stranded, dead_loop), (survivor, None)]
+
+    await provider.aclose()
+
+    assert_that(stranded.closed).is_false()
+    assert_that(survivor.closed).is_true()
+    assert_that(provider._superseded_clients).is_empty()
+
+
+class _FakeAcloseClient:
+    """SDK-client stand-in exposing ``aclose`` (the preferred spelling)."""
+
+    def __init__(self) -> None:
+        self.aclosed = False
+
+    async def aclose(self) -> None:
+        """Mark the client aclosed."""
+        self.aclosed = True
+
+
+async def test_close_sdk_client_prefers_aclose() -> None:
+    """``aclose`` is used when both spellings exist (httpx-style clients)."""
+    client = _FakeAcloseClient()
+    provider = _LifecycleProvider()
+    provider._client = client
+
+    await provider.aclose()
+
+    assert_that(client.aclosed).is_true()
+
+
+async def test_sync_close_raises_inside_running_loop() -> None:
+    """close() refuses to run inside an event loop and points at aclose()."""
+    provider = _LifecycleProvider()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        provider.close()
+
+    assert_that(str(excinfo.value)).contains("await aclose()")
