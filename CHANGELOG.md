@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.113.0] - 2026-08-09
+
+### Added
+
+- **ai**: add close/aclose lifecycle to AI provider clients (#1885) (#1976) (28d1658)
+
+### Changed
+
+- **ai**: phase 1 ADR and characterization tests for review architecture (#1972) (#1980)
+  (1fef3b6)
+- **ai**: raise ai-review job ceiling for stacked review calls (#1989) (33a864f)
+- **ci**: make AI CLI Tier 1 contract check merge-queue safe (#1119) (#1975) (fee0226)
+
 ## [0.112.7] - 2026-08-08
 
 ### Fixed
