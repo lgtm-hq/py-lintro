@@ -505,3 +505,22 @@ def test_error_comment_prunes_a_near_limit_prior_state() -> None:
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
+
+
+def test_unshrinkable_state_block_is_dropped_not_oversized(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A state block that cannot fit even pruned is dropped entirely (#1866).
+
+    Pruning floors at one run with unshortened fields; a pathological record
+    must never push the posted comment past the hard limit — the last resort
+    is posting without state (cross-run tracking resets next round).
+    """
+    monster = _finding(title="t" * (GITHUB_COMMENT_HARD_LIMIT + 10_000))
+
+    body = build_sticky_comment(
+        result=_with_findings(base=sample_review_result, findings=(monster,)),
+        head_sha="realsha",
+    )
+
+    assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)

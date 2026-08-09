@@ -40,6 +40,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from loguru import logger
+
 from lintro.ai.review.agent_prompts import render_agent_prompt_panel
 from lintro.ai.review.checklist_display import (
     format_review_questions_markdown,
@@ -291,6 +293,16 @@ def _fit_body_with_state(
         )
         pruned = prune_state_to_fit(state=state, body=body, limit=MAX_COMMENT_CHARS)
         state_block = render_state_block(state=pruned)
+    if len(body) + len(state_block) > MAX_COMMENT_CHARS:
+        # Last resort: pruning floors at one run with unshortened fields, so a
+        # pathological record (e.g. a monster model-emitted title) can still
+        # overflow. Dropping the state block resets cross-run tracking on the
+        # next round — strictly better than GitHub rejecting the comment.
+        logger.warning(
+            "Sticky state block cannot fit the comment budget even after "
+            "pruning; posting without state (cross-run tracking resets).",
+        )
+        return _cap_body(body=body)
     return body + state_block
 
 
