@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.113.1] - 2026-08-09
+
+### Changed
+
+- **ai**: raise ai-review ceiling to 75 until parallel fan-out lands (#1990) (e82d053)
+
+### Fixed
+
+- **ai**: cap sticky comment with state block and harden marker parse (#1866) (#1977)
+  (c5b0b00)
+
 ## [0.113.0] - 2026-08-09
 
 ### Added
