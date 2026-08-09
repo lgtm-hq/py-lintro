@@ -230,12 +230,16 @@ class BaseAIProvider(ABC):
                     await self._close_sdk_client(client)
                 elif creating_loop.is_running():
                     # The creating loop is alive in another thread; close
-                    # the pool there, where it belongs.
+                    # the pool there, where it belongs — without blocking
+                    # this loop's thread on a concurrent.futures result.
                     future = asyncio.run_coroutine_threadsafe(
                         self._close_sdk_client(client),
                         creating_loop,
                     )
-                    future.result(timeout=5.0)
+                    await asyncio.wait_for(
+                        asyncio.wrap_future(future),
+                        timeout=5.0,
+                    )
                 else:
                     # Closed or idle foreign loop: nothing will execute a
                     # scheduled close, and awaiting here would bind the

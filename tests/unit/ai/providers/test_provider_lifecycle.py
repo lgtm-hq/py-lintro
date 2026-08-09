@@ -115,21 +115,26 @@ async def test_stale_loop_rebuild_does_not_orphan_client(
     monkeypatch.setenv("LIFECYCLE_TEST_KEY", "test-key")
     provider = _LifecycleProvider()
 
-    loop_a = object()
-    loop_b = object()
-    monkeypatch.setattr(
-        BaseAIProvider,
-        "_current_loop",
-        staticmethod(lambda: loop_a),
-    )
-    first = provider._get_client()
+    # Real loops so aclose() exercises the genuine dispatch (is_running / is
+    # current), not an AttributeError swallowed by best-effort teardown.
+    loop_a = asyncio.new_event_loop()
+    loop_b = asyncio.get_running_loop()
+    try:
+        monkeypatch.setattr(
+            BaseAIProvider,
+            "_current_loop",
+            staticmethod(lambda: loop_a),
+        )
+        first = provider._get_client()
 
-    monkeypatch.setattr(
-        BaseAIProvider,
-        "_current_loop",
-        staticmethod(lambda: loop_b),
-    )
-    second = provider._get_client()
+        monkeypatch.setattr(
+            BaseAIProvider,
+            "_current_loop",
+            staticmethod(lambda: loop_b),
+        )
+        second = provider._get_client()
+    finally:
+        loop_a.close()
 
     assert_that(first).is_not_equal_to(second)
     assert_that(
@@ -208,6 +213,9 @@ def test_sync_close_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _LifecycleProvider()
     client = _FakeAsyncClient()
     provider._client = client
+    # No creating loop recorded: aclose treats the client as current-loop
+    # owned and awaits its close directly.
+    provider._client_loop = None
 
     provider.close()
 
