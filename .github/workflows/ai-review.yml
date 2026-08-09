@@ -101,8 +101,9 @@ jobs:
     # test_run_ai_review.py; bump both values together. 50 (not 30) because
     # custom-agent passes stack additional per-call --timeout budgets on top
     # of the main review call, and provider-heavy diffs were hitting the old
-    # ceiling exactly (#1976 reviews killed at the boundary four times).
-    timeout-minutes: 50
+    # ceiling exactly (#1976 reviews killed at the boundary four times; #1977's
+    # oscillated around 45-55 min and was killed at 50 twice).
+    timeout-minutes: 75
 
     steps:
       - name: Harden Runner
