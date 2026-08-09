@@ -351,6 +351,14 @@ class AnthropicProvider(BaseAIProvider):
         with self._session_lock:
             self._session_id = None
 
+    async def aclose(self) -> None:
+        """Close the Anthropic SDK client and any superseded loop-stale clients.
+
+        Idempotent. CLI transport holds no poolable HTTP client; this still
+        clears any API-transport client created earlier on this instance.
+        """
+        await super().aclose()
+
     async def _complete_cli(
         self,
         prompt: str,
