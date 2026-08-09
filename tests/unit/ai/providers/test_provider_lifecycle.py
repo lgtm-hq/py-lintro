@@ -297,3 +297,37 @@ async def test_sync_close_raises_inside_running_loop() -> None:
         provider.close()
 
     assert_that(str(excinfo.value)).contains("await aclose()")
+
+
+async def test_aclose_closes_client_on_live_foreign_loop() -> None:
+    """A client whose creating loop runs in another thread closes there.
+
+    Exercises the ``run_coroutine_threadsafe`` branch: the close coroutine
+    must execute on the foreign loop's thread, not the caller's.
+    """
+    import threading
+
+    foreign_loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=foreign_loop.run_forever, daemon=True)
+    thread.start()
+    try:
+
+        class _LoopRecordingClient:
+            def __init__(self) -> None:
+                self.closed_on: asyncio.AbstractEventLoop | None = None
+
+            async def close(self) -> None:
+                self.closed_on = asyncio.get_running_loop()
+
+        client = _LoopRecordingClient()
+        provider = _LifecycleProvider()
+        provider._superseded_clients = [(client, foreign_loop)]
+
+        await provider.aclose()
+
+        assert_that(client.closed_on).is_same_as(foreign_loop)
+        assert_that(provider._superseded_clients).is_empty()
+    finally:
+        foreign_loop.call_soon_threadsafe(foreign_loop.stop)
+        thread.join(timeout=5.0)
+        foreign_loop.close()
