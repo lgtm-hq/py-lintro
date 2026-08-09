@@ -308,8 +308,17 @@ async def test_aclose_closes_client_on_live_foreign_loop() -> None:
     import threading
 
     foreign_loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=foreign_loop.run_forever, daemon=True)
+    started = threading.Event()
+
+    def _run() -> None:
+        foreign_loop.call_soon(started.set)
+        foreign_loop.run_forever()
+
+    thread = threading.Thread(target=_run, daemon=True)
     thread.start()
+    # aclose() dispatches on is_running(); wait until the loop actually
+    # runs so the test cannot flake into the release branch.
+    assert_that(started.wait(timeout=5.0)).is_true()
     try:
 
         class _LoopRecordingClient:
