@@ -426,7 +426,7 @@ ai:
   # Honored even when max_cost_usd is set. (int 1–20, default: 5)
   max_parallel_calls: 5
 
-  # Hard ceiling on total spend per AI session, in USD; the run stops
+  # Spend ceiling per AI session, in USD; the run stops
   # scheduling new calls once spent+reserved reaches the cap. null disables
   # it. A cost cap does NOT force serial execution — chunk reviews still
   # fan out up to max_parallel_calls. Trade-off: calls already in flight
@@ -742,12 +742,12 @@ developer's login.
   binary's egress and version predictable under an egress allowlist.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
-  subscription, not a metered key. Setting a cap does **not** serialize provider
-  calls: review chunks still fan out up to `ai.max_parallel_calls`. In-flight
-  calls that started before the ceiling was hit still finish, so the session may
-  overshoot by up to (`max_parallel_calls` − 1) calls' cost. Review metadata
-  records per-phase timings (`context_collection`, `provider`, `parse_merge`)
-  so wall-clock regressions are visible in JSON / MCP output.
+  subscription (or, in bare mode with a reachable API key, that key — see the billing
+  note above). Setting a cap does **not** serialize provider calls: review chunks still
+  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
+  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
+  calls' cost. Review metadata records per-phase timings (`context_collection`,
+  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.

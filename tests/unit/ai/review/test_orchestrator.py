@@ -710,6 +710,7 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
         )
 
     assert_that(max_active).is_greater_than(1)
+    assert_that(max_active).is_less_than_or_equal_to(4)
     assert_that(provider.complete.call_count).is_equal_to(4)
 
 

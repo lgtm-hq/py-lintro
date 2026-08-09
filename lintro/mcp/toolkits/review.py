@@ -534,6 +534,7 @@ def _no_changes_payload(
     depth: int,
     strictness: str,
     budget: _BudgetPolicy,
+    context_collection_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Build the result for a diff with nothing in it.
 
@@ -546,6 +547,8 @@ def _no_changes_payload(
         depth: The depth the call asked for.
         strictness: The strictness the call asked for.
         budget: The ceiling the call would have run under.
+        context_collection_seconds: Wall-clock seconds spent collecting the
+            (empty) context, preserved in the payload's timings.
 
     Returns:
         dict[str, Any]: A zero-cost, zero-finding review result.
@@ -564,6 +567,12 @@ def _no_changes_payload(
         files_total=0,
         checklist_items=0,
         strictness=strictness,
+        duration_seconds=max(context_collection_seconds, 0.0),
+        phase_timings={
+            "context_collection": max(context_collection_seconds, 0.0),
+            "provider": 0.0,
+            "parse_merge": 0.0,
+        },
     )
     result = ReviewResult(metadata=metadata, summary="No changes to review.")
     return {
@@ -651,6 +660,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             depth=depth,
             strictness=strictness.value,
             budget=budget,
+            context_collection_seconds=context_collection_seconds,
         )
 
     classifications = classify_changed_files(context.changed_files)
