@@ -477,6 +477,49 @@ def test_cli_auth_failed_is_labelled_oauth_session(classifier: ModuleType) -> No
     )
 
 
+def test_oauth_prose_does_not_remap_a_concrete_kind(classifier: ModuleType) -> None:
+    """OAuth wording in stderr must not hijack a non-auth envelope kind.
+
+    A credits failure whose output happens to mention the OAuth session used
+    to stay ``insufficient_credits`` — remapping it to
+    ``auth_failed:oauth_session`` sends the operator to /login instead of
+    billing.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    payload = {
+        "error": {
+            "kind": "insufficient_credits",
+            "provider_unavailable": True,
+            "message": "OAuth session active but the credit balance is empty",
+        },
+    }
+    report = classifier.classify(
+        status=REVIEW_ERROR_EXIT_CODE,
+        output=json.dumps(payload),
+        transport="cli",
+    )
+
+    assert_that(report.headline).contains("insufficient_credits")
+    assert_that(report.headline).does_not_contain("auth_failed")
+
+
+def test_oauth_prose_classifies_a_thin_envelope(classifier: ModuleType) -> None:
+    """Without an envelope kind, OAuth prose still labels the auth failure.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=REVIEW_ERROR_EXIT_CODE,
+        output="Not logged in · Please run /login",
+        transport="cli",
+    )
+
+    assert_that(report.headline).contains("auth_failed:oauth_session")
+
+
 def test_cli_timeout_is_turn_timeout(classifier: ModuleType) -> None:
     """CLI timeouts are labelled turn_timeout, not a generic timeout.
 
@@ -576,3 +619,43 @@ def test_main_accepts_transport_flag(
     )
 
     assert_that(code).is_equal_to(1)
+
+
+def test_main_transport_flag_reaches_summary_and_labels(
+    classifier: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--transport api drives the summary header and the api vocabulary.
+
+    Args:
+        classifier: The loaded classifier module.
+        tmp_path: Directory holding the captured-output file.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Captured stdout/stderr.
+    """
+    output_file = tmp_path / "review.log"
+    output_file.write_text(
+        _envelope(kind="auth_failed", unavailable=True),
+        encoding="utf-8",
+    )
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+
+    code = classifier.main(
+        argv=[
+            "--status",
+            str(REVIEW_ERROR_EXIT_CODE),
+            "--output-file",
+            str(output_file),
+            "--transport",
+            "api",
+        ],
+    )
+
+    assert_that(code).is_equal_to(1)
+    summary = summary_file.read_text(encoding="utf-8")
+    assert_that(summary).contains("AI Review (api)")
+    assert_that(summary).contains("auth_failed:key")
+    assert_that(capsys.readouterr().out).contains("[api]")

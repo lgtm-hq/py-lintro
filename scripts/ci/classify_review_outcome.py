@@ -232,10 +232,15 @@ def refine_failure_kind(
             return "killed_externally"
         if _CLI_VERSION_DRIFT.search(haystack):
             return "cli_version_drift"
-        if kind == "auth_failed" or _OAUTH_AUTH.search(haystack):
+        if kind == "auth_failed":
             if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
                 return "auth_failed:key"
-            return _CLI_KIND_LABELS.get(kind, "auth_failed:oauth_session")
+            return "auth_failed:oauth_session"
+        # OAuth prose alone may only classify a *thin* envelope: a concrete
+        # non-auth kind (insufficient_credits, timeout, ...) must keep its own
+        # label even when stderr happens to mention the OAuth session.
+        if kind in ("", "unknown") and _OAUTH_AUTH.search(haystack):
+            return "auth_failed:oauth_session"
         return _CLI_KIND_LABELS.get(kind, kind)
 
     if kind == "auth_failed":
