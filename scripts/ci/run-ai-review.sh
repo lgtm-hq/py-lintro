@@ -142,8 +142,9 @@ set +e
 # < timeout-minutes. Bump both together.
 #
 # CLI_REVIEW_TIMEOUT_SECONDS documents the profile default the job budget
-# must cover (keep in sync with lintro.ai.transport.DEFAULT_CLI_TIMEOUT and
-# enable_review_config.DEFAULT_CLI_TIMEOUT).
+# must cover; tests/scripts/test_run_ai_review.py asserts it matches
+# enable_review_config.DEFAULT_CLI_TIMEOUT (and transport.DEFAULT_CLI_TIMEOUT).
+# shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=900
 uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
 review_status=$?

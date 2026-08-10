@@ -21,6 +21,7 @@ import yaml
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai import transport
 from lintro.cli import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -542,6 +543,12 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     assert_that(command_lines).is_length(1)
     assert_that(command_lines[0]).does_not_contain("--timeout")
 
+    module = _load_config_module()
+    assert_that(transport.DEFAULT_CLI_TIMEOUT).described_as(
+        "the library-side CLI timeout fallback must match the value "
+        "enable_review_config.py writes into the ephemeral config",
+    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
+
     timeout_matches = re.findall(
         r"^CLI_REVIEW_TIMEOUT_SECONDS=(\d+)\s*$",
         shell_text,
@@ -551,7 +558,12 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
         "run-ai-review.sh must declare CLI_REVIEW_TIMEOUT_SECONDS for the "
         "job-budget invariant (kept in sync with DEFAULT_CLI_TIMEOUT)",
     ).is_length(1)
-    review_timeout_minutes = math.ceil(int(timeout_matches[0]) / 60)
+    assert_that(float(timeout_matches[0])).described_as(
+        "the CLI_REVIEW_TIMEOUT_SECONDS documentation variable in "
+        "run-ai-review.sh has drifted from the operational "
+        "enable_review_config.DEFAULT_CLI_TIMEOUT",
+    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
+    review_timeout_minutes = math.ceil(module.DEFAULT_CLI_TIMEOUT / 60)
 
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]

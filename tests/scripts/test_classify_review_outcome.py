@@ -147,6 +147,26 @@ def test_missing_credential_never_reports_success(classifier: ModuleType) -> Non
     assert_that(report.detail).contains("CLAUDE_CODE_OAUTH_TOKEN")
 
 
+def test_missing_credential_on_api_transport_names_the_api_key(
+    classifier: ModuleType,
+) -> None:
+    """The api-transport no-credential guidance points at the API key secret.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=classifier.NO_CREDENTIAL_STATUS,
+        output="",
+        transport="api",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.NO_CREDENTIAL)
+    assert_that(report.headline).contains("[api]")
+    assert_that(report.detail).contains("ANTHROPIC_API_KEY")
+    assert_that(report.detail).does_not_contain("CLAUDE_CODE_OAUTH_TOKEN")
+
+
 def test_lintro_side_failure_is_not_blamed_on_the_provider(
     classifier: ModuleType,
 ) -> None:

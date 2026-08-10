@@ -83,6 +83,12 @@ _CLI_KIND_LABELS: Final[dict[str, str]] = {
     "timeout": "turn_timeout",
 }
 
+# These patterns classify unstructured CLI subprocess prose — when the CLI
+# fails before lintro can emit its JSON error envelope, stderr wording is all
+# there is. They were validated against claude CLI 2.1.x (2026-08); if the
+# binary rewrites an error message, the affected class silently degrades to
+# the generic kind label from _CLI_KIND_LABELS, so revalidate these patterns
+# whenever the pinned claude CLI version moves.
 _CLI_VERSION_DRIFT = re.compile(
     r"cli.?version|unsupported.+claude|json-schema-name|unknown option|"
     r"unrecognized arguments",
