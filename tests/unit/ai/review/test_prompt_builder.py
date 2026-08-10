@@ -123,3 +123,29 @@ def test_prepare_review_user_prompt_wires_paths_registry(
     assert_that(prompt).contains("Interaction paths")
     assert_that(prompt.lower()).contains("workflow")
     assert_that(prompt_mapping).is_not_empty()
+
+
+def test_deferred_scope_is_fenced_and_redacted(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Deferred-scope text (PR-summary-derived) is fenced and redacted (#1884)."""
+    checklist_items = select_checklist_items(
+        classifications=[],
+        items=get_all_checklist_items()[:1],
+    )
+
+    prompt, _ = build_review_user_prompt(
+        context=sample_review_context,
+        classifications=[],
+        checklist_items=checklist_items,
+        deferred_scope=f"perf work deferred; token {_LEAKED_KEY}",
+    )
+
+    marker = next(iter(re.findall(r"CODE_BLOCK_[0-9a-f]{8}", prompt)))
+    deferred_index = prompt.find("perf work deferred")
+    assert_that(deferred_index).is_greater_than_or_equal_to(0)
+    fence_open = prompt.rfind(f"<{marker}>", 0, deferred_index)
+    fence_close = prompt.find(f"</{marker}>", deferred_index)
+    assert_that(fence_open).is_greater_than_or_equal_to(0)
+    assert_that(fence_close).is_greater_than(deferred_index)
+    assert_that(prompt).does_not_contain(_LEAKED_KEY)
