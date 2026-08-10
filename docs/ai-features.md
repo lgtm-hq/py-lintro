@@ -450,9 +450,11 @@ ai:
   # (int >= 10000, default: 1500000)
   cli_max_diff_bytes: 1500000
 
-  # Max findings one CLI review call may emit, so a response cannot hit the
-  # 32k output-token cap mid-JSON; overflow is summarized, and a chunk that
-  # still exhausts output retries once with a tighter cap.
+  # Max findings one CLI review call may emit. The cap is a prompt contract
+  # (the model is instructed to stop at the cap and summarize overflow), not
+  # a post-parse truncation; a chunk that still exhausts the 32k output cap
+  # retries once with a tighter cap, and truncated responses fall back to
+  # the schema-retry / unstructured-recovery ladder.
   # (int 1–50, default: 12)
   cli_max_findings_per_call: 12
 

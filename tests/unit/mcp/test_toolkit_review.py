@@ -590,6 +590,40 @@ def test_review_surfaces_a_provider_failure_with_its_taxonomy(
     )
 
 
+def test_review_maps_a_too_large_diff_to_invalid_input(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A diff-size refusal raised inside ``run_review`` is invalid input.
+
+    The CLI byte ceiling (#1967) raises ``ReviewContextError`` after context
+    collection; without the dedicated handler it would be misreported as a
+    provider/execution failure instead of a size refusal the caller can fix
+    with ``paths`` or the api transport.
+    """
+    from lintro.ai.review.enums.review_context_error_code import (
+        ReviewContextErrorCode,
+    )
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    stub_ai(
+        error=ReviewContextError(
+            "diff exceeds ai.cli_max_diff_bytes",
+            code=ReviewContextErrorCode.DIFF_TOO_LARGE,
+        ),
+    )
+
+    result, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.isError).is_true()
+    assert_that(payload["error"]["code"]).is_equal_to(
+        McpErrorCode.INVALID_INPUT.value,
+    )
+    assert_that(payload["error"]["detail"]["context_error"]).is_equal_to(
+        "diff-too-large",
+    )
+
+
 def test_review_is_unavailable_without_the_ai_extra(
     repo: Path,
     monkeypatch: pytest.MonkeyPatch,
