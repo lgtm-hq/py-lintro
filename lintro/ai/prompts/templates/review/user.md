@@ -2,7 +2,7 @@ Review this code change for actionable findings.
 
 **PR:** <{boundary}> {pr_title} </{boundary}>
 
-**Base → Head:** `{base_ref}`...`{head_ref}`
+**Base → Head:** <{boundary}> `{base_ref}`...`{head_ref}` </{boundary}>
 
 **Summary:**
 

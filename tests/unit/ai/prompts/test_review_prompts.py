@@ -128,10 +128,12 @@ def test_depth_templates_render_without_key_error() -> None:
 def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
     """Every template that embeds untrusted data formats with a boundary kwarg."""
     boundary = "CODE_BLOCK_deadbeef"
-    REVIEW_USER_PROMPT_TEMPLATE.format(
+    rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
         **{**_USER_PROMPT_KWARGS, "boundary": boundary},
         output_rules=format_output_rules(checklist_count=1),
     )
+    assert_that(rendered).contains(f"<{boundary}>")
+    assert_that(rendered).contains(f"</{boundary}>")
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
         **{
             **_USER_PROMPT_KWARGS,

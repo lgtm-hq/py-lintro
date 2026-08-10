@@ -1008,8 +1008,8 @@ def build_review_prompt(
 
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
+        base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
+        head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
         pr_summary=pr_summary,
         deferred_scope_section="",
         external_review_section="",
@@ -1110,8 +1110,8 @@ def build_git_native_review_prompt(
         )
     user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
+        base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
+        head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
         pr_summary=pr_summary,
         deferred_scope_section="",
         external_review_section="",
