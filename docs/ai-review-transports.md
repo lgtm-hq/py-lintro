@@ -17,6 +17,16 @@ and reported numbers mean different things. Configure them under `ai.transports.
 | Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
 | Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
+**Bare-billing exception:** under `cli` with Anthropic, when `ai.cli_bare` resolves to
+sending `--bare` (`auto` with a reachable `ANTHROPIC_API_KEY`, or `always`, #1859), the
+call bills the API key — the run records `auth_mode=api_key` and `cost_basis=estimated`
+instead of the subscription column above.
+
+**Advisory means estimate-based, not unenforced:** the CLI advisory cap still stops the
+run (finalizing a partial review) when *locally estimated* cost reaches it. It is
+"advisory" because subscription usage has no billed price — the estimate bounds work
+done, not spend.
+
 ## Resolution
 
 Effective settings = **transport profile → legacy scalar → built-in default**.
@@ -66,6 +76,8 @@ of scope so the subscription token is actually used.
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
 `estimated` / `unpriceable`). Under subscription CLI, any `~$` figure is unpriceable —
-not a bill.
+not a bill. Live `api` runs always record `billed` (usage is provider-reported);
+`estimated` appears only for bare-billed CLI runs and for legacy records whose basis is
+derived from `auth_mode` + locally estimated token usage.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.
