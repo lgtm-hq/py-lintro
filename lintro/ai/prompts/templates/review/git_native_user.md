@@ -1,20 +1,26 @@
 Review this code change for actionable findings.
 
-**PR:** {pr_title}
+**PR:** <{boundary}> {pr_title} </{boundary}>
 
-**Base → Head:** `{base_ref}`...`{head_ref}`
+**Base → Head:** <{boundary}> `{base_ref}`...`{head_ref}` </{boundary}>
 
 **Summary:**
 
+<{boundary}>
 {pr_summary}
+</{boundary}>
 
 {deferred_scope_section}
 
+<{boundary}>
 {external_review_section}
+</{boundary}>
 
 **Changed files ({changed_file_count}):**
 
+<{boundary}>
 {changed_files}
+</{boundary}>
 
 ---
 
@@ -37,7 +43,9 @@ brief evidence (file:line).
 
 {diff_section}
 
+<{boundary}>
 {lint_results_section}
+</{boundary}>
 
 {strictness_section}
 
