@@ -134,36 +134,41 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
     )
     assert_that(rendered).contains(f"<{boundary}>")
     assert_that(rendered).contains(f"</{boundary}>")
-    REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
-        **{
-            **_USER_PROMPT_KWARGS,
-            "boundary": boundary,
-            "diff_section": "inline-diff",
-        },
-        output_rules=format_output_rules(checklist_count=1),
-    )
-    REVIEW_GIT_NATIVE_DIFF_INLINE.format(boundary=boundary, diff="diff body")
-    REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
-        agent_name="agent",
-        agent_description="desc",
-        scoped_file_count=1,
-        scoped_files="- a.py",
-        boundary=boundary,
-        agent_instructions="look for bugs",
-        diff="diff body",
-        strictness_section="",
-        output_schema="{}",
-    )
-    REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
-        prior_findings_json="[]",
-        boundary=boundary,
-        diff="diff body",
-    )
-    REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
-        boundary=boundary,
-        diff="diff body",
-        changed_files="- a.py",
-    )
+    renders = [
+        REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
+            **{
+                **_USER_PROMPT_KWARGS,
+                "boundary": boundary,
+                "diff_section": "inline-diff",
+            },
+            output_rules=format_output_rules(checklist_count=1),
+        ),
+        REVIEW_GIT_NATIVE_DIFF_INLINE.format(boundary=boundary, diff="diff body"),
+        REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
+            agent_name="agent",
+            agent_description="desc",
+            scoped_file_count=1,
+            scoped_files="- a.py",
+            boundary=boundary,
+            agent_instructions="look for bugs",
+            diff="diff body",
+            strictness_section="",
+            output_schema="{}",
+        ),
+        REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
+            prior_findings_json="[]",
+            boundary=boundary,
+            diff="diff body",
+        ),
+        REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
+            boundary=boundary,
+            diff="diff body",
+            changed_files="- a.py",
+        ),
+    ]
+    for template_render in renders:
+        assert_that(template_render).contains(f"<{boundary}>")
+        assert_that(template_render).contains(f"</{boundary}>")
 
 
 def test_optional_sections_render_empty_by_default() -> None:
