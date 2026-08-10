@@ -264,9 +264,15 @@ def test_output_rules_bound_findings_per_call_when_capped() -> None:
 def test_is_output_exhaustion_error_detects_known_signatures() -> None:
     """Output-cap retry only fires on exhaustion-shaped provider messages."""
     assert_that(
-        is_output_exhaustion_error("Claude CLI reported error: hit the token limit"),
+        is_output_exhaustion_error(
+            "Claude CLI reported error: maximum output tokens exceeded",
+        ),
     ).is_true()
     assert_that(is_output_exhaustion_error("authentication required")).is_false()
+    # No output qualifier → could equally be an input context-window error.
+    assert_that(
+        is_output_exhaustion_error("Claude CLI: hit the token limit"),
+    ).is_false()
 
 
 async def test_claude_cli_argv_length_is_constant_in_prompt_size(

@@ -197,7 +197,6 @@ def is_output_exhaustion_error(message: str) -> bool:
         "max output tokens",
         "maximum output tokens",
         "output token limit",
-        "hit the token limit",
         "maximum number of output tokens",
     )
     return any(needle in text for needle in needles)
