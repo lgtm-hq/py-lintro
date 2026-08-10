@@ -37,6 +37,12 @@ class ReviewMetadata:
         stopped_reason (str): Human-readable reason a partial review stopped
             (e.g. "cost cap"). Empty for a complete review.
         duration_seconds (float): Wall-clock duration of the review run.
+        transport (str): Transport used for the review (``api`` or ``cli``).
+            Empty for legacy records that predate transport stamping.
+        auth_mode (str): How the provider call authenticated (e.g.
+            ``api_key``, ``oauth_session``). Empty when unknown.
+        cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
+            ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not

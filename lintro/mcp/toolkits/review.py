@@ -624,7 +624,6 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.review.enums.review_strictness import ReviewStrictness
     from lintro.ai.review.orchestrator import run_review
     from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-
     from lintro.ai.transport import apply_resolved_transport
 
     lintro_config, ai_config = _resolve_ai_config(workspace=workspace)

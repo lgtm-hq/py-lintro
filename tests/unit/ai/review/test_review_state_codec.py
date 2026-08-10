@@ -92,7 +92,7 @@ def test_round_trip_preserves_runs_and_findings() -> None:
 
 
 def test_cost_basis_provenance_round_trips() -> None:
-    """transport / auth_mode / cost_basis survive serialize/parse (#1923)."""
+    """Transport / auth_mode / cost_basis survive serialize/parse (#1923)."""
     record = RunRecord(
         round=2,
         sha="deadbeef",
