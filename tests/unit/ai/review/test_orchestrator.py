@@ -884,6 +884,7 @@ def test_run_review_parallelizes_depth_two_chunks(tmp_path: Path) -> None:
         )
 
     assert_that(max_active).is_greater_than(1)
+    assert_that(max_active).is_less_than_or_equal_to(4)
     assert_that(result.metadata.chunks_reviewed).is_equal_to(4)
 
 
