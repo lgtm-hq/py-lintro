@@ -39,6 +39,10 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
+    # Deliberate private import: the retry loop is unit-tested at the helper
+    # seam because driving it through run_review_async needs a full provider
+    # + chunking stack for no extra coverage. Update this import when the
+    # helper is renamed (#1967 review).
     _invoke_chunk_review,
     resolve_review_chunks,
     run_review_async,
@@ -438,7 +442,8 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         calls.append(prompt)
         if len(calls) == 1:
             raise AIProviderError(
-                "Claude CLI reported error: exceeded the maximum number of tokens",
+                "Claude CLI reported error: exceeded the maximum number of "
+                "output tokens",
             )
         return ok_response
 

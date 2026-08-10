@@ -186,6 +186,10 @@ def is_output_exhaustion_error(message: str) -> bool:
     # ``finish_reason`` — matching those would classify *any* provider error
     # (auth, timeout, 4xx) as output exhaustion and trigger the tighter-cap
     # retry on errors that a smaller response cannot fix.
+    # Output-specific phrasings only: "exceeded the maximum number of
+    # tokens" also matches INPUT context-window violations, and "response
+    # truncated" matches generic proxy/stream errors — both would trigger a
+    # tighter-cap retry that cannot help (#1967 review).
     needles = (
         'stop_reason":"max_tokens',
         'stop_reason":"length',
@@ -193,9 +197,8 @@ def is_output_exhaustion_error(message: str) -> bool:
         "max output tokens",
         "maximum output tokens",
         "output token limit",
-        "response truncated",
         "hit the token limit",
-        "exceeded the maximum number of tokens",
+        "maximum number of output tokens",
     )
     return any(needle in text for needle in needles)
 

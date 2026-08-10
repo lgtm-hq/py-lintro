@@ -118,6 +118,17 @@ def test_is_output_exhaustion_error_matches_known_signatures() -> None:
             AIProviderError("maximum output tokens exceeded"),
         ),
     ).is_true()
+    # Input context-window violations and generic proxy truncation share
+    # wording with output exhaustion; a tighter findings cap cannot fix
+    # either, so they must not trigger the retry.
+    assert_that(
+        is_output_exhaustion_error(
+            "prompt exceeded the maximum number of tokens for this model",
+        ),
+    ).is_false()
+    assert_that(
+        is_output_exhaustion_error("upstream proxy error: response truncated"),
+    ).is_false()
 
 
 def test_measure_diff_size_empty_and_multibyte() -> None:
