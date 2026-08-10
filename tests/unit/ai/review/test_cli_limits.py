@@ -118,3 +118,15 @@ def test_is_output_exhaustion_error_matches_known_signatures() -> None:
             AIProviderError("maximum output tokens exceeded"),
         ),
     ).is_true()
+
+
+def test_measure_diff_size_empty_and_multibyte() -> None:
+    """Empty diffs measure zero; byte counts follow UTF-8, not len()."""
+    empty = measure_diff_size(unified_diff="")
+    assert_that(empty.lines).is_equal_to(0)
+    assert_that(empty.bytes).is_equal_to(0)
+    assert_that(empty.tokens).is_equal_to(0)
+
+    emoji = measure_diff_size(unified_diff="+🎉\n")
+    assert_that(emoji.lines).is_equal_to(1)
+    assert_that(emoji.bytes).is_equal_to(len("+🎉\n".encode()))

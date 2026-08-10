@@ -1620,6 +1620,10 @@ async def _invoke_chunk_review(
                     )
                     findings_cap = next_cap
                     allow_output_retry = False
+                    # Each attempt gets its own schema-retry window: charging
+                    # the retry with the first attempt's elapsed time starves
+                    # the recovery the retry exists to provide.
+                    started = time.monotonic()
                     continue
             raise
         return response, time.monotonic() - started

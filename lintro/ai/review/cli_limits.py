@@ -28,6 +28,7 @@ __all__ = [
     "CLI_TRANSPORT_DIFF_TOKEN_BUDGET",
     "DiffSize",
     "assert_cli_diff_within_ceiling",
+    "is_cli_output_exhaustion",
     "is_output_exhaustion_error",
     "measure_diff_size",
     "resolve_cli_diff_budget",
