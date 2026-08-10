@@ -133,7 +133,17 @@ class AIConfig(BaseModel):
         description="Maximum number of issues to attempt fixing per run. "
         "Counts API calls made, not suggestions returned.",
     )
-    max_parallel_calls: int = Field(default=5, ge=1, le=20)
+    max_parallel_calls: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Concurrent AI provider calls for fixes and review chunk fan-out. "
+            "Honored even when max_cost_usd is set. With n concurrent calls and "
+            "no per-call reserve estimate, a session may overshoot max_cost_usd "
+            "by up to n − 1 in-flight calls' cost."
+        ),
+    )
     max_retries: int = Field(default=2, ge=0, le=10)
     api_timeout: float = Field(default=60.0, ge=1.0)
     validate_after_group: bool = False
@@ -198,7 +208,10 @@ class AIConfig(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Maximum total cost in USD per AI session." " None disables the limit."
+            "Maximum total cost in USD per AI session. None disables the limit. "
+            "A cost cap does not serialize provider calls: under "
+            "max_parallel_calls=n concurrent workers the final total may "
+            "exceed this ceiling by up to n − 1 in-flight calls' cost."
         ),
     )
     max_prompt_tokens: int = Field(

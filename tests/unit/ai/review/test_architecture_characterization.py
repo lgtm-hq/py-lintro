@@ -65,6 +65,7 @@ _MCP_RUN_METADATA_KEYS: frozenset[str] = frozenset(
         "strictness",
         "cost_usd",
         "duration_seconds",
+        "phase_timings",
         "chunks",
         "files",
         "token_usage",

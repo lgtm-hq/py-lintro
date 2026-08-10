@@ -119,6 +119,9 @@ __all__ = [
     "strip_json_fences",
 ]
 _PROMPT_OVERHEAD_TOKENS = 12_000
+# Depth ≥ 2 generates 5–10 checklist questions per chunk. Parallel chunks get
+# disjoint id ranges so merge_checklist_answers does not collide across chunks.
+_GENERATED_CHECKLIST_ID_STRIDE = 32
 
 
 def _aborted_before_completion(
@@ -289,7 +292,7 @@ async def _review_all_chunks(
     diff_budget: int,
     completed_sink: list[_ChunkReviewPartial] | None = None,
 ) -> list[_ChunkReviewPartial]:
-    """Review all chunks sequentially or in parallel.
+    """Review all chunks with bounded concurrency.
 
     When ``completed_sink`` is provided, each successfully reviewed chunk's
     partial is appended to it as soon as it completes. This lets the caller
@@ -298,8 +301,10 @@ async def _review_all_chunks(
     all completed work.
 
     Chunks are reviewed concurrently under a semaphore capped by
-    ``max_parallel_calls``; a ``ReviewExecutionError`` or a cost-cap stop
-    cancels the remaining work and propagates to ``run_review_async``.
+    ``max_parallel_calls`` whether or not a cost cap is set (depth 1–3). A
+    ``ReviewExecutionError`` or a cost-cap stop cancels the remaining work and
+    propagates to ``run_review_async``. Depth ≥ 2 assigns each chunk a disjoint
+    generated-checklist id range so merge stays deterministic under fan-out.
     """
     if len(chunks) <= 1:
         single = await _review_chunk_with_progress(
@@ -326,70 +331,14 @@ async def _review_all_chunks(
             completed_sink.append(single)
         return [single]
 
-    if depth >= 2:
-        sequential_partials: list[_ChunkReviewPartial] = []
-        next_id = next_generated_checklist_id
-        for chunk_index, chunk in enumerate(chunks):
-            budget.check()
-            progress.on_chunk_start(
-                chunk_index=chunk_index,
-                files=list(chunk.files),
-            )
-            try:
-                partial, next_id = await _review_chunk(
-                    chunk=chunk,
-                    context=context,
-                    provider=provider,
-                    ai_config=ai_config,
-                    depth=depth,
-                    checklist_text=checklist_text,
-                    checklist_count=len(checklist_items),
-                    next_generated_checklist_id=next_id,
-                    classifications=classifications,
-                    lint_results=lint_results,
-                    budget=budget,
-                    progress=progress,
-                    chunk_index=chunk_index,
-                    repo_root=repo_root,
-                    use_one_shot=use_one_shot,
-                    strictness_section=strictness_section,
-                    diff_budget=diff_budget,
-                )
-            except Exception as exc:
-                # A cost-cap stop is an expected graceful halt, not a chunk
-                # failure: re-raise it raw (no error-level "aborted" log, no
-                # on_error) so run_review can finalize a partial cleanly.
-                if _is_cost_cap_stop(exc=exc):
-                    raise
-                progress.on_error(
-                    chunk_index=chunk_index,
-                    total_chunks=len(chunks),
-                    step="reviewing",
-                    completed_chunks=chunk_index,
-                    error=exc,
-                )
-                raise _aborted_before_completion(
-                    cause=exc,
-                    provider=provider,
-                    chunk_index=chunk_index,
-                    total_chunks=len(chunks),
-                    step="reviewing",
-                    completed_chunks=chunk_index,
-                ) from exc
-            sequential_partials.append(partial)
-            if completed_sink is not None:
-                completed_sink.append(partial)
-            progress.on_chunk_done(chunk_index=chunk_index)
-        return sequential_partials
-
     partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
-    effective_parallel = 1 if budget.max_cost_usd is not None else max_parallel_calls
-    max_workers = min(len(chunks), effective_parallel)
+    max_workers = min(len(chunks), max_parallel_calls)
     first_error: ReviewExecutionError | None = None
 
-    # Bounded concurrency on the caller's event loop replaces the former thread
-    # pool: chunk reviews are provider I/O, so tasks under a semaphore keep the
-    # same ``max_parallel_calls`` ceiling without threads.
+    # Bounded concurrency on the caller's event loop: chunk reviews are provider
+    # I/O, so tasks under a semaphore keep the ``max_parallel_calls`` ceiling
+    # without threads. A cost cap does not force serial execution; see
+    # ``CostBudget.execute`` for the accepted n−1-call overshoot bound.
     semaphore = asyncio.Semaphore(max_workers)
 
     async def _run_chunk(
@@ -408,6 +357,9 @@ async def _review_all_chunks(
         Returns:
             The chunk index paired with its partial or the exception raised.
         """
+        chunk_checklist_id = (
+            next_generated_checklist_id + chunk_index * _GENERATED_CHECKLIST_ID_STRIDE
+        )
         async with semaphore:
             try:
                 return chunk_index, await _review_chunk_with_progress(
@@ -427,6 +379,7 @@ async def _review_all_chunks(
                     repo_root=repo_root,
                     use_one_shot=use_one_shot,
                     strictness_section=strictness_section,
+                    next_generated_checklist_id=chunk_checklist_id,
                     diff_budget=diff_budget,
                 )
             except Exception as exc:
@@ -472,6 +425,7 @@ async def _review_all_chunks(
     if first_error is not None:
         raise first_error
 
+    # Index-keyed merge keeps completion order from scrambling chunk order.
     return [partial for partial in partials if partial is not None]
 
 
@@ -567,6 +521,7 @@ def run_review(
     custom_agents: tuple[CustomAgentSpec, ...] = (),
     run_builtin_checklist: bool = True,
     workspace_root: Path | None = None,
+    context_collection_seconds: float = 0.0,
 ) -> ReviewResult:
     """Execute an AI diff review from synchronous code.
 
@@ -594,6 +549,8 @@ def run_review(
             and run only the custom agents (``review.custom_agents: only``).
         workspace_root: Optional workspace root used to build providers for
             agents that declare a ``model`` override.
+        context_collection_seconds: Wall-clock seconds the caller spent in
+            ``collect_review_context`` (recorded in ``phase_timings``).
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -616,6 +573,7 @@ def run_review(
             custom_agents=custom_agents,
             run_builtin_checklist=run_builtin_checklist,
             workspace_root=workspace_root,
+            context_collection_seconds=context_collection_seconds,
         ),
     )
 
@@ -638,6 +596,7 @@ async def run_review_async(
     custom_agents: tuple[CustomAgentSpec, ...] = (),
     run_builtin_checklist: bool = True,
     workspace_root: Path | None = None,
+    context_collection_seconds: float = 0.0,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -662,6 +621,8 @@ async def run_review_async(
             and run only the custom agents (``review.custom_agents: only``).
         workspace_root: Optional workspace root used to build providers for
             agents that declare a ``model`` override.
+        context_collection_seconds: Wall-clock seconds the caller spent in
+            ``collect_review_context`` (recorded in ``phase_timings``).
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -692,6 +653,7 @@ async def run_review_async(
             depth=depth,
             checklist_items=checklist_items,
             context_window_override=context_window_override,
+            context_collection_seconds=context_collection_seconds,
         )
 
     context_window = get_context_window(
@@ -759,6 +721,9 @@ async def run_review_async(
     filtered_findings: tuple[ReviewFinding, ...] = ()
     custom_findings: tuple[ReviewFinding, ...] = ()
     started_at = time.monotonic()
+    provider_started = started_at
+    provider_seconds = 0.0
+    parse_merge_seconds = 0.0
     try:
         # Open the session inside the try so a failure before or during
         # on_start() still reaches the finally that tears it down.
@@ -766,6 +731,7 @@ async def run_review_async(
             provider.begin_durable_session(repo_root=repo_root)
             durable_session_started = True
         tracker.on_start(total_chunks=len(chunks), depth=depth)
+        provider_started = time.monotonic()
         if chunks:
             partials = await _review_all_chunks(
                 chunks=chunks,
@@ -803,6 +769,8 @@ async def run_review_async(
             on_pass_complete=custom_results.append,
             on_agent_failed=custom_agents_failed.append,
         )
+        provider_seconds = time.monotonic() - provider_started
+        merge_started = time.monotonic()
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
             policy=review_sensitivity,
@@ -817,6 +785,7 @@ async def run_review_async(
         )
         filtered_findings = filtered_findings + custom_findings
         total_findings = len(filtered_findings)
+        parse_merge_seconds = time.monotonic() - merge_started
         completed = True
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: the cost cap was reached mid-run. Keep the
@@ -830,10 +799,13 @@ async def run_review_async(
         # empty-but-actionable rather than a generic abort.
         if not _is_cost_cap_stop(exc=exc):
             raise
+        if provider_seconds <= 0.0:
+            provider_seconds = time.monotonic() - provider_started
         cap = budget.max_cost_usd
         partials = list(collected)
         partial = True
         stopped_reason = _cost_cap_reason(cap=cap)
+        merge_started = time.monotonic()
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
             policy=review_sensitivity,
@@ -843,6 +815,7 @@ async def run_review_async(
         )
         filtered_findings = filtered_findings + custom_findings
         total_findings = len(filtered_findings)
+        parse_merge_seconds = time.monotonic() - merge_started
         completed = True
         logger.warning(
             "Review stopped early — {reason} after reviewing {n} of {m} "
@@ -862,6 +835,11 @@ async def run_review_async(
                 tracker.on_abort()
 
     duration_seconds = time.monotonic() - started_at
+    phase_timings = {
+        "context_collection": max(context_collection_seconds, 0.0),
+        "provider": max(provider_seconds, 0.0),
+        "parse_merge": max(parse_merge_seconds, 0.0),
+    }
 
     total_input = sum(item.input_tokens for item in partials) + sum(
         result.input_tokens for result in custom_results
@@ -924,6 +902,7 @@ async def run_review_async(
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
         duration_seconds=duration_seconds,
+        phase_timings=phase_timings,
         custom_agents_run=len(custom_results),
         custom_agents_skipped=(
             len(agent_selection.skipped) + len(custom_agents_failed)
@@ -1707,6 +1686,16 @@ async def _generate_extra_checklist(
     lines: list[str] = []
     next_id = next_generated_checklist_id
     for item in questions:
+        # The prompt asks for 5-10 questions, but the count is model-controlled.
+        # Parallel chunks get disjoint id ranges of _GENERATED_CHECKLIST_ID_STRIDE,
+        # so accepting more than the stride would collide with the next chunk's
+        # range and corrupt merge_checklist_answers.
+        if next_id - next_generated_checklist_id >= _GENERATED_CHECKLIST_ID_STRIDE:
+            logger.warning(
+                "Generated checklist overflow: keeping the first "
+                f"{_GENERATED_CHECKLIST_ID_STRIDE} of {len(questions)} questions",
+            )
+            break
         if not isinstance(item, dict):
             continue
         question = item.get("question")
@@ -2009,6 +1998,7 @@ def _empty_review_result(
     depth: int,
     checklist_items: list[ChecklistItem],
     context_window_override: int | None,
+    context_collection_seconds: float = 0.0,
 ) -> ReviewResult:
     """Return an empty result when no changes are present."""
     context_window = get_context_window(
@@ -2030,6 +2020,11 @@ def _empty_review_result(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
+        phase_timings={
+            "context_collection": max(context_collection_seconds, 0.0),
+            "provider": 0.0,
+            "parse_merge": 0.0,
+        },
     )
     return ReviewResult(
         metadata=metadata,

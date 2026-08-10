@@ -37,6 +37,7 @@ and callers should expect a single long-running call.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -454,6 +455,7 @@ def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
         "strictness": metadata.strictness,
         "cost_usd": metadata.cost_estimate_usd,
         "duration_seconds": metadata.duration_seconds,
+        "phase_timings": dict(metadata.phase_timings),
         "chunks": {
             "total": metadata.chunks_total,
             "reviewed": metadata.chunks_reviewed,
@@ -532,6 +534,7 @@ def _no_changes_payload(
     depth: int,
     strictness: str,
     budget: _BudgetPolicy,
+    context_collection_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Build the result for a diff with nothing in it.
 
@@ -544,6 +547,8 @@ def _no_changes_payload(
         depth: The depth the call asked for.
         strictness: The strictness the call asked for.
         budget: The ceiling the call would have run under.
+        context_collection_seconds: Wall-clock seconds spent collecting the
+            (empty) context, preserved in the payload's timings.
 
     Returns:
         dict[str, Any]: A zero-cost, zero-finding review result.
@@ -562,6 +567,12 @@ def _no_changes_payload(
         files_total=0,
         checklist_items=0,
         strictness=strictness,
+        duration_seconds=max(context_collection_seconds, 0.0),
+        phase_timings={
+            "context_collection": max(context_collection_seconds, 0.0),
+            "provider": 0.0,
+            "parse_merge": 0.0,
+        },
     )
     result = ReviewResult(metadata=metadata, summary="No changes to review.")
     return {
@@ -640,13 +651,16 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         ).lower(),
     )
 
+    context_started = time.monotonic()
     context = _collect_context(arguments=arguments, workspace=workspace)
+    context_collection_seconds = time.monotonic() - context_started
     if context is None:
         return _no_changes_payload(
             ai_config=ai_config,
             depth=depth,
             strictness=strictness.value,
             budget=budget,
+            context_collection_seconds=context_collection_seconds,
         )
 
     classifications = classify_changed_files(context.changed_files)
@@ -686,6 +700,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             ),
             force_semantic_chunking=lintro_config.review.force_semantic_chunking,
             workspace_root=workspace,
+            context_collection_seconds=context_collection_seconds,
         )
     except (AIError, ValueError) as exc:
         failure = _review_failure(provider_name=str(provider.name), error=exc)
