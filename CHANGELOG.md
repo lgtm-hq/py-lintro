@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.113.2] - 2026-08-10
+
+### Changed
+
+- **ai**: honor `max_parallel_calls` under cost caps (#1969) (#1978) (39e10a8)
+
+### Fixed
+
+- **ai**: fence untrusted review prompt fields with boundary markers (#1884) (#1979)
+  (1332c8a)
+
 ## [0.113.1] - 2026-08-09
 
 ### Changed
