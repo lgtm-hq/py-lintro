@@ -281,3 +281,27 @@ def test_make_boundary_marker_prefix_matches_template_contract() -> None:
     """Generated markers match the CODE_BLOCK_* shape documented in system.md."""
     marker = make_boundary_marker()
     assert_that(marker).matches(r"^CODE_BLOCK_[0-9a-f]{8}$")
+
+
+def test_pr_title_and_sections_are_fenced_and_redacted() -> None:
+    """PR title sits inside the fence; sections pass through redaction (#1884).
+
+    A leaked key in lint output or an injection payload in the PR title must
+    reach the model only redacted and inside boundary markers.
+    """
+    context = _make_context()
+    _system, user_prompt = build_review_prompt(
+        chunk=_make_chunk(diff="+x = 1\n"),
+        context=context,
+        checklist_text="1. [logic-bug] Example?",
+        checklist_count=1,
+        interaction_paths="(none)",
+    )
+
+    markers = _extract_markers(user_prompt)
+    marker = next(iter(markers))
+    title_line = next(
+        line for line in user_prompt.splitlines() if line.startswith("**PR:**")
+    )
+    assert_that(title_line).contains(f"<{marker}>")
+    assert_that(title_line).contains(f"</{marker}>")

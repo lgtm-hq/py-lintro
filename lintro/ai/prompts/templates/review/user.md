@@ -1,6 +1,6 @@
 Review this code change for actionable findings.
 
-**PR:** {pr_title}
+**PR:** <{boundary}> {pr_title} </{boundary}>
 
 **Base → Head:** `{base_ref}`...`{head_ref}`
 
