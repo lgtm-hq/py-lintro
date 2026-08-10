@@ -43,6 +43,7 @@ _USER_PROMPT_KWARGS = {
     "output_schema": REVIEW_OUTPUT_SCHEMA,
 }
 
+
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
     """User prompt template renders without KeyError for all placeholders."""
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
