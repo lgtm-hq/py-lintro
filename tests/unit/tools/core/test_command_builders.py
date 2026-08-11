@@ -559,6 +559,33 @@ def _which_only(*available: str) -> Callable[..., str | None]:
     return _which
 
 
+def test_builder_package_names_match_the_manifest() -> None:
+    """The builder installs the same npm package the manifest declares.
+
+    These were allowed to drift: ``commitlint`` was ``commitlint`` here and
+    ``@commitlint/cli`` in the manifest, so the pinned registry fallback named a
+    package that does not exist. Now that every Node tool can reach that
+    fallback (#1811), a mismatch is a broken install command rather than dead
+    code, so it is asserted rather than left to review.
+    """
+    import json
+
+    from lintro.enums.tool_name import normalize_tool_name
+
+    manifest = json.loads(
+        (Path(__file__).parents[4] / "lintro" / "tools" / "manifest.json").read_text(),
+    )
+    builder = NodeJSBuilder()
+    for entry in manifest["tools"]:
+        install = entry.get("install", {})
+        if install.get("type") != "npm":
+            continue
+        tool_name_enum = normalize_tool_name(entry["name"])
+        assert_that(builder.package_names.get(tool_name_enum)).described_as(
+            entry["name"],
+        ).is_equal_to(install["package"])
+
+
 def test_every_node_tool_has_a_resolvable_pinned_spec() -> None:
     """No Node tool can reach the registry fallback without a version pin.
 
