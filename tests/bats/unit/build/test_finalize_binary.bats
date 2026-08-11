@@ -21,19 +21,19 @@ teardown() {
 }
 
 @test "finalize_binary.sh: --help exits 0" {
-	run bash "$SCRIPT" --help
+	run "$SCRIPT" --help
 	assert_success
 	assert_output --partial "Finalize a built lintro binary"
 }
 
 @test "finalize_binary.sh: missing args exits 2" {
-	run bash "$SCRIPT"
+	run "$SCRIPT"
 	assert_failure
 	assert_equal "2" "$status"
 }
 
 @test "finalize_binary.sh: renames binary and writes sha256 output" {
-	run bash "$SCRIPT" "$SOURCE" "$TARGET" arm64
+	run "$SCRIPT" "$SOURCE" "$TARGET" arm64
 	assert_success
 	[[ -f "$TARGET" ]]
 	[[ ! -f "$SOURCE" ]]
@@ -44,7 +44,18 @@ teardown() {
 }
 
 @test "finalize_binary.sh: fails when source binary is missing" {
-	run bash "$SCRIPT" "${WORKDIR}/missing" "$TARGET"
+	run "$SCRIPT" "${WORKDIR}/missing" "$TARGET"
 	assert_failure
 	assert_output --partial "Source binary not found"
+}
+
+@test "finalize_binary.sh: succeeds without GITHUB_OUTPUT set" {
+	# Outside Actions there is no GITHUB_OUTPUT; the rename and hashing must
+	# still succeed and nothing may be written to the (absent) output file.
+	local output_file="$GITHUB_OUTPUT"
+	run env -u GITHUB_OUTPUT "$SCRIPT" "$SOURCE" "$TARGET" arm64
+	assert_success
+	[[ -f "$TARGET" ]]
+	assert_output --partial "SHA256 for arm64:"
+	assert_equal "" "$(cat "$output_file")"
 }

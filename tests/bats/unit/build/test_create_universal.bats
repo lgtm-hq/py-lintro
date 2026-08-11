@@ -30,20 +30,20 @@ teardown() {
 }
 
 @test "create_universal.sh: --help exits 0" {
-	run bash "$SCRIPT" --help
+	run "$SCRIPT" --help
 	assert_success
 	assert_output --partial "Create a macOS universal lintro binary"
 }
 
 @test "create_universal.sh: missing args exits 2" {
-	run bash "$SCRIPT"
+	run "$SCRIPT"
 	assert_failure
 	assert_equal "2" "$status"
 }
 
 @test "create_universal.sh: fails when input binary is missing" {
 	create_fake_binary "$X86" "lintro-x86_64"
-	run bash "$SCRIPT" "${WORKDIR}/missing-arm64" "$X86" "$OUTPUT"
+	run "$SCRIPT" "${WORKDIR}/missing-arm64" "$X86" "$OUTPUT"
 	assert_failure
 	assert_output --partial "Input binary not found"
 }
@@ -56,9 +56,21 @@ teardown() {
 		skip "could not compile arm64 and x86_64 stub binaries"
 	fi
 
-	run bash "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
+	run "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
 	assert_success
 	[[ -f "$OUTPUT" ]]
 	[[ -x "$OUTPUT" ]]
 	assert_output --partial "lintro-macos-universal"
+}
+
+@test "create_universal.sh: aborts when lipo is unavailable" {
+	if command -v lipo >/dev/null 2>&1; then
+		skip "lipo is available on this host; guard only fires without it"
+	fi
+	create_fake_binary "$ARM64" "lintro-arm64"
+	create_fake_binary "$X86" "lintro-x86_64"
+
+	run "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
+	assert_failure
+	assert_output --partial "lipo not found"
 }

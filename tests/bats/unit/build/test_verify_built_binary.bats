@@ -18,19 +18,19 @@ teardown() {
 }
 
 @test "verify_built_binary.sh: --help exits 0" {
-	run bash "$SCRIPT" --help
+	run "$SCRIPT" --help
 	assert_success
 	assert_output --partial "Verify a built lintro binary"
 }
 
 @test "verify_built_binary.sh: missing args exits 2" {
-	run bash "$SCRIPT"
+	run "$SCRIPT"
 	assert_failure
 	assert_equal "2" "$status"
 }
 
 @test "verify_built_binary.sh: fails when binary is missing" {
-	run bash "$SCRIPT" "${WORKDIR}/missing"
+	run "$SCRIPT" "${WORKDIR}/missing"
 	assert_failure
 	assert_output --partial "Binary not found"
 }
@@ -46,7 +46,20 @@ esac
 EOF
 	chmod +x "$BINARY"
 
-	run bash "$SCRIPT" "$BINARY"
+	run "$SCRIPT" "$BINARY"
 	assert_success
 	assert_output --partial "lintro test 0.0.0"
+}
+
+@test "verify_built_binary.sh: fails when --version exits non-zero" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+echo "boom" >&2
+exit 3
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_equal "3" "$status"
 }
