@@ -21,7 +21,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from lintro.enums.install_context import CISystem, InstallContext
+from lintro.enums.install_context import (
+    CISystem,
+    InstallContext,
+    PackageManager,
+)
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 
 
@@ -44,8 +48,19 @@ class RuntimeContext:
     ci_name: CISystem | None = None
 
     @classmethod
-    def detect(cls) -> RuntimeContext:
+    def detect(
+        cls,
+        *,
+        node_package_manager: PackageManager | None = None,
+        prefer_global: bool = False,
+    ) -> RuntimeContext:
         """Detect the current runtime context.
+
+        Args:
+            node_package_manager: Node package manager the user named
+                explicitly; overrides all project evidence (#2005).
+            prefer_global: Whether the user asked for global installs rather
+                than project-local dev dependencies.
 
         Returns:
             RuntimeContext with detected values.
@@ -54,7 +69,11 @@ class RuntimeContext:
         return cls(
             install_context=ctx,
             platform_label=_detect_platform_label(),
-            environment=InstallEnvironment.detect(ctx),
+            environment=InstallEnvironment.detect(
+                ctx,
+                explicit_node_manager=node_package_manager,
+                prefer_global=prefer_global,
+            ),
             is_ci=_is_ci(),
             ci_name=CISystem.detect(),
         )

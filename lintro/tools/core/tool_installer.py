@@ -210,13 +210,18 @@ class ToolInstaller:
         if not tool.version_command:
             return None
 
-        main_cmd = tool.version_command[0]
-        if main_cmd not in ("sh", "bash", "cargo") and not shutil.which(main_cmd):
+        command = self._resolved_version_command(tool)
+        main_cmd = command[0]
+        if (
+            main_cmd not in ("sh", "bash", "cargo")
+            and not Path(main_cmd).is_absolute()
+            and not shutil.which(main_cmd)
+        ):
             return None
 
         try:
             result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-                tool.version_command,
+                command,
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -228,6 +233,36 @@ class ToolInstaller:
             return extract_version_from_output(output, tool.name)
         except (subprocess.TimeoutExpired, OSError):
             return None
+
+    def _resolved_version_command(self, tool: ManifestTool) -> list[str]:
+        """Resolve a tool's version command the way the run will resolve it.
+
+        For npm-installed tools the manifest's ``version_command`` names a bare
+        binary, which only ever finds a global install. Since #1811 a run
+        resolves ``node_modules/.bin`` first, so planning against ``PATH`` would
+        report a tool as missing (or as the wrong version) while checks happily
+        use the project-local one — the exact "two authorities" split #2005 is
+        about. Route npm tools through the same command-builder registry the
+        executor uses, anchored on the detected project root.
+
+        Args:
+            tool: Tool whose version command is being resolved.
+
+        Returns:
+            Argv list to run for the version probe.
+        """
+        command = list(tool.version_command)
+        if tool.install_type != "npm":
+            return command
+
+        from lintro.plugins.execution_preparation import get_executable_command
+
+        project = self._context.environment.node_project
+        resolved = get_executable_command(
+            tool.name,
+            cwd=project.root if project is not None else None,
+        )
+        return [*resolved, *command[1:]]
 
     @staticmethod
     def _version_meets_minimum(installed: str, minimum: str) -> bool:
@@ -296,6 +331,21 @@ class ToolInstaller:
                     hint = f"Upgrade {pkg} manually (not managed by Homebrew)"
             return hint
         return strategy.install_hint(*_args)
+
+    def _install_cwd(self, tool: ManifestTool) -> Path | None:
+        """Return the directory an install command should run from.
+
+        Args:
+            tool: Tool being installed.
+
+        Returns:
+            The detected Node project root for a project-local npm install, or
+            None to use the process working directory.
+        """
+        env = self._context.environment
+        if tool.install_type != "npm" or env.installs_globally():
+            return None
+        return env.node_project.root if env.node_project is not None else None
 
     @staticmethod
     def _is_brew_managed(package: str) -> bool:
@@ -386,13 +436,17 @@ class ToolInstaller:
                     duration_seconds=0.0,
                 )
 
-            # Otherwise run the command directly
+            # Otherwise run the command directly. Node package managers walk up
+            # to the nearest package.json, but running from the project root
+            # lintro actually detected removes the ambiguity — a nested cwd must
+            # not add a dependency to a manifest lintro never looked at (#2005).
             proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 shlex.split(command),
                 capture_output=True,
                 text=True,
                 timeout=300,
                 check=False,
+                cwd=self._install_cwd(tool),
             )
             duration = time.monotonic() - start
 
