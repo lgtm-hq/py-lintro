@@ -623,12 +623,7 @@ def doctor_command(
     has_fixable = missing_count > 0 or outdated_count > 0 or incompatible_count > 0
     if has_fixable:
         display_console.print()
-        _render_quick_fix(
-            display_console,
-            prod_results,
-            context,
-            upgrade=outdated_count > 0 or incompatible_count > 0,
-        )
+        _render_quick_fix(display_console, prod_results, context)
 
     display_console.print()
 
@@ -650,7 +645,6 @@ def doctor_command(
                 display_console,
                 rechecked_prod,
                 context,
-                upgrade=outdated_count > 0 or incompatible_count > 0,
                 known_invalid=unresolved,
             )
 
@@ -847,26 +841,29 @@ def _render_quick_fix(
     results: list[ToolCheckResult],
     context: RuntimeContext,
     *,
-    upgrade: bool,
     known_invalid: list[str] | None = None,
 ) -> None:
     """Render a quick fix that only contains executable actions.
+
+    The install-versus-upgrade action is derived per tool from its status, so
+    a missing tool is never advertised as an upgrade and vice versa.
 
     Args:
         console: Console to print to.
         results: Production tool check results.
         context: Detected runtime context.
-        upgrade: Whether the affected tools need an upgrade.
         known_invalid: Tool names whose install command already failed.
     """
     quick_fix = build_quick_fix(
-        [r.tool for r in _fixable_results(results)],
+        [
+            (r.tool, r.status is not ToolStatus.MISSING)
+            for r in _fixable_results(results)
+        ],
         context.environment,
-        upgrade=upgrade,
         known_invalid=known_invalid or [],
     )
-    if quick_fix.command:
-        console.print(f"  [dim]Quick fix: {quick_fix.command}[/dim]")
+    for command in quick_fix.commands:
+        console.print(f"  [dim]Quick fix: {command}[/dim]")
     if quick_fix.blocked:
         console.print("  [yellow]Needs manual action (no runnable command):[/yellow]")
         for name, reason in quick_fix.blocked:

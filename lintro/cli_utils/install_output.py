@@ -62,10 +62,10 @@ def render_install_results(
             f"[dim]({result.duration_seconds:.1f}s)[/dim]"
         )
         console.print(line)
+        if result.command:
+            console.print(f"      [dim]command: {result.command}[/dim]")
         if not result.success:
             console.print(f"      [dim]{result.message}[/dim]")
-            if result.command:
-                console.print(f"      [dim]command: {result.command}[/dim]")
 
 
 def render_outcome_summary(

@@ -274,9 +274,9 @@ def setup_command(
                 results = installer.execute(plan)
                 failed = sum(1 for r in results if not r.success)
                 render_install_results(console, results)
+                console.print()
+                render_outcome_summary(console, results)
                 if failed > 0:
-                    console.print()
-                    render_outcome_summary(console, results)
                     # Report outdated/skipped before exiting
                     if plan.outdated:
                         console.print()
