@@ -154,17 +154,28 @@ def test_malformed_records_are_skipped(module: Any) -> None:
 def test_missing_token_is_non_fatal(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A missing token warns and exits 0 without touching the workflows.
+    """A missing token errors loudly and exits 0 without touching workflows.
+
+    Exit 0 is deliberate — the sync runs in the unattended release path and
+    must never block a release PR. The annotation is ``::error::`` rather than
+    ``::warning::`` because an absent credential is a permanent skip on every
+    release, which is how the pin froze at 0.94.3 (#1787, lgtm-hq/lgtm-ci#849).
 
     Args:
         module: The loaded sync module.
         monkeypatch: Fixture used to clear the token environment.
+        capsys: Fixture used to capture the emitted annotation.
     """
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     assert_that(module.main([])).is_equal_to(0)
+
+    stderr = capsys.readouterr().err
+    assert_that(stderr).contains("::error::sync-pinned-release-image:")
+    assert_that(stderr).contains("lgtm-hq/lgtm-ci#849")
 
 
 def test_every_pinned_site_is_declared(module: Any) -> None:
