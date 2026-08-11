@@ -32,6 +32,7 @@ teardown() {
 @test "verify_built_binary.sh: fails when binary is missing" {
 	run "$SCRIPT" "${WORKDIR}/missing"
 	assert_failure
+	assert_equal "1" "$status"
 	assert_output --partial "Binary not found"
 }
 

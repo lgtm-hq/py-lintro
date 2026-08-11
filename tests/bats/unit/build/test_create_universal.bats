@@ -45,6 +45,7 @@ teardown() {
 	create_fake_binary "$X86" "lintro-x86_64"
 	run "$SCRIPT" "${WORKDIR}/missing-arm64" "$X86" "$OUTPUT"
 	assert_failure
+	assert_equal "1" "$status"
 	assert_output --partial "Input binary not found"
 }
 
@@ -76,5 +77,6 @@ teardown() {
 
 	run "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
 	assert_failure
+	assert_equal "1" "$status"
 	assert_output --partial "lipo not found"
 }

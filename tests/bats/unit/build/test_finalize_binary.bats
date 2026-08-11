@@ -46,6 +46,7 @@ teardown() {
 @test "finalize_binary.sh: fails when source binary is missing" {
 	run "$SCRIPT" "${WORKDIR}/missing" "$TARGET"
 	assert_failure
+	assert_equal "1" "$status"
 	assert_output --partial "Source binary not found"
 }
 
