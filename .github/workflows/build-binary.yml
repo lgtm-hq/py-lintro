@@ -457,8 +457,13 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
             uploads.github.com:443
 
+      # Needed for scripts/build/create_universal.sh. The codeload /
+      # objects.githubusercontent.com endpoints above are what actions/checkout
+      # fetches through, and match the other sparse-checkout jobs here.
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
