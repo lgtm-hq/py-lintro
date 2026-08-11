@@ -33,9 +33,14 @@ teardown() {
 }
 
 @test "finalize_binary.sh: renames binary and writes sha256 output" {
+	# create_fake_binary leaves the source executable and `mv` preserves that
+	# bit, so without stripping it first this would pass even if the script
+	# stopped running chmod +x. Nuitka output is not reliably executable.
+	chmod a-x "$SOURCE"
 	run "$SCRIPT" "$SOURCE" "$TARGET" arm64
 	assert_success
 	[[ -f "$TARGET" ]]
+	[[ -x "$TARGET" ]]
 	[[ ! -f "$SOURCE" ]]
 	assert_output --partial "SHA256 for arm64:"
 	assert_output --partial "Finalized ${TARGET}:"
