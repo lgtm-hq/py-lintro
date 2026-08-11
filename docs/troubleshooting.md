@@ -218,6 +218,31 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check
 
 ---
 
+### Reading `lintro install` results
+
+Every planned action is attempted, and each one is reported on its own numbered line —
+an early failure or timeout never stops the tools after it from being installed:
+
+```text
+  [1/3] FAIL  golangci_lint (2.1s)
+  [2/3] TIMEOUT  clippy (300.0s)
+  [3/3] OK  ruff (4.5s)
+```
+
+| Label     | Meaning                                                        |
+| --------- | -------------------------------------------------------------- |
+| `OK`      | Command succeeded and the tool is discoverable.                |
+| `PATH`    | Command succeeded but the tool is still not on your PATH.      |
+| `FAIL`    | Command ran and failed; re-running it unchanged will not help. |
+| `TIMEOUT` | Command exceeded the 5-minute install timeout; retry is valid. |
+| `MANUAL`  | No runnable command exists here; install the tool by hand.     |
+
+`lintro doctor` only suggests a quick fix for tools it can actually install in the
+detected environment; anything else is listed under "Needs manual action" with the
+reason, and a command that already failed is not suggested again.
+
+---
+
 ## Getting Help
 
 If your issue isn't covered here:

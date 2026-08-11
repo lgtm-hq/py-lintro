@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from lintro.enums.install_context import PackageManager
 from lintro.tools.core.install_strategies.base import InstallStrategy
-from lintro.tools.core.install_strategies.brew_names import BREW_FORMULA_NAMES
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
+from lintro.tools.core.install_strategies.package_names import (
+    brew_formula_name,
+    ecosystem_package_name,
+)
 from lintro.tools.core.install_strategies.registry import register_strategy
 
 
@@ -56,9 +59,9 @@ class BinaryStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         if env.has(PackageManager.BREW):
-            brew_pkg = BREW_FORMULA_NAMES.get(tool_name, tool_name)
+            brew_pkg = brew_formula_name(tool_name, install_package)
             return f"brew install {brew_pkg}"
         return f"See https://github.com/search?q={pkg}+releases"
 
@@ -82,9 +85,9 @@ class BinaryStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         if env.has(PackageManager.BREW):
-            brew_pkg = BREW_FORMULA_NAMES.get(tool_name, tool_name)
+            brew_pkg = brew_formula_name(tool_name, install_package)
             return f"brew upgrade {brew_pkg}"
         return f"See https://github.com/search?q={pkg}+releases"
 

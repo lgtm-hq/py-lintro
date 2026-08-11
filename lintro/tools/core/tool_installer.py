@@ -23,13 +23,20 @@ import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import time
-from pathlib import Path
 
 from loguru import logger
 
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_hints import (
+    SCRIPT_HINT_PREFIX,
+    has_install_script,
+    install_script_path,
+    is_manual_hint,
+)
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.install_strategies.package_names import script_tool_name
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
@@ -115,11 +122,7 @@ class ToolInstaller:
         Returns:
             True if the hint requires manual action.
         """
-        return (
-            hint.startswith(("See ", "Install ", "Upgrade "))
-            or "https://" in hint
-            or "http://" in hint
-        )
+        return is_manual_hint(hint)
 
     def _plan_tool(
         self,
@@ -158,7 +161,7 @@ class ToolInstaller:
                 hint = self._get_install_command(tool, upgrade=True)
                 if self._is_manual_hint(hint):
                     if self._has_install_script(tool):
-                        hint = f"via install-tools.sh ({tool.name})"
+                        hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
                     else:
                         plan.manual.append((tool, hint))
                         return
@@ -176,7 +179,7 @@ class ToolInstaller:
         hint = self._get_install_command(tool)
         if self._is_manual_hint(hint):
             if self._has_install_script(tool):
-                hint = f"via install-tools.sh ({tool.name})"
+                hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
             else:
                 plan.manual.append((tool, hint))
                 return
@@ -227,6 +230,10 @@ class ToolInstaller:
             output = result.stdout + result.stderr
             return extract_version_from_output(output, tool.name)
         except (subprocess.TimeoutExpired, OSError):
+            return None
+        except ValueError as exc:
+            # Unknown/unparseable tool output must not abort an install batch.
+            logger.debug(f"Version probe failed for {tool.name}: {exc}")
             return None
 
     @staticmethod
@@ -323,67 +330,98 @@ class ToolInstaller:
     def execute(self, plan: InstallPlan) -> list[InstallResult]:
         """Execute an installation plan.
 
+        Every planned action is attempted, in order. A non-zero exit or a
+        timeout for one tool never aborts the batch: the failure is recorded
+        and the next action still runs, so the returned list always has one
+        entry per planned action.
+
         Args:
             plan: The plan to execute.
 
         Returns:
-            List of results for each install/upgrade action.
+            List of results for each install/upgrade action, in plan order.
         """
         results: list[InstallResult] = []
+        actions: list[tuple[ManifestTool, str]] = [
+            *plan.to_install,
+            *[(tool, command) for tool, _current_ver, command in plan.to_upgrade],
+        ]
+        total = len(actions)
 
-        for tool, command in plan.to_install:
+        for index, (tool, command) in enumerate(actions, start=1):
+            logger.info(f"[{index}/{total}] {tool.name}: {command}")
             result = self._run_install(tool, command)
-            results.append(result)
-
-        for tool, _current_ver, command in plan.to_upgrade:
-            result = self._run_install(tool, command)
+            result.step = index
+            result.total_steps = total
+            logger.info(
+                f"[{index}/{total}] {tool.name}: "
+                f"{result.outcome.label} — {result.message}",
+            )
             results.append(result)
 
         return results
+
+    def _verify_discoverable(self, tool: ManifestTool) -> bool:
+        """Check whether a tool is discoverable after a successful install.
+
+        Args:
+            tool: Tool that was just installed.
+
+        Returns:
+            True if the tool can be found and reports a version.
+        """
+        if not tool.version_command:
+            # Nothing to probe with — trust the exit code.
+            return True
+        return self._get_installed_version(tool) is not None
+
+    _INSTALL_TIMEOUT_SECONDS = 300
 
     def _run_install(
         self,
         tool: ManifestTool,
         command: str,
     ) -> InstallResult:
-        """Run an install command for a tool.
+        """Run an install command for a tool and classify the outcome.
 
         Args:
             tool: Tool being installed.
             command: Shell command string.
 
         Returns:
-            InstallResult.
+            InstallResult carrying a classified :class:`InstallOutcome`; this
+            method never raises, so the caller can continue with the next tool.
         """
-        logger.info(f"Installing {tool.name}: {command}")
         start = time.monotonic()
 
         try:
-            # Script-backed installs: the planner sets "via install-tools.sh"
+            # Script-backed installs: the planner sets the script hint prefix
             # when a helper script is available for binary tools
-            if command.startswith("via install-tools.sh"):
+            if command.startswith(SCRIPT_HINT_PREFIX):
                 result = self._install_via_script(tool)
                 if result:
                     return result
                 return InstallResult(
                     tool=tool,
-                    success=False,
+                    outcome=InstallOutcome.MANUAL_BLOCKED,
                     message="install-tools.sh not found",
                     duration_seconds=time.monotonic() - start,
+                    command=command,
                 )
 
             # Non-executable hints: try install script for binary tools,
             # otherwise report as manual
-            if self._is_manual_hint(command):
+            if is_manual_hint(command):
                 if tool.install_type == "binary":
                     result = self._install_via_script(tool)
                     if result:
                         return result
                 return InstallResult(
                     tool=tool,
-                    success=False,
+                    outcome=InstallOutcome.MANUAL_BLOCKED,
                     message=f"Manual install required: {command}",
                     duration_seconds=0.0,
+                    command=command,
                 )
 
             # Otherwise run the command directly
@@ -391,44 +429,84 @@ class ToolInstaller:
                 shlex.split(command),
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=self._INSTALL_TIMEOUT_SECONDS,
                 check=False,
             )
             duration = time.monotonic() - start
 
             if proc.returncode == 0:
-                return InstallResult(
+                return self._verified_result(
                     tool=tool,
-                    success=True,
+                    command=command,
                     message="Installed successfully",
-                    duration_seconds=duration,
+                    duration=duration,
                 )
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"Command failed (exit {proc.returncode}): {proc.stderr[:200]}",
                 duration_seconds=duration,
+                command=command,
             )
         except subprocess.TimeoutExpired:
+            minutes = self._INSTALL_TIMEOUT_SECONDS // 60
             return InstallResult(
                 tool=tool,
-                success=False,
-                message="Installation timed out (5 min)",
+                outcome=InstallOutcome.TIMED_OUT,
+                message=f"Installation timed out ({minutes} min)",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )
         except OSError as e:
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"OS error: {e}",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )
+
+    def _verified_result(
+        self,
+        *,
+        tool: ManifestTool,
+        command: str,
+        message: str,
+        duration: float,
+    ) -> InstallResult:
+        """Build the result for a command that exited zero.
+
+        Args:
+            tool: Tool that was installed.
+            command: Command that was run.
+            message: Success message to use when the tool is discoverable.
+            duration: Elapsed seconds for the install.
+
+        Returns:
+            InstallResult with SUCCESS or NOT_DISCOVERABLE.
+        """
+        if self._verify_discoverable(tool):
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.SUCCESS,
+                message=message,
+                duration_seconds=duration,
+                command=command,
+            )
+        return InstallResult(
+            tool=tool,
+            outcome=InstallOutcome.NOT_DISCOVERABLE,
+            message=(
+                "Install command succeeded but "
+                f"{tool.name} is still not discoverable on PATH"
+            ),
+            duration_seconds=duration,
+            command=command,
+        )
 
     @staticmethod
     def _has_install_script(tool: ManifestTool) -> bool:
         """Check if an install script exists for a binary tool.
-
-        Reuses the same script lookup as _install_via_script.
 
         Args:
             tool: Tool to check.
@@ -436,17 +514,7 @@ class ToolInstaller:
         Returns:
             True if a script can handle this tool.
         """
-        if tool.install_type != "binary":
-            return False
-        if not shutil.which("bash"):
-            return False
-        script = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "utils"
-            / "install-tools.sh"
-        )
-        return script.exists()
+        return has_install_script(tool)
 
     def _install_via_script(self, tool: ManifestTool) -> InstallResult | None:
         """Try to install a binary tool via install-tools.sh.
@@ -457,20 +525,7 @@ class ToolInstaller:
         Returns:
             InstallResult if script was found and executed, None otherwise.
         """
-        # Look for install-tools.sh relative to the lintro package
-        script_paths = [
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "utils"
-            / "install-tools.sh",
-        ]
-
-        script = None
-        for p in script_paths:
-            if p.exists():
-                script = p
-                break
-
+        script = install_script_path()
         if not script:
             logger.debug(
                 "install-tools.sh not found for binary install "
@@ -478,8 +533,9 @@ class ToolInstaller:
             )
             return None
 
-        tool_arg = tool.name.replace("_", "-")
+        tool_arg = script_tool_name(tool.name)
         cmd = ["bash", str(script), "--tools", tool_arg]
+        command = shlex.join(cmd)
 
         start = time.monotonic()
         try:
@@ -488,27 +544,38 @@ class ToolInstaller:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=300,
+                timeout=self._INSTALL_TIMEOUT_SECONDS,
             )
             duration = time.monotonic() - start
 
             if proc.returncode == 0:
-                return InstallResult(
+                return self._verified_result(
                     tool=tool,
-                    success=True,
+                    command=command,
                     message="Installed via install-tools.sh",
-                    duration_seconds=duration,
+                    duration=duration,
                 )
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"install-tools.sh failed: {proc.stderr[:200]}",
                 duration_seconds=duration,
+                command=command,
             )
-        except (subprocess.TimeoutExpired, OSError) as exc:
+        except subprocess.TimeoutExpired:
+            minutes = self._INSTALL_TIMEOUT_SECONDS // 60
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.TIMED_OUT,
+                message=f"install-tools.sh timed out ({minutes} min)",
+                duration_seconds=time.monotonic() - start,
+                command=command,
+            )
+        except OSError as exc:
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.FAILED,
                 message=f"install-tools.sh execution failed: {exc}",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )

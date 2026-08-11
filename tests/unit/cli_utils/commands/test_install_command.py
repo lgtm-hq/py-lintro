@@ -9,6 +9,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli_utils.commands.install import install_command
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.tool_installer import InstallPlan, InstallResult
 from lintro.tools.core.tool_registry import ManifestTool
 
@@ -102,7 +103,12 @@ def test_install_specific_tools() -> None:
     ):
         mock_cls.return_value.plan.return_value = plan
         mock_cls.return_value.execute.return_value = [
-            InstallResult(tool=tool, success=True, message="OK", duration_seconds=1.0),
+            InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.SUCCESS,
+                message="OK",
+                duration_seconds=1.0,
+            ),
         ]
         result = runner.invoke(install_command, ["ruff"])
 
@@ -208,7 +214,11 @@ def test_install_failure_exit_1() -> None:
     ):
         mock_cls.return_value.plan.return_value = plan
         mock_cls.return_value.execute.return_value = [
-            InstallResult(tool=tool, success=False, message="Command failed"),
+            InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.FAILED,
+                message="Command failed",
+            ),
         ]
         result = runner.invoke(install_command, ["ruff"])
 

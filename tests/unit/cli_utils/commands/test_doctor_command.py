@@ -257,6 +257,40 @@ def test_doctor_fix_incompatible_with_json() -> None:
     assert_that(result.output).contains("--fix cannot be combined")
 
 
+def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:
+    """After --fix, a tool whose command did not resolve it is not re-suggested."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.cli_utils.commands.doctor._run_fix",
+            return_value=["ruff"],
+        ) as mock_fix,
+    ):
+        result = runner.invoke(doctor_command, ["--fix"])
+
+    assert_that(mock_fix.call_count).is_equal_to(1)
+    # Suggested once before the fix attempt, and never again afterwards.
+    assert_that(result.output.count("Quick fix: lintro install ruff")).is_equal_to(1)
+    assert_that(result.output).contains("Needs manual action")
+    assert_that(result.output).contains("previous attempt did not resolve it")
+
+
+def test_doctor_quick_fix_lists_missing_tool_before_any_fix() -> None:
+    """Without --fix, an installable missing tool is offered as a quick fix."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with p1, p2, patch("shutil.which", return_value=None):
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.output).contains("Quick fix: lintro install ruff")
+
+
 def test_doctor_tools_filter_known_tool() -> None:
     """--tools with a known tool name succeeds."""
     runner = CliRunner()
