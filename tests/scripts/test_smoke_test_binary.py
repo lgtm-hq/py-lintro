@@ -194,7 +194,52 @@ def test_empty_config_execution_order_fails(
     }
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.check_config(binary)).is_equal_to(1)
+    assert_that(smoke.check_config(binary, ["ruff", "black"])).is_equal_to(1)
+
+
+def test_external_only_config_execution_order_fails(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A non-empty order made only of third-party tools still means no builtins.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    responses = _healthy_responses()
+    responses["config"] = {
+        "stdout": json.dumps(
+            {"tool_execution_order": [{"tool": "acme-tool", "priority": 50}]},
+        ),
+        "exit": 0,
+    }
+    binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
+
+    assert_that(smoke.check_config(binary, ["ruff", "black"])).is_equal_to(1)
+
+
+def test_skip_rows_still_prove_registry_dispatch(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Result rows count as evidence even when every tool is skipped.
+
+    Release runners have none of the external tool binaries installed, so every
+    row is a skip — the rows themselves are what prove the registry dispatched.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    responses = _healthy_responses()
+    responses["check"] = {
+        "stdout": "| ruff | SKIP | - | executable not found |\nTOTALS\n",
+        "exit": 0,
+    }
+    binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
+
+    assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
 
 
 @pytest.mark.parametrize(
@@ -204,12 +249,14 @@ def test_empty_config_execution_order_fails(
         ("Traceback (most recent call last):\n  boom\n", 1, "crash"),
         ("something odd\n", 3, "no-verdict-exit-code"),
         ("nothing ran here\n", 0, "no-tool-named"),
+        ("Skipping ruff: executable not found\n", 0, "tool-named-in-prose-only"),
     ],
     ids=[
         "marker=no-tools-to-run",
         "outcome=crash",
         "outcome=no-verdict",
         "outcome=no-execution-evidence",
+        "outcome=prose-mention-only",
     ],
 )
 def test_check_failures_are_reported(

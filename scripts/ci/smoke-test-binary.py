@@ -42,6 +42,10 @@ CHECK_TIMEOUT_SECONDS = 300
 # tool-execution evidence below is what fails closed if this wording changes.
 EMPTY_REGISTRY_MARKER = "No tools to run."
 
+# Statuses rendered in the per-tool result table. Their presence in a table row
+# is what distinguishes a real result row from prose that names a tool.
+RESULT_ROW_STATUSES = ("PASS", "FAIL", "SKIP")
+
 
 def _run(
     *,
@@ -123,11 +127,28 @@ def list_builtin_tools(binary: Path) -> list[str] | None:
     return builtins
 
 
-def check_config(binary: Path) -> int:
+def _matches_tool(*, text: str, name: str) -> bool:
+    """Check whether a tool name appears in text, in either spelling.
+
+    Report and config output normalize underscores to hyphens (``pip_audit``
+    renders as ``pip-audit``), so both spellings count as the same tool.
+
+    Args:
+        text: Text to search.
+        name: Tool name as the registry spells it.
+
+    Returns:
+        True when the tool is named in the text.
+    """
+    return name in text or name.replace("_", "-") in text
+
+
+def check_config(binary: Path, builtin_tools: list[str]) -> int:
     """Assert ``config --json`` reports builtin tools.
 
     Args:
         binary: Path to the lintro binary under test.
+        builtin_tools: Builtin tool names reported by ``list-tools --json``.
 
     Returns:
         ``0`` on success, ``1`` on failure.
@@ -153,17 +174,69 @@ def check_config(binary: Path) -> int:
     if not isinstance(order, list) or not order:
         return _fail("config --json reported an empty tool execution order")
 
-    print(f"OK: config reports {len(order)} tools in the execution order")
+    # A non-empty order built purely from third-party plugins would still mean
+    # the builtin registry is empty, so require a builtin in it.
+    ordered_names = [
+        str(entry.get("tool", "")) if isinstance(entry, dict) else str(entry)
+        for entry in order
+    ]
+    builtins_in_order = [
+        name
+        for name in builtin_tools
+        if any(_matches_tool(text=ordered, name=name) for ordered in ordered_names)
+    ]
+    if not builtins_in_order:
+        return _fail(
+            "config --json reported a tool execution order without any builtin "
+            f"tool: {ordered_names}",
+        )
+
+    print(
+        f"OK: config reports {len(order)} tools in the execution order "
+        f"({len(builtins_in_order)} builtin)",
+    )
     return EXIT_OK
+
+
+def _tools_in_result_table(*, output: str, builtin_tools: list[str]) -> list[str]:
+    """Find builtin tools that produced a per-tool result row.
+
+    Only rows of the rendered result table count: a row exists exactly when the
+    registry handed the tool to the executor, which is the property #2006 broke.
+    Prose lines that merely mention a tool (``Skipping ruff: executable not
+    found``) are not evidence and are ignored.
+
+    Rows with a ``SKIP`` status still count. A release runner has none of the
+    external tool binaries installed, so every row there is a skip — yet the
+    rows themselves prove the registry was populated and dispatched.
+
+    Args:
+        output: Combined stdout and stderr of the ``check`` run.
+        builtin_tools: Builtin tool names reported by ``list-tools --json``.
+
+    Returns:
+        Sorted names of builtin tools that have a result row.
+    """
+    found: set[str] = set()
+    for line in output.splitlines():
+        row = line.strip()
+        if not row.startswith("|"):
+            continue
+        if not any(status in row for status in RESULT_ROW_STATUSES):
+            continue
+        found.update(
+            name for name in builtin_tools if _matches_tool(text=row, name=name)
+        )
+    return sorted(found)
 
 
 def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
     """Assert ``check`` runs tools instead of reporting an empty registry.
 
-    The verdict is driven by positive evidence — the run must name at least one
-    of the builtin tools the registry advertised — so a binary that dies before
-    tool execution fails even if it never prints the empty-registry marker or a
-    traceback.
+    The verdict is driven by positive evidence — the run must emit a per-tool
+    result row for at least one builtin the registry advertised — so a binary
+    that dies before tool execution fails even if it never prints the
+    empty-registry marker or a traceback.
 
     Args:
         binary: Path to the lintro binary under test.
@@ -198,23 +271,16 @@ def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
             f"check exited {result.returncode} without a verdict:\n{output[-2000:]}",
         )
 
-    # Positive evidence: the per-tool result table names the tools that ran.
-    # Tool names are normalized in the report (e.g. ``pip_audit`` renders as
-    # ``pip-audit``), so both spellings count.
-    reported = [
-        name
-        for name in builtin_tools
-        if name in output or name.replace("_", "-") in output
-    ]
+    reported = _tools_in_result_table(output=output, builtin_tools=builtin_tools)
     if not reported:
         return _fail(
-            "check produced no evidence that any builtin tool ran "
+            "check produced no per-tool result rows for any builtin tool "
             f"(looked for {len(builtin_tools)} registry names):\n{output[-2000:]}",
         )
 
     print(
         f"OK: check reached tool execution (exit {result.returncode}, "
-        f"{len(reported)} builtin tools named in the report)",
+        f"{len(reported)} builtin tools in the result table)",
     )
     return EXIT_OK
 
@@ -245,7 +311,7 @@ def main() -> int:
         builtin_tools = list_builtin_tools(binary)
         results = [
             EXIT_FAILED if builtin_tools is None else EXIT_OK,
-            check_config(binary),
+            check_config(binary, builtin_tools or []),
             check_reaches_execution(binary, builtin_tools or []),
         ]
     except subprocess.TimeoutExpired as exc:
