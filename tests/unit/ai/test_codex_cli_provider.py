@@ -81,6 +81,11 @@ async def test_codex_cli_complete_success(_mock_codex_on_path: None) -> None:
     cmd = mock_run.call_args.args[0]
     assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
     assert_that(cmd).contains("--model", "gpt-5.2-codex")
+    assert_that(cmd).does_not_contain("Review this diff")
+    assert_that(cmd[-1]).is_equal_to("-")
+    assert_that(mock_run.transport_calls[-1].input_text).is_equal_to(
+        "Review this diff",
+    )
 
 
 async def test_codex_cli_complete_auth_error(_mock_codex_on_path: None) -> None:
