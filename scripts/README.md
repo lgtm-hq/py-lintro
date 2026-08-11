@@ -55,12 +55,15 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script                                | Purpose                                                                                                     | Usage                                                       |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                |
-| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                |
-| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                |
-| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py` |
+| Script                                | Purpose                                                                                                     | Usage                                                           |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                    |
+| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                    |
+| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                    |
+| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`     |
+| `verify_built_binary.sh`              | Verify a built binary responds to `--version` and `--help`                                                  | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`     |
+| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`  |
+| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>` |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
@@ -83,18 +86,6 @@ sends a `repository_dispatch` with release facts (version, binary checksums); th
 renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 `Formula/lintro-full.rb` (PyPI full install). Only release-support helpers remain here
 (see Homebrew Scripts below).
-
-### 📦 Build Scripts (`build/`)
-
-Scripts for building standalone binaries and distribution packages.
-
-| Script                   | Purpose                                                       | Usage                                                                 |
-| ------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `build_macos.py`         | Build macOS binary using Nuitka compiler                      | `uv run python scripts/build/build_macos.py`                          |
-| `build_linux.py`         | Build Linux binary using Nuitka compiler                        | `uv run python scripts/build/build_linux.py`                          |
-| `verify_built_binary.sh` | Verify a built binary responds to `--version` and `--help`    | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`           |
-| `finalize_binary.sh`     | Rename binary, compute SHA256, write GitHub Actions output    | `./scripts/build/finalize_binary.sh <source> <target> [label]`        |
-| `create_universal.sh`    | Combine arm64 and x86_64 macOS binaries into a universal fat binary | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>` |
 
 ### 🔧 CI/CD Scripts (`ci/`)
 

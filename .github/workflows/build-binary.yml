@@ -273,8 +273,10 @@ jobs:
           retention-days: 7
 
       - name: Save SHA256 to file
+        env:
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
         run: |
-          echo "${{ steps.sha256.outputs.sha256 }}" > sha256-${{ matrix.arch }}.txt
+          echo "$SHA256" > sha256-${{ matrix.arch }}.txt
 
       - name: Upload SHA256 file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -458,7 +460,7 @@ jobs:
             uploads.github.com:443
 
       - name: Checkout scripts
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts
           persist-credentials: false
