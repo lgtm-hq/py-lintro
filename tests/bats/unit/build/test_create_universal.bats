@@ -60,7 +60,11 @@ teardown() {
 	assert_success
 	[[ -f "$OUTPUT" ]]
 	[[ -x "$OUTPUT" ]]
-	assert_output --partial "lintro-macos-universal"
+	# The filename alone appears in `ls` output for any file at that path, so
+	# assert the file(1) line that only a real fat binary produces.
+	assert_output --partial "Mach-O universal binary"
+	assert_output --partial "arm64"
+	assert_output --partial "x86_64"
 }
 
 @test "create_universal.sh: aborts when lipo is unavailable" {

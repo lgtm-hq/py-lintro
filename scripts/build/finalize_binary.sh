@@ -57,11 +57,18 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	echo "sha256=$SHA" >>"$GITHUB_OUTPUT"
 fi
 
-if command -v stat >/dev/null 2>&1; then
-	SIZE_BYTES="$(stat -f %z "$TARGET" 2>/dev/null || stat -c %s "$TARGET")"
-	SIZE_HUMAN="${SIZE_BYTES} bytes"
+# Everything below is display-only: the rename, chmod, hash and GITHUB_OUTPUT
+# write are already done. Under `set -e` a failure here would fail the step and
+# skip the upload, so every command in this block falls back instead of aborting.
+# BSD stat wants -f %z, GNU stat wants -c %s, and a stat missing both (or
+# missing entirely) yields 0 rather than a non-zero exit.
+SIZE_BYTES="$(stat -f %z "$TARGET" 2>/dev/null || stat -c %s "$TARGET" 2>/dev/null || echo 0)"
+if command -v numfmt >/dev/null 2>&1; then
+	# Restores the readable "11M" form the old `ls -lh` parsing gave us, without
+	# depending on ls output columns. numfmt is GNU-only, hence the fallback.
+	SIZE_DISPLAY="$(numfmt --to=iec "$SIZE_BYTES" 2>/dev/null || printf '%s bytes' "$SIZE_BYTES")"
 else
-	SIZE_HUMAN="$(ls -lh "$TARGET" | awk '{print $5}')"
+	SIZE_DISPLAY="${SIZE_BYTES} bytes"
 fi
 log_info "SHA256 for ${LABEL}: $SHA"
-log_success "Finalized ${TARGET}: size=${SIZE_HUMAN} sha256=${SHA}"
+log_success "Finalized ${TARGET}: size=${SIZE_DISPLAY} sha256=${SHA}"
