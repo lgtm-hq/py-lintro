@@ -16,8 +16,8 @@ STATE_VERSION_V1 = 1
 
 # GitHub rejects comment bodies over 65,536 characters.
 GITHUB_COMMENT_HARD_LIMIT = 65_536
-# Budget for the rendered body; stay well under the hard limit so the hidden
-# state block always has room.
+# Soft budget for the full sticky comment (visible body + hidden state block).
+# Staying under this leaves headroom below GitHub's hard limit.
 MAX_COMMENT_CHARS = 60_000
 # Cap how many run records are retained in the sticky state block.
 MAX_STORED_RUNS = 30

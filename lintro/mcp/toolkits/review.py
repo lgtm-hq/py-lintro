@@ -37,11 +37,13 @@ and callers should expect a single long-running call.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
+from lintro.ai.review.exceptions import ReviewContextError
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError, McpErrorEnvelope
 from lintro.mcp.registry import McpToolSpec
@@ -151,6 +153,7 @@ _INVALID_INPUT_CONTEXT_CODES: Final[frozenset[str]] = frozenset(
         "invalid-review-mode",
         "diff-desync",
         "no-parseable-diff",
+        "diff-too-large",
     },
 )
 
@@ -340,7 +343,6 @@ def _collect_context(
             otherwise.
     """
     from lintro.ai.review import collect_review_context
-    from lintro.ai.review.exceptions import ReviewContextError
 
     try:
         return collect_review_context(
@@ -454,6 +456,7 @@ def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
         "strictness": metadata.strictness,
         "cost_usd": metadata.cost_estimate_usd,
         "duration_seconds": metadata.duration_seconds,
+        "phase_timings": dict(metadata.phase_timings),
         "chunks": {
             "total": metadata.chunks_total,
             "reviewed": metadata.chunks_reviewed,
@@ -532,6 +535,7 @@ def _no_changes_payload(
     depth: int,
     strictness: str,
     budget: _BudgetPolicy,
+    context_collection_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Build the result for a diff with nothing in it.
 
@@ -544,6 +548,8 @@ def _no_changes_payload(
         depth: The depth the call asked for.
         strictness: The strictness the call asked for.
         budget: The ceiling the call would have run under.
+        context_collection_seconds: Wall-clock seconds spent collecting the
+            (empty) context, preserved in the payload's timings.
 
     Returns:
         dict[str, Any]: A zero-cost, zero-finding review result.
@@ -562,6 +568,12 @@ def _no_changes_payload(
         files_total=0,
         checklist_items=0,
         strictness=strictness,
+        duration_seconds=max(context_collection_seconds, 0.0),
+        phase_timings={
+            "context_collection": max(context_collection_seconds, 0.0),
+            "provider": 0.0,
+            "parse_merge": 0.0,
+        },
     )
     result = ReviewResult(metadata=metadata, summary="No changes to review.")
     return {
@@ -624,8 +636,10 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.review.enums.review_strictness import ReviewStrictness
     from lintro.ai.review.orchestrator import run_review
     from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+    from lintro.ai.transport import apply_resolved_transport
 
     lintro_config, ai_config = _resolve_ai_config(workspace=workspace)
+    ai_config = apply_resolved_transport(ai_config)
     budget = resolve_budget_policy(
         requested=arguments.get("max_cost_usd"),
         configured=ai_config.max_cost_usd,
@@ -640,13 +654,16 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         ).lower(),
     )
 
+    context_started = time.monotonic()
     context = _collect_context(arguments=arguments, workspace=workspace)
+    context_collection_seconds = time.monotonic() - context_started
     if context is None:
         return _no_changes_payload(
             ai_config=ai_config,
             depth=depth,
             strictness=strictness.value,
             budget=budget,
+            context_collection_seconds=context_collection_seconds,
         )
 
     classifications = classify_changed_files(context.changed_files)
@@ -686,7 +703,24 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             ),
             force_semantic_chunking=lintro_config.review.force_semantic_chunking,
             workspace_root=workspace,
+            context_collection_seconds=context_collection_seconds,
         )
+    except ReviewContextError as exc:
+        # Context errors raised inside run_review (e.g. the CLI diff-size
+        # ceiling, #1967) get the same taxonomy mapping as _collect_context,
+        # so a too-large diff reports as invalid input, not a provider crash.
+        code = str(exc.code.value)
+        if code in _UNAVAILABLE_CONTEXT_CODES:
+            mcp_code = McpErrorCode.TOOL_UNAVAILABLE
+        elif code in _INVALID_INPUT_CONTEXT_CODES:
+            mcp_code = McpErrorCode.INVALID_INPUT
+        else:
+            mcp_code = McpErrorCode.EXECUTION_ERROR
+        raise McpError(
+            code=mcp_code,
+            message=str(exc),
+            detail={"tool": "lintro_review", "context_error": code},
+        ) from exc
     except (AIError, ValueError) as exc:
         failure = _review_failure(provider_name=str(provider.name), error=exc)
         raise McpError(

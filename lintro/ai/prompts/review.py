@@ -175,7 +175,42 @@ def format_lint_results_section(*, digest: str | None) -> str:
     return f"<lint_results>\n{digest.strip()}\n</lint_results>"
 
 
-def format_output_rules(*, checklist_count: int) -> str:
+def _findings_cap_rule(*, max_findings: int | None) -> str:
+    """Render the findings-cap bullet for the output rules block.
+
+    Args:
+        max_findings: Optional per-call findings ceiling. ``None`` means no
+            hard cap (API transport).
+
+    Returns:
+        Markdown bullet(s) covering the findings cap and de-duplication rule.
+    """
+    if max_findings is None:
+        cap_line = (
+            "- There is no hard cap on findings, but **do not report the same "
+            "problem twice**."
+        )
+    else:
+        cap_line = (
+            f"- Cap `findings` at **{max_findings}** for this call (questions "
+            "still capped at 3). Prefer the highest-severity issues; summarize "
+            "any overflow in one walkthrough bullet. Never emit truncated or "
+            "mid-object JSON.\n"
+            "- **Do not report the same problem twice**."
+        )
+    return (
+        f"{cap_line} When one problem repeats across locations, report it once "
+        "and list every location in `occurrences` as `file`/`line` pairs — "
+        "including the primary one. It renders as a single collapsed thread, "
+        "and its fix prompt enumerates every location."
+    )
+
+
+def format_output_rules(
+    *,
+    checklist_count: int,
+    max_findings: int | None = None,
+) -> str:
     """Render the shared output rules block for a review prompt.
 
     Both the diff-embedded and git-native review prompts require the exact
@@ -184,6 +219,7 @@ def format_output_rules(*, checklist_count: int) -> str:
 
     Args:
         checklist_count: Number of checklist items the model must answer.
+        max_findings: Optional per-call findings ceiling (CLI transport).
 
     Returns:
         The rendered rules block.
@@ -194,4 +230,5 @@ def format_output_rules(*, checklist_count: int) -> str:
         label_changes_requested=VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED],
         label_nits_only=VERDICT_LABELS[ReviewVerdict.NITS_ONLY],
         label_ready=VERDICT_LABELS[ReviewVerdict.READY],
+        findings_cap_rule=_findings_cap_rule(max_findings=max_findings),
     ).strip()

@@ -19,7 +19,7 @@ Layout, top to bottom:
 6. ``Open findings`` — one line per finding, titles only
 7. the fix-all agent prompt panel, scoped to *all* still-open findings
 8. ``Resolved`` — struck-through titles with their fixing commit
-9. *This run* badges, two lines (model-first ordering)
+9. *This run* badges, two single-row tables (model-first ordering)
 10. ``---`` then exactly one ``🕘 Run history`` collapsible
 11. a one-line footer
 
@@ -27,9 +27,10 @@ Two invariants the renderer enforces:
 
 * **No nested ``<details>``.** Every collapsible is top level; the run history
   carries plain tables and the degraded fold-in flattens finding detail.
-* **The comment always fits GitHub's 65,536-char cap.** Oldest run history is
-  pruned first, then resolved findings, then open findings — each with a
-  visible marker, never a silent drop.
+* **The comment (body + state block) always fits ``MAX_COMMENT_CHARS``.**
+  Oldest run history is pruned first, then resolved findings, then open
+  findings — each with a visible marker, never a silent drop. The state block
+  is reserved when needed so appending it cannot push the total over the cap.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
+
+from loguru import logger
 
 from lintro.ai.review.agent_prompts import render_agent_prompt_panel
 from lintro.ai.review.checklist_display import (
@@ -68,6 +71,8 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_badge_tables,
+    run_stats_primary_cells,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -90,11 +95,13 @@ from lintro.ai.review.verdict import (
     resolve_bullet_finding,
     verdict_label,
 )
+from lintro.ai.transport import resolve_cost_basis
 
 __all__ = [
     "build_sticky_comment",
     "parse_review_state",
     "parse_review_state_v2",
+    "render_state_sticky",
     "stamp_comment_ids",
 ]
 
@@ -242,6 +249,71 @@ class _RenderLimits:
     open: int | None = None
 
 
+def _fit_body_with_state(
+    *,
+    assemble: _Assembler,
+    prior_run_count: int,
+    open_count: int,
+    resolved_count: int,
+    state: ReviewState,
+) -> str:
+    """Fit the visible body, then append state under ``MAX_COMMENT_CHARS``.
+
+    Fits the visible body first, prunes and renders the state block against
+    that body, and, when needed, refits the body with
+    ``reserved=len(state_block)`` so the
+    final concatenation is always ``<= MAX_COMMENT_CHARS`` (#1866).
+
+    Args:
+        assemble: Callable taking ``limits`` and returning the rendered body.
+        prior_run_count: Number of prior runs available to the history table.
+        open_count: Number of open findings, bounding that section's search.
+        resolved_count: Number of resolved findings, likewise.
+        state: State to embed in the hidden trailing block.
+
+    Returns:
+        Complete sticky body including the state block.
+    """
+    body = _fit_body(
+        assemble=assemble,
+        prior_run_count=prior_run_count,
+        open_count=open_count,
+        resolved_count=resolved_count,
+    )
+    pruned = prune_state_to_fit(state=state, body=body, limit=MAX_COMMENT_CHARS)
+    state_block = render_state_block(state=pruned)
+    if len(body) + len(state_block) > MAX_COMMENT_CHARS:
+        # Body left no room for even the pruned-down state; refit with an
+        # explicit reservation so appending the block cannot overflow.
+        body = _fit_body(
+            assemble=assemble,
+            prior_run_count=prior_run_count,
+            open_count=open_count,
+            resolved_count=resolved_count,
+            reserved=len(state_block),
+        )
+        pruned = prune_state_to_fit(state=state, body=body, limit=MAX_COMMENT_CHARS)
+        state_block = render_state_block(state=pruned)
+    if len(body) + len(state_block) > MAX_COMMENT_CHARS:
+        # Last resort: pruning floors at one run with unshortened fields, so a
+        # pathological record (e.g. a monster model-emitted title) can still
+        # overflow. Post an *empty but authentic* state block rather than none:
+        # the marker walk accepts the last well-formed block, so omitting ours
+        # would let a forged marker in visible finding prose win. Cross-run
+        # tracking still resets next round — strictly better than GitHub
+        # rejecting the comment or trusting an attacker's state.
+        logger.warning(
+            "Sticky state block cannot fit the comment budget even after "
+            "pruning; posting an empty state block (cross-run tracking "
+            "resets).",
+        )
+        empty_block = render_state_block(
+            state=ReviewState(runs=(), findings=(), truncated=True),
+        )
+        return _cap_body(body=body, reserved=len(empty_block)) + empty_block
+    return body + state_block
+
+
 def build_sticky_comment(
     *,
     result: ReviewResult,
@@ -253,6 +325,7 @@ def build_sticky_comment(
     head_sha: str = "",
     transport: str = "",
     auth_mode: str = "",
+    cost_basis: str = "",
     inline_failure: InlinePostFailure | None = None,
     inline_comment_ids: Mapping[str, int] | None = None,
     repo: str = "",
@@ -280,6 +353,8 @@ def build_sticky_comment(
             resolved by this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost
+            (``billed`` / ``estimated`` / ``unpriceable``).
         inline_failure: Findings whose inline comments could not be posted.
             When set, the sticky renders a warning row above the open-findings
             table and folds those findings' full detail back in.
@@ -325,6 +400,7 @@ def build_sticky_comment(
         head_sha=head_sha,
         transport=transport,
         auth_mode=auth_mode,
+        cost_basis=cost_basis,
         verdict=verdict,
         resolved=len(match.resolved),
         open_after=open_count,
@@ -352,20 +428,141 @@ def build_sticky_comment(
             pr_number=pr_number,
         )
 
-    body = _fit_body(
-        assemble=assemble,
-        prior_run_count=len(all_runs) - 1,
-        open_count=open_count,
-        resolved_count=len(match.records) - open_count,
-    )
     new_state = ReviewState(
         runs=tuple(all_runs),
         findings=match.records,
         truncated=state.truncated or runs_dropped,
     )
-    return body + render_state_block(
-        state=prune_state_to_fit(state=new_state, body=body),
+    return _fit_body_with_state(
+        assemble=assemble,
+        prior_run_count=len(all_runs) - 1,
+        open_count=open_count,
+        resolved_count=len(match.records) - open_count,
+        state=new_state,
     )
+
+
+def render_state_sticky(
+    *,
+    state: ReviewState,
+    banner: str = "",
+    repo: str = "",
+    pr_number: int | None = None,
+) -> str:
+    """Re-render the mission-control layout from persisted state alone.
+
+    The sticky is rebuilt on every run from the state blob, so a round that
+    never produced a :class:`ReviewResult` — a provider outage, an aborted CLI
+    invocation — can still show the last good board instead of blanking it
+    (#1954). Only the sections that describe *this* round are omitted: the
+    summary, the model's reasoning, the fix-all prompt panel, and the ``This
+    run`` badges all belong to a run that did not happen. Everything a reviewer
+    navigates by — verdict, tiles, open findings, resolved findings, history —
+    is derived from state and rendered unchanged.
+
+    The state is re-emitted exactly as given: a failed round must not advance
+    the round counter or touch the tracked findings, so the caller's state
+    round-trips byte-identically unless size pruning has to intervene.
+
+    Args:
+        state: State decoded from the previous sticky comment. Must carry at
+            least one run; callers with an empty state have nothing to show and
+            should render their own first-failure surface instead.
+        banner: Optional blockquote rendered directly under the header, used to
+            explain why the board is not from the current round.
+        repo: ``owner/name`` slug used to link finding titles to their threads.
+        pr_number: Pull request number used for the same links.
+
+    Returns:
+        Complete Markdown body carrying the hidden marker and state block,
+        guaranteed to fit GitHub's comment size limit.
+    """
+    records = state.findings
+    runs = list(state.runs)
+    latest = runs[-1] if runs else None
+    open_count = sum(1 for record in records if record.status is FindingStatus.OPEN)
+
+    def assemble(*, limits: _RenderLimits) -> str:
+        """Render the whole state-only body at the given per-section limits."""
+        return _assemble_state_body(
+            state=state,
+            banner=banner,
+            round_number=latest.round if latest is not None else 1,
+            head_sha=latest.sha if latest is not None else "",
+            runs=runs,
+            limits=limits,
+            repo=repo,
+            pr_number=pr_number,
+        )
+
+    return _fit_body_with_state(
+        assemble=assemble,
+        prior_run_count=max(len(runs) - 1, 0),
+        open_count=open_count,
+        resolved_count=len(records) - open_count,
+        state=state,
+    )
+
+
+def _assemble_state_body(
+    *,
+    state: ReviewState,
+    banner: str,
+    round_number: int,
+    head_sha: str,
+    runs: list[RunRecord],
+    limits: _RenderLimits,
+    repo: str,
+    pr_number: int | None,
+) -> str:
+    """Render the state-derived sticky sections and join the non-empty ones.
+
+    Args:
+        state: Persisted state to render.
+        banner: Optional blockquote rendered directly under the header.
+        round_number: Round number of the most recent successful run.
+        head_sha: Head commit sha reviewed by that run.
+        runs: Every retained run record, oldest first.
+        limits: Per-section render limits.
+        repo: ``owner/name`` slug used to link finding titles to their threads.
+        pr_number: Pull request number used for the same links.
+
+    Returns:
+        The assembled body, without the hidden state block.
+    """
+    records = state.findings
+    match = FindingMatchResult(records=records)
+    total_open = sum(1 for record in records if record.status is FindingStatus.OPEN)
+    total_resolved = len(records) - total_open
+
+    sections: list[str] = [
+        STICKY_MARKER,
+        _header(round_number=round_number, head_sha=head_sha),
+        banner,
+        _readiness_pill(verdict=derive_verdict(findings=records), records=records),
+        _verdict_explainer(),
+        _tiles_section(records=records),
+        _open_findings_section(
+            records=_sorted_open_records(records=records, limit=limits.open),
+            match=match,
+            total=total_open,
+            repo=repo,
+            pr_number=pr_number,
+        ),
+        _resolved_section(
+            records=_sorted_resolved_records(records=records, limit=limits.resolved),
+            total=total_resolved,
+        ),
+    ]
+    history = _history_section(
+        runs=runs,
+        limit=limits.history,
+        resolved_total=total_resolved,
+    )
+    if history:
+        sections.extend(["---", history])
+    sections.append(STICKY_FOOTER)
+    return "\n\n".join(section for section in sections if section)
 
 
 def _fit_body(
@@ -374,34 +571,41 @@ def _fit_body(
     prior_run_count: int,
     open_count: int,
     resolved_count: int,
+    reserved: int = 0,
 ) -> str:
-    """Shrink the rendered body until it fits ``MAX_COMMENT_CHARS``.
+    """Shrink the rendered body until it fits the budget left for it.
 
-    Pruning order is deliberate: history is the least valuable content on the
-    comment, resolved findings are already fixed, and open findings are what a
-    reader is actually here for, so they are trimmed last. Each stage leaves a
-    visible marker, so nothing is ever dropped silently.
+    The budget is ``MAX_COMMENT_CHARS - reserved`` so the caller can hold space
+    for the trailing state block (#1866). Pruning order is deliberate: history
+    is the least valuable content on the comment, resolved findings are already
+    fixed, and open findings are what a reader is actually here for, so they
+    are trimmed last. Each stage leaves a visible marker, so nothing is ever
+    dropped silently.
 
     Args:
         assemble: Callable taking ``limits`` and returning the rendered body.
         prior_run_count: Number of prior runs available to the history table.
         open_count: Number of open findings, bounding that section's search.
         resolved_count: Number of resolved findings, likewise.
+        reserved: Characters already claimed by the state block (or any other
+            trailer) that must remain outside this body.
 
     Returns:
-        A body at or under the cap when that is reachable by pruning, else the
-        smallest body pruning can produce, hard-truncated as a last resort.
+        A body at or under the remaining budget when that is reachable by
+        pruning, else the smallest body pruning can produce, hard-truncated as
+        a last resort.
     """
+    limit = _body_char_limit(reserved=reserved)
     limits = _RenderLimits()
     body = assemble(limits=limits)
-    if len(body) <= MAX_COMMENT_CHARS:
+    if len(body) <= limit:
         return body
 
     # 1. Drop the oldest run history first, one round at a time.
     for history in range(prior_run_count - 1, -1, -1):
         limits = replace(limits, history=history)
         body = assemble(limits=limits)
-        if len(body) <= MAX_COMMENT_CHARS:
+        if len(body) <= limit:
             return body
 
     # 2. Then the oldest resolved findings — they are already fixed.
@@ -410,6 +614,7 @@ def _fit_body(
         limits=limits,
         field="resolved",
         ceiling=resolved_count,
+        reserved=reserved,
     )
     if fitted is not None:
         return fitted
@@ -425,10 +630,11 @@ def _fit_body(
         field="open",
         ceiling=open_count,
         minimum=1,
+        reserved=reserved,
     )
     if fitted is None:
         fitted = assemble(limits=replace(limits, open=1))
-    return _cap_body(body=fitted)
+    return _cap_body(body=fitted, reserved=reserved)
 
 
 def _largest_fitting(
@@ -438,6 +644,7 @@ def _largest_fitting(
     field: str,
     ceiling: int,
     minimum: int = 0,
+    reserved: int = 0,
 ) -> str | None:
     """Binary-search the largest value of one limit whose body still fits.
 
@@ -455,22 +662,37 @@ def _largest_fitting(
         minimum: Smallest count the section may be rendered at. Sections whose
             absence would hollow out the comment pass ``1`` so the search can
             never settle on showing none of them.
+        reserved: Characters already claimed by the trailing state block.
 
     Returns:
         The body rendered at the largest fitting count, or ``None`` when not
         even ``minimum`` entries of that section make the body fit.
     """
+    limit = _body_char_limit(reserved=reserved)
     best: str | None = None
     lower, upper = minimum, min(ceiling, _PRUNE_SEARCH_CEILING)
     while lower <= upper:
         middle = (lower + upper) // 2
         candidate = assemble(limits=replace(limits, **{field: middle}))
-        if len(candidate) <= MAX_COMMENT_CHARS:
+        if len(candidate) <= limit:
             best = candidate
             lower = middle + 1
         else:
             upper = middle - 1
     return best
+
+
+def _body_char_limit(*, reserved: int) -> int:
+    """Return the visible-body budget after reserving the state block.
+
+    Args:
+        reserved: Characters claimed by the trailing state block (or any other
+            trailer that will be concatenated after the body).
+
+    Returns:
+        Non-negative character budget for the visible body alone.
+    """
+    return max(MAX_COMMENT_CHARS - max(reserved, 0), 0)
 
 
 def _assemble_body(
@@ -1015,12 +1237,17 @@ def _this_run_section(
     transport: str,
     auth_mode: str,
 ) -> str:
-    """Render the two-line badge block for the current run.
+    """Render the two badge tables describing the current run.
 
-    Ordering is fixed across every surface (epic #1905): model, est. cost,
-    tokens in, tokens out on line 1; transport and mechanics on line 2. No
-    figure is presented as billed — the ``transport`` badge and the ``~``
-    prefix carry that honesty.
+    Both rows use the same badge-table renderer as the per-review body's run
+    stats, and the primary row's cells come from the shared
+    ``run_stats_primary_cells``, so the model, cost, and token figures cannot
+    drift between the two surfaces (#1955). The secondary row is this
+    surface's own: the status board omits the body's ``strictness`` and
+    ``lintro`` version. Ordering is fixed across every surface (epic #1905):
+    model, est. cost, tokens in, tokens out on row 1;
+    transport and mechanics on row 2. No figure is presented as billed — the
+    ``transport`` badge and the ``~`` prefix carry that honesty.
 
     Args:
         result: Current review result.
@@ -1031,27 +1258,20 @@ def _this_run_section(
         The ``This run`` section.
     """
     metadata = result.metadata
-    estimated = metadata.token_usage_estimated
-    prefix = "~" if estimated else ""
-    usage = metadata.token_usage
-    first = " · ".join(
-        [
-            f"model `{sanitize_comment_text(metadata.model, limit=60)}`",
-            f"est. cost `{_fmt_cost(metadata.cost_estimate_usd, estimated=estimated)}`",
-            f"tokens in `{prefix}{_fmt_int(int(usage.get('prompt', 0)))}`",
-            f"tokens out `{prefix}{_fmt_int(int(usage.get('completion', 0)))}`",
-        ],
-    )
-    second = " · ".join(
-        [
-            f"transport `{_transport_label(transport=transport, auth_mode=auth_mode)}`",
-            f"depth `{metadata.depth}`",
-            f"files `{metadata.files_reviewed}`",
-            f"checks `{metadata.checklist_items}`",
-            f"duration `{metadata.duration_seconds:.0f}s`",
-        ],
-    )
-    return f"**This run** — {first}\n\n{second}"
+    primary = run_stats_primary_cells(metadata=metadata)
+    secondary = [
+        (
+            "transport",
+            _transport_label(transport=transport, auth_mode=auth_mode),
+        ),
+        ("depth", str(metadata.depth)),
+        ("files", str(metadata.files_reviewed)),
+        ("checks", str(metadata.checklist_items)),
+        ("duration", f"{metadata.duration_seconds:.0f}s"),
+    ]
+    lines = ["**This run**", ""]
+    lines.extend(format_badge_tables(rows=[primary, secondary]))
+    return "\n".join(lines)
 
 
 def _history_section(
@@ -1468,6 +1688,7 @@ def _run_record(
     head_sha: str,
     transport: str,
     auth_mode: str,
+    cost_basis: str,
     verdict: ReviewVerdict,
     resolved: int,
     open_after: int,
@@ -1480,6 +1701,7 @@ def _run_record(
         head_sha: Head commit sha reviewed in this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost.
         verdict: Readiness verdict derived from the open findings.
         resolved: Number of findings this round resolved.
         open_after: Number of findings still open after this round.
@@ -1490,14 +1712,34 @@ def _run_record(
     metadata = result.metadata
     counts = _severity_counts(findings=result.findings)
     usage = metadata.token_usage
+    effective_auth = auth_mode or metadata.auth_mode
+    effective_basis = cost_basis or metadata.cost_basis
+    if not effective_basis:
+        # Stamp provenance at creation so a fresh render and a re-render of
+        # parsed state serialize identically (parse derives the same value
+        # for legacy blobs; without this, an error-path re-render would
+        # rewrite the blob a "failed round persists state untouched"
+        # consumer expects byte-for-byte).
+        derived = resolve_cost_basis(
+            auth_mode=effective_auth,
+            estimated=bool(metadata.token_usage_estimated),
+        )
+        if derived is None:
+            logger.debug(
+                "cost_basis derivation returned no value for "
+                f"auth_mode={effective_auth!r}; run record keeps an empty "
+                "basis (unrecognized auth mode).",
+            )
+        effective_basis = derived.value if derived is not None else ""
     return RunRecord(
         round=round_number,
         timestamp=metadata.timestamp,
         sha=head_sha,
         model=metadata.model,
         provider=metadata.provider,
-        transport=transport,
-        auth_mode=auth_mode,
+        transport=transport or metadata.transport,
+        auth_mode=effective_auth,
+        cost_basis=effective_basis,
         depth=metadata.depth,
         strictness=metadata.strictness,
         files_reviewed=metadata.files_reviewed,
@@ -1550,23 +1792,26 @@ def _round_narrative(*, result: ReviewResult) -> str:
     return sentence[:_NARRATIVE_LIMIT].strip()
 
 
-def _cap_body(*, body: str) -> str:
+def _cap_body(*, body: str, reserved: int = 0) -> str:
     """Hard-truncate an over-long body as the final size safety net.
 
     Section-aware pruning in :func:`_fit_body` handles every realistic
     overflow. This exists so a pathological single section (one enormous
     finding title, say) can still never produce a comment GitHub rejects.
+    ``reserved`` leaves room for the trailing state block (#1866).
 
     Args:
         body: Sticky comment body without the state block.
+        reserved: Characters already claimed by the trailing state block.
 
     Returns:
         The body unchanged when it fits, else truncated with a visible notice.
     """
-    if len(body) <= MAX_COMMENT_CHARS:
+    limit = _body_char_limit(reserved=reserved)
+    if len(body) <= limit:
         return body
     notice = "\n\n> ✂️ Comment truncated to fit GitHub's size limit."
-    keep = MAX_COMMENT_CHARS - len(notice)
+    keep = max(limit - len(notice), 0)
     return body[:keep].rstrip() + notice
 
 

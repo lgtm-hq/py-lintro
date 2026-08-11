@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn a ``lintro review`` run into an honest CI check outcome.
+r"""Turn a ``lintro review`` run into an honest CI check outcome.
 
 The dogfood AI review check reported ``success`` on every pull request while
 producing no review at all: a depleted Anthropic balance made every run abort,
@@ -26,8 +26,13 @@ not re-implemented here. Only the exit-code contract is local knowledge:
     1  reviewed, P1 findings present
     2  review could not be produced (provider error or lintro-side failure)
 
+Transport-aware refinement (#1923): shared outcomes keep their names; API-only
+and CLI-only failure vocabularies are distinguished so a subscription-CLI kill
+is never misread as "no credits". Every headline names the transport.
+
 Usage:
-    scripts/ci/classify_review_outcome.py --status <n> --output-file <path>
+    scripts/ci/classify_review_outcome.py --status <n> --output-file <path> \
+        [--transport api|cli]
 
 Environment:
     GITHUB_STEP_SUMMARY  When set, the outcome is appended as Markdown.
@@ -38,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from enum import StrEnum, auto
@@ -63,6 +69,44 @@ NO_CREDENTIAL_STATUS: Final[int] = -1
 # `set -e`, which reddened the check but produced no annotation and no summary: a
 # red check that does not say why is only marginally better than a green one.
 NOT_INVOKED_STATUS: Final[int] = -2
+
+DEFAULT_TRANSPORT: Final[str] = "cli"
+
+# Kind labels refined for the active transport. Shared kinds stay as-is;
+# transport-specific labels make CI summaries self-diagnosing (#1923).
+_API_KIND_LABELS: Final[dict[str, str]] = {
+    "insufficient_credits": "insufficient_credits",
+    "auth_failed": "auth_failed:key",
+}
+_CLI_KIND_LABELS: Final[dict[str, str]] = {
+    "auth_failed": "auth_failed:oauth_session",
+    "timeout": "turn_timeout",
+}
+
+# These patterns classify unstructured CLI subprocess prose — when the CLI
+# fails before lintro can emit its JSON error envelope, stderr wording is all
+# there is. They were validated against claude CLI 2.1.x (2026-08); if the
+# binary rewrites an error message, the affected class silently degrades to
+# the generic kind label from _CLI_KIND_LABELS, so revalidate these patterns
+# whenever the pinned claude CLI version moves.
+_CLI_VERSION_DRIFT = re.compile(
+    r"cli.?version|unsupported.+claude|json-schema-name|unknown option|"
+    r"unrecognized arguments",
+    re.IGNORECASE,
+)
+_KILLED_EXTERNALLY = re.compile(
+    r"killed|signal\s*9|sigkill|runner.*(cancel|shut)|job timed out|"
+    r"The operation was canceled|cancelled by",
+    re.IGNORECASE,
+)
+_OAUTH_AUTH = re.compile(
+    r"not logged in|run /login|oauth|CLAUDE_CODE_OAUTH|session.*(expir|invalid)",
+    re.IGNORECASE,
+)
+_API_KEY_AUTH = re.compile(
+    r"api[- ]?key|x-api-key|authentication_error|invalid.+key",
+    re.IGNORECASE,
+)
 
 
 class ReviewOutcome(StrEnum):
@@ -99,12 +143,14 @@ class OutcomeReport:
         headline: One-line status for the check summary and annotation.
         detail: Cause text from the provider, or an empty string.
         exit_code: Exit code the wrapper should terminate with.
+        transport: Transport named on every outcome line.
     """
 
     outcome: ReviewOutcome
     headline: str
     detail: str
     exit_code: int
+    transport: str = DEFAULT_TRANSPORT
 
 
 def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
@@ -134,7 +180,85 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
-def classify(*, status: int, output: str, reason: str = "") -> OutcomeReport:
+def _normalize_transport(transport: str) -> str:
+    """Normalize a transport label to ``api`` or ``cli``.
+
+    Args:
+        transport: Raw transport string from the CLI or env.
+
+    Returns:
+        Lowercased transport; unknown values fall back to ``cli`` (dogfood).
+    """
+    normalized = (transport or DEFAULT_TRANSPORT).strip().lower()
+    if normalized in {"api", "cli"}:
+        return normalized
+    return DEFAULT_TRANSPORT
+
+
+def _with_transport(*, transport: str, headline: str) -> str:
+    """Prefix a headline with the transport name.
+
+    Args:
+        transport: Active transport.
+        headline: Outcome headline without transport.
+
+    Returns:
+        Headline that always names the transport.
+    """
+    return f"[{transport}] {headline}"
+
+
+def refine_failure_kind(
+    *,
+    transport: str,
+    kind: str,
+    message: str,
+    output: str,
+) -> str:
+    """Map a canonical error kind onto the transport's failure vocabulary.
+
+    Args:
+        transport: Active transport (``api`` or ``cli``).
+        kind: Canonical kind from the review error envelope.
+        message: Envelope message text.
+        output: Full captured output (used when the envelope is thin).
+
+    Returns:
+        A transport-aware kind label for CI summaries.
+    """
+    haystack = f"{message}\n{output}"
+    if transport == "cli":
+        # Prose patterns may only classify a *thin* envelope (no concrete
+        # kind): a real envelope kind (insufficient_credits, timeout, ...)
+        # must keep its own label even when interleaved logs mention
+        # "killed", version drift, or the OAuth session. An envelope's
+        # existence also means lintro finished writing it — a run the
+        # runner actually killed leaves no kind to override.
+        thin_envelope = kind in ("", "unknown")
+        if thin_envelope and _KILLED_EXTERNALLY.search(haystack):
+            return "killed_externally"
+        if thin_envelope and _CLI_VERSION_DRIFT.search(haystack):
+            return "cli_version_drift"
+        if kind == "auth_failed":
+            if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
+                return "auth_failed:key"
+            return "auth_failed:oauth_session"
+        if thin_envelope and _OAUTH_AUTH.search(haystack):
+            return "auth_failed:oauth_session"
+        return _CLI_KIND_LABELS.get(kind, kind)
+
+    if kind == "auth_failed":
+        return "auth_failed:key"
+    return _API_KIND_LABELS.get(kind, kind)
+
+
+def classify(
+    *,
+    status: int,
+    output: str,
+    reason: str = "",
+    transport: str = DEFAULT_TRANSPORT,
+) -> OutcomeReport:
     """Classify a review invocation into a CI-facing outcome.
 
     Args:
@@ -143,41 +267,62 @@ def classify(*, status: int, output: str, reason: str = "") -> OutcomeReport:
             review was never reached.
         output: Combined stdout/stderr captured from the run.
         reason: Wrapper-supplied explanation for a never-invoked run.
+        transport: Active transport (``api`` or ``cli``); named on every line.
 
     Returns:
         The outcome, the copy to surface, and the exit code to terminate with.
     """
+    transport = _normalize_transport(transport)
+
     if status == NOT_INVOKED_STATUS:
         return OutcomeReport(
             outcome=ReviewOutcome.BROKEN,
-            headline="the review was never invoked — nothing was reviewed",
+            headline=_with_transport(
+                transport=transport,
+                headline="the review was never invoked — nothing was reviewed",
+            ),
             detail=reason or output.strip()[-500:],
             exit_code=1,
+            transport=transport,
         )
 
     if status == NO_CREDENTIAL_STATUS:
+        detail = (
+            "Add the CLAUDE_CODE_OAUTH_TOKEN secret to activate AI review "
+            "on pull requests — the dogfood runs the `cli` transport, "
+            "which authenticates through the `claude` CLI's OAuth session."
+            if transport == "cli"
+            else (
+                "Add the ANTHROPIC_API_KEY (or provider-equivalent) secret "
+                "to activate AI review on the `api` transport."
+            )
+        )
         return OutcomeReport(
             outcome=ReviewOutcome.NO_CREDENTIAL,
-            headline="no provider credential — nothing was reviewed",
-            detail=(
-                "Add the CLAUDE_CODE_OAUTH_TOKEN secret to activate AI review "
-                "on pull requests — the dogfood runs the `cli` transport, "
-                "which authenticates through the `claude` CLI's OAuth session."
+            headline=_with_transport(
+                transport=transport,
+                headline="no provider credential — nothing was reviewed",
             ),
+            detail=detail,
             exit_code=1,
+            transport=transport,
         )
 
     if status in (REVIEW_STATUS_CLEAN, REVIEW_STATUS_FINDINGS):
         findings = status == REVIEW_STATUS_FINDINGS
         return OutcomeReport(
             outcome=ReviewOutcome.REVIEWED,
-            headline=(
-                "reviewed — P1 findings posted"
-                if findings
-                else "reviewed — no P1 findings"
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "reviewed — P1 findings posted"
+                    if findings
+                    else "reviewed — no P1 findings"
+                ),
             ),
             detail="",
             exit_code=0,
+            transport=transport,
         )
 
     error = _parse_error_envelope(text=output) or {}
@@ -190,30 +335,67 @@ def classify(*, status: int, output: str, reason: str = "") -> OutcomeReport:
         # reason is how a red check still fails to explain itself.
         message = output.strip().splitlines()[-1][:500]
 
+    refined_kind = refine_failure_kind(
+        transport=transport,
+        kind=kind,
+        message=message,
+        output=output,
+    )
+
     if status != REVIEW_STATUS_ERROR:
         # An exit status lintro does not define means the wrapper itself broke
         # (missing dependency, bad flag, crash). Never attribute that to the
         # provider — the fix is in lintro, not in the account.
         return OutcomeReport(
             outcome=ReviewOutcome.BROKEN,
-            headline=f"lintro review failed with unexpected status {status}",
+            headline=_with_transport(
+                transport=transport,
+                headline=f"lintro review failed with unexpected status {status}",
+            ),
             detail=message,
             exit_code=1,
+            transport=transport,
+        )
+
+    if refined_kind in {"killed_externally", "cli_version_drift", "turn_timeout"}:
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    f"review could not complete ({refined_kind}) — nothing was reviewed"
+                ),
+            ),
+            detail=message,
+            exit_code=1,
+            transport=transport,
         )
 
     if bool(error.get("provider_unavailable")):
         return OutcomeReport(
             outcome=ReviewOutcome.PROVIDER_UNAVAILABLE,
-            headline=f"provider unavailable ({kind}) — nothing was reviewed",
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    f"provider unavailable ({refined_kind}) — nothing was reviewed"
+                ),
+            ),
             detail=message,
             exit_code=1,
+            transport=transport,
         )
 
     return OutcomeReport(
         outcome=ReviewOutcome.BROKEN,
-        headline=f"review could not complete ({kind}) — nothing was reviewed",
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                f"review could not complete ({refined_kind}) — nothing was reviewed"
+            ),
+        ),
         detail=message,
         exit_code=1,
+        transport=transport,
     )
 
 
@@ -227,7 +409,10 @@ def render_summary(*, report: OutcomeReport) -> str:
         Markdown text ending in a newline.
     """
     icon = "✅" if report.outcome.produced_review else "🚫"
-    lines = [f"### {icon} AI Review — {report.headline}", ""]
+    lines = [
+        f"### {icon} AI Review ({report.transport}) — {report.headline}",
+        "",
+    ]
     if report.detail:
         lines.extend(["> " + report.detail, ""])
     if not report.outcome.produced_review:
@@ -250,7 +435,7 @@ def _emit(*, report: OutcomeReport) -> None:
         report: The classified outcome.
     """
     annotation = "notice" if report.outcome.produced_review else "error"
-    title = "AI Review"
+    title = f"AI Review ({report.transport})"
     body = report.headline
     if report.detail:
         body = f"{body}: {report.detail}"
@@ -299,6 +484,15 @@ def main(*, argv: list[str] | None = None) -> int:
             f"when --status is {NOT_INVOKED_STATUS}."
         ),
     )
+    parser.add_argument(
+        "--transport",
+        default=DEFAULT_TRANSPORT,
+        choices=("api", "cli"),
+        help=(
+            "Transport used for the review (default: cli). Named on every "
+            "annotation and job-summary line; selects the failure vocabulary."
+        ),
+    )
     args = parser.parse_args(argv)
 
     output = ""
@@ -307,7 +501,12 @@ def main(*, argv: list[str] | None = None) -> int:
         if path.exists():
             output = path.read_text(encoding="utf-8", errors="replace")
 
-    report = classify(status=args.status, output=output, reason=args.reason)
+    report = classify(
+        status=args.status,
+        output=output,
+        reason=args.reason,
+        transport=args.transport,
+    )
     _emit(report=report)
     if not report.outcome.produced_review:
         print(f"AI Review: {report.headline}", file=sys.stderr)

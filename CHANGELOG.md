@@ -21,6 +21,103 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.114.1] - 2026-08-11
+
+### Fixed
+
+- **ci**: re-pin dogfood release image to 0.113.3 (#2007) (e0515ef)
+
+## [0.114.0] - 2026-08-11
+
+### Added
+
+- **ai**: transport-aware AI review config and reporting (#1923) (#1981) (6e2cbdc)
+
+## [0.113.3] - 2026-08-11
+
+### Fixed
+
+- **ai**: harden CLI transport for large diffs (#1967) (#1982) (ce471b7)
+
+## [0.113.2] - 2026-08-10
+
+### Changed
+
+- **ai**: honor `max_parallel_calls` under cost caps (#1969) (#1978) (39e10a8)
+
+### Fixed
+
+- **ai**: fence untrusted review prompt fields with boundary markers (#1884) (#1979)
+  (1332c8a)
+
+## [0.113.1] - 2026-08-09
+
+### Changed
+
+- **ai**: raise ai-review ceiling to 75 until parallel fan-out lands (#1990) (e82d053)
+
+### Fixed
+
+- **ai**: cap sticky comment with state block and harden marker parse (#1866) (#1977)
+  (c5b0b00)
+
+## [0.113.0] - 2026-08-09
+
+### Added
+
+- **ai**: add close/aclose lifecycle to AI provider clients (#1885) (#1976) (28d1658)
+
+### Changed
+
+- **ai**: phase 1 ADR and characterization tests for review architecture (#1972) (#1980)
+  (1fef3b6)
+- **ai**: raise ai-review job ceiling for stacked review calls (#1989) (33a864f)
+- **ci**: make AI CLI Tier 1 contract check merge-queue safe (#1119) (#1975) (fee0226)
+
+## [0.112.7] - 2026-08-08
+
+### Fixed
+
+- **ci**: bump lintro-tools digest for markdownlint-cli2 0.23.2 (#1987) (72e9a51)
+
+## [0.112.6] - 2026-08-08
+
+### Fixed
+
+- **deps**: remediate nanoid and js-yaml security advisories (#1983) (ea88a24)
+
+## [0.112.5] - 2026-08-07
+
+### Fixed
+
+- **review**: keep the mission-control sticky when a run fails (#1960) (b817258)
+
+## [0.112.4] - 2026-08-07
+
+### Fixed
+
+- **deps**: bump js-yaml to 4.3.1 for GHSA-5p4m-2wfm-xmqj (#1964) (e98e010)
+
+## [0.112.3] - 2026-08-06
+
+### Fixed
+
+- **review**: render the sticky This-run stats as badge tables (#1958) (b215467)
+
+## [0.112.2] - 2026-08-06
+
+### Fixed
+
+- **review**: always render the fix prompt inline in the per-review comment (#1957)
+  (ac24f20)
+
+## [0.112.1] - 2026-08-06
+
+### Fixed
+
+- **review**: close mock-parity gaps from the #1905 comment-surfaces audit (#1952)
+  (3fd782e)
+
 ## [0.112.0] - 2026-08-06
 
 ### Added

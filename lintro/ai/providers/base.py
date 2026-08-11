@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.liveness import (
@@ -109,6 +111,13 @@ class BaseAIProvider(ABC):
         self._transport = transport
         self._client: Any = None
         self._client_loop: asyncio.AbstractEventLoop | None = None
+        # Clients discarded by a stale-loop rebuild are kept here (with the
+        # loop that created them) until ``aclose`` so their HTTP pools are
+        # not orphaned (#1885). Async pools must close on their creating
+        # loop; the tuple lets ``aclose`` pick the right strategy.
+        self._superseded_clients: list[tuple[Any, asyncio.AbstractEventLoop | None]] = (
+            []
+        )
 
     # -- Client management -------------------------------------------------
 
@@ -123,6 +132,17 @@ class BaseAIProvider(ABC):
             return asyncio.get_running_loop()
         except RuntimeError:
             return None
+
+    def _retire_client(self, client: Any) -> None:
+        """Queue a superseded client (with its creating loop) for ``aclose``.
+
+        Args:
+            client: SDK client instance to close when the provider shuts down.
+        """
+        if client is not None and all(
+            existing is not client for existing, _ in self._superseded_clients
+        ):
+            self._superseded_clients.append((client, self._client_loop))
 
     def _get_client(self) -> Any:
         """Get or lazily create the SDK client for the running event loop.
@@ -144,6 +164,11 @@ class BaseAIProvider(ABC):
         if self._client is not None and not stale:
             return self._client
 
+        if self._client is not None and stale:
+            self._retire_client(self._client)
+            self._client = None
+            self._client_loop = None
+
         api_key = os.environ.get(self._api_key_env) or ""
         if not api_key and not self._base_url:
             raise AIAuthenticationError(
@@ -157,6 +182,96 @@ class BaseAIProvider(ABC):
         self._client = self._create_client(api_key=api_key)
         self._client_loop = loop
         return self._client
+
+    @staticmethod
+    async def _close_sdk_client(client: Any) -> None:
+        """Await an SDK client's ``close``/``aclose`` when present.
+
+        Args:
+            client: SDK client instance, or ``None``.
+        """
+        if client is None:
+            return
+        close = getattr(client, "aclose", None)
+        if close is None:
+            close = getattr(client, "close", None)
+        if close is None:
+            return
+        result = close()
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def aclose(self) -> None:
+        """Close open SDK clients. Idempotent; safe to call more than once.
+
+        Concrete no-op for providers that hold no poolable client. Subclasses
+        with HTTP SDK clients override to close those clients. Call-site
+        ownership of *when* to close is #1972 Phase 5 — this method only
+        provides the provider-side API (#1885).
+
+        Teardown is best-effort and loop-aware: an async pool must close on
+        its creating loop, so a client is awaited directly only when that
+        loop is the running one; a client whose creating loop still runs
+        elsewhere is closed there via ``run_coroutine_threadsafe``; and a
+        client whose creating loop is gone cannot be gracefully closed —
+        its pool is left to garbage collection, by design. One client's
+        failing ``close`` never orphans the remaining clients.
+        """
+        current = self._current_loop()
+        clients = list(self._superseded_clients)
+        if self._client is not None:
+            clients.append((self._client, self._client_loop))
+        self._client = None
+        self._client_loop = None
+        self._superseded_clients = []
+        for client, creating_loop in clients:
+            try:
+                if creating_loop is None or creating_loop is current:
+                    await self._close_sdk_client(client)
+                elif creating_loop.is_running():
+                    # The creating loop is alive in another thread; close
+                    # the pool there, where it belongs — without blocking
+                    # this loop's thread on a concurrent.futures result.
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._close_sdk_client(client),
+                        creating_loop,
+                    )
+                    await asyncio.wait_for(
+                        asyncio.wrap_future(future),
+                        timeout=5.0,
+                    )
+                else:
+                    # Closed or idle foreign loop: nothing will execute a
+                    # scheduled close, and awaiting here would bind the
+                    # pool teardown to the wrong loop. Release the
+                    # reference and let garbage collection reclaim it.
+                    logger.debug(
+                        f"Releasing {self._provider_name} SDK client "
+                        "created on a dead or idle foreign event loop; "
+                        "pool reclaimed by garbage collection.",
+                    )
+            except Exception as exc:  # noqa: BLE001 - best-effort teardown
+                logger.debug(
+                    f"Ignoring error while closing {self._provider_name} "
+                    f"SDK client: {exc}",
+                )
+
+    def close(self) -> None:
+        """Synchronously close open SDK clients.
+
+        Raises:
+            RuntimeError: If called from a running event loop; use
+                ``await aclose()`` instead.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.aclose())
+            return
+        raise RuntimeError(
+            "close() cannot be called from a running event loop; "
+            "use `await aclose()` instead.",
+        )
 
     @abstractmethod
     def _create_client(self, *, api_key: str) -> Any:

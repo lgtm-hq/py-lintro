@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.enums import ConfidenceLevel, RiskLevel
+from lintro.ai.enums import ConfidenceLevel, CostBasis, RiskLevel
 
 # -- TestConfidenceLevel: Tests for ConfidenceLevel enum. --------------------
 
@@ -167,3 +167,46 @@ def test_risk_invalid_value_raises() -> None:
     """Invalid string raises ValueError."""
     with pytest.raises(ValueError, match="invalid"):
         RiskLevel("invalid")
+
+
+# -- TestCostBasis: Tests for CostBasis enum (#1923). ------------------------
+
+
+@pytest.mark.parametrize(
+    ("member", "expected_value"),
+    [
+        (CostBasis.BILLED, "billed"),
+        (CostBasis.ESTIMATED, "estimated"),
+        (CostBasis.UNPRICEABLE, "unpriceable"),
+    ],
+)
+def test_cost_basis_string_value(
+    member: CostBasis,
+    expected_value: str,
+) -> None:
+    """CostBasis members produce their serialized string values.
+
+    Args:
+        member: Enum member under test.
+        expected_value: Expected serialized string.
+    """
+    assert_that(member.value).is_equal_to(expected_value)
+    assert_that(member).is_equal_to(expected_value)
+
+
+def test_cost_basis_is_str_subclass() -> None:
+    """CostBasis members are str instances (StrEnum)."""
+    assert_that(CostBasis.BILLED).is_instance_of(str)
+
+
+def test_cost_basis_construction_from_string() -> None:
+    """CostBasis round-trips from its serialized string values."""
+    assert_that(CostBasis("billed")).is_equal_to(CostBasis.BILLED)
+    assert_that(CostBasis("estimated")).is_equal_to(CostBasis.ESTIMATED)
+    assert_that(CostBasis("unpriceable")).is_equal_to(CostBasis.UNPRICEABLE)
+
+
+def test_cost_basis_invalid_value_raises() -> None:
+    """Invalid string raises ValueError."""
+    with pytest.raises(ValueError, match="invalid"):
+        CostBasis("invalid")
