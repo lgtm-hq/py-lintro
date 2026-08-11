@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
@@ -180,8 +182,9 @@ def test_build_command_basic(astro_check_plugin: AstroCheckPlugin) -> None:
 
     # Should contain astro and check subcommand
     assert_that(cmd).contains("check")
-    # First element should be astro command (or bunx/npx wrapper)
-    assert_that(cmd[0]).is_in("astro", "bunx", "npx")
+    # First element is the resolved astro binary (possibly a project-local
+    # path) or a bunx/npx wrapper.
+    assert_that(Path(cmd[0]).name).is_in("astro", "bunx", "npx")
 
 
 def test_build_command_with_root(astro_check_plugin: AstroCheckPlugin) -> None:

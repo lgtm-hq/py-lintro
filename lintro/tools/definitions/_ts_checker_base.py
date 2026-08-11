@@ -73,20 +73,22 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
     _tsconfig_candidates: ClassVar[tuple[str, ...]] = ("tsconfig.json",)
 
     @staticmethod
-    def _resolve_binary_command(binary: str) -> list[str]:
+    def _resolve_binary_command(binary: str, cwd: Path | None = None) -> list[str]:
         """Resolve the command used to invoke a TypeScript checker binary.
 
-        Prefers the direct executable, then ``bunx``, then ``npx``, and
-        finally falls back to the bare binary name in the hope it is on PATH.
+        Uses the shared Node.js chain: project-local install, then ``PATH``,
+        then a version-pinned ``bunx``/``npx`` invocation (#1811).
 
         Args:
             binary: Name of the checker executable (e.g. ``"tsc"``).
+            cwd: Directory the checker will run in, when known.
 
         Returns:
             Command argument list for the checker.
         """
         return ts_cmd._resolve_binary_command(
             binary=binary,
+            cwd=cwd,
         )
 
     def _find_tsconfig(self, cwd: Path) -> Path | None:
@@ -161,6 +163,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         files: list[str],
         project_path: str | Path | None = None,
         options: dict[str, object] | None = None,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Build the checker invocation command.
 
@@ -168,6 +171,8 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             files: Relative file paths (used only when no project config).
             project_path: Path to tsconfig.json to use (temp or user-specified).
             options: Options dict to use for flags. Defaults to self.options.
+            cwd: Directory the checker will run in, used to resolve a
+                project-local install (#1727).
 
         Returns:
             A list of command arguments ready to be executed.
@@ -177,6 +182,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             files=files,
             project_path=project_path,
             options=options,
+            cwd=cwd,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -348,11 +354,16 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
     # Hooks: subclasses supply per-tool deltas
     # -----------------------------------------------------------------
 
-    def _command_prefix(self) -> list[str]:
+    def _command_prefix(self, cwd: Path | None = None) -> list[str]:
         """Return the command prefix used to invoke the checker.
 
+        Args:
+            cwd: Directory the checker will run in, used to resolve a
+                project-local install.
+
         Returns:
-            Command argument list (e.g. ``["tsc"]`` or ``["bunx", "vue-tsc"]``).
+            Command argument list (e.g. ``["tsc"]`` or
+            ``["bunx", "--package", "typescript@6.0.3", "tsc"]``).
 
         Raises:
             NotImplementedError: If a subclass does not override this hook.

@@ -220,10 +220,10 @@ def test_build_command_basic(svelte_check_plugin: SvelteCheckPlugin) -> None:
     # Should contain machine-verbose output format
     assert_that(cmd).contains("--output")
     assert_that(cmd).contains("machine-verbose")
-    # First element should be svelte-check command (or bunx/npx wrapper)
-    assert_that(cmd[0]).is_in("svelte-check", "bunx", "npx")
-    # svelte-check must appear somewhere in the command
-    assert_that(cmd).contains("svelte-check")
+    # First element is the resolved svelte-check binary or a bunx/npx wrapper
+    assert_that(cmd[0]).matches(r"(svelte-check|bunx|npx)$")
+    # The svelte-check package must be named somewhere in the command
+    assert_that(" ".join(cmd)).contains("svelte-check")
 
 
 def test_build_command_with_threshold(

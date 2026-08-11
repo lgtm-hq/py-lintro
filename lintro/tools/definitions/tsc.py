@@ -117,23 +117,30 @@ class TscPlugin(TypeScriptCheckerPlugin):
             default_timeout=TSC_DEFAULT_TIMEOUT,
         )
 
-    def _get_tsc_command(self) -> list[str]:
+    def _get_tsc_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command to run tsc.
 
-        Prefers direct tsc executable, falls back to bunx/npx.
+        Resolves the project-local ``typescript`` install first, then ``PATH``,
+        then a version-pinned ``bunx``/``npx`` invocation (#1811).
+
+        Args:
+            cwd: Directory tsc will run in, when known.
 
         Returns:
             Command arguments for tsc.
         """
-        return self._resolve_binary_command("tsc")
+        return self._resolve_binary_command("tsc", cwd=cwd)
 
-    def _command_prefix(self) -> list[str]:
+    def _command_prefix(self, cwd: Path | None = None) -> list[str]:
         """Return the tsc command prefix.
+
+        Args:
+            cwd: Directory tsc will run in, when known.
 
         Returns:
             Command argument list for tsc.
         """
-        return self._get_tsc_command()
+        return self._get_tsc_command(cwd=cwd)
 
     def _detect_framework_project(self, cwd: Path) -> tuple[str, str] | None:
         """Detect if the project uses a framework with its own type checker.

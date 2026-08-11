@@ -809,50 +809,56 @@ Rationale:
 
 ### Node.js Tool Resolution {#nodejs-tool-resolution}
 
-How Lintro locates a Node.js tool decides which install actually works, and the answer
-is not the same for every tool. Four resolution modes are in use; the tool's own
-definition, not a single shared code path, decides which one applies.
+**Every Node.js tool resolves the same way.** There is one chain, implemented once in
+`NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
+`astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
+`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
-**1. Runner-only tools — install as a project dependency.** `oxlint`, `oxfmt` and
-`stylelint` go through `NodeJSBuilder` in `lintro/tools/core/command_builders.py`:
+1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
+   checked — the target project's own install, not Lintro's. This is the preferred
+   answer: it is lockfile-pinned, offline, and it is the same binary your editor and
+   your own `npm run` scripts use.
+2. **`<binary>` on `PATH`** — a global install (`bun add -g`, `npm install -g`) or a
+   Homebrew formula.
+3. **`bunx <package>@<pinned>` / `npx <package>@<pinned>`** — a registry fetch at the
+   version Lintro pins in its manifest. `bunx` is tried first, then `npx`. When the
+   executable name differs from the package name (`tsc` lives in `typescript`,
+   `commitlint` in `@commitlint/cli`), the runner is invoked as
+   `bunx --package typescript@<pinned> tsc`.
+4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
-1. `bunx <binary>` — if `bunx` is available.
-2. `npx <binary>` — if only `npx` is available.
-3. bare `<binary>` — if neither runner exists.
+`@latest` is never resolved at runtime, for any tool. Branch 3 emits a one-time warning
+because it needs network access to the npm registry and imposes the pinned package's own
+`engines` floor on your runtime; a failure on that branch is reported with install
+guidance rather than the tool's raw error.
 
-`bunx`/`npx` resolve the **checked project's** `node_modules/.bin` first and otherwise
-fetch the package from the npm registry. Neither branch looks at `PATH`, so a global
-install (`bun add -g`, `npm install -g`) or a Homebrew formula is not what Lintro picks
-up on any machine that has `bun` or `npm`. Install these as a dependency of the project
-you check (`bun add -D <pkg>` / `npm install -D <pkg>`); that also pins the version
-through your lockfile instead of resolving `@latest` at check time.
+**Which install should I use?** A project devDependency (`bun add -D <pkg>` /
+`npm install -D <pkg>`) is the best answer for every Node tool — it wins the chain and
+pins the version through your lockfile. A global or Homebrew install is a valid fallback
+and is used whenever no project-local install is present.
 
-**2. `PATH`-first tools — a global install is what they prefer.** `commitlint`,
-`markdownlint-cli2`, `tsc`, `vue-tsc` and `svelte-check` resolve in their own tool
-definitions, and each checks the binary **before** any runner:
+> **Changed in the `#1811` release.** The chain above used to apply only to
+> `html-validate`. Other Node tools either went straight to
+> `bunx <binary>`/`npx <binary>` (never consulting `PATH`, and resolving `@latest`) or
+> preferred `PATH` ahead of any project-local install. Two consequences worth checking
+> after upgrading:
+>
+> - **A project-local install now wins.** If a project pins an older tool version as a
+>   devDependency while you relied on a newer global one, Lintro now runs the local pin
+>   — the same version your editor runs. Remove the devDependency, or upgrade it, if you
+>   wanted the global.
+> - **`prettier` is no longer `PATH`-only.** It previously had no Node builder at all
+>   and was resolved as a bare `prettier` name against `PATH`; a project's
+>   lockfile-pinned prettier was never used. It now follows the same chain as everything
+>   else.
+>
+> Also fixed on the way: `commitlint` and `markdownlint-cli2` had no `npx` branch, so on
+> a machine with npm but no bun a devDependency was unreachable and the tool reported a
+> skip. Both now resolve like every other Node tool.
 
-1. `<binary>` from `PATH` — a global install (`-g`) or a Homebrew formula.
-2. `bunx <binary>`.
-3. `npx <binary>` — **not available for `commitlint` or `markdownlint-cli2`**, which
-   fall straight through to step 4.
-4. bare `<binary>` — fails if nothing is installed.
-
-The `npx` gap matters: on a machine with npm but no bun, a `commitlint` or
-`markdownlint-cli2` devDependency is never reached and the tool reports a skip. Install
-those two globally, or make sure `bun` is available.
-
-**3. Local-first with a runner fallback.** `astro check` prefers the project's
-`node_modules/.bin/astro` (which also avoids the interactive "install @astrojs/check?"
-prompt that hangs without a TTY), then `PATH`, then `bunx`/`npx`. `html-validate` uses a
-similar chain with a **version-pinned** registry fallback; see
-[html-validate Configuration](#html-validate-configuration) for the full order. A global
-install works for both, though a project-local one is preferred.
-
-**4. `PATH` only.** `prettier` has no Node-specific builder at all — the command builder
-registry falls through to its bare-name default and the OS resolves `prettier` against
-`PATH`. A global install (`npm install -g prettier`, `brew install prettier`) is
-therefore the correct one; a project devDependency alone does not put `prettier` on
-`PATH`.
+Because the version check (`verify_tool_version`) resolves through this same chain, the
+binary Lintro version-gates is now the binary Lintro runs, for every Node tool rather
+than just for `html-validate`.
 
 ### Python Tools
 
@@ -1768,9 +1774,8 @@ most reliable branch of Lintro's executable resolution, it is lockfile-pinned, a
 needs no registry access at check time. A global install (`-g`) does _not_ populate
 `node_modules/.bin`, so it lands on a later, weaker branch.
 
-html-validate is the only tool on this pinned chain; see
-[Node.js Tool Resolution](#nodejs-tool-resolution) for how the other Node.js tools
-resolve.
+html-validate uses the shared Node.js chain — as of `#1811` so does every other Node.js
+tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Executable resolution order:**
 

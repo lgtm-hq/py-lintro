@@ -470,28 +470,51 @@ def test_nodejs_builder_does_not_handle_ruff() -> None:
     assert_that(builder.can_handle(ToolName.RUFF)).is_false()
 
 
-def test_nodejs_builder_uses_bunx_when_available() -> None:
-    """NodeJSBuilder uses bunx when available."""
+def test_nodejs_builder_uses_pinned_bunx_when_only_bunx_is_available(
+    no_local_node_install: None,
+) -> None:
+    """With no local or PATH install, bunx carries the pinned version.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with patch("shutil.which", _which_only("bunx")):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
-        assert_that(cmd).is_equal_to(["bunx", "markdownlint-cli2"])
+    assert_that(cmd).is_length(2)
+    assert_that(cmd[0]).is_equal_to("bunx")
+    assert_that(cmd[1]).starts_with("markdownlint-cli2@")
 
 
-def test_nodejs_builder_falls_back_to_package_name() -> None:
-    """NodeJSBuilder falls back to package name when bunx not available."""
+def test_nodejs_builder_falls_back_to_package_name(
+    no_local_node_install: None,
+) -> None:
+    """NodeJSBuilder falls back to package name when bunx not available.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
     builder = NodeJSBuilder()
     with patch("shutil.which", return_value=None):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
         assert_that(cmd).is_equal_to(["markdownlint-cli2"])
 
 
-def test_nodejs_builder_astro_check_uses_astro_binary() -> None:
-    """NodeJSBuilder resolves astro-check to astro binary."""
+def test_nodejs_builder_astro_check_uses_astro_binary(
+    no_local_node_install: None,
+) -> None:
+    """NodeJSBuilder resolves astro-check to the astro binary.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with patch("shutil.which", _which_only("astro")):
         cmd = builder.get_command("astro-check", ToolName.ASTRO_CHECK)
-        assert_that(cmd).is_equal_to(["bunx", "astro"])
+    assert_that(cmd).is_equal_to(["astro"])
 
 
 def test_nodejs_builder_handles_vue_tsc() -> None:
@@ -500,12 +523,19 @@ def test_nodejs_builder_handles_vue_tsc() -> None:
     assert_that(builder.can_handle(ToolName.VUE_TSC)).is_true()
 
 
-def test_nodejs_builder_vue_tsc_uses_vue_tsc_binary() -> None:
-    """NodeJSBuilder resolves vue-tsc to vue-tsc binary."""
+def test_nodejs_builder_vue_tsc_uses_vue_tsc_binary(
+    no_local_node_install: None,
+) -> None:
+    """NodeJSBuilder resolves vue-tsc to the vue-tsc binary.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with patch("shutil.which", _which_only("vue-tsc")):
         cmd = builder.get_command("vue-tsc", ToolName.VUE_TSC)
-        assert_that(cmd).is_equal_to(["bunx", "vue-tsc"])
+    assert_that(cmd).is_equal_to(["vue-tsc"])
 
 
 # =============================================================================
@@ -529,10 +559,20 @@ def _which_only(*available: str) -> Callable[..., str | None]:
     return _which
 
 
-def test_html_validate_is_pinned() -> None:
-    """html-validate is registered as a version-pinned Node.js tool."""
+def test_every_node_tool_has_a_resolvable_pinned_spec() -> None:
+    """No Node tool can reach the registry fallback without a version pin.
+
+    The pinned chain is the default for every Node tool (#1811), so a package
+    missing from the version pins would silently resolve ``@latest``.
+    """
     builder = NodeJSBuilder()
-    assert_that(builder.pinned_tools).contains(ToolName.HTML_VALIDATE)
+    for package_name in builder.package_names.values():
+        assert_that(pinned_npm_spec(package_name)).described_as(
+            package_name,
+        ).contains("@")
+        assert_that(pinned_npm_spec(package_name)).described_as(
+            package_name,
+        ).is_not_equal_to(package_name)
 
 
 def test_html_validate_prefers_local_node_modules_binary(tmp_path: Path) -> None:
@@ -647,12 +687,101 @@ def test_find_local_node_binary_returns_none_when_absent(tmp_path: Path) -> None
     assert_that(found).is_none()
 
 
-def test_unpinned_node_tools_keep_bunx_behaviour() -> None:
-    """Tools outside the pinned set are unaffected by the pinning branch."""
+def test_node_tool_prefers_path_binary_over_bunx(
+    no_local_node_install: None,
+) -> None:
+    """A PATH install now wins over bunx for every Node tool, not just one.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("bunx", "markdownlint-cli2")):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
-    assert_that(cmd).is_equal_to(["bunx", "markdownlint-cli2"])
+    assert_that(cmd).is_equal_to(["markdownlint-cli2"])
+
+
+def test_node_tool_prefers_local_install_over_path(tmp_path: Path) -> None:
+    """A project-local install wins over a PATH binary for a newly pinned tool."""
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / (
+        "markdownlint-cli2.cmd" if sys.platform == "win32" else "markdownlint-cli2"
+    )
+    binary.write_text("#!/bin/sh\n")
+
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("bunx", "markdownlint-cli2")):
+        cmd = builder.get_command_in("markdownlint", ToolName.MARKDOWNLINT, tmp_path)
+
+    assert_that(cmd).is_equal_to([binary.resolve().as_posix()])
+
+
+def test_prettier_resolves_project_local_install(tmp_path: Path) -> None:
+    """Prettier gained a NodeJSBuilder entry, so a local install wins (#1811)."""
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / ("prettier.cmd" if sys.platform == "win32" else "prettier")
+    binary.write_text("#!/bin/sh\n")
+
+    builder = NodeJSBuilder()
+    assert_that(builder.can_handle(ToolName.PRETTIER)).is_true()
+    with patch("shutil.which", _which_only("prettier")):
+        cmd = builder.get_command_in("prettier", ToolName.PRETTIER, tmp_path)
+
+    assert_that(cmd).is_equal_to([binary.resolve().as_posix()])
+
+
+def test_prettier_falls_back_to_pinned_runner_spec(
+    no_local_node_install: None,
+) -> None:
+    """Without a local or PATH prettier, the runner spec is version-pinned.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("npx")):
+        cmd = builder.get_command("prettier", ToolName.PRETTIER)
+    assert_that(cmd).is_length(2)
+    assert_that(cmd[0]).is_equal_to("npx")
+    assert_that(cmd[1]).starts_with("prettier@")
+
+
+def test_runner_fallback_names_package_when_binary_differs(
+    no_local_node_install: None,
+) -> None:
+    """Tsc lives in the typescript package, so the runner needs ``--package``.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("bunx")):
+        cmd = builder.get_command("tsc", ToolName.TSC)
+    assert_that(cmd[:2]).is_equal_to(["bunx", "--package"])
+    assert_that(cmd[2]).starts_with("typescript@")
+    assert_that(cmd[3]).is_equal_to("tsc")
+
+
+def test_commitlint_runner_fallback_uses_scoped_package(
+    no_local_node_install: None,
+) -> None:
+    """Commitlint's npm package is ``@commitlint/cli``, not ``commitlint``.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("npx")):
+        cmd = builder.get_command("commitlint", ToolName.COMMITLINT)
+    assert_that(cmd[:2]).is_equal_to(["npx", "--package"])
+    assert_that(cmd[2]).starts_with("@commitlint/cli@")
+    assert_that(cmd[3]).is_equal_to("commitlint")
 
 
 # =============================================================================

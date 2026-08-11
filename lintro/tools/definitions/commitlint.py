@@ -17,9 +17,9 @@ a non-error rather than failing the run.
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -109,20 +109,22 @@ class CommitlintPlugin(BaseToolPlugin):
 
         super().set_options(**set_kwargs)
 
-    def _get_commitlint_command(self) -> list[str]:
+    def _get_commitlint_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command used to invoke commitlint.
 
-        Prefers a directly installed ``commitlint`` executable (as provided by
-        a global bun/npm install or Docker image) and falls back to ``bunx``.
+        Delegates to the shared Node.js resolution chain so a project-local
+        ``@commitlint/cli`` devDependency wins over a global install, and the
+        registry fallback carries a version pin instead of ``@latest`` (#1811).
+        The previous local chain had no ``npx`` branch at all, so on an
+        npm-only machine a devDependency was unreachable.
+
+        Args:
+            cwd: Directory commitlint will run in, when known.
 
         Returns:
             Command prefix arguments for invoking commitlint.
         """
-        if shutil.which("commitlint"):
-            return ["commitlint"]
-        if shutil.which("bunx"):
-            return ["bunx", "commitlint"]
-        return ["commitlint"]
+        return self._get_executable_command(tool_name="commitlint", cwd=cwd)
 
     def doc_url(self, code: str) -> str | None:
         """Return the commitlint rules documentation URL.
@@ -157,7 +159,9 @@ class CommitlintPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        cmd: list[str] = self._get_commitlint_command()
+        cmd: list[str] = self._get_commitlint_command(
+            cwd=Path(ctx.cwd) if ctx.cwd else None,
+        )
         cmd.append("--last")
 
         logger.debug(

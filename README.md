@@ -103,7 +103,7 @@ system.
 <td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
 <td>🔀 Git commits</td>
 <td>-</td>
-<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
+<td><code>bun add -D @commitlint/cli @commitlint/config-conventional</code><br><code>npm install -D @commitlint/cli @commitlint/config-conventional</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
@@ -127,7 +127,7 @@ system.
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
 <td>📝 Markdown</td>
 <td>-</td>
-<td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
+<td><code>bun add -D markdownlint-cli2</code><br><code>npm install -D markdownlint-cli2</code></td>
 </tr>
 <tr>
 <td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
@@ -176,7 +176,7 @@ system.
 <td><a href="https://prettier.io/"><img src="https://img.shields.io/badge/Prettier-1a2b34?logo=prettier&logoColor=white" alt="Prettier"></a></td>
 <td>🟨 JS/TS · 🧾 JSON</td>
 <td>✅</td>
-<td><code>bun add -g prettier</code><br><code>npm install -g prettier</code></td>
+<td><code>bun add -D prettier</code><br><code>npm install -D prettier</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/mvdan/sh"><img src="https://img.shields.io/badge/shfmt-4EAA25?logo=gnubash&logoColor=white" alt="shfmt"></a></td>
@@ -226,7 +226,7 @@ system.
 <td><a href="https://astro.build/"><img src="https://img.shields.io/badge/Astro-ff5d01?logo=astro&logoColor=white" alt="Astro"></a></td>
 <td>🚀 Astro</td>
 <td>-</td>
-<td><code>bun add astro</code><br><code>npm install astro</code></td>
+<td><code>bun add -D astro</code><br><code>npm install -D astro</code></td>
 </tr>
 <tr>
 <td><a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/Mypy-2d50a5?logo=python&logoColor=white" alt="Mypy"></a></td>
@@ -244,7 +244,7 @@ system.
 <td><a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript"></a></td>
 <td>🟨 JS/TS</td>
 <td>-</td>
-<td><code>bun add -g typescript</code><br><code>npm install -g typescript</code><br><code>brew install typescript</code></td>
+<td><code>bun add -D typescript</code><br><code>npm install -D typescript</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/vuejs/language-tools"><img src="https://img.shields.io/badge/vue--tsc-42b883?logo=vuedotjs&logoColor=white" alt="vue-tsc"></a></td>
@@ -313,11 +313,11 @@ system.
 
 > 📦 = bundled with lintro — no separate install needed\
 > ⚡ Node.js tools support `--auto-install` to install dependencies automatically\
-> 🟨 Node.js tools do not all resolve the same way — the command above is the one that
-> works for that tool. Tools shown with `-D` (oxlint, oxfmt, stylelint, html-validate)
-> are run through `bunx`/`npx`, which look in the checked project's `node_modules` and
-> never at `PATH`, so a global or Homebrew install is not what Lintro picks up. The rest
-> prefer a binary on `PATH`, which is what `-g` and `brew install` provide. See
+> 🟨 Every Node.js tool resolves the same way: the checked project's `node_modules/.bin`
+> first, then a binary on `PATH`, then a version-pinned `bunx`/`npx` fetch. A project
+> devDependency (`-D`, shown above) is therefore always the best answer — it is
+> lockfile-pinned and needs no network. A global (`-g`) or Homebrew install still works
+> and is used when no local install exists. See
 > [Node.js tool resolution](docs/configuration.md#nodejs-tool-resolution).
 
 <!-- markdownlint-enable MD013 MD033 MD060 -->
