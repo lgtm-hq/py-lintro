@@ -37,6 +37,9 @@ EXIT_FAILED = 1
 LIST_TIMEOUT_SECONDS = 120
 CHECK_TIMEOUT_SECONDS = 300
 
+# Emitted by ``lintro/utils/tool_executor.py`` when the registry is empty. It
+# is a fast, readable signal rather than the guard of record: the positive
+# tool-execution evidence below is what fails closed if this wording changes.
 EMPTY_REGISTRY_MARKER = "No tools to run."
 
 
@@ -79,31 +82,33 @@ def _fail(message: str) -> int:
     return EXIT_FAILED
 
 
-def check_list_tools(binary: Path) -> int:
-    """Assert ``list-tools --json`` reports a non-empty builtin registry.
+def list_builtin_tools(binary: Path) -> list[str] | None:
+    """Read the builtin tool names ``list-tools --json`` reports.
 
     Args:
         binary: Path to the lintro binary under test.
 
     Returns:
-        ``0`` on success, ``1`` on failure.
+        The builtin tool names, or ``None`` when the command failed or reported
+        no builtins (the #2006 symptom). Failures are printed as they occur.
     """
     result = _run(
         argv=[str(binary), "list-tools", "--json"],
         timeout=LIST_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
-        return _fail(
-            f"list-tools --json exited {result.returncode}: {result.stderr.strip()}",
-        )
+        _fail(f"list-tools --json exited {result.returncode}: {result.stderr.strip()}")
+        return None
 
     try:
         tools = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        return _fail(f"list-tools --json emitted invalid JSON: {exc}")
+        _fail(f"list-tools --json emitted invalid JSON: {exc}")
+        return None
 
     if not isinstance(tools, dict) or not tools:
-        return _fail("list-tools --json reported an empty tool registry")
+        _fail("list-tools --json reported an empty tool registry")
+        return None
 
     builtins = [
         name
@@ -111,10 +116,11 @@ def check_list_tools(binary: Path) -> int:
         if isinstance(meta, dict) and meta.get("origin") == "builtin"
     ]
     if not builtins:
-        return _fail(f"list-tools --json reported no builtin tools: {sorted(tools)}")
+        _fail(f"list-tools --json reported no builtin tools: {sorted(tools)}")
+        return None
 
     print(f"OK: list-tools reports {len(builtins)} builtin tools")
-    return EXIT_OK
+    return builtins
 
 
 def check_config(binary: Path) -> int:
@@ -151,11 +157,17 @@ def check_config(binary: Path) -> int:
     return EXIT_OK
 
 
-def check_reaches_execution(binary: Path) -> int:
+def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
     """Assert ``check`` runs tools instead of reporting an empty registry.
+
+    The verdict is driven by positive evidence — the run must name at least one
+    of the builtin tools the registry advertised — so a binary that dies before
+    tool execution fails even if it never prints the empty-registry marker or a
+    traceback.
 
     Args:
         binary: Path to the lintro binary under test.
+        builtin_tools: Builtin tool names reported by ``list-tools --json``.
 
     Returns:
         ``0`` on success, ``1`` on failure.
@@ -186,7 +198,24 @@ def check_reaches_execution(binary: Path) -> int:
             f"check exited {result.returncode} without a verdict:\n{output[-2000:]}",
         )
 
-    print(f"OK: check reached tool execution (exit {result.returncode})")
+    # Positive evidence: the per-tool result table names the tools that ran.
+    # Tool names are normalized in the report (e.g. ``pip_audit`` renders as
+    # ``pip-audit``), so both spellings count.
+    reported = [
+        name
+        for name in builtin_tools
+        if name in output or name.replace("_", "-") in output
+    ]
+    if not reported:
+        return _fail(
+            "check produced no evidence that any builtin tool ran "
+            f"(looked for {len(builtin_tools)} registry names):\n{output[-2000:]}",
+        )
+
+    print(
+        f"OK: check reached tool execution (exit {result.returncode}, "
+        f"{len(reported)} builtin tools named in the report)",
+    )
     return EXIT_OK
 
 
@@ -213,10 +242,11 @@ def main() -> int:
     print(f"Smoke-testing {binary}")
 
     try:
+        builtin_tools = list_builtin_tools(binary)
         results = [
-            check_list_tools(binary),
+            EXIT_FAILED if builtin_tools is None else EXIT_OK,
             check_config(binary),
-            check_reaches_execution(binary),
+            check_reaches_execution(binary, builtin_tools or []),
         ]
     except subprocess.TimeoutExpired as exc:
         return _fail(f"timed out running {exc.cmd}")

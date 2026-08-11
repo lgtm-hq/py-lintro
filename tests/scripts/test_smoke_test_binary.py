@@ -82,7 +82,7 @@ def _healthy_responses() -> dict[str, dict[str, object]]:
             ),
             "exit": 0,
         },
-        "check": {"stdout": "TOTALS\nTotal Issues 0\n", "exit": 0},
+        "check": {"stdout": "| ruff | PASS |\n| black | PASS |\nTOTALS\n", "exit": 0},
     }
 
 
@@ -137,7 +137,7 @@ def test_empty_registry_fails_list_tools(
     responses["list-tools"] = {"stdout": "{}", "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.check_list_tools(binary)).is_equal_to(1)
+    assert_that(smoke.list_builtin_tools(binary)).is_none()
 
 
 def test_external_only_registry_fails_list_tools(
@@ -157,7 +157,7 @@ def test_external_only_registry_fails_list_tools(
     }
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.check_list_tools(binary)).is_equal_to(1)
+    assert_that(smoke.list_builtin_tools(binary)).is_none()
 
 
 def test_invalid_list_tools_json_fails(
@@ -174,7 +174,7 @@ def test_invalid_list_tools_json_fails(
     responses["list-tools"] = {"stdout": "not json", "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.check_list_tools(binary)).is_equal_to(1)
+    assert_that(smoke.list_builtin_tools(binary)).is_none()
 
 
 def test_empty_config_execution_order_fails(
@@ -203,8 +203,14 @@ def test_empty_config_execution_order_fails(
         ("No tools to run.\n", 0, "empty-registry-marker"),
         ("Traceback (most recent call last):\n  boom\n", 1, "crash"),
         ("something odd\n", 3, "no-verdict-exit-code"),
+        ("nothing ran here\n", 0, "no-tool-named"),
     ],
-    ids=["marker=no-tools-to-run", "outcome=crash", "outcome=no-verdict"],
+    ids=[
+        "marker=no-tools-to-run",
+        "outcome=crash",
+        "outcome=no-verdict",
+        "outcome=no-execution-evidence",
+    ],
 )
 def test_check_failures_are_reported(
     smoke: ModuleType,
@@ -226,7 +232,7 @@ def test_check_failures_are_reported(
     responses["check"] = {"stdout": stdout, "exit": exit_code}
     binary = _write_fake_binary(path=tmp_path / f"lintro-{case}", responses=responses)
 
-    assert_that(smoke.check_reaches_execution(binary)).is_equal_to(1)
+    assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(1)
 
 
 def test_issues_found_still_counts_as_reaching_execution(
@@ -240,10 +246,27 @@ def test_issues_found_still_counts_as_reaching_execution(
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {"stdout": "TOTALS\nTotal Issues 4\n", "exit": 1}
+    responses["check"] = {"stdout": "| ruff | FAIL | 4 |\nTOTALS\n", "exit": 1}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.check_reaches_execution(binary)).is_equal_to(0)
+    assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
+
+
+def test_underscore_tool_names_match_hyphenated_report(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Registry names spelled with underscores match their report spelling.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    responses = _healthy_responses()
+    responses["check"] = {"stdout": "| pip-audit | PASS |\nTOTALS\n", "exit": 0}
+    binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
+
+    assert_that(smoke.check_reaches_execution(binary, ["pip_audit"])).is_equal_to(0)
 
 
 def test_missing_binary_fails(
