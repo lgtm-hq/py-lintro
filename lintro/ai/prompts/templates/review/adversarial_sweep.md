@@ -1,7 +1,10 @@
 You previously reviewed this diff. Perform adversarial "what did I miss?" sweep.
 
-Prior findings (do not duplicate): {prior_findings_json}
+Prior findings (do not duplicate):
+<{boundary}>
+{prior_findings_json}
+</{boundary}>
 
-Diff: {diff}
+Diff: <{boundary}> {diff} </{boundary}>
 
 Output JSON: {{"findings": [...]}} — NEW findings only. Empty array if nothing new.

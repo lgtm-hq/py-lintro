@@ -422,17 +422,41 @@ ai:
   # suggestions returned. (int >= 1, default: 20)
   max_fix_attempts: 20
 
-  # Concurrent API calls during fix generation. (int 1–20, default: 5)
+  # Concurrent AI provider calls (fixes and review chunk fan-out).
+  # Honored even when max_cost_usd is set. (int 1–20, default: 5)
   max_parallel_calls: 5
 
-  # Hard ceiling on total spend per AI session, in USD; the run stops
-  # requesting fixes once the estimate reaches the cap. null disables it.
+  # Spend ceiling per AI session, in USD; the run stops
+  # scheduling new calls once spent+reserved reaches the cap. null disables
+  # it. A cost cap does NOT force serial execution — chunk reviews still
+  # fan out up to max_parallel_calls. Trade-off: calls already in flight
+  # when the ceiling is hit still finish, so the final total may overshoot
+  # by up to (max_parallel_calls − 1) in-flight calls' cost.
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
   # Token budget for a fix prompt before context is trimmed — a soft budget,
   # see "Data & Privacy". (int >= 1000, default: 12000)
   max_prompt_tokens: 12000
+
+  # ── CLI-transport review limits (#1967) ───────────────────────
+  # Per-chunk diff token budget under --transport cli; forces the semantic
+  # chunker to split diffs a single CLI turn cannot finish.
+  # (int >= 1000, default: 24000)
+  cli_max_diff_tokens: 24000
+
+  # Hard ceiling on the full unified-diff byte size under --transport cli;
+  # larger diffs fail fast with a --paths / --transport api advisory.
+  # (int >= 10000, default: 1500000)
+  cli_max_diff_bytes: 1500000
+
+  # Max findings one CLI review call may emit. The cap is a prompt contract
+  # (the model is instructed to stop at the cap and summarize overflow), not
+  # a post-parse truncation; a chunk that still exhausts the 32k output cap
+  # retries once with a tighter cap, and truncated responses fall back to
+  # the schema-retry / unstructured-recovery ladder.
+  # (int 1–50, default: 12)
+  cli_max_findings_per_call: 12
 
   # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
   max_refinement_attempts: 1
@@ -741,7 +765,12 @@ developer's login.
   binary's egress and version predictable under an egress allowlist.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
-  subscription, not a metered key.
+  subscription (or, in bare mode with a reachable API key, that key — see the billing
+  note above). Setting a cap does **not** serialize provider calls: review chunks still
+  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
+  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
+  calls' cost. Review metadata records per-phase timings (`context_collection`,
+  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.

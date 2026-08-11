@@ -109,7 +109,8 @@ def build_custom_agent_prompt(
 
     The agent body is sanitized and fenced by a per-call unique boundary marker
     so maintainer-authored prose cannot impersonate prompt structure or forge
-    the fence that closes its own data block.
+    the fence that closes its own data block. The same marker fences the scoped
+    diff so workspace-derived content cannot terminate surrounding tags.
 
     Args:
         agent: The agent whose instructions are embedded.

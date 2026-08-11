@@ -100,11 +100,12 @@ jobs:
     # posting margin, so lintro's own timeout always fires before the runner
     # kills the job — a runner kill truncates the JSON envelope the outcome
     # classifier reads. Invariant enforced by tests/scripts/
-    # test_run_ai_review.py; bump both values together. 50 (not 30) because
+    # test_run_ai_review.py; bump both values together. 75 (was 30, then 50) because
     # custom-agent passes stack additional per-call --timeout budgets on top
     # of the main review call, and provider-heavy diffs were hitting the old
-    # ceiling exactly (#1976 reviews killed at the boundary four times).
-    timeout-minutes: 50
+    # ceiling exactly (#1976 reviews killed at the boundary four times; #1977's
+    # oscillated around 45-55 min and was killed at 50 twice).
+    timeout-minutes: 75
 
     steps:
       - name: Harden Runner

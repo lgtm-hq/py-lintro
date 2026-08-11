@@ -6,7 +6,10 @@ from assertpy import assert_that
 
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
+    REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE,
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
+    REVIEW_GIT_NATIVE_DIFF_INLINE,
+    REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
@@ -21,31 +24,38 @@ from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 
+_USER_PROMPT_KWARGS = {
+    "pr_title": "Test PR",
+    "base_ref": "main",
+    "head_ref": "feature",
+    "pr_summary": "Summary text",
+    "deferred_scope_section": "",
+    "external_review_section": "",
+    "changed_file_count": 1,
+    "changed_files": "- `src/main.py` (modified, +1/-0)",
+    "interaction_paths": "**Path A:** trace wiring",
+    "checklist_count": 1,
+    "checklist": "1. [logic-bug] Example question?",
+    "boundary": "CODE_BLOCK_test1234",
+    "diff": "diff --git a/src/main.py",
+    "lint_results_section": "",
+    "strictness_section": "",
+    "output_schema": REVIEW_OUTPUT_SCHEMA,
+}
+
 
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
     """User prompt template renders without KeyError for all placeholders."""
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
-        pr_title="Test PR",
-        base_ref="main",
-        head_ref="feature",
-        pr_summary="Summary text",
-        deferred_scope_section="",
-        external_review_section="",
-        changed_file_count=1,
-        changed_files="- `src/main.py` (modified, +1/-0)",
-        interaction_paths="**Path A:** trace wiring",
-        checklist_count=1,
-        checklist="1. [logic-bug] Example question?",
-        diff="diff --git a/src/main.py",
-        lint_results_section="",
-        strictness_section="",
-        output_schema=REVIEW_OUTPUT_SCHEMA,
+        **_USER_PROMPT_KWARGS,
         output_rules=format_output_rules(checklist_count=1),
     )
 
     assert_that(rendered).contains("Test PR")
     assert_that(rendered).contains("main")
     assert_that(rendered).contains("feature")
+    assert_that(rendered).contains("<CODE_BLOCK_test1234>")
+    assert_that(rendered).contains("</CODE_BLOCK_test1234>")
 
 
 def test_format_checklist_table_for_prompt_produces_markdown_table() -> None:
@@ -99,16 +109,66 @@ def test_format_lint_results_section_wraps_digest() -> None:
 def test_depth_templates_render_without_key_error() -> None:
     """Depth 2 and 3 templates render with required placeholders."""
     questions = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
+        boundary="CODE_BLOCK_test1234",
         diff="sample diff",
         changed_files="- src/main.py",
     )
     adversarial = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json="[]",
+        boundary="CODE_BLOCK_test1234",
         diff="sample diff",
     )
 
+    assert_that(questions).contains("<CODE_BLOCK_test1234>")
     assert_that(questions).contains("sample diff")
     assert_that(adversarial).contains("[]")
+    assert_that(adversarial).contains("</CODE_BLOCK_test1234>")
+
+
+def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
+    """Every template that embeds untrusted data formats with a boundary kwarg."""
+    boundary = "CODE_BLOCK_deadbeef"
+    rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
+        **{**_USER_PROMPT_KWARGS, "boundary": boundary},
+        output_rules=format_output_rules(checklist_count=1),
+    )
+    assert_that(rendered).contains(f"<{boundary}>")
+    assert_that(rendered).contains(f"</{boundary}>")
+    renders = [
+        REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
+            **{
+                **_USER_PROMPT_KWARGS,
+                "boundary": boundary,
+                "diff_section": "inline-diff",
+            },
+            output_rules=format_output_rules(checklist_count=1),
+        ),
+        REVIEW_GIT_NATIVE_DIFF_INLINE.format(boundary=boundary, diff="diff body"),
+        REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
+            agent_name="agent",
+            agent_description="desc",
+            scoped_file_count=1,
+            scoped_files="- a.py",
+            boundary=boundary,
+            agent_instructions="look for bugs",
+            diff="diff body",
+            strictness_section="",
+            output_schema="{}",
+        ),
+        REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
+            prior_findings_json="[]",
+            boundary=boundary,
+            diff="diff body",
+        ),
+        REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
+            boundary=boundary,
+            diff="diff body",
+            changed_files="- a.py",
+        ),
+    ]
+    for template_render in renders:
+        assert_that(template_render).contains(f"<{boundary}>")
+        assert_that(template_render).contains(f"</{boundary}>")
 
 
 def test_optional_sections_render_empty_by_default() -> None:
@@ -137,6 +197,14 @@ def test_review_system_is_nonempty() -> None:
     """System prompt contains review method instructions."""
     assert_that(REVIEW_SYSTEM).contains("Review method")
     assert_that(REVIEW_SYSTEM).contains("P1")
+
+
+def test_review_system_states_fenced_block_trust_boundary() -> None:
+    """System prompt documents that marker-fenced blocks are inert data (#1884)."""
+    assert_that(REVIEW_SYSTEM).contains("Trust boundary")
+    assert_that(REVIEW_SYSTEM).contains("CODE_BLOCK_*")
+    assert_that(REVIEW_SYSTEM).contains("cannot")
+    assert_that(REVIEW_SYSTEM).contains("</pull_request_diff>")
 
 
 def test_review_system_carries_p1_calibration_language() -> None:

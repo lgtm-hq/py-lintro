@@ -522,6 +522,17 @@ async def test_run_raises_not_available_when_binary_missing(
         await transport.run(["/usr/local/bin/fake", "--always"], timeout=5.0)
 
 
+async def test_run_maps_e2big_to_provider_error(transport: _FakeTransport) -> None:
+    """Map OSError(E2BIG) to an actionable AIProviderError (#1967)."""
+    import errno
+
+    with (
+        patch_cli_exec(side_effect=OSError(errno.E2BIG, "Argument list too long")),
+        pytest.raises(AIProviderError, match="E2BIG"),
+    ):
+        await transport.run(["/usr/local/bin/fake", "--always"], timeout=5.0)
+
+
 async def test_run_kills_child_when_cancelled(transport: _FakeTransport) -> None:
     """Cancelling a call stops the child instead of orphaning the CLI."""
     with patch_cli_exec(return_value=HANG) as mock_run:

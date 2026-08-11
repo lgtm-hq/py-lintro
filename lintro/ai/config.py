@@ -191,7 +191,17 @@ class AIConfig(BaseModel):
         description="Maximum number of issues to attempt fixing per run. "
         "Counts API calls made, not suggestions returned.",
     )
-    max_parallel_calls: int = Field(default=5, ge=1, le=20)
+    max_parallel_calls: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Concurrent AI provider calls for fixes and review chunk fan-out. "
+            "Honored even when max_cost_usd is set. With n concurrent calls and "
+            "no per-call reserve estimate, a session may overshoot max_cost_usd "
+            "by up to n − 1 in-flight calls' cost."
+        ),
+    )
     max_retries: int = Field(default=2, ge=0, le=10)
     api_timeout: float = Field(default=60.0, ge=1.0)
     validate_after_group: bool = False
@@ -256,7 +266,10 @@ class AIConfig(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Maximum total cost in USD per AI session. None disables the limit."
+            "Maximum total cost in USD per AI session. None disables the limit. "
+            "A cost cap does not serialize provider calls: under "
+            "max_parallel_calls=n concurrent workers the final total may "
+            "exceed this ceiling by up to n − 1 in-flight calls' cost."
         ),
     )
     max_prompt_tokens: int = Field(
@@ -336,6 +349,36 @@ class AIConfig(BaseModel):
             "diff in the prompt even for large diffs. Only enable this for "
             "trusted diffs with no secrets concern when the efficiency of "
             "delegated git retrieval on very large diffs is required."
+        ),
+    )
+    cli_max_diff_tokens: int = Field(
+        default=24_000,
+        ge=1_000,
+        description=(
+            "Per-chunk diff token budget under --transport cli. The "
+            "context-window budget alone is far too large for a single CLI "
+            "call (timeout / 32k output-token exhaustion on ~1.5k-line PRs); "
+            "this ceiling forces the semantic chunker to split large diffs."
+        ),
+    )
+    cli_max_diff_bytes: int = Field(
+        default=1_500_000,
+        ge=10_000,
+        description=(
+            "Hard ceiling on the full unified-diff byte size under "
+            "--transport cli. Diffs above this fail with an actionable "
+            "advisory to use --paths filtering or --transport api instead of "
+            "spawning an unbounded number of CLI chunks."
+        ),
+    )
+    cli_max_findings_per_call: int = Field(
+        default=12,
+        ge=1,
+        le=50,
+        description=(
+            "Maximum findings a single CLI review call may emit. Bounds the "
+            "JSON response so the model cannot hit the ~32k output-token cap "
+            "mid-object; overflow is summarized rather than truncated."
         ),
     )
     transcript_logging: bool = Field(
@@ -508,6 +551,9 @@ class AIConfig(BaseModel):
             cache_max_entries=self.cache_max_entries,
             context_lines=self.context_lines,
             fix_search_radius=self.fix_search_radius,
+            cli_max_diff_tokens=self.cli_max_diff_tokens,
+            cli_max_diff_bytes=self.cli_max_diff_bytes,
+            cli_max_findings_per_call=self.cli_max_findings_per_call,
         )
 
     @property

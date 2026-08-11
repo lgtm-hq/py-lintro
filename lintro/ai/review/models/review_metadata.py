@@ -43,6 +43,10 @@ class ReviewMetadata:
             ``api_key``, ``oauth_session``). Empty when unknown.
         cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
             ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
+        phase_timings (dict[str, float]): Per-phase wall-clock seconds for
+            regression visibility. Keys include ``context_collection``,
+            ``provider`` (chunk + custom-agent provider calls), and
+            ``parse_merge``.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -76,6 +80,7 @@ class ReviewMetadata:
     transport: str = ""
     auth_mode: str = ""
     cost_basis: str = ""
+    phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
