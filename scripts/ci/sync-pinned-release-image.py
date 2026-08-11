@@ -39,11 +39,12 @@ warns ``no GH_TOKEN/GITHUB_TOKEN in environment`` and no-ops on every release
 (lgtm-hq/lgtm-ci#849). The pin therefore froze at 0.94.3 and the nightly
 digest-lag gate failed once a manifest tool version moved (#1787). Until that
 lands upstream, the pin must be refreshed by running this script manually with
-``GH_TOKEN`` set.
+``GH_TOKEN`` set. CI reaches it by import (``finalize-version-pr.py``), so the
+command line above is a local path and uses ``uv`` per the repo standard.
 
 Usage:
-    python3 scripts/ci/sync-pinned-release-image.py
-    python3 scripts/ci/sync-pinned-release-image.py --dry-run
+    uv run python scripts/ci/sync-pinned-release-image.py
+    uv run python scripts/ci/sync-pinned-release-image.py --dry-run
 """
 
 from __future__ import annotations
@@ -305,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         _error(
             "no GH_TOKEN/GITHUB_TOKEN in environment; pin unchanged. This is a "
             "permanent skip, not a transient failure — see lgtm-hq/lgtm-ci#849. "
-            "Refresh manually: GH_TOKEN=... python3 "
+            "Refresh manually: GH_TOKEN=... uv run python "
             "scripts/ci/sync-pinned-release-image.py",
         )
         return 0
