@@ -93,6 +93,20 @@ def _warn(message: str) -> None:
     print(f"::warning::sync-pinned-release-image: {message}", file=sys.stderr)
 
 
+def _error(message: str) -> None:
+    """Emit a GitHub Actions error annotation without failing the caller.
+
+    Reserved for misconfiguration — a missing credential is a permanent skip
+    on every release, not the transient network hiccup ``_warn`` covers, so it
+    is surfaced at error level. The exit code stays 0 by design: the release
+    PR must not be blocked by the pin sync (lgtm-hq/lgtm-ci#849, #1787).
+
+    Args:
+        message: Human-readable explanation of what was skipped and why.
+    """
+    print(f"::error::sync-pinned-release-image: {message}", file=sys.stderr)
+
+
 def _version_key(version: str) -> tuple[int, ...]:
     """Return a sortable key for a ``major.minor.patch`` string.
 
@@ -288,7 +302,12 @@ def main(argv: list[str] | None = None) -> int:
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
     if not token:
-        _warn("no GH_TOKEN/GITHUB_TOKEN in environment; pin unchanged")
+        _error(
+            "no GH_TOKEN/GITHUB_TOKEN in environment; pin unchanged. This is a "
+            "permanent skip, not a transient failure — see lgtm-hq/lgtm-ci#849. "
+            "Refresh manually: GH_TOKEN=... python3 "
+            "scripts/ci/sync-pinned-release-image.py",
+        )
         return 0
 
     resolved = latest_published_release(_fetch_package_versions(token))
