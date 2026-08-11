@@ -392,6 +392,71 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
     assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.DIFF_TOO_LARGE)
 
 
+async def test_run_review_chunks_large_cli_diff_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """run_review_async applies the CLI diff budget and reviews in chunks.
+
+    Locks the orchestrator wiring (``diff_budget = resolve_cli_diff_budget``):
+    if that line disappears, a CLI-sized diff runs one-shot again and this
+    test fails on ``chunks_total``, even though every helper unit test passes.
+    """
+    unified_diff, changed = _synthetic_diff(lines=1_600, files=8)
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=changed,
+        unified_diff=unified_diff,
+        pr_metadata=None,
+        repo_root=str(tmp_path),
+    )
+    provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-6"
+    provider.name = "anthropic"
+    provider.capabilities.supports_sessions = False
+    ai_config = AIConfig(enabled=True, review=True, transport=AITransport.CLI)
+
+    ok_payload = {
+        "summary": {
+            "headline": "Large change reviewed.",
+            "walkthrough": [{"text": "Bulk edit.", "finding_ref": ""}],
+        },
+        "checklist": [],
+        "findings": [],
+        "verdict_reasoning": {
+            "deciding_factor": "Nothing blocks.",
+            "failure_mechanism": "n/a",
+            "files_needing_attention": [],
+        },
+        "file_assessments": [],
+    }
+    ok_response = AIResponse(
+        content=json.dumps(ok_payload),
+        model="claude-sonnet-4-6",
+        provider=AIProvider.ANTHROPIC,
+        input_tokens=10,
+        output_tokens=20,
+        cost_estimate=0.0,
+    )
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        new=AsyncMock(return_value=ok_response),
+    ) as mock_call:
+        result = await run_review_async(
+            context=context,
+            provider=provider,
+            ai_config=ai_config,
+            depth=1,
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.chunks_total).is_greater_than(1)
+    assert_that(mock_call.await_count).is_equal_to(result.metadata.chunks_total)
+
+
 async def test_invoke_chunk_retries_on_cli_output_exhaustion(
     tmp_path: Path,
 ) -> None:
