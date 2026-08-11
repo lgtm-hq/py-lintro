@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate ``lintro/tools/definitions/_builtin_index.py``.
+"""Generate ``lintro/plugins/_builtin_index.py``.
 
 The builtin tool registry is populated by importing every module under
 ``lintro/tools/definitions/``. Globbing that directory at runtime only works
@@ -147,7 +147,7 @@ def main() -> int:
         return EXIT_INPUT_ERROR
 
     desired = render_index(module_names)
-    current = INDEX_PATH.read_text() if INDEX_PATH.exists() else ""
+    current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.exists() else ""
 
     if args.check:
         if current == desired:
@@ -159,7 +159,7 @@ def main() -> int:
         return EXIT_DRIFT
 
     if current != desired:
-        INDEX_PATH.write_text(desired)
+        INDEX_PATH.write_text(desired, encoding="utf-8")
         print(f"wrote {INDEX_PATH} ({len(module_names)} modules)")
     else:
         print(f"{INDEX_PATH} already up to date ({len(module_names)} modules)")

@@ -14,6 +14,9 @@ from assertpy import assert_that
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-builtin-tool-index.py"
 
+# Bound each child process so a hang surfaces as TimeoutExpired, not a stuck run.
+SUBPROCESS_TIMEOUT_SECONDS = 120
+
 
 @pytest.fixture(scope="module")
 def gen() -> ModuleType:
@@ -99,6 +102,7 @@ def test_check_passes_against_real_repo() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     assert_that(result.returncode).described_as(
@@ -207,6 +211,7 @@ def test_generated_index_passes_black() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     assert_that(result.returncode).described_as(
@@ -223,6 +228,7 @@ def test_generated_index_passes_ruff() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
     assert_that(result.returncode).described_as(
