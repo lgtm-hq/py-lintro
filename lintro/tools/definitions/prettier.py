@@ -323,7 +323,10 @@ class PrettierPlugin(BaseToolPlugin):
         logger.debug(f"[PrettierPlugin] Working directory: {ctx.cwd}")
 
         # Resolve executable in a manner consistent with other tools
-        cmd: list[str] = self._get_executable_command(tool_name="prettier") + [
+        cmd: list[str] = self._get_executable_command(
+            tool_name="prettier",
+            cwd=ctx.cwd,
+        ) + [
             "--check",
         ]
 
@@ -454,7 +457,10 @@ class PrettierPlugin(BaseToolPlugin):
                 )
 
         # Check for issues first
-        check_cmd: list[str] = self._get_executable_command(tool_name="prettier") + [
+        check_cmd: list[str] = self._get_executable_command(
+            tool_name="prettier",
+            cwd=ctx.cwd,
+        ) + [
             "--check",
         ]
         if config_args:
@@ -493,7 +499,10 @@ class PrettierPlugin(BaseToolPlugin):
         initial_count: int = len(initial_issues)
 
         # Now fix the issues
-        fix_cmd: list[str] = self._get_executable_command(tool_name="prettier") + [
+        fix_cmd: list[str] = self._get_executable_command(
+            tool_name="prettier",
+            cwd=ctx.cwd,
+        ) + [
             "--write",
         ]
         if config_args:

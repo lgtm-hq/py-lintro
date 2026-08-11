@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -214,6 +215,7 @@ class StylelintPlugin(BaseToolPlugin):
     def _base_command(
         self,
         merged_options: dict[str, object] | None = None,
+        cwd: str | Path | None = None,
     ) -> list[str]:
         """Build the base stylelint command, honoring an explicit config.
 
@@ -224,11 +226,14 @@ class StylelintPlugin(BaseToolPlugin):
             merged_options: Per-call options merged over the instance
                 defaults; falls back to ``self.options`` when omitted so a
                 caller-supplied ``config`` is not silently ignored.
+            cwd: Directory stylelint will run in, so a project-local install
+                resolves from the checked tree rather than lintro's own
+                (#1727, #1811).
 
         Returns:
             The base command list.
         """
-        cmd = [*self._get_executable_command(tool_name="stylelint")]
+        cmd = [*self._get_executable_command(tool_name="stylelint", cwd=cwd)]
         opts = merged_options if merged_options is not None else self.options
         explicit = opts.get("config")
         if explicit:
@@ -257,7 +262,7 @@ class StylelintPlugin(BaseToolPlugin):
             return ctx.early_result  # type: ignore[return-value]
 
         cmd = [
-            *self._base_command(merged_options),
+            *self._base_command(merged_options, cwd=ctx.cwd),
             "--formatter",
             "json",
             *ctx.rel_files,
@@ -320,7 +325,7 @@ class StylelintPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        base_cmd = self._base_command(merged_options)
+        base_cmd = self._base_command(merged_options, cwd=ctx.cwd)
         check_cmd = [*base_cmd, "--formatter", "json", *ctx.rel_files]
 
         # Count initial issues.

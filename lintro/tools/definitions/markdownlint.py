@@ -77,38 +77,6 @@ class MarkdownlintPlugin(BaseToolPlugin):
             default_timeout=MARKDOWNLINT_DEFAULT_TIMEOUT,
         )
 
-    def _verify_tool_version(self) -> ToolResult | None:
-        """Verify that markdownlint-cli2 meets minimum version requirements.
-
-        Overrides base implementation to use the correct executable name.
-
-        Returns:
-            Optional[ToolResult]: None if version check passes, or a skip result
-                if it fails.
-        """
-        from lintro.tools.core.version_requirements import check_tool_version
-
-        # Use the correct command for markdownlint-cli2
-        command = self._get_markdownlint_command()
-        version_info = check_tool_version(self.definition.name, command)
-
-        if version_info.version_check_passed:
-            return None  # Version check passed
-
-        # Version check failed - return skip result with warning
-        skip_message = (
-            f"Skipping {self.definition.name}: {version_info.error_message}. "
-            f"Minimum required: {version_info.min_version}. "
-            f"{version_info.install_hint}"
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=True,  # Not an error, just skipping
-            output=skip_message,
-            issues_count=0,
-        )
-
     def set_options(
         self,
         timeout: int | None = None,

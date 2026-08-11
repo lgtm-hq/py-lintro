@@ -233,7 +233,10 @@ class OxfmtPlugin(BaseToolPlugin):
         # Resolve executable in a manner consistent with other tools
         # Use --list-different to get file paths that need formatting (one per line)
         # Note: --check and --list-different are mutually exclusive in oxfmt
-        cmd: list[str] = self._get_executable_command(tool_name="oxfmt") + [
+        cmd: list[str] = self._get_executable_command(
+            tool_name="oxfmt",
+            cwd=ctx.cwd,
+        ) + [
             "--list-different",
         ]
 
@@ -311,7 +314,10 @@ class OxfmtPlugin(BaseToolPlugin):
 
         # Check for issues first using --list-different
         # Note: --check and --list-different are mutually exclusive in oxfmt
-        check_cmd: list[str] = self._get_executable_command(tool_name="oxfmt") + [
+        check_cmd: list[str] = self._get_executable_command(
+            tool_name="oxfmt",
+            cwd=ctx.cwd,
+        ) + [
             "--list-different",
         ]
         if config_args:
@@ -339,7 +345,10 @@ class OxfmtPlugin(BaseToolPlugin):
         initial_count: int = len(initial_issues)
 
         # Now fix the issues
-        fix_cmd: list[str] = self._get_executable_command(tool_name="oxfmt") + [
+        fix_cmd: list[str] = self._get_executable_command(
+            tool_name="oxfmt",
+            cwd=ctx.cwd,
+        ) + [
             "--write",
         ]
         if config_args:
