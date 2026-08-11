@@ -262,6 +262,12 @@ jobs:
           # Show help output for debugging (non-fatal)
           ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
 
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        timeout-minutes: 10
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
+
       - name: Rename binary with architecture
         run: |
           mv dist/nuitka/lintro dist/nuitka/lintro-macos-${{ matrix.arch }}
@@ -409,6 +415,12 @@ jobs:
           ls -lh dist/nuitka/
           ./dist/nuitka/lintro --version
           ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        timeout-minutes: 10
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
       - name: Rename binary with architecture
         run: |
