@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.114.0] - 2026-08-11
+
+### Added
+
+- **ai**: transport-aware AI review config and reporting (#1923) (#1981) (6e2cbdc)
+
 ## [0.113.3] - 2026-08-11
 
 ### Fixed
