@@ -17,6 +17,11 @@ and reported numbers mean different things. Configure them under `ai.transports.
 | Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
 | Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
+The credential rows above are Anthropic-specific (the dogfood default). Other CLI
+providers authenticate with their own logins and keys — `codex login` / `CODEX_API_KEY`
+for `openai`, `agent login` / `CURSOR_API_KEY` for `cursor` — see `docs/ai-features.md`,
+which also covers Claude's settings-file `apiKeyHelper` as a reachable API credential.
+
 **Bare-billing exception:** under `cli` with Anthropic, when `ai.cli_bare` resolves to
 sending `--bare` (`auto` with a reachable `ANTHROPIC_API_KEY`, or `always`, #1859), the
 call bills the API key — the run records `auth_mode=api_key` and `cost_basis=estimated`

@@ -16,6 +16,22 @@ from lintro.ai.transport import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear ambient bare-mode inputs so CLI provenance is deterministic.
+
+    ``resolve_transport_settings`` consults ``should_send_bare`` on the CLI
+    branch; a developer machine exporting ``ANTHROPIC_API_KEY`` would flip
+    ``subscription``/``unpriceable`` expectations to ``api_key``/``estimated``.
+    Tests that need those variables set them explicitly via monkeypatch.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+
+
 def test_cli_defaults_to_whole_turn_timeout() -> None:
     """CLI without a profile uses the 900s whole-turn default."""
     config = AIConfig(enabled=True, transport=AITransport.CLI)

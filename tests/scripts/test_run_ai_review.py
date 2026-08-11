@@ -535,9 +535,12 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     posting_margin_minutes = 1
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    # Collapse backslash continuations so a flag wrapped onto its own line
+    # cannot hide from the single-line assertion below.
+    joined_text = shell_text.replace("\\\n", " ")
     command_lines = [
         line
-        for line in shell_text.splitlines()
+        for line in joined_text.splitlines()
         if "uv run lintro review" in line and not line.lstrip().startswith("#")
     ]
     assert_that(command_lines).is_length(1)
