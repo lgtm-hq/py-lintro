@@ -235,7 +235,7 @@ def test_build_command_basic(vue_tsc_plugin: VueTscPlugin) -> None:
     assert_that(cmd).contains("false")
     # First element is the resolved vue-tsc binary (possibly a project-local
     # path) or a bunx/npx wrapper.
-    assert_that(Path(cmd[0]).name).is_in("vue-tsc", "bunx", "npx")
+    assert_that(Path(cmd[0]).stem).is_in("vue-tsc", "bunx", "npx")
 
 
 def test_build_command_with_project(vue_tsc_plugin: VueTscPlugin) -> None:

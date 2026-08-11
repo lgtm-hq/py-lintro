@@ -184,7 +184,7 @@ def test_build_command_basic(astro_check_plugin: AstroCheckPlugin) -> None:
     assert_that(cmd).contains("check")
     # First element is the resolved astro binary (possibly a project-local
     # path) or a bunx/npx wrapper.
-    assert_that(Path(cmd[0]).name).is_in("astro", "bunx", "npx")
+    assert_that(Path(cmd[0]).stem).is_in("astro", "bunx", "npx")
 
 
 def test_build_command_with_root(astro_check_plugin: AstroCheckPlugin) -> None:

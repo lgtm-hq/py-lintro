@@ -38,4 +38,4 @@ def test_command_prefers_direct_binary(
     """The command builder returns a commitlint invocation prefix."""
     cmd = commitlint_plugin._get_commitlint_command()
     # May be a project-local path, a PATH binary, or a pinned runner spec.
-    assert_that(Path(cmd[-1]).name).is_equal_to("commitlint")
+    assert_that(Path(cmd[-1]).stem).is_equal_to("commitlint")

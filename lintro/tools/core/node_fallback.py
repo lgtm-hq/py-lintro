@@ -86,7 +86,9 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     if len(command) < 2 or command[0] not in REGISTRY_RUNNERS:
         return None
     if command[1] in PACKAGE_FLAGS:
-        return command[2] if len(command) >= 3 else None
+        # The --package shape is ``[runner, flag, spec, binary]``; anything
+        # shorter is a malformed command, not a fallback to report on.
+        return command[2] if len(command) >= 4 else None
     return command[1]
 
 
