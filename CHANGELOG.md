@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.113.3] - 2026-08-11
+
+### Fixed
+
+- **ai**: harden CLI transport for large diffs (#1967) (#1982) (ce471b7)
+
 ## [0.113.2] - 2026-08-10
 
 ### Changed
