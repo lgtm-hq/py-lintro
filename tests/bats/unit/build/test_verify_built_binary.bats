@@ -51,6 +51,23 @@ EOF
 	assert_output --partial "lintro test 0.0.0"
 }
 
+@test "verify_built_binary.sh: --help failure stays non-fatal" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+*) echo "help exploded"; exit 4 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "lintro test 0.0.0"
+	assert_output --partial "--help exited non-zero"
+	assert_output --partial "help exploded"
+}
+
 @test "verify_built_binary.sh: fails when --version exits non-zero" {
 	cat >"$BINARY" <<'EOF'
 #!/usr/bin/env bash

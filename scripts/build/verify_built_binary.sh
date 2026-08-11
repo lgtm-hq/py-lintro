@@ -28,5 +28,20 @@ if [[ ! -f "$BINARY" ]]; then
 fi
 
 ls -lh "$(dirname "$BINARY")"
+
+# --version is the build gate: a binary that cannot report its version is not
+# a valid build.
 "$BINARY" --version
-"$BINARY" --help | head -20 || echo "Help output truncated"
+
+# --help stays non-fatal (it is diagnostic output only), but capture it before
+# truncating: piping straight into `head` under `set -o pipefail` turns head's
+# SIGPIPE into a failure that is indistinguishable from a genuinely broken
+# --help, and the old `|| echo "Help output truncated"` swallowed both.
+HELP_OUTPUT="$(mktemp)"
+trap 'rm -f "$HELP_OUTPUT"' EXIT
+if "$BINARY" --help >"$HELP_OUTPUT" 2>&1; then
+	head -20 "$HELP_OUTPUT"
+else
+	log_warning "--help exited non-zero (non-fatal); first 20 lines follow"
+	head -20 "$HELP_OUTPUT"
+fi

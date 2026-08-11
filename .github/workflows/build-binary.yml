@@ -257,13 +257,18 @@ jobs:
       - name: Verify binary
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
+      # matrix.arch reaches the shell via env, not template expansion: on
+      # workflow_call inputs.arch is a free-form string that feeds this matrix
+      # (same hardening as the Build binary step above).
       - name: Finalize binary
         id: sha256
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
         run: >-
           scripts/build/finalize_binary.sh
           dist/nuitka/lintro
-          dist/nuitka/lintro-macos-${{ matrix.arch }}
-          ${{ matrix.arch }}
+          "dist/nuitka/lintro-macos-$BUILD_ARCH"
+          "$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -275,8 +280,9 @@ jobs:
       - name: Save SHA256 to file
         env:
           SHA256: ${{ steps.sha256.outputs.sha256 }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
-          echo "$SHA256" > sha256-${{ matrix.arch }}.txt
+          echo "$SHA256" > "sha256-$BUILD_ARCH.txt"
 
       - name: Upload SHA256 file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -400,13 +406,17 @@ jobs:
       - name: Verify binary
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
+      # Kept symmetric with the macOS job: both call sites pass the arch
+      # through env so the two never drift apart.
       - name: Finalize binary
         id: sha256
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
         run: >-
           scripts/build/finalize_binary.sh
           dist/nuitka/lintro
-          dist/nuitka/lintro-linux-${{ matrix.arch }}
-          linux-${{ matrix.arch }}
+          "dist/nuitka/lintro-linux-$BUILD_ARCH"
+          "linux-$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
