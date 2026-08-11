@@ -23,7 +23,7 @@ call bills the API key — the run records `auth_mode=api_key` and `cost_basis=e
 instead of the subscription column above.
 
 **Advisory means estimate-based, not unenforced:** the CLI advisory cap still stops the
-run (finalizing a partial review) when *locally estimated* cost reaches it. It is
+run (finalizing a partial review) when _locally estimated_ cost reaches it. It is
 "advisory" because subscription usage has no billed price — the estimate bounds work
 done, not spend.
 
