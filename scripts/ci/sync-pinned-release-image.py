@@ -32,6 +32,15 @@ Digests are resolved through the GitHub Packages API on ``api.github.com``
 rather than the registry: the Version-PR job's egress allowlist permits the
 former and not ``ghcr.io``. Standard library only, for the same reason.
 
+**Known gap — the release path currently reaches this with no token.** The
+upstream ``reusable-release-version-pr.yml`` step that runs the repo's
+version-update script passes only ``NEXT_VERSION``/``SCRIPT_PATH``, so this
+warns ``no GH_TOKEN/GITHUB_TOKEN in environment`` and no-ops on every release
+(lgtm-hq/lgtm-ci#849). The pin therefore froze at 0.94.3 and the nightly
+digest-lag gate failed once a manifest tool version moved (#1787). Until that
+lands upstream, the pin must be refreshed by running this script manually with
+``GH_TOKEN`` set.
+
 Usage:
     python3 scripts/ci/sync-pinned-release-image.py
     python3 scripts/ci/sync-pinned-release-image.py --dry-run
