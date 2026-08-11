@@ -39,8 +39,9 @@ class ReviewMetadata:
         duration_seconds (float): Wall-clock duration of the review run.
         transport (str): Transport used for the review (``api`` or ``cli``).
             Empty for legacy records that predate transport stamping.
-        auth_mode (str): How the provider call authenticated (e.g.
-            ``api_key``, ``oauth_session``). Empty when unknown.
+        auth_mode (str): How the provider call authenticated —
+            ``api_key`` or ``subscription`` (see
+            ``lintro.ai.transport.AuthMode``). Empty when unknown.
         cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
             ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for

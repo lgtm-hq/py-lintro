@@ -1724,6 +1724,12 @@ def _run_record(
             auth_mode=effective_auth,
             estimated=bool(metadata.token_usage_estimated),
         )
+        if derived is None:
+            logger.debug(
+                "cost_basis derivation returned no value for "
+                f"auth_mode={effective_auth!r}; run record keeps an empty "
+                "basis (unrecognized auth mode).",
+            )
         effective_basis = derived.value if derived is not None else ""
     return RunRecord(
         round=round_number,

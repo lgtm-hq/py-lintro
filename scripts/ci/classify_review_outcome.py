@@ -228,18 +228,22 @@ def refine_failure_kind(
     """
     haystack = f"{message}\n{output}"
     if transport == "cli":
-        if _KILLED_EXTERNALLY.search(haystack):
+        # Prose patterns may only classify a *thin* envelope (no concrete
+        # kind): a real envelope kind (insufficient_credits, timeout, ...)
+        # must keep its own label even when interleaved logs mention
+        # "killed", version drift, or the OAuth session. An envelope's
+        # existence also means lintro finished writing it — a run the
+        # runner actually killed leaves no kind to override.
+        thin_envelope = kind in ("", "unknown")
+        if thin_envelope and _KILLED_EXTERNALLY.search(haystack):
             return "killed_externally"
-        if _CLI_VERSION_DRIFT.search(haystack):
+        if thin_envelope and _CLI_VERSION_DRIFT.search(haystack):
             return "cli_version_drift"
         if kind == "auth_failed":
             if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
                 return "auth_failed:key"
             return "auth_failed:oauth_session"
-        # OAuth prose alone may only classify a *thin* envelope: a concrete
-        # non-auth kind (insufficient_credits, timeout, ...) must keep its own
-        # label even when stderr happens to mention the OAuth session.
-        if kind in ("", "unknown") and _OAUTH_AUTH.search(haystack):
+        if thin_envelope and _OAUTH_AUTH.search(haystack):
             return "auth_failed:oauth_session"
         return _CLI_KIND_LABELS.get(kind, kind)
 

@@ -436,13 +436,26 @@ def review_command(
         )
         from dataclasses import replace as dc_replace
 
+        from lintro.ai.enums.cost_basis import CostBasis
+
+        # The profile resolves BILLED for the api transport *before* the run;
+        # when the provider returned no usage counters the orchestrator set
+        # token_usage_estimated, so the honest post-run basis is ESTIMATED.
+        # Stamping billed here would also suppress the legacy derivation in
+        # github_sticky._run_record, which only fires on an empty basis.
+        effective_basis = resolved_profile.cost_basis
+        if result.metadata.token_usage_estimated and (
+            effective_basis is CostBasis.BILLED
+        ):
+            effective_basis = CostBasis.ESTIMATED
+
         result = dc_replace(
             result,
             metadata=dc_replace(
                 result.metadata,
                 transport=resolved_profile.transport.value,
                 auth_mode=resolved_profile.auth_mode,
-                cost_basis=resolved_profile.cost_basis.value,
+                cost_basis=effective_basis.value,
             ),
         )
     except (AIError, ValueError) as exc:
@@ -516,7 +529,9 @@ def review_command(
             question_map=question_map,
             transport=resolved_profile.transport.value,
             auth_mode=resolved_profile.auth_mode,
-            cost_basis=resolved_profile.cost_basis.value,
+            # metadata carries the post-run reconciled basis (estimated when
+            # the provider reported no usage), not the pre-run profile value.
+            cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,

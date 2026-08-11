@@ -168,7 +168,10 @@ class RunRecord:
             The parsed run record.
         """
         auth_mode = str(payload.get("auth_mode", ""))
-        estimated = bool(payload.get("estimated", False))
+        # Strict bool only: a legacy blob carrying "false" as a *string* must
+        # not truthy-coerce into an estimated cost basis.
+        raw_estimated = payload.get("estimated", False)
+        estimated = raw_estimated if isinstance(raw_estimated, bool) else False
         if "cost_basis" in payload:
             cost_basis = _parse_cost_basis(payload.get("cost_basis"))
         else:
