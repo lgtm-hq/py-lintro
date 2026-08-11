@@ -622,6 +622,10 @@ Lintro reaches a provider one of two ways, selected by `ai.transport`:
 - **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
   Cursor's `agent`).
 
+Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures are
+**transport-scoped** — see [AI review transports](ai-review-transports.md) for the
+decision table and `ai.transports.*` profiles (#1923).
+
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
 `ai.review` is enabled. Omitting it is not fatal: `lintro doctor` reports the config as
 incompatible, and the provider factory falls back to `api` so an existing run keeps

@@ -95,6 +95,7 @@ from lintro.ai.review.verdict import (
     resolve_bullet_finding,
     verdict_label,
 )
+from lintro.ai.transport import resolve_cost_basis
 
 __all__ = [
     "build_sticky_comment",
@@ -324,6 +325,7 @@ def build_sticky_comment(
     head_sha: str = "",
     transport: str = "",
     auth_mode: str = "",
+    cost_basis: str = "",
     inline_failure: InlinePostFailure | None = None,
     inline_comment_ids: Mapping[str, int] | None = None,
     repo: str = "",
@@ -351,6 +353,8 @@ def build_sticky_comment(
             resolved by this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost
+            (``billed`` / ``estimated`` / ``unpriceable``).
         inline_failure: Findings whose inline comments could not be posted.
             When set, the sticky renders a warning row above the open-findings
             table and folds those findings' full detail back in.
@@ -396,6 +400,7 @@ def build_sticky_comment(
         head_sha=head_sha,
         transport=transport,
         auth_mode=auth_mode,
+        cost_basis=cost_basis,
         verdict=verdict,
         resolved=len(match.resolved),
         open_after=open_count,
@@ -1683,6 +1688,7 @@ def _run_record(
     head_sha: str,
     transport: str,
     auth_mode: str,
+    cost_basis: str,
     verdict: ReviewVerdict,
     resolved: int,
     open_after: int,
@@ -1695,6 +1701,7 @@ def _run_record(
         head_sha: Head commit sha reviewed in this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost.
         verdict: Readiness verdict derived from the open findings.
         resolved: Number of findings this round resolved.
         open_after: Number of findings still open after this round.
@@ -1705,14 +1712,34 @@ def _run_record(
     metadata = result.metadata
     counts = _severity_counts(findings=result.findings)
     usage = metadata.token_usage
+    effective_auth = auth_mode or metadata.auth_mode
+    effective_basis = cost_basis or metadata.cost_basis
+    if not effective_basis:
+        # Stamp provenance at creation so a fresh render and a re-render of
+        # parsed state serialize identically (parse derives the same value
+        # for legacy blobs; without this, an error-path re-render would
+        # rewrite the blob a "failed round persists state untouched"
+        # consumer expects byte-for-byte).
+        derived = resolve_cost_basis(
+            auth_mode=effective_auth,
+            estimated=bool(metadata.token_usage_estimated),
+        )
+        if derived is None:
+            logger.debug(
+                "cost_basis derivation returned no value for "
+                f"auth_mode={effective_auth!r}; run record keeps an empty "
+                "basis (unrecognized auth mode).",
+            )
+        effective_basis = derived.value if derived is not None else ""
     return RunRecord(
         round=round_number,
         timestamp=metadata.timestamp,
         sha=head_sha,
         model=metadata.model,
         provider=metadata.provider,
-        transport=transport,
-        auth_mode=auth_mode,
+        transport=transport or metadata.transport,
+        auth_mode=effective_auth,
+        cost_basis=effective_basis,
         depth=metadata.depth,
         strictness=metadata.strictness,
         files_reviewed=metadata.files_reviewed,

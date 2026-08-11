@@ -37,6 +37,13 @@ class ReviewMetadata:
         stopped_reason (str): Human-readable reason a partial review stopped
             (e.g. "cost cap"). Empty for a complete review.
         duration_seconds (float): Wall-clock duration of the review run.
+        transport (str): Transport used for the review (``api`` or ``cli``).
+            Empty for legacy records that predate transport stamping.
+        auth_mode (str): How the provider call authenticated —
+            ``api_key`` or ``subscription`` (see
+            ``lintro.ai.transport.AuthMode``). Empty when unknown.
+        cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
+            ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
@@ -71,6 +78,9 @@ class ReviewMetadata:
     chunks_reviewed: int = 0
     stopped_reason: str = ""
     duration_seconds: float = 0.0
+    transport: str = ""
+    auth_mode: str = ""
+    cost_basis: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0

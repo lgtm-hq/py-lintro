@@ -21,6 +21,7 @@ import yaml
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai import transport
 from lintro.cli import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -108,7 +109,7 @@ def test_resolve_max_cost_rejects_negative() -> None:
 
 
 def test_patch_config_enables_ai_and_bounds_cost() -> None:
-    """Patching enables AI, pins transport/provider, and sets the cost cap."""
+    """Patching enables AI, pins transport/provider, and sets the CLI profile."""
     module = _load_config_module()
 
     data = {"ai": {"enabled": False, "model": "keep-me"}, "review": {"depth": 1}}
@@ -117,7 +118,13 @@ def test_patch_config_enables_ai_and_bounds_cost() -> None:
     assert_that(patched["ai"]["enabled"]).is_true()
     assert_that(patched["ai"]["transport"]).is_equal_to("cli")
     assert_that(patched["ai"]["provider"]).is_equal_to("anthropic")
-    assert_that(patched["ai"]["max_cost_usd"]).is_equal_to(0.5)
+    assert_that(patched["ai"]["transports"]["cli"]["timeout"]).is_equal_to(
+        module.DEFAULT_CLI_TIMEOUT,
+    )
+    assert_that(
+        patched["ai"]["transports"]["cli"]["max_cost_usd_advisory"],
+    ).is_equal_to(0.5)
+    assert_that(patched["ai"]).does_not_contain_key("max_cost_usd")
     # Unrelated values are preserved.
     assert_that(patched["ai"]["model"]).is_equal_to("keep-me")
     assert_that(patched["review"]["depth"]).is_equal_to(1)
@@ -130,7 +137,9 @@ def test_patch_config_creates_ai_section_when_missing() -> None:
     patched = module.patch_config(data={}, max_cost_usd=0.25)
 
     assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(patched["ai"]["max_cost_usd"]).is_equal_to(0.25)
+    assert_that(
+        patched["ai"]["transports"]["cli"]["max_cost_usd_advisory"],
+    ).is_equal_to(0.25)
 
 
 def test_main_patches_config_file(tmp_path: Path) -> None:
@@ -507,29 +516,57 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:
-    """The lintro ``--timeout`` fires before the runner's ``timeout-minutes``.
+    """The CLI transport profile timeout fires before the job ``timeout-minutes``.
 
     The two values are load-bearing together: when the job budget is exhausted
     first, the Actions runner kills the review mid-flight, no JSON error
     envelope is written, and ``classify_review_outcome.py`` reads a truncated
     output file (how PR #1916's review died under 600 s / 15 min). The
-    invariant is ``ceil(--timeout / 60) + setup overhead + posting margin <=
+    invariant is ``ceil(cli_timeout / 60) + setup overhead + posting margin <=
     timeout-minutes``, with ~7 minutes observed for harden-runner + checkout +
     Node/claude install + uv sync, and a 1-minute posting margin. Bump the two
-    values together, in scripts/ci/run-ai-review.sh and ai-review.yml.
+    values together — ``CLI_REVIEW_TIMEOUT_SECONDS`` in run-ai-review.sh (kept
+    in sync with ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
+    ``timeout-minutes`` in ai-review.yml. The review invocation itself must
+    not pass a hand-tuned ``--timeout`` once the profile default covers it
+    (#1923).
     """
     setup_overhead_minutes = 7
     posting_margin_minutes = 1
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    # Collapse backslash continuations so a flag wrapped onto its own line
+    # cannot hide from the single-line assertion below.
+    joined_text = shell_text.replace("\\\n", " ")
+    command_lines = [
+        line
+        for line in joined_text.splitlines()
+        if "uv run lintro review" in line and not line.lstrip().startswith("#")
+    ]
+    assert_that(command_lines).is_length(1)
+    assert_that(command_lines[0]).does_not_contain("--timeout")
+
+    module = _load_config_module()
+    assert_that(transport.DEFAULT_CLI_TIMEOUT).described_as(
+        "the library-side CLI timeout fallback must match the value "
+        "enable_review_config.py writes into the ephemeral config",
+    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
+
     timeout_matches = re.findall(
-        r"lintro review .*--timeout (\d+)",
+        r"^CLI_REVIEW_TIMEOUT_SECONDS=(\d+)\s*$",
         shell_text,
+        flags=re.MULTILINE,
     )
     assert_that(timeout_matches).described_as(
-        "run-ai-review.sh must pass exactly one --timeout to lintro review",
+        "run-ai-review.sh must declare CLI_REVIEW_TIMEOUT_SECONDS for the "
+        "job-budget invariant (kept in sync with DEFAULT_CLI_TIMEOUT)",
     ).is_length(1)
-    review_timeout_minutes = math.ceil(int(timeout_matches[0]) / 60)
+    assert_that(float(timeout_matches[0])).described_as(
+        "the CLI_REVIEW_TIMEOUT_SECONDS documentation variable in "
+        "run-ai-review.sh has drifted from the operational "
+        "enable_review_config.DEFAULT_CLI_TIMEOUT",
+    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
+    review_timeout_minutes = math.ceil(module.DEFAULT_CLI_TIMEOUT / 60)
 
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
@@ -537,9 +574,9 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     budget = review_timeout_minutes + setup_overhead_minutes
     budget += posting_margin_minutes
     assert_that(job_timeout_minutes).described_as(
-        f"timeout-minutes ({job_timeout_minutes}) must cover the review "
-        f"--timeout ({review_timeout_minutes} min) plus "
+        f"timeout-minutes ({job_timeout_minutes}) must cover the CLI profile "
+        f"timeout ({review_timeout_minutes} min) plus "
         f"{setup_overhead_minutes} min setup and "
         f"{posting_margin_minutes} min posting margin — bump it together "
-        "with --timeout in run-ai-review.sh",
+        "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
     ).is_greater_than_or_equal_to(budget)

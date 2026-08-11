@@ -463,6 +463,28 @@ def test_review_passes_depth_and_strictness_through(
     assert_that(calls[0]["sensitivity"].strictness.value).is_equal_to("focused")
 
 
+def test_review_applies_the_resolved_transport_profile(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A CLI transport profile's timeout reaches the orchestrator config.
+
+    ``_execute_review`` is the only MCP path that resolves transport
+    profiles; if ``apply_resolved_transport`` is unwired, the orchestrator
+    would run a CLI review on the API-sized 60s default (#1923).
+    """
+    (repo / ".lintro-config.yaml").write_text(
+        _CONFIG + ("  transport: cli\n  transports:\n    cli:\n      timeout: 555.0\n"),
+        encoding="utf-8",
+    )
+    calls = stub_ai()
+
+    result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.isError).is_false()
+    assert_that(calls[0]["ai_config"].api_timeout).is_equal_to(555.0)
+
+
 def test_review_clamps_the_requested_budget_to_the_configured_ceiling(
     repo: Path,
     stub_ai: Callable[..., list[Any]],

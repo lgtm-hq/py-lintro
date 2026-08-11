@@ -67,6 +67,7 @@ def test_round_trip_preserves_runs_and_findings() -> None:
                 model="claude",
                 transport="cli",
                 auth_mode="subscription",
+                cost_basis="unpriceable",
                 verdict=ReviewVerdict.CHANGES_REQUESTED,
                 total=1200,
                 cost=0.05,
@@ -81,12 +82,69 @@ def test_round_trip_preserves_runs_and_findings() -> None:
     assert_that(decoded.runs).is_length(1)
     assert_that(decoded.runs[0].transport).is_equal_to("cli")
     assert_that(decoded.runs[0].auth_mode).is_equal_to("subscription")
+    assert_that(decoded.runs[0].cost_basis).is_equal_to("unpriceable")
     assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
     assert_that(decoded.findings).is_length(1)
     assert_that(decoded.findings[0].fingerprint).is_equal_to("a" * 16)
     assert_that(decoded.findings[0].severity).is_equal_to(Severity.P2)
     assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.OPEN)
     assert_that(decoded.findings[0].since_round).is_equal_to(1)
+
+
+def test_cost_basis_provenance_round_trips() -> None:
+    """Transport / auth_mode / cost_basis survive serialize/parse (#1923)."""
+    record = RunRecord(
+        round=2,
+        sha="deadbeef",
+        transport="api",
+        auth_mode="api_key",
+        cost_basis="billed",
+        cost=1.25,
+    )
+
+    restored = RunRecord.from_dict(record.to_dict())
+
+    assert_that(restored.transport).is_equal_to("api")
+    assert_that(restored.auth_mode).is_equal_to("api_key")
+    assert_that(restored.cost_basis).is_equal_to("billed")
+    assert_that(restored.cost).is_equal_to(1.25)
+
+
+def test_legacy_run_without_cost_basis_derives_from_auth_mode() -> None:
+    """A pre-#1923 subscription run derives unpriceable cost_basis."""
+    restored = RunRecord.from_dict(
+        {
+            "round": 1,
+            "transport": "cli",
+            "auth_mode": "subscription",
+            "estimated": True,
+            "cost": 0.01,
+        },
+    )
+
+    assert_that(restored.cost_basis).is_equal_to("unpriceable")
+    assert_that(restored.transport).is_equal_to("cli")
+
+
+def test_legacy_api_key_estimated_derives_estimated_basis() -> None:
+    """Metered + locally priced tokens decode as estimated."""
+    restored = RunRecord.from_dict(
+        {
+            "round": 1,
+            "transport": "api",
+            "auth_mode": "api_key",
+            "estimated": True,
+        },
+    )
+
+    assert_that(restored.cost_basis).is_equal_to("estimated")
+
+
+def test_empty_cost_basis_omitted_from_payload() -> None:
+    """Unset cost_basis stays absent so legacy-shaped payloads stay lean."""
+    payload = RunRecord(round=1, model="m").to_dict()
+
+    assert_that(payload).does_not_contain_key("cost_basis")
 
 
 def test_resolved_provenance_round_trips() -> None:

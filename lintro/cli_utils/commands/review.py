@@ -56,7 +56,12 @@ from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-from lintro.ai.transport import apply_transport_override
+from lintro.ai.transport import (
+    apply_resolved_transport,
+    apply_transport_override,
+    format_resolved_profile_log,
+    resolve_transport_settings,
+)
 from lintro.config.config_loader import get_config
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
@@ -368,6 +373,22 @@ def review_command(
         effective_ai_config = effective_ai_config.model_copy(
             update={"api_timeout": timeout},
         )
+        # Explicit --timeout wins over the transport profile for this run.
+        if effective_ai_config.transport is not None:
+            transports = effective_ai_config.transports.model_copy(deep=True)
+            if effective_ai_config.transport.value == "cli":
+                transports.cli.timeout = timeout
+            else:
+                transports.api.timeout = timeout
+            effective_ai_config = effective_ai_config.model_copy(
+                update={"transports": transports},
+            )
+    effective_ai_config = apply_resolved_transport(effective_ai_config)
+    resolved_profile = resolve_transport_settings(effective_ai_config)
+    logger.info(
+        "AI review transport profile: {}",
+        format_resolved_profile_log(resolved_profile),
+    )
 
     provider = get_provider(effective_ai_config, workspace_root=workspace_root)
     effective_depth = depth if depth is not None else lintro_config.review.depth
@@ -412,6 +433,30 @@ def review_command(
             run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
             workspace_root=workspace_root,
             context_collection_seconds=context_collection_seconds,
+        )
+        from dataclasses import replace as dc_replace
+
+        from lintro.ai.enums.cost_basis import CostBasis
+
+        # The profile resolves BILLED for the api transport *before* the run;
+        # when the provider returned no usage counters the orchestrator set
+        # token_usage_estimated, so the honest post-run basis is ESTIMATED.
+        # Stamping billed here would also suppress the legacy derivation in
+        # github_sticky._run_record, which only fires on an empty basis.
+        effective_basis = resolved_profile.cost_basis
+        if result.metadata.token_usage_estimated and (
+            effective_basis is CostBasis.BILLED
+        ):
+            effective_basis = CostBasis.ESTIMATED
+
+        result = dc_replace(
+            result,
+            metadata=dc_replace(
+                result.metadata,
+                transport=resolved_profile.transport.value,
+                auth_mode=resolved_profile.auth_mode,
+                cost_basis=effective_basis.value,
+            ),
         )
     except (AIError, ValueError) as exc:
         if post and resolved_pr is not None and effective_repo:
@@ -482,7 +527,11 @@ def review_command(
             repo=effective_repo,
             checklist_display=checklist_display,
             question_map=question_map,
-            transport=str(effective_ai_config.transport),
+            transport=resolved_profile.transport.value,
+            auth_mode=resolved_profile.auth_mode,
+            # metadata carries the post-run reconciled basis (estimated when
+            # the provider reported no usage), not the pre-run profile value.
+            cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,
