@@ -617,6 +617,14 @@ class NodeJSBuilder(CommandBuilder):
         given both via ``--package``; bare ``bunx typescript`` would look for a
         ``typescript`` executable that does not exist.
 
+        ``--package`` (``-p``) is assumed present on both runners. Verified
+        against bun 1.3.14 (``bunx --help`` documents ``-p, --package <package>``
+        as "Specify package to install when binary name differs from package
+        name") and npm 11, where ``npx --package`` predates npm 7. The repo pins
+        no minimum bun version, so if a very old bun ever needs supporting, this
+        is the branch to revisit — it degrades to a runner error, not a silently
+        wrong binary.
+
         Args:
             binary_name: Executable name (``node_modules/.bin`` entry).
             package_name: npm package name used for the registry fallback.
