@@ -112,6 +112,23 @@ compute_expected_sha256() {
 	fi
 }
 
+# Build a directory holding symlinks to only the named commands, and echo it.
+# Running a script with PATH set to that directory exercises fail-closed
+# branches (a required tool being absent) without touching the real
+# environment. Include `bash`: the `#!/usr/bin/env bash` shebang resolves the
+# interpreter through PATH, so omitting it fails the script before it starts.
+make_stub_path() {
+	local dir="$1"
+	shift
+	mkdir -p "$dir"
+	local tool src
+	for tool in "$@"; do
+		src="$(command -v "$tool")" || return 1
+		ln -sf "$src" "${dir}/${tool}"
+	done
+	printf '%s' "$dir"
+}
+
 create_fake_binary() {
 	local path="$1"
 	local content="${2:-fake-binary}"
