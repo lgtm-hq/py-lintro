@@ -265,7 +265,9 @@ jobs:
       # #2006: --version/--help pass even when the frozen binary ships an empty
       # tool registry. This asserts the registry is actually populated.
       - name: Smoke-test tool registry
-        timeout-minutes: 10
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
         run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
       - name: Rename binary with architecture
@@ -419,7 +421,9 @@ jobs:
       # #2006: --version/--help pass even when the frozen binary ships an empty
       # tool registry. This asserts the registry is actually populated.
       - name: Smoke-test tool registry
-        timeout-minutes: 10
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
         run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
       - name: Rename binary with architecture

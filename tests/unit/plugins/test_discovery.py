@@ -10,7 +10,10 @@ from assertpy import assert_that
 from loguru import logger
 
 import lintro.tools.definitions as definitions_package
-from lintro.plugins._builtin_index import BUILTIN_TOOL_MODULES
+from lintro.plugins._builtin_index import (
+    BUILTIN_TOOL_MODULES,
+    REGISTERING_TOOL_MODULES,
+)
 from lintro.plugins.discovery import (
     BUILTIN_DEFINITIONS_PACKAGE,
     ENTRY_POINT_GROUP,
@@ -25,6 +28,7 @@ from lintro.plugins.discovery import (
     is_discovered,
     reset_discovery,
 )
+from lintro.plugins.registry import ToolRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -616,3 +620,19 @@ def test_shadowed_plugin_gets_no_divergence_advice(
     assert_that(loaded).is_equal_to(0)
     assert_that(output).contains("avoid shadowing it")
     assert_that(output).does_not_contain("registers the tool under")
+
+
+def test_registering_index_matches_the_real_registry() -> None:
+    """Every module the index calls registering yields a registered tool.
+
+    The generator detects registering modules statically (``@register_tool`` in
+    the source). This is the behavioral counterpart: the binary smoke test
+    treats that subset as the expected builtin tool set, so a static-scan
+    mismatch would make released binaries fail their own registry assertion.
+    """
+    discover_builtin_tools()
+
+    registered = {name.replace("-", "_") for name in ToolRegistry.get_names()}
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+
+    assert_that(sorted(expected - registered)).is_empty()

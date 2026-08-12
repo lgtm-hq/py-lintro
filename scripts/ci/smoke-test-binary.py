@@ -8,7 +8,8 @@ reported ``No tools to run.``.
 
 This script exercises the registry through the binary itself:
 
-1. ``lintro list-tools --json`` returns a non-empty set containing builtins.
+1. ``lintro list-tools --json`` reports **every** builtin the generated index
+   says exists — a partially populated registry fails just like an empty one.
 2. ``lintro config --json`` reports builtin tools in the execution order.
 3. ``lintro check`` on a throwaway sample tree reaches tool execution instead
    of bailing out with ``No tools to run.``.
@@ -23,6 +24,7 @@ dev dependencies.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import subprocess  # nosec B404 - driving the built CLI is the point of this script; all invocations use shell=False
 import sys
@@ -31,6 +33,13 @@ from pathlib import Path
 
 EXIT_OK = 0
 EXIT_FAILED = 1
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Generated index of builtin definition modules; its registering subset is the
+# expected builtin tool set (module names match tool names modulo separator).
+BUILTIN_INDEX_PATH = REPO_ROOT / "lintro" / "plugins" / "_builtin_index.py"
+REGISTERING_MODULES_NAME = "REGISTERING_TOOL_MODULES"
 
 # Generous but bounded: a cold onefile binary pays an extraction cost on the
 # first run, and ``check`` fans out across every registered tool.
@@ -86,15 +95,58 @@ def _fail(message: str) -> int:
     return EXIT_FAILED
 
 
-def list_builtin_tools(binary: Path) -> list[str] | None:
+def expected_builtin_tools(index_path: Path) -> list[str]:
+    """Read the builtin tool names the generated index says should exist.
+
+    Parsed with :mod:`ast` rather than imported so the script stays stdlib-only
+    and never pulls the ``lintro`` package into the release runner's process.
+
+    Args:
+        index_path: Path to the generated ``_builtin_index.py``.
+
+    Returns:
+        Sorted expected tool names, or an empty list when the index cannot be
+        read or does not declare the registering-module tuple.
+    """
+    try:
+        tree = ast.parse(index_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError) as exc:
+        print(f"WARN: could not read {index_path}: {exc}", file=sys.stderr)
+        return []
+
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target, value = node.target.id, node.value
+        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            target, value = node.targets[0].id, node.value
+        else:
+            continue
+        if target != REGISTERING_MODULES_NAME or value is None:
+            continue
+        try:
+            return sorted(str(name) for name in ast.literal_eval(value))
+        except ValueError:
+            break
+
+    print(
+        f"WARN: {index_path} declares no {REGISTERING_MODULES_NAME}",
+        file=sys.stderr,
+    )
+    return []
+
+
+def list_builtin_tools(binary: Path, expected: list[str]) -> list[str] | None:
     """Read the builtin tool names ``list-tools --json`` reports.
 
     Args:
         binary: Path to the lintro binary under test.
+        expected: Builtin tool names the generated index says should exist. An
+            empty list only checks that some builtin is present.
 
     Returns:
-        The builtin tool names, or ``None`` when the command failed or reported
-        no builtins (the #2006 symptom). Failures are printed as they occur.
+        The builtin tool names, or ``None`` when the command failed, reported no
+        builtins (the #2006 symptom), or dropped tools the index expects.
+        Failures are printed as they occur.
     """
     result = _run(
         argv=[str(binary), "list-tools", "--json"],
@@ -123,7 +175,21 @@ def list_builtin_tools(binary: Path) -> list[str] | None:
         _fail(f"list-tools --json reported no builtin tools: {sorted(tools)}")
         return None
 
-    print(f"OK: list-tools reports {len(builtins)} builtin tools")
+    # A partially populated registry is the same class of bug as an empty one:
+    # a build that drops most definition modules would otherwise pass.
+    reported = {name.replace("-", "_") for name in builtins}
+    missing = [name for name in expected if name.replace("-", "_") not in reported]
+    if missing:
+        _fail(
+            f"list-tools --json is missing {len(missing)} of {len(expected)} "
+            f"builtin tools the index expects: {missing}",
+        )
+        return None
+
+    print(
+        f"OK: list-tools reports {len(builtins)} builtin tools "
+        f"({len(expected)} expected by the index)",
+    )
     return builtins
 
 
@@ -308,7 +374,10 @@ def main() -> int:
     print(f"Smoke-testing {binary}")
 
     try:
-        builtin_tools = list_builtin_tools(binary)
+        builtin_tools = list_builtin_tools(
+            binary,
+            expected_builtin_tools(BUILTIN_INDEX_PATH),
+        )
         results = [
             EXIT_FAILED if builtin_tools is None else EXIT_OK,
             check_config(binary, builtin_tools or []),

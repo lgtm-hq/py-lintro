@@ -60,6 +60,32 @@ def _write_fake_binary(
     return path
 
 
+# Verbatim shape of the rendered result table (tabulate grid + emoji + status
+# glyphs), so the row parser is exercised against production output rather than
+# a simplified stand-in.
+REAL_RESULT_TABLE = """
++-----------------+----------+----------+-------------------+
+| Tool            | Status   | Issues   | Notes             |
++=================+==========+==========+===================+
+| \U0001f5a4 black         | \u274c FAIL   | 1        |                   |
++-----------------+----------+----------+-------------------+
+| \U0001f980 ruff          | \u2705 PASS   | 0        |                   |
++-----------------+----------+----------+-------------------+
+
+\U0001f4ca TOTALS
+"""
+
+# Same table with every tool skipped, as a release runner with no external tool
+# binaries installed produces.
+SKIPPED_RESULT_TABLE = """
++-----------------+----------+----------+--------------------------------+
+| \U0001f5a4 black         | \u23ed\ufe0f  SKIP | -        | executable not found           |
++-----------------+----------+----------+--------------------------------+
+| \U0001f980 ruff          | \u23ed\ufe0f  SKIP | -        | executable not found           |
++-----------------+----------+----------+--------------------------------+
+"""
+
+
 def _healthy_responses() -> dict[str, dict[str, object]]:
     """Build the responses of a binary with a populated tool registry.
 
@@ -82,7 +108,7 @@ def _healthy_responses() -> dict[str, dict[str, object]]:
             ),
             "exit": 0,
         },
-        "check": {"stdout": "| ruff | PASS |\n| black | PASS |\nTOTALS\n", "exit": 0},
+        "check": {"stdout": REAL_RESULT_TABLE, "exit": 0},
     }
 
 
@@ -118,9 +144,107 @@ def test_healthy_binary_passes_all_checks(
         path=tmp_path / "lintro",
         responses=_healthy_responses(),
     )
+    monkeypatch.setattr(
+        smoke,
+        "BUILTIN_INDEX_PATH",
+        _write_fake_index(path=tmp_path / "_builtin_index.py", names=["black", "ruff"]),
+    )
     monkeypatch.setattr(sys, "argv", ["smoke-test-binary.py", str(binary)])
 
     assert_that(smoke.main()).is_equal_to(0)
+
+
+def _write_fake_index(*, path: Path, names: list[str]) -> Path:
+    """Write a stand-in generated builtin index.
+
+    Args:
+        path: Destination path for the index module.
+        names: Module names to declare as registering a tool.
+
+    Returns:
+        The path the index was written to.
+    """
+    rendered = "".join(f'    "{name}",\n' for name in names)
+    path.write_text(
+        "BUILTIN_TOOL_MODULES: tuple[str, ...] = (\n"
+        f"{rendered})\n\n"
+        "REGISTERING_TOOL_MODULES: tuple[str, ...] = (\n"
+        f"{rendered})\n",
+    )
+    return path
+
+
+def test_expected_builtin_tools_reads_the_registering_subset(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The expected tool set comes from the index's registering subset.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    index = _write_fake_index(
+        path=tmp_path / "_builtin_index.py",
+        names=["black", "ruff"],
+    )
+
+    assert_that(smoke.expected_builtin_tools(index)).is_equal_to(["black", "ruff"])
+
+
+def test_expected_builtin_tools_tolerates_a_missing_index(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A missing index degrades to no expectations rather than crashing.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    assert_that(smoke.expected_builtin_tools(tmp_path / "absent.py")).is_empty()
+
+
+def test_partial_registry_fails_list_tools(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A registry missing indexed builtins fails, not just an empty one.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    binary = _write_fake_binary(
+        path=tmp_path / "lintro",
+        responses=_healthy_responses(),
+    )
+
+    result = smoke.list_builtin_tools(binary, ["black", "ruff", "yamllint"])
+
+    assert_that(result).is_none()
+
+
+def test_hyphenated_report_names_satisfy_underscore_expectations(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Expected ``pip_audit`` is satisfied by a reported ``pip-audit``.
+
+    Args:
+        smoke: Imported smoke-test module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    responses = _healthy_responses()
+    responses["list-tools"] = {
+        "stdout": json.dumps({"pip-audit": {"origin": "builtin"}}),
+        "exit": 0,
+    }
+    binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
+
+    assert_that(smoke.list_builtin_tools(binary, ["pip_audit"])).is_equal_to(
+        ["pip-audit"],
+    )
 
 
 def test_empty_registry_fails_list_tools(
@@ -137,7 +261,7 @@ def test_empty_registry_fails_list_tools(
     responses["list-tools"] = {"stdout": "{}", "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.list_builtin_tools(binary)).is_none()
+    assert_that(smoke.list_builtin_tools(binary, [])).is_none()
 
 
 def test_external_only_registry_fails_list_tools(
@@ -157,7 +281,7 @@ def test_external_only_registry_fails_list_tools(
     }
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.list_builtin_tools(binary)).is_none()
+    assert_that(smoke.list_builtin_tools(binary, [])).is_none()
 
 
 def test_invalid_list_tools_json_fails(
@@ -174,7 +298,7 @@ def test_invalid_list_tools_json_fails(
     responses["list-tools"] = {"stdout": "not json", "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
-    assert_that(smoke.list_builtin_tools(binary)).is_none()
+    assert_that(smoke.list_builtin_tools(binary, [])).is_none()
 
 
 def test_empty_config_execution_order_fails(
@@ -233,10 +357,7 @@ def test_skip_rows_still_prove_registry_dispatch(
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {
-        "stdout": "| ruff | SKIP | - | executable not found |\nTOTALS\n",
-        "exit": 0,
-    }
+    responses["check"] = {"stdout": SKIPPED_RESULT_TABLE, "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
     assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
@@ -293,7 +414,7 @@ def test_issues_found_still_counts_as_reaching_execution(
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {"stdout": "| ruff | FAIL | 4 |\nTOTALS\n", "exit": 1}
+    responses["check"] = {"stdout": REAL_RESULT_TABLE, "exit": 1}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
     assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
@@ -310,7 +431,10 @@ def test_underscore_tool_names_match_hyphenated_report(
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {"stdout": "| pip-audit | PASS |\nTOTALS\n", "exit": 0}
+    responses["check"] = {
+        "stdout": "| \U0001f527 pip-audit     | \u2705 PASS   | 0        |     |\n",
+        "exit": 0,
+    }
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
     assert_that(smoke.check_reaches_execution(binary, ["pip_audit"])).is_equal_to(0)

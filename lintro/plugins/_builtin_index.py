@@ -52,3 +52,47 @@ BUILTIN_TOOL_MODULES: tuple[str, ...] = (
     "vue_tsc",
     "yamllint",
 )
+
+# Subset of the modules above that register a tool with the registry (they use
+# the ``@register_tool`` decorator). Helper modules that only support a tool are
+# imported but contribute no registry entry. The binary smoke test uses this to
+# assert a built binary exposes every builtin tool, not merely a non-empty set.
+REGISTERING_TOOL_MODULES: tuple[str, ...] = (
+    "actionlint",
+    "astro_check",
+    "bandit",
+    "black",
+    "cargo_audit",
+    "cargo_deny",
+    "clippy",
+    "commitlint",
+    "dotenv_linter",
+    "gitleaks",
+    "golangci_lint",
+    "hadolint",
+    "html_validate",
+    "idiom_review",
+    "markdownlint",
+    "mypy",
+    "osv_scanner",
+    "oxfmt",
+    "oxlint",
+    "pip_audit",
+    "prettier",
+    "pydoclint",
+    "pytest",
+    "ruff",
+    "rustfmt",
+    "semgrep",
+    "shellcheck",
+    "shfmt",
+    "sqlfluff",
+    "stylelint",
+    "svelte_check",
+    "taplo",
+    "trufflehog",
+    "tsc",
+    "vale",
+    "vue_tsc",
+    "yamllint",
+)

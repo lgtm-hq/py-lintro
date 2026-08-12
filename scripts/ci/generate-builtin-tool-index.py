@@ -60,7 +60,19 @@ from __future__ import annotations
 BUILTIN_TOOL_MODULES: tuple[str, ...] = (
 '''
 
+_REGISTERING_HEADER = """)
+
+# Subset of the modules above that register a tool with the registry (they use
+# the ``@register_tool`` decorator). Helper modules that only support a tool are
+# imported but contribute no registry entry. The binary smoke test uses this to
+# assert a built binary exposes every builtin tool, not merely a non-empty set.
+REGISTERING_TOOL_MODULES: tuple[str, ...] = (
+"""
+
 _FOOTER = ")\n"
+
+# Decorator that marks a definition module as contributing a registry entry.
+REGISTER_DECORATOR = "@register_tool"
 
 
 def collect_module_names(definitions_dir: Path) -> list[str]:
@@ -86,17 +98,43 @@ def collect_module_names(definitions_dir: Path) -> list[str]:
     )
 
 
-def render_index(module_names: list[str]) -> str:
+def collect_registering_module_names(definitions_dir: Path) -> list[str]:
+    """Collect the definition modules that register a tool.
+
+    Args:
+        definitions_dir: Directory holding the builtin tool definition modules.
+
+    Returns:
+        Sorted module base names whose source applies ``@register_tool``.
+
+    Raises:
+        FileNotFoundError: When ``definitions_dir`` does not exist.
+    """
+    if not definitions_dir.is_dir():
+        msg = f"Builtin definitions directory not found: {definitions_dir}"
+        raise FileNotFoundError(msg)
+
+    return sorted(
+        path.stem
+        for path in definitions_dir.glob("*.py")
+        if not path.name.startswith("_")
+        and REGISTER_DECORATOR in path.read_text(encoding="utf-8")
+    )
+
+
+def render_index(module_names: list[str], registering: list[str]) -> str:
     """Render the text of the generated index module.
 
     Args:
         module_names: Sorted builtin definition module names.
+        registering: Sorted subset that registers a tool.
 
     Returns:
         Full module source text, formatted the way black would emit it.
     """
-    body = "".join(f'    "{name}",\n' for name in module_names)
-    return f"{_HEADER}{body}{_FOOTER}"
+    modules_body = "".join(f'    "{name}",\n' for name in module_names)
+    registering_body = "".join(f'    "{name}",\n' for name in registering)
+    return f"{_HEADER}{modules_body}{_REGISTERING_HEADER}{registering_body}{_FOOTER}"
 
 
 def _report_drift(*, current: str, desired: str, path: Path) -> None:
@@ -135,6 +173,7 @@ def main() -> int:
 
     try:
         module_names = collect_module_names(DEFINITIONS_DIR)
+        registering = collect_registering_module_names(DEFINITIONS_DIR)
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
@@ -146,7 +185,7 @@ def main() -> int:
         )
         return EXIT_INPUT_ERROR
 
-    desired = render_index(module_names)
+    desired = render_index(module_names, registering)
     current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.exists() else ""
 
     if args.check:

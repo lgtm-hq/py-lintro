@@ -55,6 +55,37 @@ def test_collect_module_names_skips_private_modules(
     assert_that(names).is_equal_to(["black", "ruff"])
 
 
+def _registering_module() -> str:
+    """Build the source of a definition module that registers a tool.
+
+    Returns:
+        Module source carrying the ``@register_tool`` decorator.
+    """
+    return "@register_tool\nclass Plugin:\n    pass\n"
+
+
+def test_collect_registering_module_names_skips_helper_modules(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Only modules applying ``@register_tool`` join the registering subset.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    (tmp_path / "ruff.py").write_text(_registering_module())
+    (tmp_path / "black.py").write_text(_registering_module())
+    (tmp_path / "oxlint_doctor.py").write_text("HELPER = True\n")
+
+    assert_that(gen.collect_module_names(tmp_path)).is_equal_to(
+        ["black", "oxlint_doctor", "ruff"],
+    )
+    assert_that(gen.collect_registering_module_names(tmp_path)).is_equal_to(
+        ["black", "ruff"],
+    )
+
+
 def test_collect_module_names_rejects_missing_directory(
     gen: ModuleType,
     tmp_path: Path,
@@ -80,7 +111,7 @@ def test_render_index_emits_importable_tuple(
         tmp_path: Pytest-provided temporary directory.
     """
     rendered_path = tmp_path / "_rendered_index.py"
-    rendered_path.write_text(gen.render_index(["black", "ruff"]))
+    rendered_path.write_text(gen.render_index(["black", "ruff"], ["black", "ruff"]))
 
     spec = importlib.util.spec_from_file_location("_rendered_index", rendered_path)
     if spec is None or spec.loader is None:
@@ -150,8 +181,8 @@ def test_check_reports_drift(
         capsys: Pytest stdout/stderr capture fixture.
     """
     definitions, index_path = fake_repo
-    (definitions / "ruff.py").write_text("")
-    index_path.write_text(gen.render_index(["black"]))
+    (definitions / "ruff.py").write_text(_registering_module())
+    index_path.write_text(gen.render_index(["black"], ["black"]))
     monkeypatch.setattr(sys, "argv", ["generate-builtin-tool-index.py", "--check"])
 
     exit_code = gen.main()
@@ -172,13 +203,15 @@ def test_write_mode_refreshes_the_index(
         fake_repo: Definitions directory and index path fixture.
     """
     definitions, index_path = fake_repo
-    (definitions / "ruff.py").write_text("")
-    index_path.write_text(gen.render_index(["black"]))
+    (definitions / "ruff.py").write_text(_registering_module())
+    index_path.write_text(gen.render_index(["black"], ["black"]))
 
     exit_code = gen.main()
 
     assert_that(exit_code).is_equal_to(0)
-    assert_that(index_path.read_text()).is_equal_to(gen.render_index(["ruff"]))
+    assert_that(index_path.read_text()).is_equal_to(
+        gen.render_index(["ruff"], ["ruff"]),
+    )
 
 
 def test_empty_definitions_directory_is_an_input_error(
