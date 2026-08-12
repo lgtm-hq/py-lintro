@@ -32,6 +32,7 @@ from lintro.tools.core.install_hints import (
     SCRIPT_HINT_PREFIX,
     has_install_script,
     install_script_path,
+    is_brew_managed,
     is_manual_hint,
 )
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
@@ -42,6 +43,10 @@ from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
 )
+
+#: Version-probe entrypoints that run a wrapper or host binary rather than the
+#: tool's own executable, so they cannot prove the tool is on PATH.
+_INDIRECT_PROBE_COMMANDS = frozenset({"sh", "bash", "cargo"})
 
 # Re-export so existing ``from lintro.tools.core.tool_installer import InstallPlan``
 # continues to work.
@@ -314,18 +319,7 @@ class ToolInstaller:
         Returns:
             True if brew manages this package.
         """
-        if not shutil.which("brew"):
-            return False
-        try:
-            result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled; binary resolved from a known command, no user shell input
-                ["brew", "list", "--formula", package],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, OSError):
-            return False
+        return is_brew_managed(package)
 
     def execute(self, plan: InstallPlan) -> list[InstallResult]:
         """Execute an installation plan.
@@ -361,19 +355,36 @@ class ToolInstaller:
 
         return results
 
-    def _verify_discoverable(self, tool: ManifestTool) -> bool:
+    @staticmethod
+    def _verify_discoverable(tool: ManifestTool) -> bool:
         """Check whether a tool is discoverable after a successful install.
+
+        Only the executable lookup is used as evidence. A version probe can
+        fail for reasons that have nothing to do with discoverability — a
+        repo-relative wrapper script (``bash scripts/...``), a subcommand of
+        another binary (``cargo audit``), unparseable output, or a transient
+        error — and reporting those as NOT_DISCOVERABLE would mark a genuinely
+        successful install as failed and suppress the tool from later quick
+        fixes.
 
         Args:
             tool: Tool that was just installed.
 
         Returns:
-            True if the tool can be found and reports a version.
+            False only when the tool's own executable is provably absent from
+            PATH; True when it resolves or when no on-PATH probe applies.
         """
         if not tool.version_command:
             # Nothing to probe with — trust the exit code.
             return True
-        return self._get_installed_version(tool) is not None
+
+        main_cmd = tool.version_command[0]
+        if main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd:
+            # The probe runs a wrapper/host binary, not the tool itself, so it
+            # cannot answer whether the tool ended up discoverable.
+            return True
+
+        return shutil.which(main_cmd) is not None
 
     _INSTALL_TIMEOUT_SECONDS = 300
 

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.cli_utils.install_output import unresolved_tool_names
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_plan import InstallPlan
@@ -113,8 +114,8 @@ def test_timeout_is_classified_separately_from_failure() -> None:
     assert_that(result.outcome.is_retryable).is_true()
 
 
-def test_unparseable_version_probe_does_not_abort_the_install() -> None:
-    """A version probe that cannot be parsed degrades to NOT_DISCOVERABLE."""
+def test_unparseable_version_output_still_counts_as_installed() -> None:
+    """A discoverable binary is a success even if its version is unparseable."""
     installer = _installer()
     tool = _tool("faketool")
 
@@ -131,7 +132,81 @@ def test_unparseable_version_probe_does_not_abort_the_install() -> None:
         ]
         result = installer._run_install(tool, "pip install faketool")
 
-    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
+
+
+def test_wrapper_script_probe_is_not_treated_as_undiscoverable() -> None:
+    """A repo-relative wrapper probe (vue_tsc) cannot prove undiscoverability."""
+    installer = _installer()
+    tool = ManifestTool(
+        name="vue_tsc",
+        version="3.1.5",
+        min_version="3.1.5",
+        install_type="npm",
+        install_package="vue-tsc",
+        version_command=("bash", "scripts/ci/resolve-vue-tsc-version.sh"),
+    )
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        # The wrapper's host binary resolves, the tool's own name does not;
+        # neither fact says anything about the installed package.
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        result = installer._run_install(tool, "bun add -g vue-tsc@3.1.5")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
+
+
+def test_cargo_subcommand_probe_is_not_treated_as_undiscoverable() -> None:
+    """``cargo audit --version`` probes cargo, not the installed subcommand."""
+    installer = _installer()
+    tool = ManifestTool(
+        name="cargo_audit",
+        version="0.21.0",
+        min_version="0.21.0",
+        install_type="cargo",
+        install_package="cargo-audit",
+        version_command=("cargo", "audit", "--version"),
+    )
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        result = installer._run_install(tool, "cargo install cargo-audit")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
+
+
+def test_probe_failure_never_reaches_known_invalid() -> None:
+    """A probe that errors out must not mark the install unresolved."""
+    installer = _installer()
+    tool = ManifestTool(
+        name="vue_tsc",
+        version="3.1.5",
+        min_version="3.1.5",
+        install_type="npm",
+        install_package="vue-tsc",
+        version_command=("bash", "scripts/ci/resolve-vue-tsc-version.sh"),
+    )
+
+    with (
+        patch(
+            "lintro.tools.core.tool_installer.subprocess.run",
+            side_effect=[
+                MagicMock(returncode=0, stdout="", stderr=""),
+                OSError("boom"),
+            ],
+        ),
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+    ):
+        result = installer._run_install(tool, "bun add -g vue-tsc@3.1.5")
+
+    assert_that(result.success).is_true()
+    assert_that(unresolved_tool_names([result])).is_empty()
 
 
 def test_manual_hint_is_manual_blocked() -> None:

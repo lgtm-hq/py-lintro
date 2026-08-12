@@ -16,7 +16,11 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 
-from lintro.tools.core.install_hints import has_install_script, is_manual_hint
+from lintro.tools.core.install_hints import (
+    has_install_script,
+    is_manual_hint,
+)
+from lintro.tools.core.install_hints import is_brew_managed as _default_brew_check
 from lintro.tools.core.install_strategies import InstallEnvironment, get_strategy
 from lintro.tools.core.manifest_models import ManifestTool
 
@@ -73,16 +77,14 @@ def build_quick_fix(
             the tool in this session; they are reported as blocked rather than
             suggested again.
         is_brew_managed: Predicate used to confirm that Homebrew really manages
-            a formula before suggesting ``brew upgrade``; defaults to the
-            installer's own check. Injectable so tests stay off subprocess.
+            a formula before suggesting ``brew upgrade``; defaults to the same
+            check the installer uses. Injectable so tests stay off subprocess.
 
     Returns:
         QuickFix with executable commands and the blocked remainder.
     """
     if is_brew_managed is None:
-        from lintro.tools.core.tool_installer import ToolInstaller
-
-        is_brew_managed = ToolInstaller._is_brew_managed
+        is_brew_managed = _default_brew_check
 
     quick_fix = QuickFix()
 

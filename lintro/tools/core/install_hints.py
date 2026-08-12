@@ -8,6 +8,7 @@ actually run in the detected environment), so they live in one place.
 from __future__ import annotations
 
 import shutil
+import subprocess  # nosec B404 - used only to ask Homebrew what it manages; shell=False
 from pathlib import Path
 
 from lintro.tools.core.manifest_models import ManifestTool
@@ -60,3 +61,30 @@ def has_install_script(tool: ManifestTool) -> bool:
     if not shutil.which("bash"):
         return False
     return install_script_path() is not None
+
+
+def is_brew_managed(package: str) -> bool:
+    """Check whether Homebrew manages a package.
+
+    Shared by the installer (which refuses to run ``brew upgrade`` on a
+    formula brew does not own) and quick-fix generation (which must not
+    suggest such a command in the first place).
+
+    Args:
+        package: Homebrew formula name.
+
+    Returns:
+        True if brew manages this package.
+    """
+    if not shutil.which("brew"):
+        return False
+    try:
+        result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled
+            ["brew", "list", "--formula", package],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
