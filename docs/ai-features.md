@@ -645,7 +645,41 @@ ai:
 ```
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
-config for a single invocation.
+config for a single invocation. `lintro review` also accepts `--provider` and `--model`.
+Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`,
+`LINTRO_AI_ENABLED`) apply to every AI surface and lose to CLI flags. There is no
+`--enabled` flag and no override for `ai.max_cost_usd`.
+
+### Invocation overrides
+
+Resolution order for `provider`, `model`, `transport`, and `enabled` is:
+
+```text
+CLI flag > environment variable > .lintro-config.yaml > built-in default
+```
+
+| Variable / flag                                   | Overrides      | Notes                                                                                        |
+| ------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------- |
+| `LINTRO_AI_PROVIDER` / `lintro review --provider` | `ai.provider`  | `anthropic`, `openai`, or `cursor`                                                           |
+| `LINTRO_AI_MODEL` / `lintro review --model`       | `ai.model`     | any model id; empty env falls through                                                        |
+| `LINTRO_AI_TRANSPORT` / `--transport`             | `ai.transport` | `api` or `cli`                                                                               |
+| `LINTRO_AI_ENABLED`                               | `ai.enabled`   | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
+
+Unset variables are absent (fall through). Invalid values fail at resolution with a
+message naming the variable and the accepted values — they never silently use the config
+default. Review output annotates each resolved field with its source
+(`provider: cursor (env)`).
+
+```bash
+# Try Cursor locally without dirtying .lintro-config.yaml
+LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
+
+# Same thing with flags (flags win if both are set)
+lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
+
+# Kill switch for this environment
+LINTRO_AI_ENABLED=0 lintro check .
+```
 
 ### Transport authentication
 
@@ -933,13 +967,12 @@ cosign-signed. The `ai` variant is a strict superset built `FROM` the base image
 `full` stage, so nothing is lost by using it — it is simply larger, which is why the
 lint image stays free of it.
 
-To use AI features, pass your API key as an environment variable. The **provider** comes
-from `ai.provider` in the `.lintro-config.yaml` of the mounted workspace — there is no
-provider CLI flag or environment override, and exporting `OPENAI_API_KEY` alone does not
-switch lintro off its `anthropic` default. `--transport` is the one part of the AI
-config the CLI can override per run. The examples pass the key by **name** (`-e VAR`, no
-`=value`), so the secret is inherited from the shell's environment instead of appearing
-in the container's argument list.
+To use AI features, pass your API key as an environment variable. The **provider**
+defaults to `ai.provider` in the mounted `.lintro-config.yaml`, and can be overridden
+per run with `LINTRO_AI_PROVIDER` or `lintro review --provider` without editing that
+file. `--transport` (and `LINTRO_AI_TRANSPORT`) override the invocation path. The
+examples pass the key by **name** (`-e VAR`, no `=value`), so the secret is inherited
+from the shell's environment instead of appearing in the container's argument list.
 
 ```bash
 # API transport, with `ai: {provider: anthropic}` in the mounted config

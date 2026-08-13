@@ -404,3 +404,31 @@ def test_mcp_review_disabled_maps_to_tool_unavailable(tmp_path: Path) -> None:
     assert_that(raised.code).is_equal_to(McpErrorCode.TOOL_UNAVAILABLE)
     detail = raised.envelope.detail or {}
     assert_that(detail["reason"]).is_equal_to("review_disabled")
+
+
+def test_mcp_invalid_provider_env_maps_to_invalid_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP preparation maps a typo'd ``LINTRO_AI_PROVIDER`` to invalid input."""
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "cursur")
+    workspace = tmp_path.resolve()
+    (workspace / ".lintro-config.yaml").write_text(
+        "ai:\n  enabled: true\n  review: true\n  provider: anthropic\n",
+        encoding="utf-8",
+    )
+    from lintro.config import config_loader
+
+    loaded = config_loader.load_config(config_path=workspace / ".lintro-config.yaml")
+    with (
+        patch("lintro.ai.availability.is_ai_available", return_value=True),
+        patch("lintro.config.config_loader.get_config", return_value=loaded),
+        pytest.raises(McpError) as excinfo,
+    ):
+        mcp_review._resolve_ai_config(workspace=workspace)
+
+    raised = excinfo.value
+    assert_that(raised.code).is_equal_to(McpErrorCode.INVALID_INPUT)
+    assert_that(str(raised)).contains("LINTRO_AI_PROVIDER='cursur'")
+    detail = raised.envelope.detail or {}
+    assert_that(detail["reason"]).is_equal_to("invalid_ai_override")

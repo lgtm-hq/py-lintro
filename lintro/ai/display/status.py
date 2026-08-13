@@ -11,6 +11,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums.config_source import ConfigSource
+from lintro.ai.resolved_ai_config import ResolvedAIConfig, format_sourced_value
+
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
 
@@ -20,17 +23,18 @@ AI_STATUS_NO_CONFIG = "[dim]disabled (no config)[/dim]"
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | Mapping[str, Any] | None,
+    ai_config: AIConfig | ResolvedAIConfig | Mapping[str, Any] | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
     Args:
         ai_config: Raw ``ai:`` mapping as held by the core executor, an
-            already-parsed :class:`AIConfig`, or None when unavailable. A
-            mapping is parsed here with diagnostics off, because rendering a
-            summary must not emit unknown-key warnings or migration hints
-            (the resolver on the AI entry path already reports them).
+            already-parsed :class:`AIConfig`, a :class:`ResolvedAIConfig`
+            carrying provenance, or None when unavailable. A mapping is
+            parsed here with diagnostics off, because rendering a summary
+            must not emit unknown-key warnings or migration hints (the
+            resolver on the AI entry path already reports them).
         is_ci: Whether the run is in a CI environment (affects the
             ``auto_apply`` warning wording).
 
@@ -42,12 +46,23 @@ def render_ai_status(
     if ai_config is None:
         ai_parts.append(AI_STATUS_NO_CONFIG)
         return ai_parts
-    if isinstance(ai_config, Mapping):
+
+    sources: Mapping[str, ConfigSource] | None = None
+    if isinstance(ai_config, ResolvedAIConfig):
+        sources = ai_config.sources
+        ai_config = ai_config.config
+    elif isinstance(ai_config, Mapping):
         from lintro.ai.config import AIConfig as _AIConfig
 
-        ai_config = _AIConfig.from_mapping(ai_config, diagnostics=False)
+        resolved = _AIConfig.resolve_from_mapping(ai_config, diagnostics=False)
+        sources = resolved.sources
+        ai_config = resolved.config
+
     if not ai_config.enabled:
-        ai_parts.append("[dim]disabled[/dim]")
+        disabled = "[dim]disabled[/dim]"
+        if sources is not None and sources.get("enabled") is ConfigSource.ENV:
+            disabled = "[dim]disabled (env)[/dim]"
+        ai_parts.append(disabled)
         return ai_parts
 
     import os
@@ -95,16 +110,36 @@ def render_ai_status(
                 f"  [yellow]set {key_env} env var[/yellow]",
             )
 
-    ai_parts.append(f"  provider: {ai_config.provider}")
+    provider_label = str(ai_config.provider)
+    if sources is not None:
+        provider_label = format_sourced_value(
+            provider_label,
+            sources.get("provider"),
+        )
+    ai_parts.append(f"  provider: {provider_label}")
 
     effective_model = ai_config.model or get_default_model(
         provider_name,
     )
     if effective_model:
         model_label = effective_model
-        if not ai_config.model:
+        if sources is not None:
+            model_label = format_sourced_value(
+                model_label,
+                sources.get("model"),
+            )
+        elif not ai_config.model:
             model_label += " [dim](default)[/dim]"
         ai_parts.append(f"  model: {model_label}")
+
+    if sources is not None:
+        transport_value = (
+            ai_config.transport.value if ai_config.transport is not None else "unset"
+        )
+        ai_parts.append(
+            "  transport: "
+            + format_sourced_value(transport_value, sources.get("transport")),
+        )
 
     # auto_apply warning
     if ai_config.auto_apply:

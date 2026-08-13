@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.115.0] - 2026-08-13
+
+### Added
+
+- **ai**: add env-var and CLI-flag override layer for AI config (#2016) (a3ca539)
+
+## [0.114.1] - 2026-08-11
+
+### Fixed
+
+- **ci**: re-pin dogfood release image to 0.113.3 (#2007) (e0515ef)
+
 ## [0.114.0] - 2026-08-11
 
 ### Added
