@@ -120,11 +120,11 @@ compute_expected_sha256() {
 make_stub_path() {
 	local dir="$1"
 	shift
-	mkdir -p "$dir"
+	mkdir -p "$dir" || return 1
 	local tool src
 	for tool in "$@"; do
 		src="$(command -v "$tool")" || return 1
-		ln -sf "$src" "${dir}/${tool}"
+		ln -sf "$src" "${dir}/${tool}" || return 1
 	done
 	printf '%s' "$dir"
 }
