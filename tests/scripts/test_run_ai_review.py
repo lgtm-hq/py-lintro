@@ -349,7 +349,36 @@ def test_workflow_fetches_cursor_installer_from_workflow_commit() -> None:
     assert_that(checkout["sparse-checkout"]).contains(
         "scripts/ci/install-cursor-agent.sh",
     )
+    assert_that(checkout["sparse-checkout"]).contains(
+        "scripts/ci/enable_cursor_workspace_trust.py",
+    )
     assert_that(checkout["sparse-checkout-cone-mode"]).is_equal_to(False)
+
+
+def test_workflow_enables_cursor_workspace_trust_before_review() -> None:
+    """CI opts into ``--trust`` on the ephemeral checkout, not in git.
+
+    The Cursor ``agent`` CLI will not start non-interactively without it.
+    Assert the step runs the side-checkout copy (base tree may not have the
+    script yet) and sits before the review step that holds the credential.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+    trust_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).endswith(
+            "enable_cursor_workspace_trust.py",
+        )
+    ]
+    assert_that(trust_steps).is_length(1)
+    assert_that(trust_steps[0]["run"]).is_equal_to(
+        "python3 .ai-review-installer/scripts/ci/enable_cursor_workspace_trust.py",
+    )
+    assert_that(names.index("Enable Cursor workspace trust")).is_less_than(
+        names.index("Run AI review (posts comment; fails when nothing was reviewed)"),
+    )
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
