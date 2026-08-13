@@ -10,6 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.install_context import InstallContext, PackageManager
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.tool_installer import InstallPlan, InstallResult, ToolInstaller
 from lintro.tools.core.tool_registry import ManifestTool
@@ -789,7 +790,7 @@ def test_execute_runs_installs_and_upgrades(
 
     fake_result = InstallResult(
         tool=tool_a,
-        success=True,
+        outcome=InstallOutcome.SUCCESS,
         message="ok",
         duration_seconds=0.1,
     )
@@ -831,13 +832,18 @@ def test_run_install_success(
     """
     tool = make_tool(install_type="pip")
 
-    with patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run:
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch.object(installer, "_verify_discoverable", return_value=True),
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         result = installer._run_install(tool, "pip install faketool-pkg>=1.2.0")
 
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
     assert_that(result.success).is_true()
     assert_that(result.message).contains("successfully")
     assert_that(result.duration_seconds).is_greater_than_or_equal_to(0.0)
+    assert_that(result.command).is_equal_to("pip install faketool-pkg>=1.2.0")
 
 
 def test_run_install_failure(

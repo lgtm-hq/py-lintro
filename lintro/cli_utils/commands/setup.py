@@ -18,6 +18,10 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from lintro.cli_utils.install_output import (
+    render_install_results,
+    render_outcome_summary,
+)
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.tool_installer import ToolInstaller
 from lintro.tools.core.tool_registry import ManifestRegistry
@@ -268,20 +272,11 @@ def setup_command(
             ):
                 console.print()
                 results = installer.execute(plan)
-                succeeded = sum(1 for r in results if r.success)
                 failed = sum(1 for r in results if not r.success)
-                for r in results:
-                    if r.success:
-                        console.print(f"  [green]OK[/green]  {r.tool.name}")
-                    else:
-                        console.print(
-                            f"  [red]FAIL[/red]  {r.tool.name}: {r.message}",
-                        )
+                render_install_results(console, results)
+                console.print()
+                render_outcome_summary(console, results)
                 if failed > 0:
-                    console.print(
-                        f"\n  [yellow]{succeeded} installed, "
-                        f"{failed} failed[/yellow]",
-                    )
                     # Report outdated/skipped before exiting
                     if plan.outdated:
                         console.print()
