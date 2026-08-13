@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
+from lintro.ai.resolved_ai_config import format_sourced_value
 from lintro.ai.review.agent_prompts import render_finding_prompt_panel
 from lintro.ai.review.checklist_display import (
     cleared_answers,
@@ -157,7 +158,13 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
     prompt_tokens = int(metadata.token_usage.get("prompt", 0))
     completion_tokens = int(metadata.token_usage.get("completion", 0))
     return [
-        ("model", f"`{sanitize_comment_text(metadata.model, limit=60)}`"),
+        (
+            "model",
+            format_sourced_value(
+                f"`{sanitize_comment_text(metadata.model, limit=60)}`",
+                metadata.model_source or None,
+            ),
+        ),
         ("est. cost", _fmt_cost(metadata.cost_estimate_usd, estimated=estimated)),
         ("tokens in", f"{tilde}{_fmt_int(prompt_tokens)}"),
         ("tokens out", f"{tilde}{_fmt_int(completion_tokens)}"),
@@ -180,17 +187,38 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
     completion_tokens = int(metadata.token_usage.get("completion", 0))
     source = "estimated" if estimated else "provider-reported"
     parts = [
-        f"**Model:** `{sanitize_comment_text(metadata.model, limit=60)}`",
-        f"**Provider:** `{sanitize_comment_text(metadata.provider, limit=40)}`",
-        f"**Depth:** {metadata.depth}",
-        (
-            f"**Tokens:** {_fmt_tokens(total_tokens, estimated=estimated)} "
-            f"(in {_fmt_int(prompt_tokens)} / out {_fmt_int(completion_tokens)}, "
-            f"{source})"
+        "**Model:** "
+        + format_sourced_value(
+            f"`{sanitize_comment_text(metadata.model, limit=60)}`",
+            metadata.model_source or None,
         ),
-        f"**Est. cost:** {_fmt_cost(metadata.cost_estimate_usd, estimated=estimated)}",
-        f"**Duration:** {metadata.duration_seconds:.1f}s",
+        "**Provider:** "
+        + format_sourced_value(
+            f"`{sanitize_comment_text(metadata.provider, limit=40)}`",
+            metadata.provider_source or None,
+        ),
     ]
+    if metadata.transport or metadata.transport_source:
+        parts.append(
+            "**Transport:** "
+            + format_sourced_value(
+                f"`{sanitize_comment_text(metadata.transport or 'unset', limit=40)}`",
+                metadata.transport_source or None,
+            ),
+        )
+    parts.extend(
+        [
+            f"**Depth:** {metadata.depth}",
+            (
+                f"**Tokens:** {_fmt_tokens(total_tokens, estimated=estimated)} "
+                f"(in {_fmt_int(prompt_tokens)} / out {_fmt_int(completion_tokens)}, "
+                f"{source})"
+            ),
+            f"**Est. cost:** "
+            f"{_fmt_cost(metadata.cost_estimate_usd, estimated=estimated)}",
+            f"**Duration:** {metadata.duration_seconds:.1f}s",
+        ],
+    )
     return " · ".join(parts)
 
 

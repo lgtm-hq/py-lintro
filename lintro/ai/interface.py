@@ -25,6 +25,7 @@ from lintro.models.core.sarif_enrichment import AISarifEnrichment
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.models import AIResult
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.tool_result import ToolResult
@@ -89,7 +90,9 @@ def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:
     :class:`~lintro.config.lintro_config.LintroConfig` stores the ``ai:``
     section verbatim as a mapping so that :mod:`lintro.config` never imports
     :mod:`lintro.ai` (issue #724). Every caller that needs typed AI settings
-    goes through this function.
+    goes through this function. Environment overlays (``LINTRO_AI_*``) are
+    applied inside :meth:`AIConfig.from_mapping` so every surface sees the
+    same effective values (#1970).
 
     Unknown keys are dropped with a warning, so resolving is also what makes
     a typo'd ``ai.*`` key discoverable. Callers should resolve once per run
@@ -245,7 +248,7 @@ def run_ai_layer(
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | Mapping[str, Any] | None,
+    ai_config: AIConfig | ResolvedAIConfig | Mapping[str, Any] | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
