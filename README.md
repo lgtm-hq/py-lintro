@@ -226,7 +226,7 @@ system.
 <td><a href="https://astro.build/"><img src="https://img.shields.io/badge/Astro-ff5d01?logo=astro&logoColor=white" alt="Astro"></a></td>
 <td>🚀 Astro</td>
 <td>-</td>
-<td><code>bun add -D astro @astrojs/check</code><br><code>npm install -D astro @astrojs/check</code></td>
+<td><code>bun add -D @astrojs/check</code><br><code>npm install -D @astrojs/check</code></td>
 </tr>
 <tr>
 <td><a href="https://mypy-lang.org/"><img src="https://img.shields.io/badge/Mypy-2d50a5?logo=python&logoColor=white" alt="Mypy"></a></td>

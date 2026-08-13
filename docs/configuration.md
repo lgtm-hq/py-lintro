@@ -1631,15 +1631,17 @@ template expressions.
 
 ```bash
 # bun (recommended)
-bun add -D astro @astrojs/check
+bun add -D @astrojs/check
 
 # npm
-npm install -D astro @astrojs/check
+npm install -D @astrojs/check
 ```
 
 `astro check` needs `@astrojs/check`, and Lintro runs Astro with `CI=1` so its
-interactive "install @astrojs/check?" prompt cannot complete — install both. A
-project-local install is strongly preferred here for that reason; see
+interactive "install @astrojs/check?" prompt cannot complete. Add that package as a
+devDependency; `astro` is already a production dependency in an Astro project, and
+installing it with `-D` would move it out of `dependencies`. A project-local install of
+`@astrojs/check` is strongly preferred here; see
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Native Config:** `astro.config.mjs`, `astro.config.ts`, or `astro.config.js`

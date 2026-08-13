@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from assertpy import assert_that
 
@@ -221,11 +219,16 @@ def test_set_options_use_project_files_invalid_type(
 # Tests for _build_command method
 
 
-def test_build_command_basic(vue_tsc_plugin: VueTscPlugin) -> None:
+def test_build_command_basic(
+    vue_tsc_plugin: VueTscPlugin,
+    no_local_node_install: None,
+) -> None:
     """Build basic command with default options.
 
     Args:
         vue_tsc_plugin: The VueTscPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
     """
     cmd = vue_tsc_plugin._build_command(files=[])
 
@@ -233,9 +236,9 @@ def test_build_command_basic(vue_tsc_plugin: VueTscPlugin) -> None:
     assert_that(cmd).contains("--noEmit")
     assert_that(cmd).contains("--pretty")
     assert_that(cmd).contains("false")
-    # First element is the resolved vue-tsc binary (possibly a project-local
-    # path) or a bunx/npx wrapper.
-    assert_that(Path(cmd[0]).stem).is_in("vue-tsc", "bunx", "npx")
+    # First element is the PATH/runner-resolved vue-tsc binary or a bunx/npx
+    # wrapper — not a project-local node_modules path.
+    assert_that(cmd[0]).is_in("vue-tsc", "bunx", "npx")
 
 
 def test_build_command_with_project(vue_tsc_plugin: VueTscPlugin) -> None:
