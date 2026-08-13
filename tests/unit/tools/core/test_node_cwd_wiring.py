@@ -126,7 +126,7 @@ def test_check_resolves_from_the_execution_directory(
 
     calls = _record_resolution(plugin, project, output, "check")
 
-    _assert_execution_cwd(calls, tool_name=tool_name)
+    _assert_execution_cwd(calls, tool_name=tool_name, project=project)
 
 
 @pytest.mark.parametrize(
@@ -156,11 +156,16 @@ def test_fix_resolves_from_the_execution_directory(
 
     calls = _record_resolution(plugin, project, output, "fix")
 
-    _assert_execution_cwd(calls, tool_name=tool_name)
+    _assert_execution_cwd(calls, tool_name=tool_name, project=project)
 
 
-def _assert_execution_cwd(calls: list[dict[str, Any]], *, tool_name: str) -> None:
-    """Require at least one resolution call anchored on the execution directory.
+def _assert_execution_cwd(
+    calls: list[dict[str, Any]],
+    *,
+    tool_name: str,
+    project: Path,
+) -> None:
+    """Require a resolution call anchored on the prepared project directory.
 
     Some plugins also resolve without ``cwd`` while building ``version_command``
     on the ``definition`` property. Those probes are not the execution path.
@@ -168,11 +173,17 @@ def _assert_execution_cwd(calls: list[dict[str, Any]], *, tool_name: str) -> Non
     Args:
         calls: Keyword arguments of every ``_get_executable_command`` call.
         tool_name: Tool name used in assertion descriptions.
+        project: Directory that must appear as ``cwd``.
     """
     assert_that(calls).described_as(f"{tool_name} resolution calls").is_not_empty()
-    cwd_calls = [call for call in calls if call.get("cwd") is not None]
-    assert_that(cwd_calls).described_as(
-        f"{tool_name} cwd-anchored resolution calls",
+    expected = project.resolve()
+    matching = [
+        call
+        for call in calls
+        if call.get("cwd") is not None and Path(call["cwd"]).resolve() == expected
+    ]
+    assert_that(matching).described_as(
+        f"{tool_name} cwd equals the execution directory",
     ).is_not_empty()
 
 
