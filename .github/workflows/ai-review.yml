@@ -19,10 +19,10 @@ name: AI Review - Dogfood
 # never): bare mode disables OAuth session login and authenticates only against
 # an API key, which is precisely the credential that does not work here (#1838).
 #
-# The AI_REVIEW_MAX_COST_USD cap below feeds ai.transports.cli.max_cost_usd_advisory:
-# API-path accounting that lintro can only price from tokens it estimated
-# itself. Under the CLI transport the call bills the subscription, so the cap
-# is advisory rather than enforced spend control (#1923).
+# Spend ceiling is the committed `ai.max_cost_usd: 0.50` in `.lintro-config.yaml`.
+# There is no env/flag overlay for that field (#1970/#1971): a PR cannot raise
+# the cap. Under the CLI transport the call bills the subscription, so the
+# figure is advisory rather than enforced spend control (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -94,8 +94,8 @@ jobs:
       # `--post` maintains the sticky review comment and posts inline review
       # comments, both of which require write access to pull requests.
       pull-requests: write
-    # COUPLED to ai.transports.cli.timeout (default 900 s, written by
-    # enable_review_config.py / lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
+    # COUPLED to ai.transports.cli.timeout (default 900 s,
+    # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
     # job budget must cover setup (~7 min) + the full review timeout (15 min) +
     # posting margin, so lintro's own timeout always fires before the runner
     # kills the job — a runner kill truncates the JSON envelope the outcome
@@ -194,4 +194,14 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_REVIEW_MAX_COST_USD: '2.00'
+          # Repo Actions variables named identically to the env vars they feed
+          # (#1971). Unset variables keep today's pinned CI defaults (cli /
+          # anthropic); a set variable is the experiment loop (`gh variable set`
+          # → next run → `gh variable delete`). Empty MODEL falls through to
+          # the provider/config default. LINTRO_AI_ENABLED is hardcoded: CI
+          # always turns the master switch on; the committed YAML stays
+          # `enabled: false` for local checkouts.
+          LINTRO_AI_ENABLED: '1'
+          LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
+          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
+          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}

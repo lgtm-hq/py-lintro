@@ -24,12 +24,13 @@ set -euo pipefail
 # lintro's own machine-readable error envelope — the failure taxonomy is not
 # re-implemented in shell.
 #
-# Transport: the review runs on the `cli` transport (pinned in
-# enable_review_config.py), so the credential is CLAUDE_CODE_OAUTH_TOKEN — the
-# `claude` binary's OAuth session — not ANTHROPIC_API_KEY, whose account has no
-# balance (#1894). The missing-credential guard below checks that variable
-# accordingly; checking the API key would report "no credential" on a perfectly
-# authenticated run, and vice versa.
+# Default transport is `cli` (workflow fallback when LINTRO_AI_TRANSPORT is
+# unset), so the credential is CLAUDE_CODE_OAUTH_TOKEN — the `claude` binary's
+# OAuth session — not ANTHROPIC_API_KEY, whose account has no balance (#1894).
+# The missing-credential guard below checks that variable accordingly; checking
+# the API key would report "no credential" on a perfectly authenticated run,
+# and vice versa. Provider/model/transport overrides come from LINTRO_AI_*
+# env vars fed by repo Actions variables (#1971).
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
 # invoking this script, so the lintro that runs with CLAUDE_CODE_OAUTH_TOKEN is
@@ -53,7 +54,10 @@ set -euo pipefail
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
-#   AI_REVIEW_MAX_COST_USD  Optional spend cap (advisory under CLI transport).
+#   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
+#   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
+#   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
+#   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -106,16 +110,6 @@ fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
 
-# Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
-# reads ai.enabled only from .lintro-config.yaml (env/flag overrides for
-# provider/model/transport land separately in #1970), so patch it here rather
-# than passing non-existent flags. The config comes from the base ref, not the
-# PR, so a PR cannot loosen the cost cap. Transport/provider and the CLI
-# transport profile (timeout + advisory cost) are pinned too (#1923).
-if ! uv run python "${script_dir}/enable_review_config.py"; then
-	report_not_invoked "Could not enable AI review in .lintro-config.yaml; see the log above."
-fi
-
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
 repo_arg=()
@@ -129,10 +123,10 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-# Timeout comes from ai.transports.cli.timeout (default 900s), written by
-# enable_review_config.py — no hand-tuned --timeout at this call site (#1923).
-# The default ai.api_timeout (60s) is sized for streaming API chunks; a CLI
-# turn runs the whole review in one `claude` invocation and needs minutes.
+# Timeout comes from ai.transports.cli.timeout (default 900s) — no hand-tuned
+# --timeout at this call site (#1923). The default ai.api_timeout (60s) is
+# sized for streaming API chunks; a CLI turn runs the whole review in one
+# agent invocation and needs minutes.
 #
 # COUPLED to ai-review.yml's `timeout-minutes`: the resolved CLI timeout must
 # fire BEFORE the Actions runner kills the job, or the review dies without a
@@ -143,7 +137,7 @@ set +e
 #
 # CLI_REVIEW_TIMEOUT_SECONDS documents the profile default the job budget
 # must cover; tests/scripts/test_run_ai_review.py asserts it matches
-# enable_review_config.DEFAULT_CLI_TIMEOUT (and transport.DEFAULT_CLI_TIMEOUT).
+# lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=900
 uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
