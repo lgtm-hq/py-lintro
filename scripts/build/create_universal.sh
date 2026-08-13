@@ -43,5 +43,6 @@ mkdir -p "$OUTPUT_DIR"
 lipo -create "$ARM64_BINARY" "$X86_64_BINARY" -output "$OUTPUT"
 chmod +x "$OUTPUT"
 
-file "$OUTPUT"
-ls -lh "$OUTPUT"
+# Display-only: a missing file(1)/ls must not fail a successful lipo.
+file "$OUTPUT" || true
+ls -lh "$OUTPUT" || true

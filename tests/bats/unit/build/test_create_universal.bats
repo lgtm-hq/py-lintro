@@ -69,13 +69,11 @@ teardown() {
 }
 
 @test "create_universal.sh: aborts when lipo is unavailable" {
-	if command -v lipo >/dev/null 2>&1; then
-		skip "lipo is available on this host; guard only fires without it"
-	fi
+	stub_path="$(make_stub_path "${BATS_TEST_TMPDIR}/stubbin" bash dirname mkdir chmod)"
 	create_fake_binary "$ARM64" "lintro-arm64"
 	create_fake_binary "$X86" "lintro-x86_64"
 
-	run "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
+	PATH="$stub_path" run "$SCRIPT" "$ARM64" "$X86" "$OUTPUT"
 	assert_failure
 	assert_equal "1" "$status"
 	assert_output --partial "lipo not found"
