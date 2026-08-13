@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -61,6 +62,27 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--transport")
     assert_that(result.output).contains("--provider")
     assert_that(result.output).contains("--model")
+
+
+def test_review_invalid_provider_env_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo'd ``LINTRO_AI_PROVIDER`` is a usage error, not a traceback."""
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "cursur")
+    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("LINTRO_AI_PROVIDER='cursur'")
+    assert_that(result.output).does_not_contain("Traceback")
 
 
 def test_review_alias_rev_works() -> None:

@@ -25,6 +25,7 @@ from lintro.ai.doctor_checks import (
     check_ai_configuration,
     check_ai_liveness,
 )
+from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.interface import resolve_ai_config
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
@@ -406,7 +407,8 @@ def doctor_command(
 
     Raises:
         SystemExit: When missing or broken tools are detected.
-        click.UsageError: When --fix is combined with --report or --json.
+        click.UsageError: When --fix is combined with --report or --json,
+            or when an ``LINTRO_AI_*`` overlay fails validation.
 
     Examples:
         lintro doctor
@@ -449,7 +451,10 @@ def doctor_command(
     from lintro.config.config_loader import get_config
 
     config = get_config()
-    ai_config = resolve_ai_config(config)
+    try:
+        ai_config = resolve_ai_config(config)
+    except AIConfigOverrideError as exc:
+        raise click.UsageError(str(exc)) from exc
     ai_checks = check_ai_configuration(ai_config)
     if ai_liveness:
         # Appended after the presence checks so the chain reads in order:

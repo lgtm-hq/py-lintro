@@ -40,14 +40,14 @@ Existing suites already pin large parts of review behavior
 `tests/unit/cli/test_review_command.py`). Phase 1 therefore adds only the gaps below
 rather than re-testing those topics:
 
-| Gap                          | Why it matters                                                           | Phase 1 lock                                 |
-| ---------------------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
-| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability     | `tests/unit/test_core_ai_import_boundary.py` |
-| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`               | preparation characterization tests           |
-| Effective-config seam parity | Both surfaces must resolve via `resolve_ai_config`; adapters then differ | config parity tests                          |
-| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2           | exit semantics tests                         |
-| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                           | error-mapping characterization               |
-| MCP run-metadata key set     | Agents depend on a stable `run` object                                   | metadata key characterization                |
+| Gap                          | Why it matters                                                                                     | Phase 1 lock                                 |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability                               | `tests/unit/test_core_ai_import_boundary.py` |
+| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`                                         | preparation characterization tests           |
+| Effective-config seam parity | MCP via `resolve_ai_config`; CLI review via `resolve_from_mapping` + `apply_cli_overrides` (#1970) | config parity tests                          |
+| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2                                     | exit semantics tests                         |
+| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                     | error-mapping characterization               |
+| MCP run-metadata key set     | Agents depend on a stable `run` object                                                             | metadata key characterization                |
 
 Prompt golden fixtures, orchestrator phase isolation, and provider lifecycle wiring are
 deferred to Phases 3–5 (and coordinated with #1884 / #1885).

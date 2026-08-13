@@ -287,9 +287,12 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
 
     Raises:
         McpError: :attr:`McpErrorCode.TOOL_UNAVAILABLE` when no AI provider is
-            installed or ``ai.review`` is disabled for this workspace.
+            installed or ``ai.review`` is disabled for this workspace;
+            :attr:`McpErrorCode.INVALID_INPUT` when an ``LINTRO_AI_*`` overlay
+            fails validation.
     """
     from lintro.ai.availability import is_ai_available
+    from lintro.ai.exceptions import AIConfigOverrideError
     from lintro.ai.interface import resolve_ai_config
     from lintro.config.config_loader import get_config
 
@@ -304,7 +307,14 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
         )
 
     lintro_config = get_config()
-    ai_config = resolve_ai_config(lintro_config)
+    try:
+        ai_config = resolve_ai_config(lintro_config)
+    except AIConfigOverrideError as exc:
+        raise McpError(
+            code=McpErrorCode.INVALID_INPUT,
+            message=str(exc),
+            detail={"tool": "lintro_review", "reason": "invalid_ai_override"},
+        ) from exc
     if not ai_config.review_enabled:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
