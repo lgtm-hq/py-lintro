@@ -837,7 +837,7 @@ guidance rather than the tool's raw error.
 pins the version through your lockfile. A global or Homebrew install is a valid fallback
 and is used whenever no project-local install is present.
 
-> **Changed in the `#1811` release.** The chain above used to apply only to
+> **Changed after v0.115.0 (#1811).** The chain above used to apply only to
 > `html-validate`. Other Node tools either went straight to
 > `bunx <binary>`/`npx <binary>` (never consulting `PATH`, and resolving `@latest`) or
 > preferred `PATH` ahead of any project-local install. Two consequences worth checking
@@ -1782,8 +1782,8 @@ most reliable branch of Lintro's executable resolution, it is lockfile-pinned, a
 needs no registry access at check time. A global install (`-g`) does _not_ populate
 `node_modules/.bin`, so it lands on a later, weaker branch.
 
-html-validate uses the shared Node.js chain — as of `#1811` so does every other Node.js
-tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
+html-validate uses the shared Node.js chain — as of a release after v0.115.0 (#1811) so
+does every other Node.js tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Executable resolution order:**
 
