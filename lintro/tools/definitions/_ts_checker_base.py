@@ -72,12 +72,18 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
     #: tsconfig filenames probed by :meth:`_find_tsconfig`, in priority order.
     _tsconfig_candidates: ClassVar[tuple[str, ...]] = ("tsconfig.json",)
 
-    @staticmethod
-    def _resolve_binary_command(binary: str, cwd: Path | None = None) -> list[str]:
+    def _resolve_binary_command(
+        self,
+        binary: str,
+        cwd: Path | None = None,
+    ) -> list[str]:
         """Resolve the command used to invoke a TypeScript checker binary.
 
-        Uses the shared Node.js chain: project-local install, then ``PATH``,
-        then a version-pinned ``bunx``/``npx`` invocation (#1811).
+        Uses the shared Node.js chain via ``_get_executable_command``:
+        project-local install, then ``PATH``, then a version-pinned
+        ``bunx``/``npx`` invocation (#1811). Going through the instance
+        method keeps every Node tool on one call site so a dropped
+        ``cwd=`` argument is visible to the same tests.
 
         Args:
             binary: Name of the checker executable (e.g. ``"tsc"``).
@@ -86,10 +92,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         Returns:
             Command argument list for the checker.
         """
-        return ts_cmd._resolve_binary_command(
-            binary=binary,
-            cwd=cwd,
-        )
+        return self._get_executable_command(tool_name=binary, cwd=cwd)
 
     def _find_tsconfig(self, cwd: Path) -> Path | None:
         """Find a tsconfig for the working directory or explicit project option.
