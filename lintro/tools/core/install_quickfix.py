@@ -22,6 +22,7 @@ from lintro.tools.core.install_hints import (
 )
 from lintro.tools.core.install_hints import is_brew_managed as _default_brew_check
 from lintro.tools.core.install_strategies import InstallEnvironment, get_strategy
+from lintro.tools.core.install_strategies.package_names import brew_formula_name
 from lintro.tools.core.manifest_models import ManifestTool
 
 #: Predicate deciding whether Homebrew manages a formula.
@@ -126,7 +127,7 @@ def build_quick_fix(
         # Same guard as ToolInstaller._get_install_command: brew can only
         # upgrade what it installed.
         if hint.startswith("brew upgrade"):
-            formula = hint.split()[-1]
+            formula = brew_formula_name(tool.name, tool.install_package)
             if not is_brew_managed(formula):
                 quick_fix.blocked.append(
                     (tool.name, f"{formula} is not managed by Homebrew"),

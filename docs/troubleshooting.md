@@ -229,13 +229,16 @@ an early failure or timeout never stops the tools after it from being installed:
   [3/3] OK  ruff (4.5s)
 ```
 
-| Label     | Meaning                                                        |
-| --------- | -------------------------------------------------------------- |
-| `OK`      | Command succeeded and the tool is discoverable.                |
-| `PATH`    | Command succeeded but the tool is still not on your PATH.      |
-| `FAIL`    | Command ran and failed; re-running it unchanged will not help. |
-| `TIMEOUT` | Command exceeded the 5-minute install timeout; retry is valid. |
-| `MANUAL`  | No runnable command exists here; install the tool by hand.     |
+| Label     | Meaning                                                          |
+| --------- | ---------------------------------------------------------------- |
+| `OK`      | Command succeeded and the tool is discoverable.                  |
+| `PATH`    | Command succeeded, but the tool's own executable is not on PATH. |
+| `FAIL`    | Command ran and failed; re-running it unchanged will not help.   |
+| `TIMEOUT` | Command exceeded the 5-minute install timeout; retry is valid.   |
+| `MANUAL`  | No runnable command exists here; install the tool by hand.       |
+
+Wrapper-probed tools (`bash`/`sh`/`cargo` version commands) still report `OK`, because
+those probes cannot tell whether the tool itself is discoverable.
 
 `lintro doctor` only suggests a quick fix for tools it can actually install in the
 detected environment; anything else is listed under "Needs manual action" with the
