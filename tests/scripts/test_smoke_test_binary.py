@@ -440,6 +440,23 @@ def test_underscore_tool_names_match_hyphenated_report(
     assert_that(smoke.check_reaches_execution(binary, ["pip_audit"])).is_equal_to(0)
 
 
+def test_matches_tool_requires_complete_identifier(smoke: ModuleType) -> None:
+    """A longer tool name must not satisfy a shorter builtin.
+
+    Args:
+        smoke: Imported smoke-test module.
+    """
+    assert_that(smoke._matches_tool(text="ruff-format", name="ruff")).is_false()
+    assert_that(smoke._matches_tool(text="ruff", name="ruff")).is_true()
+    assert_that(smoke._matches_tool(text="pip-audit", name="pip_audit")).is_true()
+    assert_that(
+        smoke._matches_tool(text="| ruff-format | PASS |", name="ruff"),
+    ).is_false()
+    assert_that(
+        smoke._matches_tool(text="| ruff | PASS |", name="ruff"),
+    ).is_true()
+
+
 def test_missing_binary_fails(
     smoke: ModuleType,
     tmp_path: Path,

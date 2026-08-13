@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import subprocess  # nosec B404 - driving the built CLI is the point of this script; all invocations use shell=False
 import sys
 import tempfile
@@ -193,20 +194,37 @@ def list_builtin_tools(binary: Path, expected: list[str]) -> list[str] | None:
     return builtins
 
 
+_TOOL_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _tool_spellings(name: str) -> set[str]:
+    """Return the identifier spellings a tool name may appear as.
+
+    Args:
+        name: Tool name as the registry spells it.
+
+    Returns:
+        The original name plus underscore/hyphen variants.
+    """
+    return {name, name.replace("_", "-"), name.replace("-", "_")}
+
+
 def _matches_tool(*, text: str, name: str) -> bool:
-    """Check whether a tool name appears in text, in either spelling.
+    """Check whether a complete tool identifier appears in text.
 
     Report and config output normalize underscores to hyphens (``pip_audit``
     renders as ``pip-audit``), so both spellings count as the same tool.
+    Matching is token-based so an external ``ruff-format`` entry cannot
+    satisfy builtin ``ruff``.
 
     Args:
         text: Text to search.
         name: Tool name as the registry spells it.
 
     Returns:
-        True when the tool is named in the text.
+        True when the tool is named in the text as a complete identifier.
     """
-    return name in text or name.replace("_", "-") in text
+    return bool(set(_TOOL_TOKEN.findall(text)) & _tool_spellings(name))
 
 
 def check_config(binary: Path, builtin_tools: list[str]) -> int:

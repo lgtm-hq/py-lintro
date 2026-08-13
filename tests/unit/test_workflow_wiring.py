@@ -1855,6 +1855,31 @@ def test_build_binary_job_timeout_leaves_diagnostic_headroom() -> None:
         assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
 
 
+def test_build_binary_job_timeout_covers_compile_and_smoke() -> None:
+    """The job deadline must cover compile + smoke + diagnostic headroom.
+
+    The smoke-test step can use 20 minutes on its own. A 35-minute job with a
+    25-minute compile bound can cancel a valid smoke test before that step's
+    own timeout fires.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        job = workflow["jobs"][job_id]
+        steps = job["steps"]
+        compile_timeout = next(
+            step["timeout-minutes"]
+            for step in steps
+            if step.get("name") == "Build binary"
+        )
+        smoke_timeout = next(
+            step["timeout-minutes"]
+            for step in steps
+            if step.get("name") == "Smoke-test tool registry"
+        )
+        headroom = job["timeout-minutes"] - compile_timeout - smoke_timeout
+        assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
+
+
 def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
     """Build binary is bracketed by the #1707 sampler with failure-only upload.
 
