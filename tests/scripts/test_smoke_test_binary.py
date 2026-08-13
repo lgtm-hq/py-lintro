@@ -457,6 +457,23 @@ def test_matches_tool_requires_complete_identifier(smoke: ModuleType) -> None:
     ).is_true()
 
 
+def test_notes_column_cannot_satisfy_a_different_tool(smoke: ModuleType) -> None:
+    """A Notes cell mentioning another tool is not a result row for that tool.
+
+    Args:
+        smoke: Imported smoke-test module.
+    """
+    output = (
+        "| black | PASS | 0 | unable to open ruff.py |\n"
+        "| ruff-format | PASS | 0 | |\n"
+    )
+    found = smoke._tools_in_result_table(
+        output=output,
+        builtin_tools=["ruff", "black"],
+    )
+    assert_that(found).is_equal_to(["black"])
+
+
 def test_missing_binary_fails(
     smoke: ModuleType,
     tmp_path: Path,

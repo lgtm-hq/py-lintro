@@ -282,6 +282,22 @@ def check_config(binary: Path, builtin_tools: list[str]) -> int:
     return EXIT_OK
 
 
+def _result_table_tool_cell(row: str) -> str:
+    """Return the Tool column of a tabulate grid row.
+
+    Matching the complete row would let a Notes cell mentioning ``ruff.py``
+    satisfy builtin ``ruff``. Only the first data cell is the tool identity.
+
+    Args:
+        row: A stripped table row starting with ``|``.
+
+    Returns:
+        The first data cell, or the whole row when the shape is unexpected.
+    """
+    data_cells = [cell.strip() for cell in row.split("|") if cell.strip()]
+    return data_cells[0] if data_cells else row
+
+
 def _tools_in_result_table(*, output: str, builtin_tools: list[str]) -> list[str]:
     """Find builtin tools that produced a per-tool result row.
 
@@ -308,8 +324,11 @@ def _tools_in_result_table(*, output: str, builtin_tools: list[str]) -> list[str
             continue
         if not any(status in row for status in RESULT_ROW_STATUSES):
             continue
+        tool_cell = _result_table_tool_cell(row)
         found.update(
-            name for name in builtin_tools if _matches_tool(text=row, name=name)
+            name
+            for name in builtin_tools
+            if _matches_tool(text=tool_cell, name=name)
         )
     return sorted(found)
 
