@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from lintro.ai.config_overrides import apply_cli_overrides
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.providers.claude_auth import should_send_bare
@@ -17,6 +18,7 @@ __all__ = [
     "DEFAULT_API_TIMEOUT",
     "DEFAULT_CLI_TIMEOUT",
     "ResolvedTransportSettings",
+    "apply_cli_overrides",
     "apply_resolved_transport",
     "apply_transport_override",
     "format_resolved_profile_log",
