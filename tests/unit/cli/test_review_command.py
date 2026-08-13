@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -59,6 +60,29 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--show-checklist")
     assert_that(result.output).contains("--timeout")
     assert_that(result.output).contains("--transport")
+    assert_that(result.output).contains("--provider")
+    assert_that(result.output).contains("--model")
+
+
+def test_review_invalid_provider_env_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo'd ``LINTRO_AI_PROVIDER`` is a usage error, not a traceback."""
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "cursur")
+    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("LINTRO_AI_PROVIDER='cursur'")
+    assert_that(result.output).does_not_contain("Traceback")
 
 
 def test_review_alias_rev_works() -> None:
@@ -277,6 +301,79 @@ def test_review_passes_transport_override_to_provider() -> None:
     assert_that(provider_config.transport.value).is_equal_to("cli")
 
 
+def test_review_passes_provider_and_model_overrides_to_provider() -> None:
+    """--provider and --model override config when resolving the provider."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+        ) as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch("lintro.cli_utils.commands.review.render_review_output"),
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="cursor-grok-4.6-high",
+            name="cursor",
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--provider",
+                "cursor",
+                "--model",
+                "cursor-grok-4.6-high",
+                "--transport",
+                "cli",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    provider_config = mock_get_provider.call_args.args[0]
+    assert_that(provider_config.provider.value).is_equal_to("cursor")
+    assert_that(provider_config.model).is_equal_to("cursor-grok-4.6-high")
+    assert_that(provider_config.transport.value).is_equal_to("cli")
+
+
 def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
     """The rendered result carries transport, auth_mode, and cost_basis.
 
@@ -343,6 +440,8 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
     assert_that(rendered.metadata.transport).is_equal_to("api")
     assert_that(rendered.metadata.auth_mode).is_equal_to("api_key")
     assert_that(rendered.metadata.cost_basis).is_equal_to("billed")
+    assert_that(rendered.metadata.provider_source).is_equal_to("config")
+    assert_that(rendered.metadata.transport_source).is_equal_to("config")
 
 
 def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
@@ -1316,6 +1415,8 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         depth=None,
         strictness=None,
         transport="cli",
+        provider=None,
+        model=None,
         timeout=600.0,
         context_window=None,
         semantic_chunks=False,

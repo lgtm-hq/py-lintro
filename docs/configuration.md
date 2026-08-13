@@ -453,6 +453,13 @@ export LINTRO_DOCKER=1
 
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+
+# AI config overlays (flag > env > .lintro-config.yaml > default). See
+# docs/ai-features.md "Invocation overrides".
+export LINTRO_AI_PROVIDER=cursor
+export LINTRO_AI_MODEL=cursor-grok-4.6-high
+export LINTRO_AI_TRANSPORT=cli
+export LINTRO_AI_ENABLED=1
 ```
 
 | Variable                         | Description                                                  | Default   |
@@ -462,6 +469,10 @@ export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 | `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
 | `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
 | `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
+| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
+| `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
+| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |
+| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)               | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,

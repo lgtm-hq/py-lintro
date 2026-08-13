@@ -7,21 +7,23 @@ normative decision record is
 
 ## Ownership boundaries
 
-| Concern                                  | Owner today                                            | Target                                        |
-| ---------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
-| Typed `AIConfig` from raw `ai:` mapping  | `resolve_ai_config()` in `lintro.ai.interface`         | `ResolvedAIConfig` (+ provenance) via #1970   |
-| Invocation transport / timeout overrides | CLI adapter (`apply_transport_override`, `model_copy`) | Same resolver pipeline (#1970 / #1923)        |
-| Monotonic cost-cap clamp                 | MCP adapter (`resolve_budget_policy`)                  | Shared domain prep; adapters keep policy      |
-| Diff review preparation                  | Duplicated in CLI + MCP                                | `prepare_review` / `execute_review` (Phase 3) |
-| Review execution facade                  | `run_review` / `run_review_async`                      | Unchanged facade; internals split (Phase 4)   |
-| Provider client `aclose()` API           | Not yet (#1885)                                        | Provider-side only in #1885                   |
-| Provider close call-site wiring          | N/A until #1885                                        | Phase 5 of #1972                              |
+| Concern                                  | Owner today                                             | Target                                        |
+| ---------------------------------------- | ------------------------------------------------------- | --------------------------------------------- |
+| Typed `AIConfig` from raw `ai:` mapping  | `AIConfig.resolve_from_mapping()` → `ResolvedAIConfig`  | Same resolver; #1923 extends it               |
+| Invocation transport / timeout overrides | CLI review: `apply_cli_overrides` on `ResolvedAIConfig` | Same resolver pipeline (#1970 / #1923)        |
+| Monotonic cost-cap clamp                 | MCP adapter (`resolve_budget_policy`)                   | Shared domain prep; adapters keep policy      |
+| Diff review preparation                  | Duplicated in CLI + MCP                                 | `prepare_review` / `execute_review` (Phase 3) |
+| Review execution facade                  | `run_review` / `run_review_async`                       | Unchanged facade; internals split (Phase 4)   |
+| Provider client `aclose()` API           | Not yet (#1885)                                         | Provider-side only in #1885                   |
+| Provider close call-site wiring          | N/A until #1885                                         | Phase 5 of #1972                              |
 
 ## Shared preparation (current duplicated steps)
 
 Both the CLI (`lintro review`) and MCP (`lintro_review`) currently:
 
-1. Resolve AI config through `resolve_ai_config`.
+1. Resolve AI config. CLI review uses `AIConfig.resolve_from_mapping` plus
+   `apply_cli_overrides` (keeps provenance). MCP uses `resolve_ai_config`, which unwraps
+   the same env-aware parse.
 2. Gate on `ai.review` being enabled (adapter-specific error shape).
 3. Collect review context, classify changed files, select/format checklist items.
 4. Optionally build a lint digest.

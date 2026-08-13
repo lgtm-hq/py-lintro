@@ -1,20 +1,17 @@
 """Tests for the dogfood AI review CI helpers.
 
-Covers the ``enable_review_config.py`` config patcher, the graceful-skip
-behaviour of ``run-ai-review.sh``, the review CLI flags the script relies on,
-and that the ``ai-review.yml`` workflow parses as valid YAML.
+Covers the graceful-skip behaviour of ``run-ai-review.sh``, the review CLI
+flags the script relies on, and that the ``ai-review.yml`` workflow parses as
+valid YAML and feeds ``LINTRO_AI_*`` from repo Actions variables (#1971).
 """
 
 from __future__ import annotations
 
-import importlib.util
 import math
 import os
 import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import yaml
@@ -28,32 +25,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_SCRIPT = REPO_ROOT / "scripts" / "ci" / "enable_review_config.py"
 SHELL_SCRIPT = REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ai-review.yml"
+PROJECT_CONFIG = REPO_ROOT / ".lintro-config.yaml"
 
-#: The guarded provider credential. The dogfood runs the ``cli`` transport, so
-#: the secret in scope is the ``claude`` CLI's OAuth token, never an API key.
+#: Guarded provider credentials. Anthropic dogfood uses the ``claude`` CLI
+#: OAuth token; Cursor dogfood uses ``CURSOR_API_KEY``.
 CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
-
-
-def _load_config_module() -> ModuleType:
-    """Load enable_review_config.py as an importable module.
-
-    Returns:
-        The loaded module exposing its public helpers.
-
-    Raises:
-        RuntimeError: When the module spec cannot be created.
-    """
-    spec = importlib.util.spec_from_file_location(
-        "enable_review_config",
-        CONFIG_SCRIPT,
-    )
-    if spec is None or spec.loader is None:
-        msg = f"Unable to load module from {CONFIG_SCRIPT}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["enable_review_config"] = module
-    spec.loader.exec_module(module)
-    return module
+CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
+PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
 
 
 def _run_shell(
@@ -80,89 +58,45 @@ def _run_shell(
     )
 
 
-def test_resolve_max_cost_defaults_when_unset() -> None:
-    """An unset or blank cost value falls back to the default cap."""
-    module = _load_config_module()
+def test_patch_script_is_gone() -> None:
+    """The YAML-patching workaround must not return (#1971)."""
+    assert_that(CONFIG_SCRIPT.exists()).is_false()
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).does_not_contain("enable_review_config.py")
 
-    assert_that(module.resolve_max_cost_usd(raw_value=None)).is_equal_to(
-        module.DEFAULT_MAX_COST_USD,
+
+def test_committed_config_keeps_ai_off_with_review_ready() -> None:
+    """Local default stays AI-off; CI turns it on via ``LINTRO_AI_ENABLED=1``.
+
+    ``ai.review: true`` is committed so enabling the master switch does not
+    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
+    spend ceiling with no overlay.
+    """
+    loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
+    ai_section = loaded["ai"]
+    assert_that(ai_section["enabled"]).is_false()
+    assert_that(ai_section["review"]).is_true()
+    assert_that(ai_section["max_cost_usd"]).is_equal_to(0.50)
+
+
+def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
+    """The review step overlays provider/model/transport from Actions variables."""
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    review_steps = [
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    ]
+    assert_that(review_steps).is_length(1)
+    env = review_steps[0]["env"]
+    assert_that(env["LINTRO_AI_ENABLED"]).is_equal_to("1")
+    assert_that(env["LINTRO_AI_TRANSPORT"]).is_equal_to(
+        "${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}",
     )
-    assert_that(module.resolve_max_cost_usd(raw_value="  ")).is_equal_to(
-        module.DEFAULT_MAX_COST_USD,
+    assert_that(env["LINTRO_AI_PROVIDER"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}",
     )
-
-
-def test_resolve_max_cost_parses_value() -> None:
-    """A valid numeric string parses into a float cap."""
-    module = _load_config_module()
-
-    assert_that(module.resolve_max_cost_usd(raw_value="1.25")).is_equal_to(1.25)
-
-
-def test_resolve_max_cost_rejects_negative() -> None:
-    """A negative cost value raises ValueError."""
-    module = _load_config_module()
-
-    assert_that(module.resolve_max_cost_usd).raises(ValueError).when_called_with(
-        raw_value="-1",
-    )
-
-
-def test_patch_config_enables_ai_and_bounds_cost() -> None:
-    """Patching enables AI, pins transport/provider, and sets the CLI profile."""
-    module = _load_config_module()
-
-    data = {"ai": {"enabled": False, "model": "keep-me"}, "review": {"depth": 1}}
-    patched = module.patch_config(data=data, max_cost_usd=0.5)
-
-    assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(patched["ai"]["transport"]).is_equal_to("cli")
-    assert_that(patched["ai"]["provider"]).is_equal_to("anthropic")
-    assert_that(patched["ai"]["transports"]["cli"]["timeout"]).is_equal_to(
-        module.DEFAULT_CLI_TIMEOUT,
-    )
-    assert_that(
-        patched["ai"]["transports"]["cli"]["max_cost_usd_advisory"],
-    ).is_equal_to(0.5)
-    assert_that(patched["ai"]).does_not_contain_key("max_cost_usd")
-    # Unrelated values are preserved.
-    assert_that(patched["ai"]["model"]).is_equal_to("keep-me")
-    assert_that(patched["review"]["depth"]).is_equal_to(1)
-
-
-def test_patch_config_creates_ai_section_when_missing() -> None:
-    """A missing ai section is created rather than raising."""
-    module = _load_config_module()
-
-    patched = module.patch_config(data={}, max_cost_usd=0.25)
-
-    assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(
-        patched["ai"]["transports"]["cli"]["max_cost_usd_advisory"],
-    ).is_equal_to(0.25)
-
-
-def test_main_patches_config_file(tmp_path: Path) -> None:
-    """main() writes the enabled AI settings back to the target file."""
-    module = _load_config_module()
-    config_file = tmp_path / ".lintro-config.yaml"
-    config_file.write_text("ai:\n  enabled: false\n", encoding="utf-8")
-
-    exit_code = module.main(argv=["--config", str(config_file)])
-
-    assert_that(exit_code).is_equal_to(0)
-    reloaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    assert_that(reloaded["ai"]["enabled"]).is_true()
-    assert_that(reloaded["ai"]["transport"]).is_equal_to("cli")
-
-
-def test_main_returns_error_when_config_missing(tmp_path: Path) -> None:
-    """main() returns a non-zero code when the config file is absent."""
-    module = _load_config_module()
-
-    exit_code = module.main(argv=["--config", str(tmp_path / "missing.yaml")])
-
-    assert_that(exit_code).is_equal_to(1)
+    assert_that(env["LINTRO_AI_MODEL"]).is_equal_to("${{ vars.LINTRO_AI_MODEL }}")
+    assert_that(env).does_not_contain_key("AI_REVIEW_MAX_COST_USD")
 
 
 def test_shell_help_exits_zero() -> None:
@@ -189,6 +123,51 @@ def test_shell_fails_visibly_without_oauth_token() -> None:
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
     assert_that(result.stderr).contains("nothing was reviewed")
+
+
+def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> None:
+    """Cursor overlay must not treat a Claude token as the Cursor credential.
+
+    ``LINTRO_AI_PROVIDER=cursor`` with only ``CLAUDE_CODE_OAUTH_TOKEN`` set is
+    how #2018's first dogfood run looked after the Actions variables flipped:
+    the wrapper would have proceeded, then crashed inside ``get_provider``.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            CURSOR_CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_accepts_cursor_key_without_claude_token() -> None:
+    """A Cursor key satisfies the guard even when the Claude token is absent.
+
+    The failure here must be the missing PR number (classifier, invoked), not
+    a missing-credential skip — otherwise flipping the provider variable would
+    still demand the Anthropic secret.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            CURSOR_CREDENTIAL_ENV: "dummy-cursor-key",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).contains("No PR number provided")
+    assert_that(result.stdout).does_not_contain("no provider credential")
 
 
 def test_shell_fails_visibly_without_pr_number() -> None:
@@ -330,9 +309,12 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         if isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/checkout@")
     ]
-    assert_that(checkout_steps).is_length(1)
+    workspace_checkouts = [
+        step for step in checkout_steps if not (step.get("with") or {}).get("path")
+    ]
+    assert_that(workspace_checkouts).is_length(1)
 
-    checkout = checkout_steps[0]
+    checkout = workspace_checkouts[0]
     assert_that(checkout).contains_key("with")
     # Structurally assert the checkout pins to the trusted base ref. A harmless
     # head-ref mention in a comment/log elsewhere in the file must not false-fail
@@ -342,23 +324,80 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     )
 
 
-def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """CLAUDE_CODE_OAUTH_TOKEN is injected only into the final review step env.
+def test_workflow_fetches_cursor_installer_from_workflow_commit() -> None:
+    """The Cursor installer is fetched from ``github.sha``, not the base tree.
 
-    The secret must not appear in workflow- or job-level env maps, nor in
+    GitHub runs this workflow YAML from the PR, but the workspace checkout is
+    the trusted base ref. A new ``install-cursor-agent.sh`` therefore is not on
+    disk unless it is fetched from the workflow commit into a side path. Pin
+    hashes still come from the base Dockerfile.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    installer_checkouts = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+        and (step.get("with") or {}).get("path") == ".ai-review-installer"
+    ]
+    assert_that(installer_checkouts).is_length(1)
+    checkout = installer_checkouts[0]["with"]
+    assert_that(checkout["ref"]).is_equal_to("${{ github.sha }}")
+    assert_that(checkout["persist-credentials"]).is_equal_to(False)
+    assert_that(checkout["sparse-checkout"]).contains(
+        "scripts/ci/install-cursor-agent.sh",
+    )
+    assert_that(checkout["sparse-checkout"]).contains(
+        "scripts/ci/enable_cursor_workspace_trust.py",
+    )
+    assert_that(checkout["sparse-checkout-cone-mode"]).is_equal_to(False)
+
+
+def test_workflow_enables_cursor_workspace_trust_before_review() -> None:
+    """CI opts into ``--trust`` on the ephemeral checkout, not in git.
+
+    The Cursor ``agent`` CLI will not start non-interactively without it.
+    Assert the step runs the side-checkout copy (base tree may not have the
+    script yet) and sits before the review step that holds the credential.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+    trust_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).endswith(
+            "enable_cursor_workspace_trust.py",
+        )
+    ]
+    assert_that(trust_steps).is_length(1)
+    assert_that(trust_steps[0]["run"]).is_equal_to(
+        "python3 .ai-review-installer/scripts/ci/enable_cursor_workspace_trust.py",
+    )
+    assert_that(names.index("Enable Cursor workspace trust")).is_less_than(
+        names.index("Run AI review (posts comment; fails when nothing was reviewed)"),
+    )
+
+
+def test_workflow_secret_scoped_to_review_step_only() -> None:
+    """Provider credentials are injected only into the final review step env.
+
+    Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
-    paths never receive the token before the trusted base-ref install completes.
+    paths never receive a token before the trusted base-ref install completes.
     This is the ordering control audited in #1317.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
-    if workflow_env is not None:
-        assert_that(workflow_env).does_not_contain_key(CREDENTIAL_ENV)
-
     job_env = loaded["jobs"]["ai-review"].get("env")
-    if job_env is not None:
-        assert_that(job_env).does_not_contain_key(CREDENTIAL_ENV)
+    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        if workflow_env is not None:
+            assert_that(workflow_env).does_not_contain_key(credential_env)
+        if job_env is not None:
+            assert_that(job_env).does_not_contain_key(credential_env)
 
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -373,12 +412,17 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
         "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
     )
+    assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(
+        "${{ secrets.CURSOR_API_KEY }}",
+    )
     for step in steps:
         if step is review_step:
             continue
-        assert_that(step.get("env") or {}).described_as(
-            f"step {step.get('name')!r}",
-        ).does_not_contain_key(CREDENTIAL_ENV)
+        step_env = step.get("env") or {}
+        for credential_env in PROVIDER_CREDENTIAL_ENVS:
+            assert_that(step_env).described_as(
+                f"step {step.get('name')!r}",
+            ).does_not_contain_key(credential_env)
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
@@ -468,11 +512,12 @@ def test_workflow_forbids_bare_mode_for_the_cli_transport() -> None:
 
 
 def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
-    """The claude CLI version is resolved, not hard-coded in the workflow.
+    """Agent CLI versions are resolved, not hard-coded in the workflow.
 
     A second pin site would drift from ``docker/ai-tools.Dockerfile``, and the
     dogfood would then review with a CLI version the contract tests never
-    checked.
+    checked. Cursor's calendar build id is not semver, so it is resolved
+    without ``--exact``.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -482,15 +527,36 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     ]
     assert_that(resolve_steps).is_length(1)
     assert_that(resolve_steps[0]["id"]).is_equal_to("pins")
+    pin_run = resolve_steps[0]["run"]
+    assert_that(pin_run).contains("NODE_VERSION")
+    assert_that(pin_run).contains("CLAUDE_CODE_VERSION")
+    assert_that(pin_run).contains("--exact")
+    assert_that(pin_run).contains("CURSOR_AGENT_VERSION")
+    assert_that(pin_run).contains("CURSOR_AGENT_SHA256_X64")
 
-    install_steps = [
+    claude_install_steps = [
         step
         for step in steps
         if str(step.get("run", "")).strip() == "scripts/ci/install-claude-cli.sh"
     ]
-    assert_that(install_steps).is_length(1)
-    assert_that(install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
+    assert_that(claude_install_steps).is_length(1)
+    assert_that(claude_install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
         "${{ steps.pins.outputs.claude-code-version }}",
+    )
+
+    cursor_install_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).strip()
+        == ".ai-review-installer/scripts/ci/install-cursor-agent.sh"
+    ]
+    assert_that(cursor_install_steps).is_length(1)
+    cursor_env = cursor_install_steps[0]["env"]
+    assert_that(cursor_env["CURSOR_AGENT_VERSION"]).is_equal_to(
+        "${{ steps.pins.outputs.cursor-agent-version }}",
+    )
+    assert_that(cursor_env["CURSOR_AGENT_SHA256_X64"]).is_equal_to(
+        "${{ steps.pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
 
@@ -512,7 +578,14 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     assert_that(harden_steps).is_length(1)
 
     endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
-    assert_that(endpoints).contains("registry.npmjs.org:443", "nodejs.org:443")
+    assert_that(endpoints).contains(
+        "registry.npmjs.org:443",
+        "nodejs.org:443",
+        "downloads.cursor.com:443",
+        "api.cursor.com:443",
+        "*.cursor.sh:443",
+        "*.cursorapi.com:443",
+    )
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:
@@ -546,12 +619,6 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     assert_that(command_lines).is_length(1)
     assert_that(command_lines[0]).does_not_contain("--timeout")
 
-    module = _load_config_module()
-    assert_that(transport.DEFAULT_CLI_TIMEOUT).described_as(
-        "the library-side CLI timeout fallback must match the value "
-        "enable_review_config.py writes into the ephemeral config",
-    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
-
     timeout_matches = re.findall(
         r"^CLI_REVIEW_TIMEOUT_SECONDS=(\d+)\s*$",
         shell_text,
@@ -563,10 +630,9 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     ).is_length(1)
     assert_that(float(timeout_matches[0])).described_as(
         "the CLI_REVIEW_TIMEOUT_SECONDS documentation variable in "
-        "run-ai-review.sh has drifted from the operational "
-        "enable_review_config.DEFAULT_CLI_TIMEOUT",
-    ).is_equal_to(module.DEFAULT_CLI_TIMEOUT)
-    review_timeout_minutes = math.ceil(module.DEFAULT_CLI_TIMEOUT / 60)
+        "run-ai-review.sh has drifted from transport.DEFAULT_CLI_TIMEOUT",
+    ).is_equal_to(transport.DEFAULT_CLI_TIMEOUT)
+    review_timeout_minutes = math.ceil(transport.DEFAULT_CLI_TIMEOUT / 60)
 
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
