@@ -27,7 +27,8 @@ if [[ ! -f "$BINARY" ]]; then
 	exit 1
 fi
 
-ls -lh "$(dirname "$BINARY")"
+# Display-only: a missing ls must not skip the --version gate.
+ls -lh "$(dirname "$BINARY")" || true
 
 # --version is the build gate: a binary that cannot report its version is not
 # a valid build.
