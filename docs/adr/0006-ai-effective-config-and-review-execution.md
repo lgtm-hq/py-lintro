@@ -80,9 +80,10 @@ Contract invariants:
 - Keep security-sensitive caps monotonic: an invocation may lower a configured cap where
   explicitly supported, never raise it (`ai.max_cost_usd` today).
 
-Issue #1970 implements the initial resolver. This epic must not introduce a second
-resolver. Until #1970 lands, the seam remains `resolve_ai_config()` returning
-`AIConfig`, with adapter-local overrides applied afterward.
+Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
+`ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies
+`--provider`/`--model`/`--transport` on that object via `apply_cli_overrides`; other
+surfaces consume `resolve_ai_config()` which unwraps the same env-aware parse.
 
 ### B. Shared review domain request and preparation
 

@@ -9,8 +9,8 @@ normative decision record is
 
 | Concern                                  | Owner today                                            | Target                                        |
 | ---------------------------------------- | ------------------------------------------------------ | --------------------------------------------- |
-| Typed `AIConfig` from raw `ai:` mapping  | `resolve_ai_config()` in `lintro.ai.interface`         | `ResolvedAIConfig` (+ provenance) via #1970   |
-| Invocation transport / timeout overrides | CLI adapter (`apply_transport_override`, `model_copy`) | Same resolver pipeline (#1970 / #1923)        |
+| Typed `AIConfig` from raw `ai:` mapping  | `AIConfig.resolve_from_mapping()` → `ResolvedAIConfig` | Same resolver; #1923 extends it               |
+| Invocation transport / timeout overrides | CLI adapter (`apply_cli_overrides`, `model_copy`)      | Same resolver pipeline (#1970 / #1923)        |
 | Monotonic cost-cap clamp                 | MCP adapter (`resolve_budget_policy`)                  | Shared domain prep; adapters keep policy      |
 | Diff review preparation                  | Duplicated in CLI + MCP                                | `prepare_review` / `execute_review` (Phase 3) |
 | Review execution facade                  | `run_review` / `run_review_async`                      | Unchanged facade; internals split (Phase 4)   |

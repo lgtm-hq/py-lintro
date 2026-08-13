@@ -58,8 +58,8 @@ def patched_review(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         review_module,
-        "apply_transport_override",
-        lambda ai_config, _transport: ai_config,
+        "apply_cli_overrides",
+        lambda resolved, **_kwargs: resolved,
     )
     monkeypatch.setattr(review_module, "get_provider", lambda _, **_kwargs: provider)
     monkeypatch.setattr(

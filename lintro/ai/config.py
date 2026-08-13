@@ -31,7 +31,9 @@ from lintro.ai.enums import (
     ConfidenceLevel,
     SanitizeMode,
 )
+from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.registry import AIProvider
+from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 __all__ = [
     "AIBudgetConfig",
@@ -41,6 +43,7 @@ __all__ = [
     "AITransportProfiles",
     "ApiTransportProfile",
     "CliTransportProfile",
+    "ResolvedAIConfig",
 ]
 
 
@@ -455,6 +458,11 @@ class AIConfig(BaseModel):
         rejected, because ``AIConfig`` itself forbids extras and a stale key
         in ``.lintro-config.yaml`` must not break the whole run.
 
+        Environment overrides (``LINTRO_AI_PROVIDER``, ``LINTRO_AI_MODEL``,
+        ``LINTRO_AI_TRANSPORT``, ``LINTRO_AI_ENABLED``) are applied here so
+        every consumer of :meth:`from_mapping` — execution, status, doctor,
+        MCP — sees the same effective values (#1970).
+
         This is the boundary that keeps :mod:`lintro.config` free of any
         knowledge of ``AIConfig``'s field set (see issue #724): the loader
         stores the ``ai:`` section verbatim and the AI layer parses it.
@@ -468,23 +476,60 @@ class AIConfig(BaseModel):
                 must not duplicate its output; resolvers leave it True.
 
         Returns:
-            AIConfig: Parsed AI configuration.
+            AIConfig: Parsed AI configuration after env overlays.
         """
-        if not data:
-            return cls()
+        return cls.resolve_from_mapping(data, diagnostics=diagnostics).config
 
-        known_fields = set(cls.model_fields)
-        unknown = set(data) - known_fields
-        if unknown and diagnostics:
-            logger.warning(
-                "Unknown AI config keys ignored: {}",
-                ", ".join(sorted(unknown)),
-            )
-        filtered = {k: v for k, v in data.items() if k in known_fields}
+    @classmethod
+    def resolve_from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        diagnostics: bool = True,
+    ) -> ResolvedAIConfig:
+        """Parse ``ai:`` into effective values plus per-field provenance.
+
+        Env overlays are applied after the mapping is validated so a
+        ``LINTRO_AI_ENABLED=1`` overlay cannot trigger the legacy
+        ``ai.enabled``-only sub-toggle default. Invalid env values fail
+        here and never fall through to the config default.
+
+        Args:
+            data: Raw ``ai`` section from config, or None when absent.
+            diagnostics: Whether this parse may emit user-facing diagnostics.
+
+        Returns:
+            Validated config together with provenance for ``provider``,
+            ``model``, ``transport``, and ``enabled``.
+        """
+        from lintro.ai.config_overrides import (
+            OVERRIDE_FIELDS,
+            apply_env_overrides,
+        )
+
+        filtered: dict[str, Any] = {}
+        if data:
+            known_fields = set(cls.model_fields)
+            unknown = set(data) - known_fields
+            if unknown and diagnostics:
+                logger.warning(
+                    "Unknown AI config keys ignored: {}",
+                    ", ".join(sorted(unknown)),
+                )
+            filtered = {k: v for k, v in data.items() if k in known_fields}
+
         if diagnostics:
-            return cls(**filtered)
-        with _suppressed_diagnostics():
-            return cls(**filtered)
+            config = cls(**filtered) if filtered else cls()
+        else:
+            with _suppressed_diagnostics():
+                config = cls(**filtered) if filtered else cls()
+
+        sources: dict[str, ConfigSource] = {
+            field: (ConfigSource.CONFIG if field in filtered else ConfigSource.DEFAULT)
+            for field in OVERRIDE_FIELDS
+        }
+        config, sources = apply_env_overrides(config, sources)
+        return ResolvedAIConfig(config=config, sources=sources)
 
     # -- Effective feature state -------------------------------------------
 

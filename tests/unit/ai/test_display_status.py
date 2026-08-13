@@ -225,7 +225,7 @@ def test_render_ai_status_mapping_matches_parsed_config(
 
     from_mapping = render_ai_status(ai_config=mapping, is_ci=is_ci)
     from_model = render_ai_status(
-        ai_config=AIConfig.from_mapping(mapping),
+        ai_config=AIConfig.resolve_from_mapping(mapping),
         is_ci=is_ci,
     )
 

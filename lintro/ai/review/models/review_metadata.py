@@ -44,6 +44,13 @@ class ReviewMetadata:
             ``lintro.ai.transport.AuthMode``). Empty when unknown.
         cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
             ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
+        provider_source (str): Provenance of ``provider`` — ``flag``,
+            ``env``, ``config``, or ``default`` (#1970). Empty on legacy
+            records.
+        model_source (str): Provenance of ``model`` (#1970). Empty on
+            legacy records.
+        transport_source (str): Provenance of ``transport`` (#1970). Empty
+            on legacy records.
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
@@ -81,6 +88,9 @@ class ReviewMetadata:
     transport: str = ""
     auth_mode: str = ""
     cost_basis: str = ""
+    provider_source: str = ""
+    model_source: str = ""
+    transport_source: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
