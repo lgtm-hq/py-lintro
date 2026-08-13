@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.manifest_models import ManifestTool
 
 
@@ -13,15 +14,30 @@ class InstallResult:
 
     Attributes:
         tool: The manifest tool entry.
-        success: Whether installation succeeded.
+        outcome: Classified end state of the action.
         message: Human-readable result message.
         duration_seconds: How long the install took.
+        command: The command that was attempted, for actionable reporting.
+        step: 1-based position of this action within the executed batch.
+        total_steps: Total number of actions in the executed batch.
     """
 
     tool: ManifestTool
-    success: bool
+    outcome: InstallOutcome
     message: str
     duration_seconds: float = 0.0
+    command: str = ""
+    step: int = 0
+    total_steps: int = 0
+
+    @property
+    def success(self) -> bool:
+        """Whether the tool ended up installed and discoverable.
+
+        Returns:
+            True only when the outcome is :attr:`InstallOutcome.SUCCESS`.
+        """
+        return self.outcome.is_success
 
 
 @dataclass

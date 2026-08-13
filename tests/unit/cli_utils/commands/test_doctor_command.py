@@ -18,8 +18,10 @@ from lintro.cli_utils.commands.doctor import (
 )
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.install_context import InstallContext, PackageManager
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.tool_registry import ManifestTool
 from lintro.utils.doctor_report import ToolCheckResult
@@ -255,6 +257,110 @@ def test_doctor_fix_incompatible_with_json() -> None:
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).contains("--fix cannot be combined")
+
+
+def test_doctor_post_fix_blocks_only_non_retryable_outcomes() -> None:
+    """A failed install is suppressed afterwards; a timed-out one stays retryable.
+
+    Exercises the real path — installer outcomes flow through
+    ``unresolved_tool_names`` into the follow-up quick fix — rather than
+    stubbing ``_run_fix``'s return value.
+    """
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    failed_tool = _make_tool(name="ruff")
+    timed_out_tool = _make_tool(name="clippy", install_type="rustup")
+    plan = InstallPlan(
+        to_install=[
+            (failed_tool, "uv pip install ruff"),
+            (timed_out_tool, "rustup component add clippy"),
+        ],
+    )
+    execute_results = [
+        InstallResult(
+            tool=failed_tool,
+            outcome=InstallOutcome.FAILED,
+            message="Command failed (exit 1)",
+            command="uv pip install ruff",
+            step=1,
+            total_steps=2,
+        ),
+        InstallResult(
+            tool=timed_out_tool,
+            outcome=InstallOutcome.TIMED_OUT,
+            message="Installation timed out (5 min)",
+            command="rustup component add clippy",
+            step=2,
+            total_steps=2,
+        ),
+    ]
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.plan",
+            return_value=plan,
+        ),
+        patch(
+            "lintro.tools.core.tool_installer.ToolInstaller.execute",
+            return_value=execute_results,
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor._fixable_results",
+            side_effect=lambda results: [
+                ToolCheckResult(tool=failed_tool, status=ToolStatus.MISSING),
+                ToolCheckResult(tool=timed_out_tool, status=ToolStatus.MISSING),
+            ],
+        ),
+    ):
+        result = runner.invoke(doctor_command, ["--fix"])
+
+    # The failure is non-retryable, so it is blocked from the follow-up fix.
+    assert_that(result.output).contains("previous attempt did not resolve it")
+    blocked_section = result.output.split("Needs manual action")[-1]
+    assert_that(blocked_section).contains("ruff")
+    # The timeout stays retryable and is still offered.
+    assert_that(result.output).contains("lintro install")
+    assert_that(result.output).does_not_contain(
+        "Re-running the same command will not help for: ruff, clippy",
+    )
+
+
+def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:
+    """After --fix, a tool whose command did not resolve it is not re-suggested."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.cli_utils.commands.doctor._run_fix",
+            return_value=["ruff"],
+        ) as mock_fix,
+    ):
+        result = runner.invoke(doctor_command, ["--fix"])
+
+    assert_that(mock_fix.call_count).is_equal_to(1)
+    # Suggested once before the fix attempt, and never again afterwards.
+    assert_that(result.output.count("Quick fix: lintro install ruff")).is_equal_to(1)
+    assert_that(result.output).contains("Needs manual action")
+    assert_that(result.output).contains("previous attempt did not resolve it")
+
+
+def test_doctor_quick_fix_lists_missing_tool_before_any_fix() -> None:
+    """Without --fix, an installable missing tool is offered as a quick fix."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with p1, p2, patch("shutil.which", return_value=None):
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.output).contains("Quick fix: lintro install ruff")
 
 
 def test_doctor_tools_filter_known_tool() -> None:
