@@ -27,9 +27,11 @@ SHELL_SCRIPT = REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ai-review.yml"
 PROJECT_CONFIG = REPO_ROOT / ".lintro-config.yaml"
 
-#: The guarded provider credential. The dogfood runs the ``cli`` transport, so
-#: the secret in scope is the ``claude`` CLI's OAuth token, never an API key.
+#: Guarded provider credentials. Anthropic dogfood uses the ``claude`` CLI
+#: OAuth token; Cursor dogfood uses ``CURSOR_API_KEY``.
 CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
+PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
 
 
 def _run_shell(
@@ -121,6 +123,51 @@ def test_shell_fails_visibly_without_oauth_token() -> None:
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
     assert_that(result.stderr).contains("nothing was reviewed")
+
+
+def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> None:
+    """Cursor overlay must not treat a Claude token as the Cursor credential.
+
+    ``LINTRO_AI_PROVIDER=cursor`` with only ``CLAUDE_CODE_OAUTH_TOKEN`` set is
+    how #2018's first dogfood run looked after the Actions variables flipped:
+    the wrapper would have proceeded, then crashed inside ``get_provider``.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            CURSOR_CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_accepts_cursor_key_without_claude_token() -> None:
+    """A Cursor key satisfies the guard even when the Claude token is absent.
+
+    The failure here must be the missing PR number (classifier, invoked), not
+    a missing-credential skip — otherwise flipping the provider variable would
+    still demand the Anthropic secret.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            CURSOR_CREDENTIAL_ENV: "dummy-cursor-key",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).contains("No PR number provided")
+    assert_that(result.stdout).does_not_contain("no provider credential")
 
 
 def test_shell_fails_visibly_without_pr_number() -> None:
@@ -262,9 +309,12 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         if isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/checkout@")
     ]
-    assert_that(checkout_steps).is_length(1)
+    workspace_checkouts = [
+        step for step in checkout_steps if not (step.get("with") or {}).get("path")
+    ]
+    assert_that(workspace_checkouts).is_length(1)
 
-    checkout = checkout_steps[0]
+    checkout = workspace_checkouts[0]
     assert_that(checkout).contains_key("with")
     # Structurally assert the checkout pins to the trusted base ref. A harmless
     # head-ref mention in a comment/log elsewhere in the file must not false-fail
@@ -274,23 +324,51 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     )
 
 
-def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """CLAUDE_CODE_OAUTH_TOKEN is injected only into the final review step env.
+def test_workflow_fetches_cursor_installer_from_workflow_commit() -> None:
+    """The Cursor installer is fetched from ``github.sha``, not the base tree.
 
-    The secret must not appear in workflow- or job-level env maps, nor in
+    GitHub runs this workflow YAML from the PR, but the workspace checkout is
+    the trusted base ref. A new ``install-cursor-agent.sh`` therefore is not on
+    disk unless it is fetched from the workflow commit into a side path. Pin
+    hashes still come from the base Dockerfile.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    installer_checkouts = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+        and (step.get("with") or {}).get("path") == ".ai-review-installer"
+    ]
+    assert_that(installer_checkouts).is_length(1)
+    checkout = installer_checkouts[0]["with"]
+    assert_that(checkout["ref"]).is_equal_to("${{ github.sha }}")
+    assert_that(checkout["persist-credentials"]).is_equal_to(False)
+    assert_that(checkout["sparse-checkout"]).contains(
+        "scripts/ci/install-cursor-agent.sh",
+    )
+    assert_that(checkout["sparse-checkout-cone-mode"]).is_equal_to(False)
+
+
+def test_workflow_secret_scoped_to_review_step_only() -> None:
+    """Provider credentials are injected only into the final review step env.
+
+    Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
-    paths never receive the token before the trusted base-ref install completes.
+    paths never receive a token before the trusted base-ref install completes.
     This is the ordering control audited in #1317.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
-    if workflow_env is not None:
-        assert_that(workflow_env).does_not_contain_key(CREDENTIAL_ENV)
-
     job_env = loaded["jobs"]["ai-review"].get("env")
-    if job_env is not None:
-        assert_that(job_env).does_not_contain_key(CREDENTIAL_ENV)
+    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        if workflow_env is not None:
+            assert_that(workflow_env).does_not_contain_key(credential_env)
+        if job_env is not None:
+            assert_that(job_env).does_not_contain_key(credential_env)
 
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -305,12 +383,17 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
         "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
     )
+    assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(
+        "${{ secrets.CURSOR_API_KEY }}",
+    )
     for step in steps:
         if step is review_step:
             continue
-        assert_that(step.get("env") or {}).described_as(
-            f"step {step.get('name')!r}",
-        ).does_not_contain_key(CREDENTIAL_ENV)
+        step_env = step.get("env") or {}
+        for credential_env in PROVIDER_CREDENTIAL_ENVS:
+            assert_that(step_env).described_as(
+                f"step {step.get('name')!r}",
+            ).does_not_contain_key(credential_env)
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
@@ -400,11 +483,12 @@ def test_workflow_forbids_bare_mode_for_the_cli_transport() -> None:
 
 
 def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
-    """The claude CLI version is resolved, not hard-coded in the workflow.
+    """Agent CLI versions are resolved, not hard-coded in the workflow.
 
     A second pin site would drift from ``docker/ai-tools.Dockerfile``, and the
     dogfood would then review with a CLI version the contract tests never
-    checked.
+    checked. Cursor's calendar build id is not semver, so it is resolved
+    without ``--exact``.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -414,15 +498,36 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     ]
     assert_that(resolve_steps).is_length(1)
     assert_that(resolve_steps[0]["id"]).is_equal_to("pins")
+    pin_run = resolve_steps[0]["run"]
+    assert_that(pin_run).contains("NODE_VERSION")
+    assert_that(pin_run).contains("CLAUDE_CODE_VERSION")
+    assert_that(pin_run).contains("--exact")
+    assert_that(pin_run).contains("CURSOR_AGENT_VERSION")
+    assert_that(pin_run).contains("CURSOR_AGENT_SHA256_X64")
 
-    install_steps = [
+    claude_install_steps = [
         step
         for step in steps
         if str(step.get("run", "")).strip() == "scripts/ci/install-claude-cli.sh"
     ]
-    assert_that(install_steps).is_length(1)
-    assert_that(install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
+    assert_that(claude_install_steps).is_length(1)
+    assert_that(claude_install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
         "${{ steps.pins.outputs.claude-code-version }}",
+    )
+
+    cursor_install_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).strip()
+        == ".ai-review-installer/scripts/ci/install-cursor-agent.sh"
+    ]
+    assert_that(cursor_install_steps).is_length(1)
+    cursor_env = cursor_install_steps[0]["env"]
+    assert_that(cursor_env["CURSOR_AGENT_VERSION"]).is_equal_to(
+        "${{ steps.pins.outputs.cursor-agent-version }}",
+    )
+    assert_that(cursor_env["CURSOR_AGENT_SHA256_X64"]).is_equal_to(
+        "${{ steps.pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
 
@@ -444,7 +549,14 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     assert_that(harden_steps).is_length(1)
 
     endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
-    assert_that(endpoints).contains("registry.npmjs.org:443", "nodejs.org:443")
+    assert_that(endpoints).contains(
+        "registry.npmjs.org:443",
+        "nodejs.org:443",
+        "downloads.cursor.com:443",
+        "api.cursor.com:443",
+        "*.cursor.sh:443",
+        "*.cursorapi.com:443",
+    )
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:

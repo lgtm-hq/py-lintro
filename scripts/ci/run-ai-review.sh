@@ -25,22 +25,21 @@ set -euo pipefail
 # re-implemented in shell.
 #
 # Default transport is `cli` (workflow fallback when LINTRO_AI_TRANSPORT is
-# unset), so the credential is CLAUDE_CODE_OAUTH_TOKEN — the `claude` binary's
-# OAuth session — not ANTHROPIC_API_KEY, whose account has no balance (#1894).
-# The missing-credential guard below checks that variable accordingly; checking
-# the API key would report "no credential" on a perfectly authenticated run,
-# and vice versa. Provider/model/transport overrides come from LINTRO_AI_*
-# env vars fed by repo Actions variables (#1971).
+# unset). The credential depends on LINTRO_AI_PROVIDER (#1971): anthropic uses
+# CLAUDE_CODE_OAUTH_TOKEN (the `claude` CLI OAuth session, not ANTHROPIC_API_KEY
+# whose account has no balance — #1894); cursor uses CURSOR_API_KEY. Checking
+# the wrong variable would report "no credential" on a perfectly authenticated
+# run, and vice versa.
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
-# invoking this script, so the lintro that runs with CLAUDE_CODE_OAUTH_TOKEN is
+# invoking this script, so the lintro that runs with the provider credential is
 # trusted code — never the PR head. The PR diff is fetched independently by
 # `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
 # as data and never executed with the token.
 #
 # Fork PRs never reach this script: the workflow's job guard requires the head
-# repo to be the base repo, so an empty CLAUDE_CODE_OAUTH_TOKEN means the secret
-# is genuinely missing — a visible failure, not a skip.
+# repo to be the base repo, so an empty credential means the secret is
+# genuinely missing — a visible failure, not a skip.
 #
 # Usage:
 #   PR_NUMBER=<n> CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
@@ -49,7 +48,10 @@ set -euo pipefail
 #
 # Environment:
 #   CLAUDE_CODE_OAUTH_TOKEN Claude Code OAuth token used by the `claude` CLI.
-#                           Empty => visible failure.
+#                           Required when LINTRO_AI_PROVIDER is anthropic
+#                           (the default). Empty => visible failure.
+#   CURSOR_API_KEY          Cursor CLI key. Required when LINTRO_AI_PROVIDER
+#                           is cursor. Empty => visible failure.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
@@ -98,7 +100,14 @@ report_not_invoked() {
 
 pr_number="${1:-${PR_NUMBER:-}}"
 
-if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+provider="${LINTRO_AI_PROVIDER:-anthropic}"
+provider="${provider,,}"
+if [[ "$provider" == "cursor" ]]; then
+	credential="${CURSOR_API_KEY:-}"
+else
+	credential="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+fi
+if [[ -z "$credential" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NO_CREDENTIAL_STATUS" \
 		--transport cli
