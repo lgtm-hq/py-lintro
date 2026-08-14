@@ -122,7 +122,7 @@ def test_check_prefers_local_astro_cmd_on_windows(
 
     with (
         patch(
-            "lintro.tools.definitions.astro_check.sys.platform",
+            "lintro.tools.core.command_builders.sys.platform",
             "win32",
         ),
         patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
@@ -152,7 +152,7 @@ def test_get_astro_command_passes_subprocess_validation_on_windows(
     local_cmd.write_text("@echo off\n")
 
     with patch(
-        "lintro.tools.definitions.astro_check.sys.platform",
+        "lintro.tools.core.command_builders.sys.platform",
         "win32",
     ):
         cmd = astro_check_plugin._get_astro_command(astro_project)
@@ -193,12 +193,14 @@ def test_check_windows_shell_shim_falls_back_to_global(
 
     with (
         patch(
-            "lintro.tools.definitions.astro_check.sys.platform",
+            "lintro.tools.core.command_builders.sys.platform",
             "win32",
         ),
         patch(
-            "lintro.tools.definitions.astro_check.shutil.which",
-            side_effect=lambda name: "/usr/bin/astro" if name == "astro" else None,
+            "lintro.tools.core.command_builders.shutil.which",
+            side_effect=lambda name, **_kw: (
+                "/usr/bin/astro" if name == "astro" else None
+            ),
         ),
         patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
     ):
@@ -229,8 +231,10 @@ def test_check_ignores_astro_directory_in_bin(
 
     with (
         patch(
-            "lintro.tools.definitions.astro_check.shutil.which",
-            side_effect=lambda name: "/usr/bin/astro" if name == "astro" else None,
+            "lintro.tools.core.command_builders.shutil.which",
+            side_effect=lambda name, **_kw: (
+                "/usr/bin/astro" if name == "astro" else None
+            ),
         ),
         patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
     ):
@@ -257,8 +261,10 @@ def test_check_falls_back_to_global_astro(
 
     with (
         patch(
-            "lintro.tools.definitions.astro_check.shutil.which",
-            side_effect=lambda name: "/usr/bin/astro" if name == "astro" else None,
+            "lintro.tools.core.command_builders.shutil.which",
+            side_effect=lambda name, **_kw: (
+                "/usr/bin/astro" if name == "astro" else None
+            ),
         ),
         patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
     ):

@@ -21,6 +21,11 @@ from loguru import logger
 # Package runners used as the last-resort registry fallback for Node tools.
 REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 
+# Runner flags that carry the package spec when it differs from the executable
+# name (``bunx --package typescript@6.0.3 tsc``). Both ``bunx`` and ``npx``
+# accept the short and long spelling.
+PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
+
 # Node runtime floors that a pinned npm tool imposes on the consumer once the
 # registry fallback (or a local install) is used. These come from the pinned
 # package's own ``engines`` field, which is not carried in lintro's manifest, so
@@ -64,6 +69,29 @@ def split_npm_spec(spec: str) -> tuple[str, str | None]:
     return spec[:separator], spec[separator + 1 :]
 
 
+def registry_fallback_spec(command: Sequence[str]) -> str | None:
+    """Extract the npm spec from a resolved registry-fallback command.
+
+    Handles both shapes the builder emits: ``[runner, spec]`` when the
+    executable and package share a name, and ``[runner, "--package", spec,
+    binary]`` when they differ.
+
+    Args:
+        command: Resolved command list, as returned by a command builder.
+
+    Returns:
+        The ``package@version`` spec, or None when *command* is not a registry
+        fallback.
+    """
+    if len(command) < 2 or command[0] not in REGISTRY_RUNNERS:
+        return None
+    if command[1] in PACKAGE_FLAGS:
+        # The --package shape is ``[runner, flag, spec, binary]``; anything
+        # shorter is a malformed command, not a fallback to report on.
+        return command[2] if len(command) >= 4 else None
+    return command[1]
+
+
 def is_registry_fallback_command(command: Sequence[str]) -> bool:
     """Report whether a resolved command is the ``bunx``/``npx`` fallback.
 
@@ -74,7 +102,7 @@ def is_registry_fallback_command(command: Sequence[str]) -> bool:
         True when the command invokes the tool through a package runner rather
         than a project-local or PATH install.
     """
-    return len(command) >= 2 and command[0] in REGISTRY_RUNNERS
+    return registry_fallback_spec(command) is not None
 
 
 def registry_fallback_install_hint(command: Sequence[str]) -> str:
@@ -87,8 +115,8 @@ def registry_fallback_install_hint(command: Sequence[str]) -> str:
         Multi-line guidance naming the pinned install commands and, when
         known, the Node runtime the pin requires.
     """
-    package, _version = split_npm_spec(command[1])
-    spec = command[1]
+    spec = registry_fallback_spec(command) or ""
+    package, _version = split_npm_spec(spec)
     lines = [
         f"Lintro prefers a project-local install of {package}. Add it to this "
         "project:",
@@ -101,6 +129,23 @@ def registry_fallback_install_hint(command: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def _format_fallback_command(command: Sequence[str]) -> str:
+    """Render a registry-fallback command for logs and user-facing hints.
+
+    Both builder shapes must round-trip: ``[runner, spec]`` when the
+    executable and package share a name, and ``[runner, "--package", spec,
+    binary]`` when they differ. Joining the resolved argv is the only
+    representation that stays accurate for both.
+
+    Args:
+        command: Resolved command list, as returned by a command builder.
+
+    Returns:
+        Space-joined command suitable for wrapping in backticks.
+    """
+    return " ".join(command)
+
+
 def registry_fallback_guidance(command: Sequence[str]) -> str:
     """Build the actionable message for a failed registry fallback.
 
@@ -111,10 +156,11 @@ def registry_fallback_guidance(command: Sequence[str]) -> str:
         Message explaining what failed and how to make the tool resolve
         locally instead.
     """
-    runner, spec = command[0], command[1]
+    spec = registry_fallback_spec(command) or ""
     package, _version = split_npm_spec(spec)
+    rendered = _format_fallback_command(command)
     return (
-        f"{package} could not be run via `{runner} {spec}`.\n"
+        f"{package} could not be run via `{rendered}`.\n"
         f"{registry_fallback_install_hint(command)}"
     )
 
@@ -128,14 +174,16 @@ def notify_registry_fallback_selected(command: Sequence[str]) -> None:
     Args:
         command: Resolved ``[runner, spec, ...]`` command list.
     """
-    if not is_registry_fallback_command(command):
+    spec = registry_fallback_spec(command)
+    if spec is None:
         return
-    package, _version = split_npm_spec(command[1])
+    package, _version = split_npm_spec(spec)
     if package in _FALLBACK_NOTICES_EMITTED:
         return
     _FALLBACK_NOTICES_EMITTED.add(package)
+    rendered = _format_fallback_command(command)
     logger.warning(
         f"No project-local or PATH install of {package} found; falling back to "
-        f"`{command[0]} {command[1]}`, which needs registry access.\n"
+        f"`{rendered}`, which needs registry access.\n"
         f"{registry_fallback_install_hint(command)}",
     )

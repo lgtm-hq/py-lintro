@@ -14,9 +14,7 @@ Example:
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -55,27 +53,6 @@ _ASTRO_CONFIG_NAMES: tuple[str, ...] = (
 ASTRO_CHECK_OPTION_TYPES: OptionSchema = {
     "root": (str, "string path"),
 }
-
-
-def _local_astro_binary(cwd: Path) -> Path | None:
-    """Return an executable project-local ``astro`` binary, if present.
-
-    On Windows, npm places a shell shim at ``.bin/astro`` that is not
-    executable with ``shell=False``; the ``astro.cmd`` wrapper is used instead.
-    Directories or other non-file paths are ignored.
-
-    Args:
-        cwd: Project root containing ``node_modules``.
-
-    Returns:
-        Path to the local binary, or ``None`` if none is runnable.
-    """
-    bin_dir = cwd / "node_modules" / ".bin"
-    if sys.platform == "win32":
-        cmd = bin_dir / "astro.cmd"
-        return cmd if cmd.is_file() else None
-    shim = bin_dir / "astro"
-    return shim if shim.is_file() else None
 
 
 @register_tool
@@ -131,11 +108,13 @@ class AstroCheckPlugin(BaseToolPlugin):
     def _get_astro_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command to run astro check.
 
-        Prefers the project-local ``node_modules/.bin/astro`` binary so the
-        command behaves like the project's pinned ``astro check`` and does not
-        trigger the global/`bunx` interactive "install @astrojs/check?" prompt
-        that hangs without a TTY. Falls back to a global ``astro``, then
-        ``bunx``/``npx``.
+        Delegates to the shared Node.js resolution chain (#1811), which keeps
+        the project-local ``node_modules/.bin/astro`` binary first — that is
+        what avoids the interactive "install @astrojs/check?" prompt that hangs
+        without a TTY — and adds two things the previous hand-rolled chain
+        lacked: the local search walks *up* from the execution directory rather
+        than probing only that one directory (#1727), and the ``bunx``/``npx``
+        fallback carries the pinned astro version instead of ``@latest``.
 
         Args:
             cwd: Project root used to locate the local astro binary.
@@ -143,23 +122,12 @@ class AstroCheckPlugin(BaseToolPlugin):
         Returns:
             Command arguments for astro check.
         """
-        # Prefer the project-local binary to avoid interactive install prompts
-        if cwd is not None:
-            local_astro = _local_astro_binary(cwd)
-            if local_astro is not None:
-                # POSIX path: backslashes in cmd[0] fail validate_subprocess_command
-                return [local_astro.as_posix(), "check"]
-        # Prefer direct executable if available
-        if shutil.which("astro"):
-            return ["astro", "check"]
-        # Try bunx (bun)
-        if shutil.which("bunx"):
-            return ["bunx", "astro", "check"]
-        # Try npx (npm)
-        if shutil.which("npx"):
-            return ["npx", "astro", "check"]
-        # Last resort
-        return ["astro", "check"]
+        # ``_get_executable_command`` returns a POSIX path for a local binary:
+        # backslashes in cmd[0] fail validate_subprocess_command.
+        return [
+            *self._get_executable_command(tool_name="astro-check", cwd=cwd),
+            "check",
+        ]
 
     def _find_astro_config(self, cwd: Path) -> Path | None:
         """Find astro config file by walking up from *cwd*.

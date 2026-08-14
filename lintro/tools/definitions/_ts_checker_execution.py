@@ -413,6 +413,7 @@ def _check_multi_project(
                 ),
                 project_path=project_path,
                 options=options,
+                cwd=Path(project_dir),
             )
 
             try:
@@ -489,6 +490,7 @@ def _run_and_parse(
         files=ctx.rel_files if not project_path else [],
         project_path=project_path,
         options=options,
+        cwd=Path(ctx.cwd) if ctx.cwd else None,
     )
     logger.debug(
         "[{}] Running with cwd={} and cmd={}",

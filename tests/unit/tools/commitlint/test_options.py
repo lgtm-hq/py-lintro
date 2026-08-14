@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
@@ -35,4 +37,5 @@ def test_command_prefers_direct_binary(
 ) -> None:
     """The command builder returns a commitlint invocation prefix."""
     cmd = commitlint_plugin._get_commitlint_command()
-    assert_that(cmd[-1]).is_equal_to("commitlint")
+    # May be a project-local path, a PATH binary, or a pinned runner spec.
+    assert_that(Path(cmd[-1]).stem).is_equal_to("commitlint")

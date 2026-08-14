@@ -291,7 +291,10 @@ class OxlintPlugin(BaseToolPlugin):
         logger.debug(f"[OxlintPlugin] Working directory: {ctx.cwd}")
 
         # Build Oxlint command with JSON format
-        cmd: list[str] = self._get_executable_command(tool_name="oxlint") + [
+        cmd: list[str] = self._get_executable_command(
+            tool_name="oxlint",
+            cwd=ctx.cwd,
+        ) + [
             "--format",
             "json",
         ]
@@ -373,7 +376,10 @@ class OxlintPlugin(BaseToolPlugin):
         oxlint_args = self._build_oxlint_args(merged_options)
 
         # Build check command for counting issues
-        check_cmd: list[str] = self._get_executable_command(tool_name="oxlint") + [
+        check_cmd: list[str] = self._get_executable_command(
+            tool_name="oxlint",
+            cwd=ctx.cwd,
+        ) + [
             "--format",
             "json",
         ]
@@ -407,7 +413,10 @@ class OxlintPlugin(BaseToolPlugin):
         initial_count: int = len(initial_issues)
 
         # Now fix the issues
-        fix_cmd: list[str] = self._get_executable_command(tool_name="oxlint") + [
+        fix_cmd: list[str] = self._get_executable_command(
+            tool_name="oxlint",
+            cwd=ctx.cwd,
+        ) + [
             "--fix",
         ]
         if config_args:

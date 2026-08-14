@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,31 +10,6 @@ from lintro.utils.tsconfig import create_temp_tsconfig
 
 if TYPE_CHECKING:
     from lintro.tools.definitions._ts_checker_base import TypeScriptCheckerPlugin
-
-
-def _resolve_binary_command(binary: str) -> list[str]:
-    """Resolve the command used to invoke a TypeScript checker binary.
-
-    Prefers the direct executable, then ``bunx``, then ``npx``, and
-    finally falls back to the bare binary name in the hope it is on PATH.
-
-    Args:
-        binary: Name of the checker executable (e.g. ``"tsc"``).
-
-    Returns:
-        Command argument list for the checker.
-    """
-    # Prefer direct executable if available
-    if shutil.which(binary):
-        return [binary]
-    # Try bunx (bun)
-    if shutil.which("bunx"):
-        return ["bunx", binary]
-    # Try npx (npm)
-    if shutil.which("npx"):
-        return ["npx", binary]
-    # Last resort - hope the binary is in PATH
-    return [binary]
 
 
 def _find_tsconfig(plugin: TypeScriptCheckerPlugin, cwd: Path) -> Path | None:
@@ -134,6 +108,7 @@ def _build_command(
     files: list[str],
     project_path: str | Path | None = None,
     options: dict[str, object] | None = None,
+    cwd: Path | None = None,
 ) -> list[str]:
     """Build the checker invocation command.
 
@@ -142,6 +117,8 @@ def _build_command(
         files: Relative file paths (used only when no project config).
         project_path: Path to tsconfig.json to use (temp or user-specified).
         options: Options dict to use for flags. Defaults to plugin.options.
+        cwd: Directory the checker will run in, used to resolve a
+            project-local install (#1727).
 
     Returns:
         A list of command arguments ready to be executed.
@@ -149,7 +126,7 @@ def _build_command(
     if options is None:
         options = plugin.options
 
-    cmd: list[str] = list(plugin._command_prefix())
+    cmd: list[str] = list(plugin._command_prefix(cwd=cwd))
 
     # Core flags for linting (no output, machine-readable format)
     cmd.extend(["--noEmit", "--pretty", "false"])
