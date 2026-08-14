@@ -211,10 +211,10 @@ jobs:
 
       - name: Enable Cursor workspace trust
         # `agent` exits 1 in non-interactive CI until the workspace is trusted.
-        # lintro maps that to `--trust` via `ai.cursor_trust_workspace`; there
-        # is no env overlay, and the committed YAML stays false for local
-        # checkouts. Safe here: checkout is pull_request.base.sha and fork PRs
-        # never reach this job.
+        # #2023 defaults `ai.cursor_trust_workspace` to true; this step stays
+        # until that default is on main and #2025 deletes the patcher. Safe
+        # here: checkout is pull_request.base.sha and fork PRs never reach
+        # this job.
         run: python3 .ai-review-installer/scripts/ci/enable_cursor_workspace_trust.py
 
       - name: Run AI review (posts comment; fails when nothing was reviewed)
