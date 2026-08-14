@@ -151,7 +151,7 @@ Arguments (all optional):
 | `strictness`   | `string`   | `review.strictness` | `focused`, `balanced`, or `thorough`                     |
 | `with_lint`    | `boolean`  | `false`             | Include a lint digest of the changed files in the prompt |
 | `paths`        | `string[]` | the whole diff      | Limit the review to these path prefixes                  |
-| `max_cost_usd` | `number`   | effective `ai.max_cost_usd` | Spend ceiling for this call; can only lower the effective cap |
+| `max_cost_usd` | `number`   | effective cap       | Spend ceiling; can only lower the effective cap          |
 
 ```json
 {
@@ -195,9 +195,9 @@ Arguments (all optional):
 
 Cost control:
 
-- The effective `ai.max_cost_usd` (after `LINTRO_AI_MAX_COST_USD` / CLI overlay and
-  the active transport profile) is the ceiling. `max_cost_usd` can only **lower** it;
-  a larger value is clamped to the effective one and reported as `budget.clamped: true`.
+- The effective `ai.max_cost_usd` (after `LINTRO_AI_MAX_COST_USD` / CLI overlay and the
+  active transport profile) is the ceiling. `max_cost_usd` can only **lower** it; a
+  larger value is clamped to the effective one and reported as `budget.clamped: true`.
   If the operator sets no ceiling, the argument becomes the ceiling — set
   `ai.max_cost_usd` (or overlay it) if agents must never spend more than a fixed amount.
 - When the ceiling stops a run **after** some chunks were reviewed, the call succeeds
