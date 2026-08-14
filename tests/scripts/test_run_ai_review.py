@@ -70,13 +70,13 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
 
     ``ai.review: true`` is committed so enabling the master switch does not
     rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
-    spend ceiling with no overlay.
+    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in #1971).
     """
     loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
     ai_section = loaded["ai"]
     assert_that(ai_section["enabled"]).is_false()
     assert_that(ai_section["review"]).is_true()
-    assert_that(ai_section["max_cost_usd"]).is_equal_to(0.50)
+    assert_that(ai_section["max_cost_usd"]).is_equal_to(2.00)
 
 
 def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
@@ -145,6 +145,47 @@ def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> Non
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_lowercases_provider_without_bash4_syntax() -> None:
+    """Provider matching must work on bash 3.2 (no ``${var,,}``)."""
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).does_not_contain("${provider,,}")
+    assert_that(shell_text).contains("tr '[:upper:]' '[:lower:]'")
+
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            CURSOR_CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "CURSOR",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_no_credential_path_respects_transport_overlay() -> None:
+    """A missing credential must classify against ``LINTRO_AI_TRANSPORT``.
+
+    Hardcoding ``--transport cli`` on the no-credential path mislabels an
+    ``api`` overlay as a CLI OAuth failure (#2025).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            "LINTRO_AI_TRANSPORT": "API",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("[api]")
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("[cli]")
 
 
 def test_shell_accepts_cursor_key_without_claude_token() -> None:
@@ -299,6 +340,14 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     SHA so PR-controlled code never executes with the provider credential in
     scope. The PR itself is still reviewed via ``gh`` (diff fetched over the
     API), independent of the checked-out tree.
+
+    Strict trust boundary (#2025): this job may have exactly one
+    ``actions/checkout``. A second checkout with any ``path:`` (the #2018
+    ``.ai-review-installer`` side-checkout of ``github.sha``) executes
+    PR-authored code on the credential-holding job. Two-PR bootstrap:
+    new CI scripts land inert in PR 1; the workflow step that invokes them
+    lands in PR 2 after PR 1 is on main. Never land a new script and its
+    first workflow invocation in the same PR.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -309,75 +358,37 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         if isinstance(step.get("uses"), str)
         and step["uses"].startswith("actions/checkout@")
     ]
-    workspace_checkouts = [
-        step for step in checkout_steps if not (step.get("with") or {}).get("path")
-    ]
-    assert_that(workspace_checkouts).is_length(1)
+    assert_that(checkout_steps).is_length(1)
 
-    checkout = workspace_checkouts[0]
+    checkout = checkout_steps[0]
     assert_that(checkout).contains_key("with")
+    assert_that(checkout["with"]).does_not_contain_key("path")
     # Structurally assert the checkout pins to the trusted base ref. A harmless
     # head-ref mention in a comment/log elsewhere in the file must not false-fail
     # this, so we assert on the parsed step rather than banning text file-wide.
     assert_that(checkout["with"]["ref"]).is_equal_to(
         "${{ github.event.pull_request.base.sha }}",
     )
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert_that(workflow_text).contains("TWO-PR BOOTSTRAP")
+    assert_that(workflow_text).does_not_contain(".ai-review-installer")
+    assert_that(workflow_text).does_not_contain("enable_cursor_workspace_trust")
 
 
-def test_workflow_fetches_cursor_installer_from_workflow_commit() -> None:
-    """The Cursor installer is fetched from ``github.sha``, not the base tree.
-
-    GitHub runs this workflow YAML from the PR, but the workspace checkout is
-    the trusted base ref. A new ``install-cursor-agent.sh`` therefore is not on
-    disk unless it is fetched from the workflow commit into a side path. Pin
-    hashes still come from the base Dockerfile.
-    """
-    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-
-    steps = loaded["jobs"]["ai-review"]["steps"]
-    installer_checkouts = [
-        step
-        for step in steps
-        if isinstance(step.get("uses"), str)
-        and step["uses"].startswith("actions/checkout@")
-        and (step.get("with") or {}).get("path") == ".ai-review-installer"
+def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
+    """#2023 defaults ``ai.cursor_trust_workspace``; the CI patcher is gone."""
+    assert_that(
+        (REPO_ROOT / "scripts" / "ci" / "enable_cursor_workspace_trust.py").exists(),
+    ).is_false()
+    names = [
+        str(step.get("name", ""))
+        for step in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+            "ai-review"
+        ]["steps"]
     ]
-    assert_that(installer_checkouts).is_length(1)
-    checkout = installer_checkouts[0]["with"]
-    assert_that(checkout["ref"]).is_equal_to("${{ github.sha }}")
-    assert_that(checkout["persist-credentials"]).is_equal_to(False)
-    assert_that(checkout["sparse-checkout"]).contains(
-        "scripts/ci/install-cursor-agent.sh",
-    )
-    assert_that(checkout["sparse-checkout"]).contains(
-        "scripts/ci/enable_cursor_workspace_trust.py",
-    )
-    assert_that(checkout["sparse-checkout-cone-mode"]).is_equal_to(False)
-
-
-def test_workflow_enables_cursor_workspace_trust_before_review() -> None:
-    """CI opts into ``--trust`` on the ephemeral checkout, not in git.
-
-    The Cursor ``agent`` CLI will not start non-interactively without it.
-    Assert the step runs the side-checkout copy (base tree may not have the
-    script yet) and sits before the review step that holds the credential.
-    """
-    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = loaded["jobs"]["ai-review"]["steps"]
-    names = [str(step.get("name", "")) for step in steps]
-    trust_steps = [
-        step
-        for step in steps
-        if str(step.get("run", "")).endswith(
-            "enable_cursor_workspace_trust.py",
-        )
-    ]
-    assert_that(trust_steps).is_length(1)
-    assert_that(trust_steps[0]["run"]).is_equal_to(
-        "python3 .ai-review-installer/scripts/ci/enable_cursor_workspace_trust.py",
-    )
-    assert_that(names.index("Enable Cursor workspace trust")).is_less_than(
-        names.index("Run AI review (posts comment; fails when nothing was reviewed)"),
+    assert_that(names).does_not_contain("Enable Cursor workspace trust")
+    assert_that(names).does_not_contain(
+        "Checkout cursor-agent installer (matches this workflow)",
     )
 
 
@@ -525,14 +536,24 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     resolve_steps = [
         step for step in steps if "ai_tools_arg_pin.py" in str(step.get("run", ""))
     ]
-    assert_that(resolve_steps).is_length(1)
-    assert_that(resolve_steps[0]["id"]).is_equal_to("pins")
-    pin_run = resolve_steps[0]["run"]
+    assert_that(resolve_steps).is_length(2)
+
+    claude_pins = next(step for step in resolve_steps if step.get("id") == "pins")
+    pin_run = claude_pins["run"]
     assert_that(pin_run).contains("NODE_VERSION")
     assert_that(pin_run).contains("CLAUDE_CODE_VERSION")
     assert_that(pin_run).contains("--exact")
-    assert_that(pin_run).contains("CURSOR_AGENT_VERSION")
-    assert_that(pin_run).contains("CURSOR_AGENT_SHA256_X64")
+    assert_that(pin_run).does_not_contain("CURSOR_AGENT_VERSION")
+
+    cursor_pins = next(
+        step for step in resolve_steps if step.get("id") == "cursor-pins"
+    )
+    assert_that(cursor_pins["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}",
+    )
+    assert_that(cursor_pins["run"]).contains("CURSOR_AGENT_VERSION")
+    assert_that(cursor_pins["run"]).contains("CURSOR_AGENT_SHA256_X64")
+    assert_that(cursor_pins["run"]).does_not_contain("--exact")
 
     claude_install_steps = [
         step
@@ -547,16 +568,19 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     cursor_install_steps = [
         step
         for step in steps
-        if str(step.get("run", "")).strip()
-        == ".ai-review-installer/scripts/ci/install-cursor-agent.sh"
+        if str(step.get("run", "")).strip() == "scripts/ci/install-cursor-agent.sh"
     ]
     assert_that(cursor_install_steps).is_length(1)
-    cursor_env = cursor_install_steps[0]["env"]
+    cursor_install = cursor_install_steps[0]
+    assert_that(cursor_install["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}",
+    )
+    cursor_env = cursor_install["env"]
     assert_that(cursor_env["CURSOR_AGENT_VERSION"]).is_equal_to(
-        "${{ steps.pins.outputs.cursor-agent-version }}",
+        "${{ steps.cursor-pins.outputs.cursor-agent-version }}",
     )
     assert_that(cursor_env["CURSOR_AGENT_SHA256_X64"]).is_equal_to(
-        "${{ steps.pins.outputs.cursor-agent-sha256-x64 }}",
+        "${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
 
@@ -582,10 +606,19 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "registry.npmjs.org:443",
         "nodejs.org:443",
         "downloads.cursor.com:443",
+        "api2.cursor.sh:443",
+        "api3.cursor.sh:443",
+        "agentn.global.api5.cursor.sh:443",
+        "repo42.cursor.sh:443",
+        "release-assets.githubusercontent.com:443",
+    )
+    assert_that(endpoints).does_not_contain(
         "api.cursor.com:443",
         "*.cursor.sh:443",
         "*.cursorapi.com:443",
     )
+    for endpoint in endpoints:
+        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:

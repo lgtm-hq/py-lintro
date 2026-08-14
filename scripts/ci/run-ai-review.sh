@@ -93,15 +93,16 @@ NOT_INVOKED_STATUS=-2
 report_not_invoked() {
 	python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NOT_INVOKED_STATUS" \
-		--transport cli \
+		--transport "$transport" \
 		--reason "$1"
 	exit 1
 }
 
 pr_number="${1:-${PR_NUMBER:-}}"
 
-provider="${LINTRO_AI_PROVIDER:-anthropic}"
-provider="${provider,,}"
+# bash-3.2-safe (macOS system bash): `${var,,}` is bash 4+ only (#2025).
+provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
+transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
 if [[ "$provider" == "cursor" ]]; then
 	credential="${CURSOR_API_KEY:-}"
 else
@@ -110,7 +111,7 @@ fi
 if [[ -z "$credential" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NO_CREDENTIAL_STATUS" \
-		--transport cli
+		--transport "$transport"
 fi
 
 if [[ -z "$pr_number" ]]; then
@@ -159,5 +160,5 @@ cat "$output_file"
 # and job summary either way. --transport names the failure vocabulary (#1923).
 python3 "${script_dir}/classify_review_outcome.py" \
 	--status "$review_status" \
-	--transport cli \
+	--transport "$transport" \
 	--output-file "$output_file"

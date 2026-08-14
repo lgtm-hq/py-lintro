@@ -117,7 +117,7 @@ tools:
 ai:
   enabled: false
   review: true
-  max_cost_usd: 0.50
+  max_cost_usd: 2.00
   provider: anthropic
   # model: claude-sonnet-4-20250514  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
