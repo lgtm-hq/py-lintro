@@ -3,13 +3,15 @@
 
 ``lintro review`` with ``LINTRO_AI_PROVIDER=cursor`` shells out to ``agent``,
 which refuses to start in a non-interactive runner until the workspace is
-trusted (``--trust``, ``--yolo``, or ``-f``). lintro's opt-in for that flag is
-``ai.cursor_trust_workspace``; there is no env or CLI overlay for it (#1970).
+trusted (``--trust``, ``--yolo``, or ``-f``). lintro maps that to
+``ai.cursor_trust_workspace``, which defaults to True as of #2023 (trust
+follows from choosing ``provider: cursor``; set ``false`` to restore the
+interactive prompt). There is still no env or CLI overlay for the field.
 
-The dogfood job checks out the PR's trusted BASE ref and never runs for fork
-PRs, so this is the case the flag exists for. The committed
-``.lintro-config.yaml`` stays ``false`` so a local checkout does not silently
-grant workspace trust.
+This patcher remains until #2025 deletes it. It is idempotent when the
+ephemeral checkout already has ``cursor_trust_workspace: true``. The
+dogfood job checks out the PR's trusted BASE ref and never runs for fork
+PRs.
 
 Stdlib only: this runs on the runner before ``uv sync``.
 
