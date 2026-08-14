@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.116.0] - 2026-08-14
+
+### Added
+
+- **ai**: grant cursor workspace trust by default (#2030) (a2b2898)
+
+### Changed
+
+- **build**: derive builtin index via AST and smoke-test JSON output (#2032) (706bd52)
+
 ## [0.115.4] - 2026-08-14
 
 ### Fixed
