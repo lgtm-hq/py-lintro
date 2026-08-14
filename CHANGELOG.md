@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.116.1] - 2026-08-14
+
+### Fixed
+
+- **install**: verify local-first discoverability and version progress (#2031) (ae30403)
+
 ## [0.116.0] - 2026-08-14
 
 ### Added
