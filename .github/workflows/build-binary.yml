@@ -473,7 +473,10 @@ jobs:
     name: Create Universal Binary
     needs: [get-release-info, build-macos]
     runs-on: macos-latest
-    timeout-minutes: 10
+    # download/lipo/upload (~10 min) + 20 min smoke + 5 min headroom.
+    # The smoke step's 20-minute budget must not sit inside the previous
+    # 10-minute job deadline or the parent would cancel a valid smoke test.
+    timeout-minutes: 35
     permissions:
       contents: write
     if: inputs.arch == 'universal'
@@ -491,13 +494,17 @@ jobs:
             objects.githubusercontent.com:443
             uploads.github.com:443
 
-      # Needed for scripts/build/create_universal.sh. The codeload /
+      # Needed for scripts/build/create_universal.sh and the binary smoke
+      # test (scripts/ci/smoke-test-binary.py reads the generated builtin
+      # index under lintro/plugins). The codeload /
       # objects.githubusercontent.com endpoints above are what actions/checkout
       # fetches through, and match the other sparse-checkout jobs here.
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            lintro/plugins
           persist-credentials: false
 
       - name: Download arm64 binary
@@ -518,6 +525,16 @@ jobs:
           binaries/lintro-macos-arm64
           binaries/lintro-macos-x86_64
           binaries/lintro-macos-universal
+
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. Lipo can also produce a binary that will not launch, so
+      # the post-lipo artifact is smoke-tested independently of the per-arch
+      # inputs.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py binaries/lintro-macos-universal
 
       - name: Upload universal artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
