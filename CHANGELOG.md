@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.115.3] - 2026-08-14
+
+### Changed
+
+- **ci**: extract inline shell from build-binary.yml into dedicated scripts (#1439)
+  (4ddc701)
+
+### Fixed
+
+- **build**: discover builtin tools from a compiled module index (#2009) (4a8aea1)
+
 ## [0.115.2] - 2026-08-14
 
 ### Fixed
