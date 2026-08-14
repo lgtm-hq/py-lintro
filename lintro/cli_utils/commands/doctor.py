@@ -858,9 +858,11 @@ def _render_quick_fix(
         results: Production tool check results.
         context: Detected runtime context.
         known_invalid: Tool names whose prior action in this process was a
-            non-success (failed, undiscoverable, still outdated, timed out,
-            or blocked). Per-process only: a non-success remedy is never
-            re-suggested within one run; a fresh run gets one fresh attempt.
+            non-success that is not worth retrying unchanged (failed,
+            undiscoverable, still outdated, or blocked). Timeouts are
+            retryable and are not included. Per-process only: a non-success
+            remedy is never re-suggested within one run; a fresh run gets
+            one fresh attempt.
     """
     quick_fix = build_quick_fix(
         [

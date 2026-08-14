@@ -190,6 +190,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
         )
 
     main_cmd = command[0]
+    tool_path: str | None
     if Path(main_cmd).is_absolute():
         tool_path = main_cmd
     else:
