@@ -51,6 +51,12 @@ class ReviewMetadata:
             legacy records.
         transport_source (str): Provenance of ``transport`` (#1970). Empty
             on legacy records.
+        max_cost_usd (float | None): Effective ``ai.max_cost_usd`` ceiling
+            for this run. ``None`` means uncapped (#2024). Unset on
+            legacy records (same default, so they must not be labeled
+            uncapped without ``max_cost_usd_source``).
+        max_cost_usd_source (str): Provenance of ``max_cost_usd`` (#2024).
+            Empty on legacy records.
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
@@ -91,6 +97,8 @@ class ReviewMetadata:
     provider_source: str = ""
     model_source: str = ""
     transport_source: str = ""
+    max_cost_usd: float | None = None
+    max_cost_usd_source: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from lintro.ai.resolved_ai_config import format_sourced_value
+from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.agent_prompts import render_finding_prompt_panel
 from lintro.ai.review.checklist_display import (
     cleared_answers,
@@ -204,6 +204,14 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
             + format_sourced_value(
                 f"`{sanitize_comment_text(metadata.transport or 'unset', limit=40)}`",
                 metadata.transport_source or None,
+            ),
+        )
+    if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
+        parts.append(
+            "**Max cost:** "
+            + format_max_cost_label(
+                max_cost_usd=metadata.max_cost_usd,
+                source=metadata.max_cost_usd_source or None,
             ),
         )
     parts.extend(
