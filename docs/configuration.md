@@ -891,16 +891,18 @@ Rationale:
 `prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
 1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
-   checked — the target project's own install, not Lintro's. This is the preferred
-   answer: it is lockfile-pinned, offline, and it is the same binary your editor and
-   your own `npm run` scripts use.
-2. **`<binary>` on `PATH`** — a global install (`bun add -g`, `npm install -g`) or a
-   Homebrew formula.
-3. **`bunx <package>@<pinned>` / `npx <package>@<pinned>`** — a registry fetch at the
-   version Lintro pins in its manifest. `bunx` is tried first, then `npx`. When the
-   executable name differs from the package name (`tsc` lives in `typescript`,
-   `commitlint` in `@commitlint/cli`), the runner is invoked as
-   `bunx --package typescript@<pinned> tsc`.
+   checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
+   package with its own `package.json` stops there; a decoy `node_modules` above that
+   boundary is ignored. This is the preferred answer: it is lockfile-pinned, offline,
+   and it is the same binary your editor and your own `npm run` scripts use.
+2. **the `PATH`-resolved absolute path of `<binary>`** — a global install (`bun add -g`,
+   `npm install -g`) or a Homebrew formula.
+3. **`bunx <package>@<pinned>` / `npx --yes --package <package>@<pinned> <binary>`** — a
+   registry fetch at the version Lintro pins in its manifest. `bunx` is tried first,
+   then `npx`. `bunx` keeps the short form when the executable name matches the package
+   name (`bunx prettier@<pinned>`); it uses `--package` when they differ
+   (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
+   cannot hang waiting for a TTY prompt.
 4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
 `@latest` is never resolved at runtime, for any tool. Branch 3 emits a one-time warning
@@ -1864,10 +1866,11 @@ does every other Node.js tool; see [Node.js Tool Resolution](#nodejs-tool-resolu
 **Executable resolution order:**
 
 1. `node_modules/.bin/html-validate`, searched upward from the directory being checked
-   (the target project's own install, not Lintro's).
-2. `html-validate` on `PATH` (e.g. a global install).
+   until the nearest `package.json` or `.git`.
+2. the `PATH`-resolved absolute path of `html-validate` (e.g. a global install).
 3. `bunx html-validate@<pinned>` — registry fallback, only if `bunx` is available.
-4. `npx html-validate@<pinned>` — registry fallback, only if `npx` is available.
+4. `npx --yes --package html-validate@<pinned> html-validate` — registry fallback, only
+   if `npx` is available.
 5. bare `html-validate` (fails if nothing is installed).
 
 `<pinned>` is the version Lintro pins in its manifest; `@latest` is never resolved at

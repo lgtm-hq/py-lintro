@@ -26,7 +26,6 @@ from lintro.tools.core.command_builders import (
 )
 from lintro.tools.core.node_fallback import (
     NODE_ENGINE_REQUIREMENTS,
-    PACKAGE_FLAGS,
     is_registry_fallback_command,
     notify_registry_fallback_selected,
     registry_fallback_guidance,
@@ -1283,12 +1282,6 @@ def test_is_registry_fallback_command_detects_package_runners() -> None:
     assert_that(is_registry_fallback_command(["/local/html-validate"])).is_false()
     assert_that(is_registry_fallback_command(["html-validate"])).is_false()
     assert_that(is_registry_fallback_command(["bunx"])).is_false()
-
-
-def test_yes_is_not_a_package_flag() -> None:
-    """``--yes`` is a runner flag, not a package selector."""
-    assert_that(PACKAGE_FLAGS).does_not_contain("--yes")
-    assert_that(PACKAGE_FLAGS).does_not_contain("-y")
 
 
 def test_registry_fallback_spec_round_trips_npx_yes_package_shape() -> None:

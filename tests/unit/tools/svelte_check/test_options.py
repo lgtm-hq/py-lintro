@@ -230,6 +230,7 @@ def test_build_command_basic(
     # First element is the PATH/runner-resolved svelte-check binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
     assert_that(Path(cmd[0]).name).is_in("svelte-check", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
     # The svelte-check package must be named somewhere in the command
     assert_that(" ".join(cmd)).contains("svelte-check")
 

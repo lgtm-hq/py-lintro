@@ -241,6 +241,7 @@ def test_build_command_basic(
     # First element is the PATH/runner-resolved vue-tsc binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
     assert_that(Path(cmd[0]).name).is_in("vue-tsc", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
 
 
 def test_build_command_with_project(vue_tsc_plugin: VueTscPlugin) -> None:
