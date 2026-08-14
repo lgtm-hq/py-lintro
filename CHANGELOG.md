@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.116.2] - 2026-08-14
+
+### Changed
+
+- **ai**: remove PR-head side-checkout and re-tighten the ai-review trust boundary
+  (#2036) (ccb2fe5)
+
+### Fixed
+
+- **tools**: make npx fallback non-interactive and bound `node_modules` walk (#2034)
+  (8139a7b)
+
 ## [0.116.1] - 2026-08-14
 
 ### Fixed
