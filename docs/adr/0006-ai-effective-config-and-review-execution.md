@@ -79,8 +79,9 @@ Contract invariants:
   and advisory tools without reparsing the raw `ai:` mapping.
 - CLI and env overlays may raise or lift `ai.max_cost_usd` (`LINTRO_AI_MAX_COST_USD` /
   `lintro review --max-cost-usd`; literal `0` = uncapped, mapped to `None`) (#2024).
-  MCP's per-call `max_cost_usd` argument remains a monotonic clamp: it may lower the
-  effective ceiling, never raise it.
+  Overlays beat transport profile caps as well as the legacy scalar; YAML `0` remains
+  a $0 cap. MCP's per-call `max_cost_usd` argument remains a monotonic clamp: it may
+  lower the effective ceiling, never raise it.
 
 Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
 `ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies

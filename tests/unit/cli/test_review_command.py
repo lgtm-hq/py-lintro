@@ -86,6 +86,94 @@ def test_review_invalid_provider_env_exits_two(
     assert_that(result.output).does_not_contain("Traceback")
 
 
+def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
+    """Non-numeric ``--max-cost-usd`` uses the overlay error, not Click's float."""
+    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "plenty"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("--max-cost-usd='plenty'")
+    assert_that(result.output).contains("0 for uncapped")
+    assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_review_max_cost_flag_beats_transport_profile() -> None:
+    """``--max-cost-usd 0`` lifts a YAML transport-profile cap (#2024)."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai={
+            "enabled": True,
+            "review": True,
+            "transport": "cli",
+            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+        },
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "0"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    provider_config = mock_get_provider.call_args.args[0]
+    assert_that(provider_config.max_cost_usd).is_none()
+    rendered = mock_render.call_args.kwargs["result"]
+    assert_that(rendered.metadata.max_cost_usd).is_none()
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
+
+
 def test_review_alias_rev_works() -> None:
     """Alias rev resolves to the review command help."""
     runner = CliRunner()
@@ -387,7 +475,12 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai={
+            "enabled": True,
+            "review": True,
+            "provider": "anthropic",
+            "transport": "api",
+        },
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -444,7 +537,7 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
     assert_that(rendered.metadata.provider_source).is_equal_to("config")
     assert_that(rendered.metadata.transport_source).is_equal_to("config")
     assert_that(rendered.metadata.max_cost_usd).is_none()
-    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("config")
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("default")
 
 
 def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:

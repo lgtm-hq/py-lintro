@@ -139,7 +139,10 @@ def apply_cli_overrides(
     Flags beat env vars. Omitted flags leave the corresponding field
     untouched. There is no ``--enabled`` flag. Literal ``0`` for
     ``--max-cost-usd`` means uncapped (mapped to ``None`` before overlay
-    so Pydantic cannot treat it as a $0 cap).
+    so Pydantic cannot treat it as a $0 cap). Overlaying ``max_cost_usd``
+    also stamps both transport-profile cost fields so
+    ``apply_resolved_transport`` cannot clobber flag/env with a YAML
+    profile cap (#2024).
 
     Args:
         resolved: Config + provenance after the env layer.
@@ -280,11 +283,38 @@ def _apply_overlay(
     try:
         payload = config.model_dump()
         payload.update(update)
+        if "max_cost_usd" in overlay:
+            _stamp_overlay_cost_on_profiles(
+                payload,
+                overlay["max_cost_usd"],
+            )
         return AIConfig.model_validate(payload)
     except ValidationError as exc:
         raise AIConfigOverrideError(
             _describe_validation_error(exc=exc, overlay=overlay, names=names),
         ) from exc
+
+
+def _stamp_overlay_cost_on_profiles(
+    payload: dict[str, Any],
+    max_cost_usd: float | None,
+) -> None:
+    """Write an overlay cost cap onto both transport profiles.
+
+    ``resolve_transport_settings`` prefers profile caps over the legacy
+    scalar. Flag/env overlays must beat those YAML profile fields (#2024),
+    matching how ``--timeout`` stamps the active profile.
+
+    Args:
+        payload: ``model_dump()`` of the config being overlaid.
+        max_cost_usd: Overlay ceiling, or None when uncapped.
+    """
+    transports = dict(payload.get("transports") or {})
+    api = dict(transports.get("api") or {})
+    cli = dict(transports.get("cli") or {})
+    api["max_cost_usd"] = max_cost_usd
+    cli["max_cost_usd_advisory"] = max_cost_usd
+    payload["transports"] = {**transports, "api": api, "cli": cli}
 
 
 def _describe_validation_error(

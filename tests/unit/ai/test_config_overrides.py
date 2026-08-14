@@ -15,7 +15,7 @@ from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.github_render import format_run_mechanics
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.transport import apply_cli_overrides
+from lintro.ai.transport import apply_cli_overrides, apply_resolved_transport
 from lintro.config.lintro_config import LintroConfig
 
 
@@ -236,6 +236,65 @@ def test_max_cost_usd_zero_is_uncapped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert_that(from_flag.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
 
 
+def test_yaml_zero_is_a_zero_dollar_cap_not_uncapped() -> None:
+    """Committed YAML ``0`` is a $0 cap; only overlay ``0`` is uncapped (#2024)."""
+    resolved = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0))
+
+    assert_that(resolved.config.max_cost_usd).is_equal_to(0.0)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.CONFIG)
+
+
+def test_max_cost_usd_overlay_beats_transport_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag/env overlays beat YAML transport-profile caps (#2024)."""
+    mapping = {
+        "max_cost_usd": 0.5,
+        "transport": "cli",
+        "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+    }
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "0")
+
+    from_env = AIConfig.resolve_from_mapping(mapping)
+    applied_env = apply_resolved_transport(from_env.config)
+
+    assert_that(applied_env.max_cost_usd).is_none()
+    assert_that(from_env.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
+
+    monkeypatch.delenv("LINTRO_AI_MAX_COST_USD")
+    from_flag = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(
+            {
+                "max_cost_usd": 0.5,
+                "transport": "cli",
+                "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+            },
+        ),
+        max_cost_usd=0,
+    )
+    applied_flag = apply_resolved_transport(from_flag.config)
+
+    assert_that(applied_flag.max_cost_usd).is_none()
+    assert_that(from_flag.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
+def test_max_cost_usd_overlay_raises_profile_cap() -> None:
+    """A positive overlay replaces the profile cap, not only the legacy scalar."""
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(
+            {
+                "transport": "api",
+                "transports": {"api": {"max_cost_usd": 1.25}},
+            },
+        ),
+        max_cost_usd=9.0,
+    )
+    applied = apply_resolved_transport(resolved.config)
+
+    assert_that(applied.max_cost_usd).is_equal_to(9.0)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
 def test_invalid_max_cost_usd_env_fails_loud(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-numeric cost cap names the variable and accepted values (#2024)."""
     monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "plenty")
@@ -259,6 +318,19 @@ def test_negative_max_cost_usd_fails_loud() -> None:
 
     message = str(exc_info.value)
     assert_that(message).contains("--max-cost-usd=-1.0")
+    assert_that(message).contains("0 for uncapped")
+
+
+def test_nonnumeric_max_cost_usd_flag_fails_loud() -> None:
+    """A non-numeric ``--max-cost-usd`` uses the overlay error, not Click (#2024)."""
+    with pytest.raises(AIConfigOverrideError) as exc_info:
+        apply_cli_overrides(
+            AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+            max_cost_usd="plenty",
+        )
+
+    message = str(exc_info.value)
+    assert_that(message).contains("--max-cost-usd='plenty'")
     assert_that(message).contains("0 for uncapped")
 
 

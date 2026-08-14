@@ -194,7 +194,6 @@ ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
 @click.option(
     "--max-cost-usd",
     "max_cost_usd_override",
-    type=float,
     default=None,
     help=(
         "Override ai.max_cost_usd for this invocation. A positive number is "
@@ -275,7 +274,7 @@ def review_command(
     transport: str | None,
     provider_override: str | None,
     model_override: str | None,
-    max_cost_usd_override: float | None,
+    max_cost_usd_override: str | None,
     list_agents: bool,
     advisory_tools: str | None,
     tool_options: str | None,
@@ -610,7 +609,7 @@ def _cli_overrides(
     transport: str | None,
     provider: str | None,
     model: str | None,
-    max_cost_usd: float | None,
+    max_cost_usd: float | str | None,
     timeout: float | None,
     context_window: int | None,
     semantic_chunks: bool,
@@ -649,7 +648,7 @@ def _cli_overrides(
     if model is not None:
         overrides.append(f"--model {model}")
     if max_cost_usd is not None:
-        overrides.append(f"--max-cost-usd {max_cost_usd:g}")
+        overrides.append(f"--max-cost-usd {max_cost_usd}")
     if timeout is not None:
         overrides.append(f"--timeout {timeout:g}")
     if context_window is not None:

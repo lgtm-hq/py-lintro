@@ -2849,7 +2849,7 @@ ai:
 | `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
 | `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
 | `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `max_cost_usd`          | float  | `null`         | Legacy cost cap (USD); prefer transport profiles. Overridable; literal `0` = uncapped        |
+| `max_cost_usd`          | float  | `null`         | Legacy cost cap (USD); prefer transport profiles. Env/flag may overlay; overlay `0` = uncapped (YAML `0` is a $0 cap) |
 | `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
 | `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
 | `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |
