@@ -6,12 +6,15 @@ from assertpy import assert_that
 from rich.console import Console
 
 from lintro.cli_utils.install_output import (
+    _OUTCOME_STYLES,
+    _SUMMARY_LABELS,
+    _SUMMARY_ORDER,
     count_outcomes,
     render_install_results,
     render_outcome_summary,
     unresolved_tool_names,
 )
-from lintro.enums.install_outcome import InstallOutcome
+from lintro.enums.install_outcome import _LABELS, InstallOutcome
 from lintro.tools.core.install_plan import InstallResult
 from lintro.tools.core.tool_registry import ManifestTool
 
@@ -107,12 +110,35 @@ def test_unresolved_names_exclude_retryable_outcomes() -> None:
     """Only a timeout is worth retrying unchanged; other issues are not."""
     unresolved = unresolved_tool_names(
         [
-            _result("golangci_lint", InstallOutcome.FAILED, step=1, total=5),
-            _result("clippy", InstallOutcome.TIMED_OUT, step=2, total=5),
-            _result("vale", InstallOutcome.MANUAL_BLOCKED, step=3, total=5),
-            _result("taplo", InstallOutcome.NOT_DISCOVERABLE, step=4, total=5),
-            _result("ruff", InstallOutcome.SUCCESS, step=5, total=5),
+            _result("golangci_lint", InstallOutcome.FAILED, step=1, total=6),
+            _result("clippy", InstallOutcome.TIMED_OUT, step=2, total=6),
+            _result("vale", InstallOutcome.MANUAL_BLOCKED, step=3, total=6),
+            _result("taplo", InstallOutcome.NOT_DISCOVERABLE, step=4, total=6),
+            _result("ruff", InstallOutcome.STILL_OUTDATED, step=5, total=6),
+            _result("black", InstallOutcome.SUCCESS, step=6, total=6),
         ],
     )
 
-    assert_that(unresolved).is_equal_to(["golangci_lint", "vale", "taplo"])
+    assert_that(unresolved).is_equal_to(
+        ["golangci_lint", "vale", "taplo", "ruff"],
+    )
+
+
+def test_every_install_outcome_has_render_maps() -> None:
+    """Every InstallOutcome member has style, summary label, and summary order."""
+    members = set(InstallOutcome)
+
+    assert_that(set(_OUTCOME_STYLES)).is_equal_to(members)
+    assert_that(set(_SUMMARY_LABELS)).is_equal_to(members)
+    assert_that(set(_SUMMARY_ORDER)).is_equal_to(members)
+    assert_that(set(_LABELS)).is_equal_to(members)
+
+
+def test_render_distinguishes_still_outdated_from_success() -> None:
+    """An upgrade that left the version below min_version is not reported as OK."""
+    output = _render(
+        [_result("ruff", InstallOutcome.STILL_OUTDATED, step=1, total=1)],
+    )
+
+    assert_that(output).contains("STALE  ruff")
+    assert_that(output).contains("still below minimum version")

@@ -231,18 +231,33 @@ an early failure or timeout never stops the tools after it from being installed:
 
 | Label     | Meaning                                                          |
 | --------- | ---------------------------------------------------------------- |
-| `OK`      | Command succeeded and the tool is discoverable.                  |
-| `PATH`    | Command succeeded, but the tool's own executable is not on PATH. |
+| `OK`      | Command succeeded and the tool is discoverable at `min_version`. |
+| `PATH`    | Command succeeded, but the tool is still not discoverable.       |
+| `STALE`   | Discoverable after the command, but still below `min_version`.   |
 | `FAIL`    | Command ran and failed; re-running it unchanged will not help.   |
 | `TIMEOUT` | Command exceeded the 5-minute install timeout; retry is valid.   |
 | `MANUAL`  | No runnable command exists here; install the tool by hand.       |
 
 Wrapper-probed tools (`bash`/`sh`/`cargo` version commands) still report `OK`, because
-those probes cannot tell whether the tool itself is discoverable.
+those probes cannot tell whether the tool itself is discoverable. A project-local npm
+add whose binary lands in `<project>/node_modules/.bin` **is** discoverable: planning,
+post-install verification, and `lintro doctor` share the same local-first probe, so a
+successful `npm install -D` is not reported as `PATH` just because that directory is not
+on `PATH`. The `bunx`/`npx` registry fallback is **not** an install and is never treated
+as discoverable.
+
+`lintro install` exits 1 when **any** planned action is not a full success, including
+`PATH` (`NOT_DISCOVERABLE`) and `STALE` (`STILL_OUTDATED`). A zero-exit install command
+is not enough.
+
+A `PATH` result names the install destination directory and the PATH remedy. For a
+project-local npm add that directory is the detected project's `node_modules/.bin`.
 
 `lintro doctor` only suggests a quick fix for tools it can actually install in the
 detected environment; anything else is listed under "Needs manual action" with the
-reason, and a command that already failed is not suggested again.
+reason. Failed remedies (`FAIL`, `PATH`, `STALE`, `MANUAL`) are recorded in a
+**per-process** `known_invalid` set: within one run the identical command is never
+re-suggested; a fresh run gets one fresh attempt. There is no state file.
 
 ---
 

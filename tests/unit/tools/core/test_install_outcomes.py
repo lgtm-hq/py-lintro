@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - only TimeoutExpired is referenced; no process is spawned
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.cli_utils.install_output import unresolved_tool_names
+from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_plan import InstallPlan
-from lintro.tools.core.tool_installer import ToolInstaller
+from lintro.tools.core.install_quickfix import build_quick_fix
+from lintro.tools.core.install_strategies.environment import InstallEnvironment
+from lintro.tools.core.install_strategies.node_project import detect_node_project
+from lintro.tools.core.tool_installer import (
+    ToolInstaller,
+    is_resolved_command_discoverable,
+)
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 
 
@@ -128,7 +139,7 @@ def test_unparseable_version_output_still_counts_as_installed() -> None:
     ):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="faketool 1.2.0", stderr=""),
+            MagicMock(returncode=0, stdout="no version here", stderr=""),
         ]
         result = installer._run_install(tool, "pip install faketool")
 
@@ -290,3 +301,204 @@ def test_execute_continues_after_failure_and_timeout() -> None:
     assert_that([(r.step, r.total_steps) for r in results]).is_equal_to(
         [(1, 3), (2, 3), (3, 3)],
     )
+
+
+def _write_node_project(root: Path) -> Path:
+    """Create a minimal npm-locked Node project.
+
+    Args:
+        root: Directory to write the project into.
+
+    Returns:
+        The project root.
+    """
+    (root / "package.json").write_text(
+        json.dumps({"name": "demo"}),
+        encoding="utf-8",
+    )
+    (root / "package-lock.json").write_text("", encoding="utf-8")
+    return root
+
+
+def _node_installer(root: Path) -> ToolInstaller:
+    """Build an installer anchored on a Node project.
+
+    Args:
+        root: Project root with a package.json.
+
+    Returns:
+        ToolInstaller instance.
+    """
+    return ToolInstaller(
+        ManifestRegistry.load(),
+        RuntimeContext(
+            install_context=InstallContext.PIP,
+            platform_label="Linux x86_64",
+            environment=InstallEnvironment(
+                install_context=InstallContext.PIP,
+                available_managers=frozenset({PackageManager.NPM, PackageManager.UV}),
+                node_project=detect_node_project(root),
+            ),
+            is_ci=False,
+        ),
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake shell-script binary is not executable on Windows",
+)
+def test_project_local_npm_binary_is_discoverable(tmp_path: Path) -> None:
+    """A binary only under node_modules/.bin is discoverable, not PATH.
+
+    After a project-local ``npm install -D`` the executable is not on PATH.
+    Planning, post-install verification, and doctor must still treat it as
+    installed.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_node_project(tmp_path)
+    registry = ManifestRegistry.load()
+    tool = registry.get("prettier")
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / "prettier"
+    binary.write_text(f'#!/bin/sh\necho "{tool.version}"\n', encoding="utf-8")
+    binary.chmod(0o755)
+
+    installer = _node_installer(tmp_path)
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout=tool.version, stderr=""),
+        ]
+        assert_that(installer._verify_discoverable(tool)).is_true()
+        result = installer._run_install(tool, "npm install -D prettier")
+
+    assert_that(result.outcome).is_not_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.outcome).is_equal_to(InstallOutcome.SUCCESS)
+
+
+def test_bunx_npx_fallback_is_not_treated_as_discoverable() -> None:
+    """The registry fallback is a fetch, not an install."""
+    assert_that(
+        is_resolved_command_discoverable(["bunx", "prettier@3.9.4"]),
+    ).is_false()
+    assert_that(
+        is_resolved_command_discoverable(["npx", "prettier@3.9.4"]),
+    ).is_false()
+
+    installer = _installer()
+    tool = ManifestTool(
+        name="prettier",
+        version="3.9.4",
+        min_version="3.9.4",
+        install_type="npm",
+        install_package="prettier",
+        version_command=("prettier", "--version"),
+    )
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            return_value=["bunx", "prettier@3.9.4"],
+        ),
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        assert_that(installer._verify_discoverable(tool)).is_false()
+        result = installer._run_install(tool, "npm install -D prettier@3.9.4")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+
+
+def test_upgrade_exit_0_still_outdated_is_not_re_suggested() -> None:
+    """Exit 0 with a version still below min_version is a non-success.
+
+    The tool is added to known_invalid so post-fix quick-fix does not
+    re-emit the identical command within this process.
+    """
+    installer = _installer()
+    tool = ManifestTool(
+        name="ruff",
+        version="2.0.0",
+        min_version="2.0.0",
+        install_type="pip",
+        install_package="ruff",
+        version_command=("ruff", "--version"),
+    )
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch(
+            "lintro.tools.core.tool_installer.shutil.which",
+            return_value="/usr/local/bin/ruff",
+        ),
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="ruff 1.0.0", stderr=""),
+        ]
+        result = installer._run_install(tool, "pip install --upgrade ruff")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.STILL_OUTDATED)
+    assert_that(result.success).is_false()
+    assert_that(result.outcome.is_retryable).is_false()
+    assert_that(result.message).contains("1.0.0")
+    assert_that(result.message).contains("2.0.0")
+
+    unresolved = unresolved_tool_names([result])
+    assert_that(unresolved).is_equal_to(["ruff"])
+
+    quick_fix = build_quick_fix(
+        [(tool, True)],
+        InstallEnvironment(
+            install_context=InstallContext.PIP,
+            available_managers=frozenset({PackageManager.UV}),
+        ),
+        known_invalid=unresolved,
+    )
+    assert_that(quick_fix.commands).is_empty()
+    assert_that([name for name, _reason in quick_fix.blocked]).is_equal_to(["ruff"])
+
+
+def test_not_discoverable_message_names_the_destination_directory(
+    tmp_path: Path,
+) -> None:
+    """A PATH outcome for a project-local npm add names node_modules/.bin.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_node_project(tmp_path)
+    installer = _node_installer(tmp_path)
+    tool = ManifestTool(
+        name="prettier",
+        version="3.9.4",
+        min_version="3.9.4",
+        install_type="npm",
+        install_package="prettier",
+        version_command=("prettier", "--version"),
+    )
+    expected_bin = tmp_path.resolve() / "node_modules" / ".bin"
+
+    with (
+        patch("lintro.tools.core.tool_installer.subprocess.run") as mock_run,
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            return_value=["prettier"],
+        ),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        result = installer._run_install(tool, "npm install -D prettier@3.9.4")
+
+    assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
+    assert_that(result.message).contains(str(expected_bin))
+    assert_that(result.message).contains("PATH")
+    assert_that(result.message).does_not_contain("needs manual action")

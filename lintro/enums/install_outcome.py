@@ -10,11 +10,16 @@ class InstallOutcome(StrEnum):
 
     A plain success/failure flag cannot express the states that make a retry
     loop converge: a command may succeed while the binary stays undiscoverable,
-    and a timeout is retryable where an invalid package name is not.
+    a command may succeed while the version stays below ``min_version``, and a
+    timeout is retryable where an invalid package name is not.
 
     Attributes:
         SUCCESS: Command succeeded and the tool is discoverable afterwards.
-        NOT_DISCOVERABLE: Command succeeded but the tool is still not on PATH.
+        NOT_DISCOVERABLE: Command succeeded but the tool is still not
+            discoverable (not on PATH, and not a project-local
+            ``node_modules/.bin`` binary).
+        STILL_OUTDATED: Command succeeded and the tool is discoverable, but
+            the probed version is still below ``min_version``.
         FAILED: Command ran and exited non-zero (or could not be launched).
         TIMED_OUT: Command exceeded the install timeout.
         MANUAL_BLOCKED: No executable command exists in this environment.
@@ -22,6 +27,7 @@ class InstallOutcome(StrEnum):
 
     SUCCESS = auto()
     NOT_DISCOVERABLE = auto()
+    STILL_OUTDATED = auto()
     FAILED = auto()
     TIMED_OUT = auto()
     MANUAL_BLOCKED = auto()
@@ -40,8 +46,9 @@ class InstallOutcome(StrEnum):
         """Whether re-running the same command could still succeed.
 
         Only a timeout is worth retrying. A failed command, a blocked manual
-        step, and an install that left the tool off PATH all reproduce
-        identically, so none of them may be re-emitted as a quick fix.
+        step, an install that left the tool undiscoverable, and an upgrade
+        that left the version below ``min_version`` all reproduce identically,
+        so none of them may be re-emitted as a quick fix.
 
         Returns:
             True when retrying the identical command is meaningful.
@@ -61,6 +68,7 @@ class InstallOutcome(StrEnum):
 _LABELS: dict[InstallOutcome, str] = {
     InstallOutcome.SUCCESS: "OK",
     InstallOutcome.NOT_DISCOVERABLE: "PATH",
+    InstallOutcome.STILL_OUTDATED: "STALE",
     InstallOutcome.FAILED: "FAIL",
     InstallOutcome.TIMED_OUT: "TIMEOUT",
     InstallOutcome.MANUAL_BLOCKED: "MANUAL",

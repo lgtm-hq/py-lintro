@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -249,7 +250,53 @@ def test_install_failure_exit_1() -> None:
     assert_that(result.exit_code).is_equal_to(1)
 
 
-# ── _detect_languages ────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        InstallOutcome.NOT_DISCOVERABLE,
+        InstallOutcome.STILL_OUTDATED,
+    ],
+)
+def test_install_non_success_outcomes_exit_1(outcome: InstallOutcome) -> None:
+    """NOT_DISCOVERABLE and STILL_OUTDATED keep the exit-1-on-any-non-success contract.
+
+    Args:
+        outcome: Non-success outcome that must still fail the process.
+    """
+    runner = CliRunner()
+    p1, p2 = _patches()
+
+    tool = _make_tool()
+    plan = InstallPlan(to_install=[(tool, "pip install ruff>=0.14.0")])
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.install.ToolInstaller",
+        ) as mock_cls,
+    ):
+        mock_cls.return_value.plan.return_value = plan
+        mock_cls.return_value.execute.return_value = [
+            InstallResult(
+                tool=tool,
+                outcome=outcome,
+                message=str(outcome),
+            ),
+        ]
+        result = runner.invoke(install_command, ["ruff"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+
+
+def test_install_help_documents_exit_1_on_non_success() -> None:
+    """CLI help states that NOT_DISCOVERABLE still exits 1."""
+    runner = CliRunner()
+    result = runner.invoke(install_command, ["--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("Exits 1")
+    assert_that(result.output).contains("NOT_DISCOVERABLE")
+    assert_that(result.output).does_not_contain("Args:")
 
 
 def test_detect_languages_returns_list() -> None:

@@ -30,10 +30,15 @@ import shutil
 import subprocess  # nosec B404 - subprocess is the only way to ask a binary its version; every call below is a fixed argv list with shell=False
 from dataclasses import dataclass
 from enum import StrEnum, auto
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.tool_installer import (
+    is_resolved_command_discoverable,
+    resolve_version_command,
+)
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
@@ -168,11 +173,13 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             upgrade_hint=upgrade_hint,
         )
 
-    # Find the main executable (may be a wrapper like "sh", "cargo", etc.)
-    main_cmd = tool.version_command[0]
-    tool_path = shutil.which(main_cmd)
+    try:
+        command = resolve_version_command(tool, context=context)
+    except ImportError:
+        command = list(tool.version_command)
 
-    if not tool_path:
+    if not is_resolved_command_discoverable(command):
+        main_cmd = command[0] if command else ""
         return ToolCheckResult(
             tool=tool,
             status=ToolStatus.MISSING,
@@ -182,9 +189,12 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             upgrade_hint=upgrade_hint,
         )
 
+    main_cmd = command[0]
+    tool_path = main_cmd if Path(main_cmd).is_absolute() else shutil.which(main_cmd)
+
     try:
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-            tool.version_command,
+            command,
             capture_output=True,
             text=True,
             timeout=VERSION_PROBE_TIMEOUT_SECONDS,

@@ -857,7 +857,9 @@ def _render_quick_fix(
         console: Console to print to.
         results: Production tool check results.
         context: Detected runtime context.
-        known_invalid: Tool names whose install command already failed.
+        known_invalid: Tool names whose install command already failed in this
+            process. Per-process only: a failed remedy is never re-suggested
+            within one run; a fresh run gets one fresh attempt.
     """
     quick_fix = build_quick_fix(
         [
