@@ -261,6 +261,10 @@ jobs:
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
       - name: Verify generated tool versions
         run: python3 scripts/ci/generate-tool-versions.py --check
+      # #2006: the index is what frozen binaries discover builtins from, so
+      # drift here ships a binary with an incomplete tool registry.
+      - name: Verify generated builtin tool index
+        run: python3 scripts/ci/generate-builtin-tool-index.py --check
 
   docker-build:
     name: 🐳 Build Docker Images

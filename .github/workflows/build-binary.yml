@@ -148,9 +148,11 @@ jobs:
     name: Build macOS Binary
     needs: get-release-info
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
-    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
-    # job deadline can preempt the failure-only OOM evidence upload.
-    timeout-minutes: 35
+    # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
+    # The smoke step's 20-minute budget used to sit inside a 35-minute job
+    # that already spent 25 minutes on compile, so the parent could cancel a
+    # valid smoke test.
+    timeout-minutes: 60
     permissions:
       contents: write
     strategy:
@@ -257,6 +259,14 @@ jobs:
       - name: Verify binary
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
+
       # matrix.arch reaches the shell via env, not template expansion: on
       # workflow_call inputs.arch is a free-form string that feeds this matrix
       # (same hardening as the Build binary step above).
@@ -305,9 +315,11 @@ jobs:
     name: Build Linux Binary
     needs: get-release-info
     runs-on: ${{ matrix.runner }}
-    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
-    # job deadline can preempt the failure-only OOM evidence upload.
-    timeout-minutes: 35
+    # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
+    # The smoke step's 20-minute budget used to sit inside a 35-minute job
+    # that already spent 25 minutes on compile, so the parent could cancel a
+    # valid smoke test.
+    timeout-minutes: 60
     permissions:
       contents: write
     strategy:
@@ -405,6 +417,14 @@ jobs:
 
       - name: Verify binary
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
+
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
       # Kept symmetric with the macOS job: both call sites pass the arch
       # through env so the two never drift apart.

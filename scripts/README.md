@@ -161,6 +161,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `compute-new-manifest-tools.sh`      | Print tool names a PR adds vs the merge-base (fails closed to empty)       | `BASE_REF=main scripts/ci/compute-new-manifest-tools.sh`                                                                   |
 | `compute-new-manifest-tools.py`      | Diff tool names between an old and new manifest (added names)              | `python scripts/ci/compute-new-manifest-tools.py --help`                                                                   |
 | `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions        | `python scripts/ci/generate-tool-versions.py [--check]`                                                                    |
+| `generate-builtin-tool-index.py`     | Generate `lintro/plugins/_builtin_index.py` from the definitions dir       | `python scripts/ci/generate-builtin-tool-index.py [--check]`                                                               |
+| `smoke-test-binary.py`               | Assert a built binary's tool registry is populated (`#2006`)               | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
 | `stage-python-coverage-html.sh`      | Stage flat HTML coverage for GitHub Pages bundling                         | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
 | `render-coverage-json-html.py`       | Render a simple HTML index from CI `coverage.json` for Pages bundling      | `python scripts/ci/testing/render-coverage-json-html.py --help`                                                            |
 

@@ -26,12 +26,14 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import os
+import pkgutil
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from lintro.plugins._builtin_index import BUILTIN_TOOL_MODULES
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import (
     LINTRO_PLUGIN_API_VERSION,
@@ -42,8 +44,8 @@ from lintro.plugins.registry import ToolRegistry
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
 
-# Path to builtin tool definitions
-BUILTIN_DEFINITIONS_PATH = Path(__file__).parent.parent / "tools" / "definitions"
+# Import path of the package holding the builtin tool definitions.
+BUILTIN_DEFINITIONS_PACKAGE = "lintro.tools.definitions"
 
 # Entry point group third-party packages use to register tool plugins.
 ENTRY_POINT_GROUP = "lintro.tools"
@@ -66,11 +68,55 @@ _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _discovered: bool = False
 
 
+def _module_names_from_package_scan() -> set[str]:
+    """Scan the definitions package for tool modules, when that is possible.
+
+    Complements the generated index so a definition module added to a source
+    checkout is discovered even before the index is regenerated. Returns an
+    empty set whenever the package exposes no importable search path — the
+    normal situation inside a frozen Nuitka onefile binary, where the index is
+    the only source of module names.
+
+    Returns:
+        Public (non-underscore) module names found next to the definitions
+        package, or an empty set when the package cannot be scanned.
+    """
+    try:
+        package = importlib.import_module(BUILTIN_DEFINITIONS_PACKAGE)
+        search_path = [str(entry) for entry in getattr(package, "__path__", ()) or ()]
+        if not search_path:
+            return set()
+        return {
+            module.name
+            for module in pkgutil.iter_modules(search_path)
+            if not module.name.startswith("_")
+        }
+    except Exception as e:  # noqa: BLE001 - scanning is best-effort, index wins
+        logger.debug(f"Could not scan {BUILTIN_DEFINITIONS_PACKAGE!r}: {e}")
+        return set()
+
+
+def get_builtin_module_names() -> tuple[str, ...]:
+    """Return the builtin tool definition modules to import.
+
+    Combines the generated index (which travels with the compiled package and
+    therefore works in wheels and frozen binaries alike) with a best-effort
+    package scan (which picks up modules added to a source checkout before the
+    index was regenerated).
+
+    Returns:
+        Sorted, de-duplicated module base names.
+    """
+    names = set(BUILTIN_TOOL_MODULES)
+    names.update(_module_names_from_package_scan())
+    return tuple(sorted(names))
+
+
 def discover_builtin_tools() -> int:
     """Load all builtin tool definitions.
 
-    This function imports all Python modules in the tools/definitions/
-    directory, which triggers the @register_tool decorators.
+    Imports every module named by :func:`get_builtin_module_names`, which
+    triggers the ``@register_tool`` decorators.
 
     Returns:
         Number of tool modules loaded.
@@ -81,21 +127,18 @@ def discover_builtin_tools() -> int:
     """
     loaded_count = 0
 
-    if not BUILTIN_DEFINITIONS_PATH.exists():
-        logger.warning(
-            f"Builtin definitions path not found: {BUILTIN_DEFINITIONS_PATH}",
-        )
+    module_names = get_builtin_module_names()
+    if not module_names:
+        logger.warning("No builtin tool definition modules are known")
         return loaded_count
 
-    for py_file in BUILTIN_DEFINITIONS_PATH.glob("*.py"):
-        if py_file.name.startswith("_"):
-            continue
-
-        module_name = f"lintro.tools.definitions.{py_file.stem}"
+    for name in module_names:
+        module_name = f"{BUILTIN_DEFINITIONS_PACKAGE}.{name}"
         try:
-            # Safe: module_name from internal directory files, not user input
+            # Safe: module_name comes from the generated builtin index or a
+            # scan of lintro's own package, never from user input.
             importlib.import_module(module_name)  # nosemgrep: non-literal-import
-            logger.debug(f"Loaded builtin tool: {py_file.stem}")
+            logger.debug(f"Loaded builtin tool: {name}")
             loaded_count += 1
         except ImportError as e:
             logger.warning(f"Failed to import {module_name}: {e}")

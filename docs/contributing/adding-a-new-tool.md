@@ -339,6 +339,17 @@ python3 scripts/ci/generate-tool-versions.py --check
 
 CI fails the PR if `_generated_versions.py` or `manifest.json` are out of sync.
 
+Also regenerate the builtin tool index so the new definition module is discoverable from
+frozen (Nuitka onefile) binaries, which cannot glob the `lintro/tools/definitions/`
+source directory:
+
+```bash
+python3 scripts/ci/generate-builtin-tool-index.py
+```
+
+This rewrites `lintro/plugins/_builtin_index.py`. CI fails the PR when it is out of sync
+(`--check`).
+
 ---
 
 ## Step 10 — Docker
@@ -531,6 +542,9 @@ uv run lintro doctor
 
 # Verify the version generator is in sync (no diff = clean)
 python3 scripts/ci/generate-tool-versions.py --check
+
+# Verify the builtin tool index is in sync (no diff = clean)
+python3 scripts/ci/generate-builtin-tool-index.py --check
 ```
 
 Implementation checklist:
@@ -554,6 +568,7 @@ Implementation checklist:
 - [ ] `renovate.json` — custom managers for `_tool_versions.py` and `manifest.json`
       (binary tools only)
 - [ ] `scripts/ci/generate-tool-versions.py --check` passes
+- [ ] `scripts/ci/generate-builtin-tool-index.py --check` passes
 - [ ] Unit tests (parser + plugin) added
 - [ ] Integration tests added (with `skipif` guard)
 - [ ] Test samples added (`violations.<ext>` and `clean.<ext>`)
