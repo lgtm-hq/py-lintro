@@ -84,8 +84,10 @@ class NpmStrategy(InstallStrategy):
             _install_component: Unused for npm.
 
         Returns:
-            Shell command string, or a manual-action message when the project
-            declares a different version.
+            Shell command string, the manager's install-all command when a
+            matching declaration should be restored from the lockfile, or a
+            manual-action message when the project declares a different
+            version.
         """
         pkg = ecosystem_package_name(tool_name, install_package)
         brew_hint = _brew_hint(env, tool_name, verb="install")
@@ -169,12 +171,18 @@ def _pin_conflict(
     Only the *declared* spec is compared, because that is what the project
     author wrote down and what an install or upgrade command would overwrite. A
     spec that already names the recommended version (``3.9.4``, ``^3.9.4``,
-    ``~3.9.4``) is not a conflict.
+    ``~3.9.4``, ``=3.9.4``, ``v3.9.4``) is not a conflict.
 
     The advice differs by path. A declared-but-missing package does not need a
     versioned add at all — it needs the project's own dependencies installed,
-    which restores the pinned version from the lockfile. Suggesting a versioned
-    add there would be suggesting the very rewrite this guard exists to stop.
+    which restores the pinned version from the lockfile. That is true even when
+    the declared spec already names lintro's version: ``npm install -D
+    prettier@3.9.4`` would still rewrite ``^3.9.4`` (and can downgrade a
+    lockfile that resolved a newer 3.9.x). Suggesting a versioned add there
+    would be suggesting the very rewrite this guard exists to stop. On the
+    install path a matching declaration therefore returns the manager's
+    install-all command. On the upgrade path a matching declaration is not a
+    conflict and the versioned add proceeds.
 
     Args:
         env: The current install environment.
@@ -184,15 +192,22 @@ def _pin_conflict(
             installed tool rather than a first install.
 
     Returns:
-        A manual-action message, or None when there is no conflict.
+        A manual-action message when the pin conflicts, the manager's
+        install-all command when a matching declaration should be restored
+        from the lockfile, or None when there is no pin to protect (or an
+        upgrade of a matching pin should proceed).
     """
     project = env.node_project
     if project is None or env.prefer_global:
         return None
     declared = project.declared_spec(package)
-    if declared is None or declared.lstrip("^~=v ").strip() == version:
+    if declared is None:
         return None
     manager, _source = env.node_manager()
+    if declared.lstrip("^~=v ").strip() == version:
+        if upgrading:
+            return None
+        return NODE_MANAGER_COMMANDS[manager].install_all
     adopt = add_dependency_command(
         manager=manager,
         spec=f"{package}@{version}",

@@ -31,6 +31,22 @@ from lintro.tools.core.tool_registry import ManifestRegistry
 
 PM = PackageManager
 
+#: Documented non-conflicting pin spellings from ``docs/configuration.md``.
+_MATCHING_PIN_SPELLINGS: tuple[str, ...] = (
+    "3.9.4",
+    "^3.9.4",
+    "~3.9.4",
+    "=3.9.4",
+    "v3.9.4",
+)
+_MATCHING_PIN_IDS: tuple[str, ...] = (
+    "exact",
+    "caret",
+    "tilde",
+    "equals",
+    "v-prefix",
+)
+
 
 def _write_project(
     root: Path,
@@ -435,16 +451,25 @@ def test_upgrade_reports_a_conflicting_project_pin(tmp_path: Path) -> None:
     assert_that(hint).contains("3.1.0", "3.9.4", "npm install -D prettier@3.9.4")
 
 
-def test_upgrade_proceeds_when_the_pin_already_matches(tmp_path: Path) -> None:
-    """A caret range that admits the recommendation is not a conflict.
+@pytest.mark.parametrize(
+    "declared",
+    _MATCHING_PIN_SPELLINGS,
+    ids=list(_MATCHING_PIN_IDS),
+)
+def test_upgrade_proceeds_when_the_pin_already_matches(
+    declared: str,
+    tmp_path: Path,
+) -> None:
+    """A spec that already names the recommendation is not a conflict.
 
     Args:
+        declared: Declared spec spelling under test.
         tmp_path: Temporary directory provided by pytest.
     """
     _write_project(
         tmp_path,
         lockfile="package-lock.json",
-        dev_dependencies={"prettier": "^3.9.4"},
+        dev_dependencies={"prettier": declared},
     )
     env = _env(tmp_path)
 
@@ -745,6 +770,38 @@ def test_declared_but_missing_package_does_not_rewrite_the_pin(tmp_path: Path) -
     assert_that(hint).starts_with("Install prettier from the project")
     assert_that(hint).contains("3.1.0", "3.9.4", "npm install")
     assert_that(hint).does_not_contain("npm install -D prettier@3.9.4 ")
+
+
+@pytest.mark.parametrize(
+    "declared",
+    _MATCHING_PIN_SPELLINGS,
+    ids=list(_MATCHING_PIN_IDS),
+)
+def test_matching_declared_missing_package_restores_from_the_lockfile(
+    declared: str,
+    tmp_path: Path,
+) -> None:
+    """A matching pin still must not emit a versioned add.
+
+    ``^3.9.4`` names lintro's version, so it is not a conflict — but
+    ``npm install -D prettier@3.9.4`` would still rewrite the range and can
+    downgrade a lockfile that resolved a newer 3.9.x. Restore via install-all.
+
+    Args:
+        declared: Declared spec spelling under test.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_project(
+        tmp_path,
+        lockfile="package-lock.json",
+        dev_dependencies={"prettier": declared},
+    )
+    env = _env(tmp_path)
+
+    hint = _npm_strategy().install_hint(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(hint).is_equal_to("npm install")
+    assert_that(ToolInstaller._is_manual_hint(hint)).is_false()
 
 
 def test_undeclared_package_still_installs_normally(tmp_path: Path) -> None:

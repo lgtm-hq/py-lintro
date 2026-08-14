@@ -657,10 +657,13 @@ $ lintro install prettier --upgrade
 
 The comparison is deliberately literal, not a semver range solve: a spec that names the
 recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
-conflict and upgrades normally. Anything else, including a wider range such as `^3.9.0`
-that a resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward
-asking is deliberate: the cost of a needless question is far below the cost of silently
-rewriting someone's `package.json`.
+conflict and upgrades normally. On a first install of a declared-but-missing package,
+those same spellings emit the manager's install-all command (`npm install`,
+`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
+would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
+resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
+deliberate: the cost of a needless question is far below the cost of silently rewriting
+someone's `package.json`.
 
 **Planning matches execution.** The version probe for npm-installed tools resolves
 through the same chain a check uses, so `lintro install` reports on the binary
