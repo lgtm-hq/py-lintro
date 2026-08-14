@@ -106,14 +106,17 @@ def expected_builtin_tools(index_path: Path) -> list[str]:
         index_path: Path to the generated ``_builtin_index.py``.
 
     Returns:
-        Sorted expected tool names, or an empty list when the index cannot be
-        read or does not declare the registering-module tuple.
+        Sorted expected tool names.
+
+    Raises:
+        RuntimeError: If the index cannot be read, parsed, or declares no
+            registering modules. Fail closed: an unreadable index must not
+            degrade to "any builtin is enough".
     """
     try:
         tree = ast.parse(index_path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
-        print(f"WARN: could not read {index_path}: {exc}", file=sys.stderr)
-        return []
+        raise RuntimeError(f"could not read {index_path}: {exc}") from exc
 
     for node in tree.body:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -125,15 +128,20 @@ def expected_builtin_tools(index_path: Path) -> list[str]:
         if target != REGISTERING_MODULES_NAME or value is None:
             continue
         try:
-            return sorted(str(name) for name in ast.literal_eval(value))
-        except ValueError:
-            break
+            names = sorted(str(name) for name in ast.literal_eval(value))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"{index_path} {REGISTERING_MODULES_NAME} is not a literal",
+            ) from exc
+        if not names:
+            raise RuntimeError(
+                f"{index_path} declares an empty {REGISTERING_MODULES_NAME}",
+            )
+        return names
 
-    print(
-        f"WARN: {index_path} declares no {REGISTERING_MODULES_NAME}",
-        file=sys.stderr,
+    raise RuntimeError(
+        f"{index_path} declares no {REGISTERING_MODULES_NAME}",
     )
-    return []
 
 
 def list_builtin_tools(binary: Path, expected: list[str]) -> list[str] | None:
@@ -326,9 +334,7 @@ def _tools_in_result_table(*, output: str, builtin_tools: list[str]) -> list[str
             continue
         tool_cell = _result_table_tool_cell(row)
         found.update(
-            name
-            for name in builtin_tools
-            if _matches_tool(text=tool_cell, name=name)
+            name for name in builtin_tools if _matches_tool(text=tool_cell, name=name)
         )
     return sorted(found)
 
@@ -420,6 +426,8 @@ def main() -> int:
             check_config(binary, builtin_tools or []),
             check_reaches_execution(binary, builtin_tools or []),
         ]
+    except RuntimeError as exc:
+        return _fail(str(exc))
     except subprocess.TimeoutExpired as exc:
         return _fail(f"timed out running {exc.cmd}")
 

@@ -192,17 +192,18 @@ def test_expected_builtin_tools_reads_the_registering_subset(
     assert_that(smoke.expected_builtin_tools(index)).is_equal_to(["black", "ruff"])
 
 
-def test_expected_builtin_tools_tolerates_a_missing_index(
+def test_expected_builtin_tools_fails_closed_on_a_missing_index(
     smoke: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """A missing index degrades to no expectations rather than crashing.
+    """A missing index fails the smoke test instead of skipping completeness.
 
     Args:
         smoke: Imported smoke-test module.
         tmp_path: Pytest-provided temporary directory.
     """
-    assert_that(smoke.expected_builtin_tools(tmp_path / "absent.py")).is_empty()
+    with pytest.raises(RuntimeError, match="could not read"):
+        smoke.expected_builtin_tools(tmp_path / "absent.py")
 
 
 def test_partial_registry_fails_list_tools(
