@@ -132,8 +132,9 @@ order and for what changed.
 - `typescript` - TypeScript compiler for type checking (`bun add -D typescript` or
   `npm install -D typescript`; a global install is used when no project-local one
   exists)
-- `astro` - Astro type checker for `.astro` files (`bun add -D astro @astrojs/check` or
-  `npm install -D astro @astrojs/check`)
+- `astro` - Astro type checker for `.astro` files (`bun add astro` and
+  `bun add -D @astrojs/check`, or `npm install astro` and
+  `npm install -D @astrojs/check`)
 - `svelte-check` - Svelte type checker for `.svelte` files (install locally with
   `bun add -D svelte-check` or `npm install -D svelte-check`)
 - `vue-tsc` - Vue TypeScript type checker for `.vue` files (`bun add -D vue-tsc` or

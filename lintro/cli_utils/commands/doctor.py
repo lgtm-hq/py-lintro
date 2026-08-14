@@ -25,9 +25,16 @@ from lintro.ai.doctor_checks import (
     check_ai_configuration,
     check_ai_liveness,
 )
+from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.interface import resolve_ai_config
+from lintro.cli_utils.install_output import (
+    render_install_results,
+    render_outcome_summary,
+    unresolved_tool_names,
+)
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_quickfix import build_quick_fix
 from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
@@ -406,7 +413,8 @@ def doctor_command(
 
     Raises:
         SystemExit: When missing or broken tools are detected.
-        click.UsageError: When --fix is combined with --report or --json.
+        click.UsageError: When --fix is combined with --report or --json,
+            or when an ``LINTRO_AI_*`` overlay fails validation.
 
     Examples:
         lintro doctor
@@ -449,7 +457,10 @@ def doctor_command(
     from lintro.config.config_loader import get_config
 
     config = get_config()
-    ai_config = resolve_ai_config(config)
+    try:
+        ai_config = resolve_ai_config(config)
+    except AIConfigOverrideError as exc:
+        raise click.UsageError(str(exc)) from exc
     ai_checks = check_ai_configuration(ai_config)
     if ai_liveness:
         # Appended after the presence checks so the chain reads in order:
@@ -617,24 +628,12 @@ def doctor_command(
     has_fixable = missing_count > 0 or outdated_count > 0 or incompatible_count > 0
     if has_fixable:
         display_console.print()
-        affected_names = [
-            r.tool.name
-            for r in prod_results
-            if r.status
-            in (ToolStatus.MISSING, ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
-        ]
-        upgrade_flag = (
-            " --upgrade" if outdated_count > 0 or incompatible_count > 0 else ""
-        )
-        display_console.print(
-            f"  [dim]Quick fix: lintro install{upgrade_flag}"
-            f" {' '.join(affected_names)}[/dim]",
-        )
+        _render_quick_fix(display_console, prod_results, context)
 
     display_console.print()
 
     if fix and has_fixable:
-        _run_fix(display_console, prod_results, context, registry)
+        unresolved = _run_fix(display_console, prod_results, context, registry)
         rechecked = probe_tools()
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
@@ -645,6 +644,14 @@ def doctor_command(
             1 for r in rechecked_prod if r.status == ToolStatus.INCOMPATIBLE
         )
         unknown_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.UNKNOWN)
+        if missing_count or outdated_count or incompatible_count:
+            display_console.print()
+            _render_quick_fix(
+                display_console,
+                rechecked_prod,
+                context,
+                known_invalid=unresolved,
+            )
 
     if (
         missing_count > 0
@@ -817,23 +824,80 @@ def _output_json(
     click.echo(json.dumps(output, indent=2))
 
 
-def _run_fix(
-    console: Console,
-    results: list[ToolCheckResult],
-    context: RuntimeContext,
-    registry: ManifestRegistry,
-) -> None:
-    """Attempt to install missing/outdated tools via the central installer."""
-    from lintro.tools.core.tool_installer import ToolInstaller
+def _fixable_results(results: list[ToolCheckResult]) -> list[ToolCheckResult]:
+    """Select the checks that an install/upgrade run could resolve.
 
-    fixable = [
+    Args:
+        results: Production tool check results.
+
+    Returns:
+        Results whose status is missing, outdated, or incompatible.
+    """
+    return [
         r
         for r in results
         if r.status
         in (ToolStatus.MISSING, ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
     ]
+
+
+def _render_quick_fix(
+    console: Console,
+    results: list[ToolCheckResult],
+    context: RuntimeContext,
+    *,
+    known_invalid: list[str] | None = None,
+) -> None:
+    """Render a quick fix that only contains executable actions.
+
+    The install-versus-upgrade action is derived per tool from its status, so
+    a missing tool is never advertised as an upgrade and vice versa.
+
+    Args:
+        console: Console to print to.
+        results: Production tool check results.
+        context: Detected runtime context.
+        known_invalid: Tool names whose install command already failed.
+    """
+    quick_fix = build_quick_fix(
+        [
+            (r.tool, r.status is not ToolStatus.MISSING)
+            for r in _fixable_results(results)
+        ],
+        context.environment,
+        known_invalid=known_invalid or [],
+    )
+    for command in quick_fix.commands:
+        console.print(f"  [dim]Quick fix: {command}[/dim]")
+    if quick_fix.blocked:
+        console.print("  [yellow]Needs manual action (no runnable command):[/yellow]")
+        for name, reason in quick_fix.blocked:
+            console.print(f"    {name:<20} [dim]{reason}[/dim]")
+
+
+def _run_fix(
+    console: Console,
+    results: list[ToolCheckResult],
+    context: RuntimeContext,
+    registry: ManifestRegistry,
+) -> list[str]:
+    """Attempt to install missing/outdated tools via the central installer.
+
+    Args:
+        console: Console to print to.
+        results: Production tool check results.
+        context: Detected runtime context.
+        registry: Manifest registry.
+
+    Returns:
+        Names of tools whose install command failed in a way that re-running
+        the identical command cannot fix.
+    """
+    from lintro.tools.core.tool_installer import ToolInstaller
+
+    fixable = _fixable_results(results)
     if not fixable:
-        return
+        return []
 
     console.print("  [bold]Attempting to install missing tools...[/bold]")
     console.print()
@@ -846,18 +910,23 @@ def _run_fix(
     plan = installer.plan(tools=tool_names, upgrade=has_outdated)
     install_results = installer.execute(plan)
 
-    for r in install_results:
-        if r.success:
-            console.print(
-                f"  [green]OK[/green]  {r.tool.name} "
-                f"[dim]({r.duration_seconds:.1f}s)[/dim]",
-            )
-        else:
-            console.print(f"  [red]FAIL[/red]  {r.tool.name}: {r.message}")
+    render_install_results(console, install_results)
 
     if plan.skipped:
         for tool, reason in plan.skipped:
             console.print(f"  [yellow]SKIP[/yellow]  {tool.name}: {reason}")
 
     console.print()
+    render_outcome_summary(console, install_results)
+
+    unresolved = unresolved_tool_names(install_results)
+    if unresolved:
+        console.print(
+            "  [yellow]Re-running the same command will not help for: "
+            f"{', '.join(unresolved)}[/yellow]",
+        )
+
+    console.print()
     console.print("  [dim]Run 'lintro doctor' again to verify.[/dim]")
+
+    return unresolved

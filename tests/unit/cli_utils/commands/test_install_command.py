@@ -11,6 +11,7 @@ from click.testing import CliRunner
 
 from lintro.cli_utils.commands.install import install_command
 from lintro.enums.install_context import InstallContext, PackageManager
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import InstallEnvironment
 from lintro.tools.core.tool_installer import InstallPlan, InstallResult
@@ -126,7 +127,12 @@ def test_install_specific_tools() -> None:
     ):
         mock_cls.return_value.plan.return_value = plan
         mock_cls.return_value.execute.return_value = [
-            InstallResult(tool=tool, success=True, message="OK", duration_seconds=1.0),
+            InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.SUCCESS,
+                message="OK",
+                duration_seconds=1.0,
+            ),
         ]
         result = runner.invoke(install_command, ["ruff"])
 
@@ -232,7 +238,11 @@ def test_install_failure_exit_1() -> None:
     ):
         mock_cls.return_value.plan.return_value = plan
         mock_cls.return_value.execute.return_value = [
-            InstallResult(tool=tool, success=False, message="Command failed"),
+            InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.FAILED,
+                message="Command failed",
+            ),
         ]
         result = runner.invoke(install_command, ["ruff"])
 

@@ -129,6 +129,23 @@ def registry_fallback_install_hint(command: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def _format_fallback_command(command: Sequence[str]) -> str:
+    """Render a registry-fallback command for logs and user-facing hints.
+
+    Both builder shapes must round-trip: ``[runner, spec]`` when the
+    executable and package share a name, and ``[runner, "--package", spec,
+    binary]`` when they differ. Joining the resolved argv is the only
+    representation that stays accurate for both.
+
+    Args:
+        command: Resolved command list, as returned by a command builder.
+
+    Returns:
+        Space-joined command suitable for wrapping in backticks.
+    """
+    return " ".join(command)
+
+
 def registry_fallback_guidance(command: Sequence[str]) -> str:
     """Build the actionable message for a failed registry fallback.
 
@@ -139,11 +156,11 @@ def registry_fallback_guidance(command: Sequence[str]) -> str:
         Message explaining what failed and how to make the tool resolve
         locally instead.
     """
-    runner = command[0]
     spec = registry_fallback_spec(command) or ""
     package, _version = split_npm_spec(spec)
+    rendered = _format_fallback_command(command)
     return (
-        f"{package} could not be run via `{runner} {spec}`.\n"
+        f"{package} could not be run via `{rendered}`.\n"
         f"{registry_fallback_install_hint(command)}"
     )
 
@@ -164,8 +181,9 @@ def notify_registry_fallback_selected(command: Sequence[str]) -> None:
     if package in _FALLBACK_NOTICES_EMITTED:
         return
     _FALLBACK_NOTICES_EMITTED.add(package)
+    rendered = _format_fallback_command(command)
     logger.warning(
         f"No project-local or PATH install of {package} found; falling back to "
-        f"`{command[0]} {spec}`, which needs registry access.\n"
+        f"`{rendered}`, which needs registry access.\n"
         f"{registry_fallback_install_hint(command)}",
     )

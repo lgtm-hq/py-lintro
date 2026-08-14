@@ -102,6 +102,25 @@ def clear_logging_handlers() -> Iterator[None]:
     yield
 
 
+_AI_OVERRIDE_ENV_VARS: tuple[str, ...] = (
+    "LINTRO_AI_PROVIDER",
+    "LINTRO_AI_MODEL",
+    "LINTRO_AI_TRANSPORT",
+    "LINTRO_AI_ENABLED",
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_ai_config_override_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep developer ``LINTRO_AI_*`` overrides out of config-resolution tests.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    for name in _AI_OVERRIDE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def no_local_node_install(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make project-local Node resolution find nothing.

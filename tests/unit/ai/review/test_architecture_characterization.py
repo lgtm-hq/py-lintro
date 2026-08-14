@@ -3,8 +3,8 @@
 These tests freeze *current* CLI/MCP review preparation behavior,
 effective-config parity, review metadata shape, error mapping, and exit
 semantics (0/1/2) before later phases extract shared preparation or split the
-orchestrator. They intentionally avoid implementing ``ResolvedAIConfig``,
-``prepare_review``, orchestrator decomposition, or provider close wiring.
+orchestrator. Issue #1970 landed ``ResolvedAIConfig``; Phase 3 still owns
+``prepare_review``, orchestrator decomposition, and provider close wiring.
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ MCP_REVIEW_PATH = PROJECT_ROOT / "lintro/mcp/toolkits/review.py"
 # Domain helpers both adapters must keep calling until Phase 3 extracts them.
 _SHARED_PREPARATION_CALLS: frozenset[str] = frozenset(
     {
-        "resolve_ai_config",
         "collect_review_context",
         "classify_changed_files",
         "get_all_checklist_items",
@@ -251,6 +250,11 @@ def test_cli_and_mcp_review_adapters_call_shared_preparation_helpers() -> None:
 
     assert_that(_SHARED_PREPARATION_CALLS.issubset(cli_calls)).is_true()
     assert_that(_SHARED_PREPARATION_CALLS.issubset(mcp_calls)).is_true()
+    # CLI keeps provenance via resolve_from_mapping (#1970); MCP still goes
+    # through resolve_ai_config, which applies the same env layer internally.
+    assert_that(cli_calls).contains("resolve_from_mapping")
+    assert_that(cli_calls).contains("apply_cli_overrides")
+    assert_that(mcp_calls).contains("resolve_ai_config")
 
 
 def test_cli_owns_posting_and_exit_helpers_mcp_does_not() -> None:

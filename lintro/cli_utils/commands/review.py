@@ -28,9 +28,10 @@ from loguru import logger
 from rich.console import Console
 
 from lintro.ai.availability import require_ai
-from lintro.ai.exceptions import AIError
-from lintro.ai.interface import resolve_ai_config
+from lintro.ai.config import AIConfig
+from lintro.ai.exceptions import AIConfigOverrideError, AIError
 from lintro.ai.paths import resolve_workspace_root
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -57,8 +58,8 @@ from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.transport import (
+    apply_cli_overrides,
     apply_resolved_transport,
-    apply_transport_override,
     format_resolved_profile_log,
     resolve_transport_settings,
 )
@@ -175,6 +176,22 @@ ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
     help="Override ai.transport for this invocation.",
 )
 @click.option(
+    "--provider",
+    "provider_override",
+    type=click.Choice(
+        [member.value for member in AIProvider],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Override ai.provider for this invocation.",
+)
+@click.option(
+    "--model",
+    "model_override",
+    default=None,
+    help="Override ai.model for this invocation.",
+)
+@click.option(
     "--timeout",
     type=float,
     default=None,
@@ -246,6 +263,8 @@ def review_command(
     timeout: float | None,
     path_filter: tuple[str, ...],
     transport: str | None,
+    provider_override: str | None,
+    model_override: str | None,
     list_agents: bool,
     advisory_tools: str | None,
     tool_options: str | None,
@@ -286,7 +305,16 @@ def review_command(
             fail_on_findings=fail_on_findings,
         )
 
-    ai_config = resolve_ai_config(lintro_config)
+    try:
+        resolved_ai = apply_cli_overrides(
+            AIConfig.resolve_from_mapping(lintro_config.ai),
+            provider=provider_override,
+            model=model_override,
+            transport=transport,
+        )
+    except AIConfigOverrideError as exc:
+        raise click.UsageError(str(exc)) from exc
+    ai_config = resolved_ai.config
     if not ai_config.review_enabled:
         raise click.UsageError(
             "AI review is disabled in configuration. Set ai.review: true "
@@ -368,7 +396,7 @@ def review_command(
                 issue_count,
             )
 
-    effective_ai_config = apply_transport_override(ai_config, transport)
+    effective_ai_config = ai_config
     if timeout is not None:
         effective_ai_config = effective_ai_config.model_copy(
             update={"api_timeout": timeout},
@@ -456,6 +484,9 @@ def review_command(
                 transport=resolved_profile.transport.value,
                 auth_mode=resolved_profile.auth_mode,
                 cost_basis=effective_basis.value,
+                provider_source=resolved_ai.source_of("provider").value,
+                model_source=resolved_ai.source_of("model").value,
+                transport_source=resolved_ai.source_of("transport").value,
             ),
         )
     except (AIError, ValueError) as exc:
@@ -539,6 +570,8 @@ def review_command(
                     depth=depth,
                     strictness=strictness,
                     transport=transport,
+                    provider=provider_override,
+                    model=model_override,
                     timeout=timeout,
                     context_window=context_window,
                     semantic_chunks=semantic_chunks,
@@ -560,6 +593,8 @@ def _cli_overrides(
     depth: int | None,
     strictness: str | None,
     transport: str | None,
+    provider: str | None,
+    model: str | None,
     timeout: float | None,
     context_window: int | None,
     semantic_chunks: bool,
@@ -575,6 +610,8 @@ def _cli_overrides(
         depth: ``--depth`` value, or None when unset.
         strictness: ``--strictness`` value, or None when unset.
         transport: ``--transport`` value, or None when unset.
+        provider: ``--provider`` value, or None when unset.
+        model: ``--model`` value, or None when unset.
         timeout: ``--timeout`` value, or None when unset.
         context_window: ``--context-window`` value, or None when unset.
         semantic_chunks: Whether ``--semantic-chunks`` was passed.
@@ -590,6 +627,10 @@ def _cli_overrides(
         overrides.append(f"--strictness {strictness}")
     if transport is not None:
         overrides.append(f"--transport {transport}")
+    if provider is not None:
+        overrides.append(f"--provider {provider}")
+    if model is not None:
+        overrides.append(f"--model {model}")
     if timeout is not None:
         overrides.append(f"--timeout {timeout:g}")
     if context_window is not None:

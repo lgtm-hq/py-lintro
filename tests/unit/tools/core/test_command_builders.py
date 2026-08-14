@@ -27,6 +27,7 @@ from lintro.tools.core.command_builders import (
 from lintro.tools.core.node_fallback import (
     NODE_ENGINE_REQUIREMENTS,
     is_registry_fallback_command,
+    notify_registry_fallback_selected,
     registry_fallback_guidance,
     reset_registry_fallback_notices,
     split_npm_spec,
@@ -1183,6 +1184,32 @@ def test_registry_fallback_guidance_omits_unknown_node_floor() -> None:
 
     assert_that(guidance).contains("npm install -D some-linter@1.0.0")
     assert_that(guidance).does_not_contain("requires Node")
+
+
+def test_registry_fallback_guidance_includes_package_flag_shape() -> None:
+    """The --package runner shape is named in full, not just runner + spec."""
+    command = ["npx", "--package", "typescript@5.9.3", "tsc"]
+    guidance = registry_fallback_guidance(command)
+
+    assert_that(guidance).contains("npx --package typescript@5.9.3 tsc")
+    assert_that(guidance).does_not_contain("npx typescript@5.9.3`")
+
+
+def test_package_flag_fallback_logs_the_full_command(
+    clean_fallback_notices: None,
+) -> None:
+    """Selecting a --package fallback warns with the full resolved argv.
+
+    Args:
+        clean_fallback_notices: Fixture clearing the one-time notice cache.
+    """
+    command = ["npx", "--package", "@commitlint/cli@19.0.0", "commitlint"]
+    with patch("lintro.tools.core.node_fallback.logger") as mock_logger:
+        notify_registry_fallback_selected(command)
+
+    message = cast(str, mock_logger.warning.call_args.args[0])
+    assert_that(message).contains("npx --package @commitlint/cli@19.0.0 commitlint")
+    assert_that(message).does_not_contain("npx @commitlint/cli@19.0.0`")
 
 
 def test_html_validate_bunx_fallback_warns_once(

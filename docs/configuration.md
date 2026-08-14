@@ -453,6 +453,13 @@ export LINTRO_DOCKER=1
 
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+
+# AI config overlays (flag > env > .lintro-config.yaml > default). See
+# docs/ai-features.md "Invocation overrides".
+export LINTRO_AI_PROVIDER=cursor
+export LINTRO_AI_MODEL=cursor-grok-4.6-high
+export LINTRO_AI_TRANSPORT=cli
+export LINTRO_AI_ENABLED=1
 ```
 
 | Variable                         | Description                                                  | Default   |
@@ -462,6 +469,10 @@ export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 | `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
 | `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
 | `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
+| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
+| `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
+| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |
+| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)               | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -897,7 +908,7 @@ guidance rather than the tool's raw error.
 pins the version through your lockfile. A global or Homebrew install is a valid fallback
 and is used whenever no project-local install is present.
 
-> **Changed in the `#1811` release.** The chain above used to apply only to
+> **Changed after v0.115.0 (#1811).** The chain above used to apply only to
 > `html-validate`. Other Node tools either went straight to
 > `bunx <binary>`/`npx <binary>` (never consulting `PATH`, and resolving `@latest`) or
 > preferred `PATH` ahead of any project-local install. Two consequences worth checking
@@ -1691,15 +1702,17 @@ template expressions.
 
 ```bash
 # bun (recommended)
-bun add -D astro @astrojs/check
+bun add -D @astrojs/check
 
 # npm
-npm install -D astro @astrojs/check
+npm install -D @astrojs/check
 ```
 
 `astro check` needs `@astrojs/check`, and Lintro runs Astro with `CI=1` so its
-interactive "install @astrojs/check?" prompt cannot complete — install both. A
-project-local install is strongly preferred here for that reason; see
+interactive "install @astrojs/check?" prompt cannot complete. Add that package as a
+devDependency; `astro` is already a production dependency in an Astro project, and
+installing it with `-D` would move it out of `dependencies`. A project-local install of
+`@astrojs/check` is strongly preferred here; see
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Native Config:** `astro.config.mjs`, `astro.config.ts`, or `astro.config.js`
@@ -1840,8 +1853,8 @@ most reliable branch of Lintro's executable resolution, it is lockfile-pinned, a
 needs no registry access at check time. A global install (`-g`) does _not_ populate
 `node_modules/.bin`, so it lands on a later, weaker branch.
 
-html-validate uses the shared Node.js chain — as of `#1811` so does every other Node.js
-tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
+html-validate uses the shared Node.js chain — as of a release after v0.115.0 (#1811) so
+does every other Node.js tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Executable resolution order:**
 

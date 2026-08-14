@@ -18,6 +18,11 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from lintro.cli_utils.install_output import (
+    render_install_results,
+    render_outcome_summary,
+    unresolved_tool_names,
+)
 from lintro.cli_utils.onboarding import (
     is_interactive_tty,
     print_install_next_steps,
@@ -279,30 +284,26 @@ def install_command(
     console.print()
     results = installer.execute(plan)
 
-    # Report results
+    # Report results — every planned action is attempted, so each one gets a
+    # numbered line even when an earlier action failed or timed out.
     succeeded = sum(1 for r in results if r.success)
     failed = sum(1 for r in results if not r.success)
 
-    for r in results:
-        if r.success:
-            console.print(
-                f"  [green]OK[/green]  {r.tool.name} "
-                f"[dim]({r.duration_seconds:.1f}s)[/dim]",
-            )
-        else:
-            console.print(f"  [red]FAIL[/red]  {r.tool.name}: {r.message}")
+    render_install_results(console, results)
 
     console.print()
+    render_outcome_summary(console, results)
     has_issues = failed > 0 or plan.skipped or plan.outdated or plan.manual
 
-    if failed > 0:
-        console.print(
-            f"  [yellow]{succeeded} installed, {failed} failed[/yellow]",
-        )
-    elif has_issues:
-        console.print(f"  [green]{succeeded} tools installed.[/green]")
-    else:
+    if not has_issues:
         console.print(f"  [green]All {succeeded} tools installed.[/green]")
+
+    unresolved = unresolved_tool_names(results)
+    if unresolved:
+        console.print(
+            "  [yellow]Re-running the same command will not help for: "
+            f"{', '.join(unresolved)}[/yellow]",
+        )
 
     if plan.outdated:
         console.print(

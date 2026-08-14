@@ -21,6 +21,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.115.2] - 2026-08-14
+
+### Fixed
+
+- **tools**: resolve every Node tool through the pinned local-first chain (#2013)
+  (05076fe)
+
+## [0.115.1] - 2026-08-13
+
+### Changed
+
+- **ai**: drive AI-review config via repo Actions variables (#2018) (9f43a98)
+
+### Fixed
+
+- **install**: make install retries convergent and actionable (#2012) (73dd323)
+
+## [0.115.0] - 2026-08-13
+
+### Added
+
+- **ai**: add env-var and CLI-flag override layer for AI config (#2016) (a3ca539)
+
 ## [0.114.1] - 2026-08-11
 
 ### Fixed

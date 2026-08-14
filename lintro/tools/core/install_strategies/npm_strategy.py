@@ -15,12 +15,15 @@ from __future__ import annotations
 
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.tools.core.install_strategies.base import InstallStrategy
-from lintro.tools.core.install_strategies.brew_names import BREW_FORMULA_NAMES
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.node_project import (
     NODE_MANAGER_COMMANDS,
     NODE_MANAGERS,
     add_dependency_command,
+)
+from lintro.tools.core.install_strategies.package_names import (
+    BREW_FORMULA_NAMES,
+    ecosystem_package_name,
 )
 from lintro.tools.core.install_strategies.registry import register_strategy
 
@@ -84,7 +87,7 @@ class NpmStrategy(InstallStrategy):
             Shell command string, or a manual-action message when the project
             declares a different version.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         conflict = _pin_conflict(env, pkg, tool_version, upgrading=False)
         if conflict is not None:
             return conflict
@@ -121,7 +124,7 @@ class NpmStrategy(InstallStrategy):
             Shell command string, or a manual-action message when the project
             pins a different version.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         conflict = _pin_conflict(env, pkg, tool_version, upgrading=True)
         if conflict is not None:
             return conflict

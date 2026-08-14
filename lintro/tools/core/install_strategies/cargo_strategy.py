@@ -5,6 +5,7 @@ from __future__ import annotations
 from lintro.enums.install_context import PackageManager
 from lintro.tools.core.install_strategies.base import InstallStrategy
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
+from lintro.tools.core.install_strategies.package_names import ecosystem_package_name
 from lintro.tools.core.install_strategies.registry import register_strategy
 
 
@@ -57,7 +58,7 @@ class CargoStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         return f"cargo install {pkg}"
 
     def upgrade_hint(
@@ -80,7 +81,7 @@ class CargoStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        pkg = install_package or tool_name
+        pkg = ecosystem_package_name(tool_name, install_package)
         return f"cargo install --force {pkg}"
 
 

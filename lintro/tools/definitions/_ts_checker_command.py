@@ -6,31 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.enums.doc_url_template import DocUrlTemplate
-from lintro.plugins.execution_preparation import get_executable_command
 from lintro.utils.tsconfig import create_temp_tsconfig
 
 if TYPE_CHECKING:
     from lintro.tools.definitions._ts_checker_base import TypeScriptCheckerPlugin
-
-
-def _resolve_binary_command(binary: str, cwd: Path | None = None) -> list[str]:
-    """Resolve the command used to invoke a TypeScript checker binary.
-
-    Delegates to the shared Node.js resolution chain (#1811): a project-local
-    ``node_modules/.bin`` install first, then ``PATH``, then a version-pinned
-    ``bunx``/``npx`` invocation. A type checker must match the project's own
-    ``typescript``/``vue-tsc`` version — a different compiler reports different
-    diagnostics — so the lockfile-pinned local install is the only defensible
-    first choice.
-
-    Args:
-        binary: Name of the checker executable (e.g. ``"tsc"``).
-        cwd: Directory the checker will run in, when known.
-
-    Returns:
-        Command argument list for the checker.
-    """
-    return get_executable_command(binary, cwd=cwd)
 
 
 def _find_tsconfig(plugin: TypeScriptCheckerPlugin, cwd: Path) -> Path | None:

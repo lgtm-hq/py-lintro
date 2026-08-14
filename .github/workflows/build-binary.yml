@@ -255,24 +255,20 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          # Fail if binary can't execute --version (required for valid build)
-          ./dist/nuitka/lintro --version
-          # Show help output for debugging (non-fatal)
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-macos-${{ matrix.arch }}
-
-      - name: Calculate SHA256
+      # matrix.arch reaches the shell via env, not template expansion: on
+      # workflow_call inputs.arch is a free-form string that feeds this matrix
+      # (same hardening as the Build binary step above).
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-macos-${{ matrix.arch }}"
-          SHA=$(shasum -a 256 "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for ${{ matrix.arch }}: $SHA"
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          "dist/nuitka/lintro-macos-$BUILD_ARCH"
+          "$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -282,8 +278,11 @@ jobs:
           retention-days: 7
 
       - name: Save SHA256 to file
+        env:
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
-          echo "${{ steps.sha256.outputs.sha256 }}" > sha256-${{ matrix.arch }}.txt
+          echo "$SHA256" > "sha256-$BUILD_ARCH.txt"
 
       - name: Upload SHA256 file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -405,22 +404,19 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          ./dist/nuitka/lintro --version
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-linux-${{ matrix.arch }}
-
-      - name: Calculate SHA256
+      # Kept symmetric with the macOS job: both call sites pass the arch
+      # through env so the two never drift apart.
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-linux-${{ matrix.arch }}"
-          SHA=$(sha256sum "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for linux-${{ matrix.arch }}: $SHA"
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          "dist/nuitka/lintro-linux-$BUILD_ARCH"
+          "linux-$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -471,7 +467,18 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
             uploads.github.com:443
+
+      # Needed for scripts/build/create_universal.sh. The codeload /
+      # objects.githubusercontent.com endpoints above are what actions/checkout
+      # fetches through, and match the other sparse-checkout jobs here.
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
 
       - name: Download arm64 binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -486,17 +493,11 @@ jobs:
           path: binaries/
 
       - name: Create universal binary
-        run: |
-          lipo -create \
-            binaries/lintro-macos-arm64 \
-            binaries/lintro-macos-x86_64 \
-            -output binaries/lintro-macos-universal
-          chmod +x binaries/lintro-macos-universal
-
-      - name: Verify universal binary
-        run: |
-          file binaries/lintro-macos-universal
-          ls -lh binaries/lintro-macos-universal
+        run: >-
+          scripts/build/create_universal.sh
+          binaries/lintro-macos-arm64
+          binaries/lintro-macos-x86_64
+          binaries/lintro-macos-universal
 
       - name: Upload universal artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
