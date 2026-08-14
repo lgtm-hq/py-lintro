@@ -21,10 +21,11 @@ name: AI Review - Dogfood
 # authenticates only against an API key, which is precisely the credential that
 # does not work for the Anthropic dogfood (#1838).
 #
-# Spend ceiling is the committed `ai.max_cost_usd: 0.50` in `.lintro-config.yaml`.
-# There is no env/flag overlay for that field (#1970/#1971): a PR cannot raise
-# the cap. Under the CLI transport the call bills the subscription, so the
-# figure is advisory rather than enforced spend control (#1923).
+# Spend ceiling is the committed `ai.max_cost_usd: 2.00` in `.lintro-config.yaml`
+# (the empirically validated value from #1976/#1977; the 0.50 that landed with
+# #1971 was a side-effect, restored here by #2025). Under the CLI transport the
+# call bills the subscription, so the figure is advisory rather than enforced
+# spend control (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -51,6 +52,14 @@ name: AI Review - Dogfood
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
+#
+# TWO-PR BOOTSTRAP (#2025): this job checks out only the trusted base ref.
+# GitHub runs the workflow YAML from the PR, so a brand-new script invoked
+# here would be missing on the PR that introduces it. Convention: PR 1 lands
+# the script inert (no workflow step calls it yet); PR 2, after PR 1 is on
+# main, adds the step that invokes it. Never land a new script and its first
+# workflow invocation in the same PR. A second `actions/checkout` (any
+# `path:`) fails the audit in tests/scripts/test_run_ai_review.py.
 
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
@@ -82,13 +91,13 @@ jobs:
     # (pull_request.base.sha, i.e. main), never the PR head, so the code that
     # runs with the provider credential is always trusted — a PR cannot
     # substitute its own lintro/** to exfiltrate the token. Agent CLI versions
-    # are pinned in the base ref's Dockerfile for the same reason. The Cursor
-    # installer script is fetched from this workflow's commit (`github.sha`)
-    # into a side path: GitHub runs the workflow YAML from the PR, but the
-    # workspace checkout is base, so a new installer would otherwise be missing
-    # on the PR that introduces it. Pin hashes still come from the base
-    # Dockerfile. The PR is reviewed as data: `lintro review --pr <N>` fetches
-    # the diff via `gh` (GitHub API), it does not execute the PR's working tree.
+    # are pinned in the base ref's Dockerfile for the same reason. Cursor
+    # install is gated on `vars.LINTRO_AI_PROVIDER == 'cursor'` and runs
+    # `scripts/ci/install-cursor-agent.sh` from this trusted checkout — never
+    # a PR-head side-checkout. New installer scripts follow the two-PR
+    # bootstrap convention in the file header. The PR is reviewed as data:
+    # `lintro review --pr <N>` fetches the diff via `gh` (GitHub API), it
+    # does not execute the PR's working tree.
     # Trade-off: a PR that breaks the review code itself won't be caught by this
     # job (that is covered by the unit tests in tests/), which is the correct
     # security posture. The credential is therefore safe to enable.
@@ -115,6 +124,15 @@ jobs:
 
     steps:
       - name: Harden Runner
+        # Cursor shards observed on live dogfood (runs 31779466126 /
+        # 31782811574): downloads.cursor.com, api2.cursor.sh, api3.cursor.sh,
+        # agentn.global.api5.cursor.sh, repo42.cursor.sh. A rotated shard
+        # (e.g. repo43.cursor.sh) is named in the harden-runner summary of
+        # the failed run; fix is a one-line allowlist PR. No wildcards on
+        # this job. release-assets.githubusercontent.com is setup-node's
+        # GitHub releases CDN; those runs blocked it and the action fell
+        # back to nodejs.org — allowlisted so Node install is not a silent
+        # fallback.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -125,6 +143,7 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
@@ -133,9 +152,10 @@ jobs:
             nodejs.org:443
             registry.npmjs.org:443
             downloads.cursor.com:443
-            api.cursor.com:443
-            *.cursor.sh:443
-            *.cursorapi.com:443
+            api2.cursor.sh:443
+            api3.cursor.sh:443
+            agentn.global.api5.cursor.sh:443
+            repo42.cursor.sh:443
 
       - name: Checkout base ref (trusted lintro install)
         # Install lintro from the PR's BASE ref (main), NOT the PR head. The
@@ -153,32 +173,21 @@ jobs:
 
       - name: Resolve pinned agent-CLI versions
         id: pins
-        # Single pin site: the Node, claude-code, and Cursor agent versions live
-        # in docker/ai-tools.Dockerfile's ARG pins, so the CLIs this job drives
-        # are the ones lintro ships and the contract tests verify. --exact is
-        # only valid for semver ARGs; CURSOR_AGENT_VERSION is a calendar build
-        # id and the sha256 is a digest, so those resolve without --exact.
+        # Single pin site: the Node and claude-code versions live in
+        # docker/ai-tools.Dockerfile's Renovate-managed ARGs, so the CLI this
+        # job drives is the one lintro ships and the contract tests verify.
         run: |
           python3 scripts/ci/ai_tools_arg_pin.py NODE_VERSION CLAUDE_CODE_VERSION \
             --exact --format github >>"$GITHUB_OUTPUT"
+
+      - name: Resolve pinned cursor agent version
+        id: cursor-pins
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
+        # Calendar build id is not semver, so this resolves without --exact.
+        # Gated so the anthropic path never touches the Cursor tarball pins.
+        run: |
           python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION \
             CURSOR_AGENT_SHA256_X64 --format github >>"$GITHUB_OUTPUT"
-
-      - name: Checkout cursor-agent installer (matches this workflow)
-        # Workspace checkout is the trusted base ref, so a new installer added
-        # on this PR would not be on disk. Fetch just that script from the
-        # commit GitHub used for the workflow YAML. Pin hashes still come from
-        # the base Dockerfile in the previous step.
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          persist-credentials: false
-          path: .ai-review-installer
-          sparse-checkout: |
-            scripts/ci/install-cursor-agent.sh
-            scripts/ci/enable_cursor_workspace_trust.py
-          sparse-checkout-cone-mode: false
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -191,10 +200,12 @@ jobs:
         run: scripts/ci/install-claude-cli.sh
 
       - name: Install pinned cursor agent CLI
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
         env:
-          CURSOR_AGENT_VERSION: ${{ steps.pins.outputs.cursor-agent-version }}
-          CURSOR_AGENT_SHA256_X64: ${{ steps.pins.outputs.cursor-agent-sha256-x64 }}
-        run: .ai-review-installer/scripts/ci/install-cursor-agent.sh
+          CURSOR_AGENT_VERSION: ${{ steps.cursor-pins.outputs.cursor-agent-version }}
+          # yamllint disable-line rule:line-length
+          CURSOR_AGENT_SHA256_X64: ${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}
+        run: scripts/ci/install-cursor-agent.sh
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -208,14 +219,6 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra ai
-
-      - name: Enable Cursor workspace trust
-        # `agent` exits 1 in non-interactive CI until the workspace is trusted.
-        # #2023 defaults `ai.cursor_trust_workspace` to true; this step stays
-        # until that default is on main and #2025 deletes the patcher. Safe
-        # here: checkout is pull_request.base.sha and fork PRs never reach
-        # this job.
-        run: python3 .ai-review-installer/scripts/ci/enable_cursor_workspace_trust.py
 
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
