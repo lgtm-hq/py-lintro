@@ -206,7 +206,7 @@ def test_check_windows_shell_shim_falls_back_to_global(
     ):
         astro_check_plugin.check([str(astro_project)], {})
 
-    assert_that(captured["cmd"][:2]).is_equal_to(["astro", "check"])
+    assert_that(captured["cmd"][:2]).is_equal_to(["/usr/bin/astro", "check"])
 
 
 def test_check_ignores_astro_directory_in_bin(
@@ -240,7 +240,7 @@ def test_check_ignores_astro_directory_in_bin(
     ):
         astro_check_plugin.check([str(astro_project)], {})
 
-    assert_that(captured["cmd"][:2]).is_equal_to(["astro", "check"])
+    assert_that(captured["cmd"][:2]).is_equal_to(["/usr/bin/astro", "check"])
 
 
 def test_check_falls_back_to_global_astro(
@@ -270,7 +270,7 @@ def test_check_falls_back_to_global_astro(
     ):
         astro_check_plugin.check([str(astro_project)], {})
 
-    assert_that(captured["cmd"][:2]).is_equal_to(["astro", "check"])
+    assert_that(captured["cmd"][:2]).is_equal_to(["/usr/bin/astro", "check"])
 
 
 def test_check_timeout_returns_timeout_result(

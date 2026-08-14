@@ -457,6 +457,12 @@ def find_local_node_binary(
     the project's own install. A local install is lockfile-tracked, so it is
     preferred over any registry fetch.
 
+    The walk stops at the nearest ancestor that contains ``package.json`` or
+    ``.git`` (a file or directory). That marker directory is still searched;
+    directories above it are not, so a decoy ``node_modules`` outside the
+    project — or a monorepo root above a nested package with its own
+    ``package.json`` — cannot win.
+
     On Windows the package manager writes a ``.cmd`` shim; the extension-less
     shim there is a shell script that cannot be executed with ``shell=False``.
 
@@ -474,6 +480,8 @@ def find_local_node_binary(
         candidate = directory / "node_modules" / ".bin" / name
         if candidate.is_file():
             return candidate.as_posix()
+        if (directory / "package.json").is_file() or (directory / ".git").exists():
+            break
     return None
 
 
@@ -615,7 +623,10 @@ class NodeJSBuilder(CommandBuilder):
         When the executable name differs from the package name (``tsc`` in
         ``typescript``, ``commitlint`` in ``@commitlint/cli``) the runner is
         given both via ``--package``; bare ``bunx typescript`` would look for a
-        ``typescript`` executable that does not exist.
+        ``typescript`` executable that does not exist. ``npx`` always uses
+        ``--yes --package spec binary`` so a CI/non-TTY run cannot hang on an
+        install prompt, even when the names match. ``bunx`` keeps the shorter
+        ``[bunx, spec]`` form when they match.
 
         ``--package`` (``-p``) is assumed present on both runners. Verified
         against bun 1.3.14 (``bunx --help`` documents ``-p, --package <package>``
@@ -639,18 +650,20 @@ class NodeJSBuilder(CommandBuilder):
             logger.debug(f"Using project-local {binary_name}: {local}")
             return [local]
 
-        if shutil.which(binary_name):
-            logger.debug(f"Using {binary_name} from PATH")
-            return [binary_name]
+        tool_path = shutil.which(binary_name)
+        if tool_path:
+            logger.debug(f"Using {binary_name} from PATH: {tool_path}")
+            return [tool_path]
 
         spec = pinned_npm_spec(package_name)
         for runner in ("bunx", "npx"):
             if shutil.which(runner):
-                command = (
-                    [runner, spec]
-                    if package_name == binary_name
-                    else [runner, "--package", spec, binary_name]
-                )
+                if runner == "npx":
+                    command = ["npx", "--yes", "--package", spec, binary_name]
+                elif package_name == binary_name:
+                    command = [runner, spec]
+                else:
+                    command = [runner, "--package", spec, binary_name]
                 notify_registry_fallback_selected(command)
                 return command
         return [binary_name]

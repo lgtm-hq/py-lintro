@@ -222,7 +222,7 @@ def test_get_tsc_command_with_tsc_available(
     with patch("shutil.which", return_value="/usr/bin/tsc"):
         cmd = tsc_plugin._get_tsc_command()
 
-    assert_that(cmd).is_equal_to(["tsc"])
+    assert_that(cmd).is_equal_to(["/usr/bin/tsc"])
 
 
 def test_get_tsc_command_with_bunx_fallback(
@@ -274,9 +274,12 @@ def test_get_tsc_command_with_npx_fallback(
     with patch("shutil.which", side_effect=which_side_effect):
         cmd = tsc_plugin._get_tsc_command()
 
-    assert_that(cmd[:2]).is_equal_to(["npx", "--package"])
-    assert_that(cmd[2]).starts_with("typescript@")
-    assert_that(cmd[3]).is_equal_to("tsc")
+    # tsc ships inside the ``typescript`` package, so the runner needs
+    # ``--package`` to find the executable (#1811). npx is always
+    # non-interactive (#2028).
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("typescript@")
+    assert_that(cmd[4]).is_equal_to("tsc")
 
 
 def test_get_tsc_command_fallback_to_tsc(

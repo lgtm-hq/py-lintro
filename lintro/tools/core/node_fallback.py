@@ -23,8 +23,14 @@ REGISTRY_RUNNERS: frozenset[str] = frozenset({"bunx", "npx"})
 
 # Runner flags that carry the package spec when it differs from the executable
 # name (``bunx --package typescript@6.0.3 tsc``). Both ``bunx`` and ``npx``
-# accept the short and long spelling.
+# accept the short and long spelling. ``--yes`` is *not* a package flag; it is
+# a boolean runner flag (see ``RUNNER_FLAGS``).
 PACKAGE_FLAGS: frozenset[str] = frozenset({"-p", "--package"})
+
+# Boolean runner flags that may precede the package spec or ``--package``.
+# Skipped when recovering the spec from a resolved command. ``--yes`` / ``-y``
+# is npx's non-interactive install flag, not a package selector.
+RUNNER_FLAGS: frozenset[str] = frozenset({"--yes", "-y"})
 
 # Node runtime floors that a pinned npm tool imposes on the consumer once the
 # registry fallback (or a local install) is used. These come from the pinned
@@ -72,9 +78,16 @@ def split_npm_spec(spec: str) -> tuple[str, str | None]:
 def registry_fallback_spec(command: Sequence[str]) -> str | None:
     """Extract the npm spec from a resolved registry-fallback command.
 
-    Handles both shapes the builder emits: ``[runner, spec]`` when the
-    executable and package share a name, and ``[runner, "--package", spec,
-    binary]`` when they differ.
+    Handles the shapes the builder emits:
+
+    - ``[bunx, spec]`` when the executable and package share a name
+    - ``[bunx, "--package", spec, binary]`` when they differ
+    - ``[npx, "--yes", "--package", spec, binary]`` always, including when
+      the names match
+
+    Boolean runner flags such as ``--yes`` are skipped until ``--package``
+    or the spec is reached. ``--yes`` is not a package flag and must not be
+    added to :data:`PACKAGE_FLAGS`.
 
     Args:
         command: Resolved command list, as returned by a command builder.
@@ -85,11 +98,16 @@ def registry_fallback_spec(command: Sequence[str]) -> str | None:
     """
     if len(command) < 2 or command[0] not in REGISTRY_RUNNERS:
         return None
-    if command[1] in PACKAGE_FLAGS:
-        # The --package shape is ``[runner, flag, spec, binary]``; anything
+    index = 1
+    while index < len(command) and command[index] in RUNNER_FLAGS:
+        index += 1
+    if index >= len(command):
+        return None
+    if command[index] in PACKAGE_FLAGS:
+        # The --package shape is ``[..., flag, spec, binary]``; anything
         # shorter is a malformed command, not a fallback to report on.
-        return command[2] if len(command) >= 4 else None
-    return command[1]
+        return command[index + 1] if len(command) >= index + 3 else None
+    return command[index]
 
 
 def is_registry_fallback_command(command: Sequence[str]) -> bool:
@@ -132,10 +150,9 @@ def registry_fallback_install_hint(command: Sequence[str]) -> str:
 def _format_fallback_command(command: Sequence[str]) -> str:
     """Render a registry-fallback command for logs and user-facing hints.
 
-    Both builder shapes must round-trip: ``[runner, spec]`` when the
-    executable and package share a name, and ``[runner, "--package", spec,
-    binary]`` when they differ. Joining the resolved argv is the only
-    representation that stays accurate for both.
+    Every builder shape must round-trip, including npx's
+    ``[npx, "--yes", "--package", spec, binary]``. Joining the resolved argv
+    is the only representation that stays accurate for all of them.
 
     Args:
         command: Resolved command list, as returned by a command builder.

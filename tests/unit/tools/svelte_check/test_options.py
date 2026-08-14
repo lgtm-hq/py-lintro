@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
@@ -227,7 +229,7 @@ def test_build_command_basic(
     assert_that(cmd).contains("machine-verbose")
     # First element is the PATH/runner-resolved svelte-check binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
-    assert_that(cmd[0]).is_in("svelte-check", "bunx", "npx")
+    assert_that(Path(cmd[0]).name).is_in("svelte-check", "bunx", "npx")
     # The svelte-check package must be named somewhere in the command
     assert_that(" ".join(cmd)).contains("svelte-check")
 

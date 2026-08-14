@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
@@ -238,7 +240,7 @@ def test_build_command_basic(
     assert_that(cmd).contains("false")
     # First element is the PATH/runner-resolved vue-tsc binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
-    assert_that(cmd[0]).is_in("vue-tsc", "bunx", "npx")
+    assert_that(Path(cmd[0]).name).is_in("vue-tsc", "bunx", "npx")
 
 
 def test_build_command_with_project(vue_tsc_plugin: VueTscPlugin) -> None:
