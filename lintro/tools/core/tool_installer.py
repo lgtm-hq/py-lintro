@@ -22,6 +22,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
+import sysconfig
 import time
 from collections.abc import Sequence
 from pathlib import Path
@@ -60,6 +61,21 @@ __all__ = [
     "is_resolved_command_discoverable",
     "resolve_version_command",
 ]
+
+
+def _is_wrapper_probe(command: Sequence[str]) -> bool:
+    """Return whether *command* probes a wrapper or host binary, not the tool.
+
+    Args:
+        command: Version-command argv (manifest or resolved).
+
+    Returns:
+        True when argv[0] is ``sh``/``bash``/``cargo`` or contains ``/``.
+    """
+    if not command:
+        return False
+    main_cmd = command[0]
+    return main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd
 
 
 def _is_node_modules_bin(path: Path) -> bool:
@@ -101,9 +117,11 @@ def resolve_version_command(
     command = list(tool.version_command)
     if tool.install_type != "npm":
         return command
-    # Wrapper version commands (vue-tsc's bash helper) are not a Node
-    # binary name; splicing the runtime chain onto them drops the wrapper.
-    if not command or command[0] in ("sh", "bash"):
+    # Wrapper probes cannot answer whether the tool itself is discoverable
+    # (`sh`/`bash`/`cargo`, or an argv[0] containing `/`). Leave them as
+    # the manifest wrote them — the same set `_verify_discoverable` used
+    # before this helper existed — instead of splicing the Node chain on.
+    if _is_wrapper_probe(command):
         return command
 
     from lintro.plugins.execution_preparation import get_executable_command
@@ -153,7 +171,7 @@ def is_resolved_command_discoverable(command: Sequence[str]) -> bool:
     if main_path.is_absolute() and _is_node_modules_bin(main_path):
         return main_path.exists()
 
-    if main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd:
+    if _is_wrapper_probe(command):
         return True
 
     return shutil.which(main_cmd) is not None
@@ -631,19 +649,34 @@ class ToolInstaller:
             Message naming the install destination directory and the PATH
             remedy, rather than a generic "needs manual action".
         """
-        dest = self._install_cwd(tool)
-        if dest is not None:
-            bin_dir = dest / "node_modules" / ".bin"
-            return (
-                f"Install command succeeded but {tool.name} is still not "
-                f"discoverable. It was installed to {bin_dir}; add that "
-                f'directory to PATH, for example: export PATH="{bin_dir}:$PATH"'
-            )
+        bin_dir = self._install_destination_dir(tool)
         return (
             f"Install command succeeded but {tool.name} is still not "
-            "discoverable on PATH. Add the install destination directory "
-            "to PATH."
+            f"discoverable. It was installed to {bin_dir}; add that "
+            f'directory to PATH, for example: export PATH="{bin_dir}:$PATH"'
         )
+
+    def _install_destination_dir(self, tool: ManifestTool) -> Path:
+        """Return the directory an install of *tool* is expected to land in.
+
+        Args:
+            tool: Tool whose binary could not be found after install.
+
+        Returns:
+            Concrete destination directory named in the PATH remedy.
+        """
+        dest = self._install_cwd(tool)
+        if dest is not None:
+            return dest / "node_modules" / ".bin"
+        if tool.install_type == "npm":
+            npm = shutil.which("npm")
+            if npm is not None:
+                return Path(npm).resolve().parent
+        if tool.install_type == "pip":
+            return Path(sysconfig.get_path("scripts"))
+        if tool.install_type == "cargo":
+            return Path.home() / ".cargo" / "bin"
+        return Path.home() / ".local" / "bin"
 
     def _verified_result(
         self,

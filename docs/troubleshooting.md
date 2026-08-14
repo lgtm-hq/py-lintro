@@ -238,13 +238,14 @@ an early failure or timeout never stops the tools after it from being installed:
 | `TIMEOUT` | Command exceeded the 5-minute install timeout; retry is valid.   |
 | `MANUAL`  | No runnable command exists here; install the tool by hand.       |
 
-Wrapper-probed tools (`bash`/`sh`/`cargo` version commands) still report `OK`, because
-those probes cannot tell whether the tool itself is discoverable. A project-local npm
-add whose binary lands in `<project>/node_modules/.bin` **is** discoverable: planning,
-post-install verification, and `lintro doctor` share the same local-first probe, so a
-successful `npm install -D` is not reported as `PATH` just because that directory is not
-on `PATH`. The `bunx`/`npx` registry fallback is **not** an install and is never treated
-as discoverable.
+Wrapper-probed tools (`bash`/`sh`/`cargo` version commands, or an argv[0] containing
+`/`) still skip the PATH discoverability check, because those probes cannot tell whether
+the tool itself is discoverable. They still report `STALE` when a parsed version is
+below `min_version`. A project-local npm add whose binary lands in
+`<project>/node_modules/.bin` **is** discoverable: planning, post-install verification,
+and `lintro doctor` share the same local-first probe, so a successful `npm install -D`
+is not reported as `PATH` just because that directory is not on `PATH`. The `bunx`/`npx`
+registry fallback is **not** an install and is never treated as discoverable.
 
 `lintro install` exits 1 when **any** planned action is not a full success, including
 `PATH` (`NOT_DISCOVERABLE`) and `STALE` (`STILL_OUTDATED`). A zero-exit install command

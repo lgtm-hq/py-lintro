@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only TimeoutExpired is referenced; no process is spawned
 import sys
+import sysconfig
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,7 @@ from lintro.tools.core.install_strategies.node_project import detect_node_projec
 from lintro.tools.core.tool_installer import (
     ToolInstaller,
     is_resolved_command_discoverable,
+    resolve_version_command,
 )
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 
@@ -90,6 +92,9 @@ def test_command_success_without_discovery_is_flagged() -> None:
     assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
     assert_that(result.success).is_false()
     assert_that(result.message).contains("not discoverable")
+    assert_that(result.message).contains(str(Path(sysconfig.get_path("scripts"))))
+    assert_that(result.message).contains("PATH")
+    assert_that(result.message).does_not_contain("needs manual action")
     # A rerun installs the same package to the same place — it cannot fix PATH.
     assert_that(result.outcome.is_retryable).is_false()
 
@@ -502,3 +507,46 @@ def test_not_discoverable_message_names_the_destination_directory(
     assert_that(result.message).contains(str(expected_bin))
     assert_that(result.message).contains("PATH")
     assert_that(result.message).does_not_contain("needs manual action")
+
+
+@pytest.mark.parametrize(
+    ("argv0", "rest"),
+    [
+        ("bash", ("scripts/vue-tsc-version.sh",)),
+        ("sh", ("scripts/vue-tsc-version.sh",)),
+        ("cargo", ("audit", "--version")),
+        ("scripts/probe.sh", ()),
+    ],
+    ids=["bash", "sh", "cargo", "relative-path"],
+)
+def test_npm_wrapper_probes_are_not_rewritten_by_node_resolution(
+    tmp_path: Path,
+    argv0: str,
+    rest: tuple[str, ...],
+) -> None:
+    """Wrapper probes stay as the manifest wrote them, even for npm tools.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        argv0: First element of the manifest version command.
+        rest: Remaining argv.
+    """
+    _write_node_project(tmp_path)
+    installer = _node_installer(tmp_path)
+    command = (argv0, *rest)
+    tool = ManifestTool(
+        name="vue_tsc",
+        version="3.0.0",
+        min_version="3.0.0",
+        install_type="npm",
+        install_package="vue-tsc",
+        version_command=command,
+    )
+    with patch(
+        "lintro.plugins.execution_preparation.get_executable_command",
+    ) as mock_resolve:
+        resolved = resolve_version_command(tool, context=installer._context)
+
+    assert_that(resolved).is_equal_to(list(command))
+    mock_resolve.assert_not_called()
+    assert_that(is_resolved_command_discoverable(resolved)).is_true()
