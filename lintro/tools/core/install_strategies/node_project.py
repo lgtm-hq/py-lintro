@@ -42,11 +42,16 @@ LOCKFILE_MANAGERS: tuple[tuple[str, PackageManager], ...] = (
 )
 
 #: Managers lintro will fall back to when the project says nothing, in
-#: preference order. bun stays first because it is the faster installer; this is
-#: the *only* branch where lintro's own preference is allowed to decide.
+#: preference order. bun stays first because it is the faster installer; npm
+#: next because it is the default Node toolchain. pnpm and yarn follow so a
+#: machine that only has those still gets a command it can run, rather than a
+#: hardcoded ``npm install`` that then fails with an OS error. This is the
+#: *only* branch where lintro's own preference is allowed to decide.
 FALLBACK_MANAGER_ORDER: tuple[PackageManager, ...] = (
     PackageManager.BUN,
     PackageManager.NPM,
+    PackageManager.PNPM,
+    PackageManager.YARN,
 )
 
 #: Every Node package manager lintro can drive, with all of its command

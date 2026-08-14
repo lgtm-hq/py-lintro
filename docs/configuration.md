@@ -625,8 +625,10 @@ dependency, while lintro installed and upgraded a global one (#2005).
    (`"packageManager": "pnpm@9.1.0"`).
 3. **Lockfile evidence** — `bun.lock`/`bun.lockb`, `pnpm-lock.yaml`, `yarn.lock`,
    `package-lock.json`, `npm-shrinkwrap.json`.
-4. **Available manager** — bun if installed, otherwise npm. This is the only step where
-   lintro's own preference decides anything.
+4. **Available manager** — bun if installed, otherwise npm, then pnpm, then yarn. bun
+   and npm are lintro's own preference; pnpm and yarn are included so a machine that
+   only has those still gets a command it can run. This is the only step where lintro's
+   own preference decides anything.
 
 Availability does **not** veto the first three. If your project is npm-locked but only
 bun is installed, lintro still tells you to run `npm install -D …` rather than quietly

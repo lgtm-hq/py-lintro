@@ -20,6 +20,7 @@ from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import InstallEnvironment, get_strategy
 from lintro.tools.core.install_strategies.base import InstallStrategy
 from lintro.tools.core.install_strategies.node_project import (
+    FALLBACK_MANAGER_ORDER,
     NODE_MANAGER_COMMANDS,
     NODE_MANAGERS,
     add_dependency_command,
@@ -280,6 +281,38 @@ def test_available_manager_is_the_last_resort(tmp_path: Path) -> None:
 
     assert_that(manager).is_equal_to(PM.BUN)
     assert_that(source).is_equal_to(NodeManagerSource.AVAILABLE_FALLBACK)
+
+
+@pytest.mark.parametrize(
+    "only",
+    [PM.PNPM, PM.YARN],
+    ids=["pnpm-only", "yarn-only"],
+)
+def test_pnpm_or_yarn_only_machine_is_used_when_the_project_has_no_evidence(
+    only: PackageManager,
+    tmp_path: Path,
+) -> None:
+    """A pnpm- or yarn-only host must not be told to run npm.
+
+    Prerequisites pass on pnpm/yarn alone, so falling through to a hardcoded
+    ``npm install -D`` would emit a command the machine cannot run.
+
+    Args:
+        only: The single manager present on PATH.
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_project(tmp_path)
+    env = _env(tmp_path, managers=frozenset({only}))
+
+    manager, source = select_node_manager(
+        available=frozenset({only}),
+        project=detect_node_project(tmp_path),
+    )
+    hint = _npm_strategy().install_hint(env, "prettier", "3.9.4", "prettier", None)
+
+    assert_that(manager).is_equal_to(only)
+    assert_that(source).is_equal_to(NodeManagerSource.AVAILABLE_FALLBACK)
+    assert_that(hint).starts_with(only.value)
 
 
 def test_unrecognised_package_manager_field_falls_through(tmp_path: Path) -> None:
@@ -889,3 +922,4 @@ def test_every_selectable_manager_has_command_spellings() -> None:
 
     # The fallback manager is hardcoded and must also be covered.
     assert_that(NODE_MANAGERS).contains(PM.NPM)
+    assert_that(frozenset(FALLBACK_MANAGER_ORDER)).is_equal_to(NODE_MANAGERS)
