@@ -219,7 +219,10 @@ class ToolInstaller:
         if not tool.version_command:
             return None
 
-        command = self._resolved_version_command(tool)
+        try:
+            command = self._resolved_version_command(tool)
+        except ImportError:
+            return None
         main_cmd = command[0]
         if (
             main_cmd not in ("sh", "bash", "cargo")
@@ -267,6 +270,10 @@ class ToolInstaller:
         command = list(tool.version_command)
         if tool.install_type != "npm":
             return command
+        # Wrapper version commands (vue-tsc's bash helper) are not a Node
+        # binary name; splicing the runtime chain onto them drops the wrapper.
+        if command[0] in ("sh", "bash"):
+            return command
 
         from lintro.plugins.execution_preparation import get_executable_command
 
@@ -275,6 +282,10 @@ class ToolInstaller:
             tool.name,
             cwd=project.root if project is not None else None,
         )
+        # bunx/npx is the registry fallback, not an install. Treating it as
+        # already_ok would skip the project-local add this PR exists to make.
+        if not resolved or resolved[0] in ("bunx", "npx"):
+            return command
         return [*resolved, *command[1:]]
 
     @staticmethod

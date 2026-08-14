@@ -88,12 +88,12 @@ class NpmStrategy(InstallStrategy):
             declares a different version.
         """
         pkg = ecosystem_package_name(tool_name, install_package)
-        conflict = _pin_conflict(env, pkg, tool_version, upgrading=False)
-        if conflict is not None:
-            return conflict
         brew_hint = _brew_hint(env, tool_name, verb="install")
         if brew_hint is not None:
             return brew_hint
+        conflict = _pin_conflict(env, pkg, tool_version, upgrading=False)
+        if conflict is not None:
+            return conflict
         return _node_add_command(env, pkg, tool_version)
 
     def upgrade_hint(
@@ -125,12 +125,12 @@ class NpmStrategy(InstallStrategy):
             pins a different version.
         """
         pkg = ecosystem_package_name(tool_name, install_package)
-        conflict = _pin_conflict(env, pkg, tool_version, upgrading=True)
-        if conflict is not None:
-            return conflict
         brew_hint = _brew_hint(env, tool_name, verb="upgrade")
         if brew_hint is not None:
             return brew_hint
+        conflict = _pin_conflict(env, pkg, tool_version, upgrading=True)
+        if conflict is not None:
+            return conflict
         return _node_add_command(env, pkg, tool_version)
 
 

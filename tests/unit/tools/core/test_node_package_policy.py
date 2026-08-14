@@ -536,6 +536,32 @@ def test_planning_leaves_non_npm_tools_on_path() -> None:
     assert_that(command).is_equal_to(list(tool.version_command))
 
 
+def test_registry_fallback_is_not_treated_as_installed(
+    tmp_path: Path,
+) -> None:
+    """bunx/npx is a fetch, not an install, so planning must still add locally.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_project(tmp_path, lockfile="package-lock.json")
+    registry = ManifestRegistry.load()
+    installer = _installer(registry, tmp_path)
+    tool = registry.get("prettier")
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            return_value=["bunx", "prettier@3.9.4"],
+        ),
+        patch("lintro.tools.core.tool_installer.shutil.which", return_value=None),
+    ):
+        command = installer._resolved_version_command(tool)
+        version = installer._get_installed_version(tool)
+
+    assert_that(command).is_equal_to(list(tool.version_command))
+    assert_that(version).is_none()
+
+
 def test_local_install_runs_from_the_project_root(tmp_path: Path) -> None:
     """A project-local install command runs in the detected project root.
 
