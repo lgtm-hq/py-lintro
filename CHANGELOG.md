@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.117.0] - 2026-08-14
+
+### Added
+
+- **ai**: add cost-cap override via env and flag (#2033) (d27971f)
+
 ## [0.116.2] - 2026-08-14
 
 ### Changed
