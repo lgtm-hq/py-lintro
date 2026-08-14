@@ -612,7 +612,7 @@ def test_get_executable_command_nodejs_tool_with_bunx(
     with patch("shutil.which", return_value="/usr/bin/markdownlint-cli2"):
         result = fake_tool_plugin._get_executable_command(ToolName.MARKDOWNLINT)
 
-        assert_that(result).is_equal_to(["markdownlint-cli2"])
+        assert_that(result).is_equal_to(["/usr/bin/markdownlint-cli2"])
 
 
 def test_get_executable_command_astro_check_with_bunx(
@@ -629,7 +629,7 @@ def test_get_executable_command_astro_check_with_bunx(
     with patch("shutil.which", return_value="/usr/bin/astro"):
         result = fake_tool_plugin._get_executable_command("astro-check")
 
-        assert_that(result).is_equal_to(["astro"])
+        assert_that(result).is_equal_to(["/usr/bin/astro"])
 
 
 def test_get_executable_command_vue_tsc_with_bunx(
@@ -646,7 +646,7 @@ def test_get_executable_command_vue_tsc_with_bunx(
     with patch("shutil.which", return_value="/usr/bin/vue-tsc"):
         result = fake_tool_plugin._get_executable_command("vue-tsc")
 
-        assert_that(result).is_equal_to(["vue-tsc"])
+        assert_that(result).is_equal_to(["/usr/bin/vue-tsc"])
 
 
 def test_get_executable_command_nodejs_tool_without_bunx(

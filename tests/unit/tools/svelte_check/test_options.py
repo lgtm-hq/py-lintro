@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -220,14 +223,16 @@ def test_build_command_basic(
         no_local_node_install: Fixture removing any project-local Node install
             from resolution.
     """
-    cmd = svelte_check_plugin._build_command()
+    with patch("shutil.which", return_value="/usr/local/bin/svelte-check"):
+        cmd = svelte_check_plugin._build_command()
 
     # Should contain machine-verbose output format
     assert_that(cmd).contains("--output")
     assert_that(cmd).contains("machine-verbose")
     # First element is the PATH/runner-resolved svelte-check binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
-    assert_that(cmd[0]).is_in("svelte-check", "bunx", "npx")
+    assert_that(Path(cmd[0]).name).is_in("svelte-check", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
     # The svelte-check package must be named somewhere in the command
     assert_that(" ".join(cmd)).contains("svelte-check")
 

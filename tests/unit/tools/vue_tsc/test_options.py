@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -230,7 +233,8 @@ def test_build_command_basic(
         no_local_node_install: Fixture removing any project-local Node install
             from resolution.
     """
-    cmd = vue_tsc_plugin._build_command(files=[])
+    with patch("shutil.which", return_value="/usr/local/bin/vue-tsc"):
+        cmd = vue_tsc_plugin._build_command(files=[])
 
     # Should contain --noEmit and --pretty false
     assert_that(cmd).contains("--noEmit")
@@ -238,7 +242,8 @@ def test_build_command_basic(
     assert_that(cmd).contains("false")
     # First element is the PATH/runner-resolved vue-tsc binary or a bunx/npx
     # wrapper — not a project-local node_modules path.
-    assert_that(cmd[0]).is_in("vue-tsc", "bunx", "npx")
+    assert_that(Path(cmd[0]).name).is_in("vue-tsc", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
 
 
 def test_build_command_with_project(vue_tsc_plugin: VueTscPlugin) -> None:

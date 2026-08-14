@@ -29,6 +29,7 @@ from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     notify_registry_fallback_selected,
     registry_fallback_guidance,
+    registry_fallback_spec,
     reset_registry_fallback_notices,
     split_npm_spec,
 )
@@ -515,7 +516,7 @@ def test_nodejs_builder_astro_check_uses_astro_binary(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("astro")):
         cmd = builder.get_command("astro-check", ToolName.ASTRO_CHECK)
-    assert_that(cmd).is_equal_to(["astro"])
+    assert_that(cmd).is_equal_to(["/usr/local/bin/astro"])
 
 
 def test_nodejs_builder_handles_vue_tsc() -> None:
@@ -536,7 +537,7 @@ def test_nodejs_builder_vue_tsc_uses_vue_tsc_binary(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("vue-tsc")):
         cmd = builder.get_command("vue-tsc", ToolName.VUE_TSC)
-    assert_that(cmd).is_equal_to(["vue-tsc"])
+    assert_that(cmd).is_equal_to(["/usr/local/bin/vue-tsc"])
 
 
 # =============================================================================
@@ -558,6 +559,25 @@ def _which_only(*available: str) -> Callable[..., str | None]:
         return f"/usr/local/bin/{name}" if name in available else None
 
     return _which
+
+
+def _write_local_node_binary(root: Path, binary_name: str) -> Path:
+    """Create a fake ``node_modules/.bin`` executable under *root*.
+
+    Args:
+        root: Directory that should contain ``node_modules/.bin``.
+        binary_name: Executable name.
+
+    Returns:
+        Path to the created executable.
+    """
+    local_bin = root / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    binary = local_bin / (
+        f"{binary_name}.cmd" if sys.platform == "win32" else binary_name
+    )
+    binary.write_text("#!/bin/sh\n")
+    return binary
 
 
 def test_builder_package_names_match_the_manifest() -> None:
@@ -634,7 +654,7 @@ def test_html_validate_prefers_path_binary_over_bunx() -> None:
     ):
         cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
 
-    assert_that(cmd).is_equal_to(["html-validate"])
+    assert_that(cmd).is_equal_to(["/usr/local/bin/html-validate"])
 
 
 def test_html_validate_bunx_fallback_is_version_pinned() -> None:
@@ -667,8 +687,9 @@ def test_html_validate_npx_fallback_is_version_pinned() -> None:
     ):
         cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
 
+    spec = f"html-validate@{get_tool_version('html-validate')}"
     assert_that(cmd).is_equal_to(
-        ["npx", f"html-validate@{get_tool_version('html-validate')}"],
+        ["npx", "--yes", "--package", spec, "html-validate"],
     )
 
 
@@ -694,13 +715,13 @@ def test_pinned_npm_spec_falls_back_to_bare_name() -> None:
 
 
 def test_find_local_node_binary_walks_up_to_project_root(tmp_path: Path) -> None:
-    """Resolution walks up so subdirectories still find the project install."""
-    local_bin = tmp_path / "node_modules" / ".bin"
-    local_bin.mkdir(parents=True)
-    binary = local_bin / (
-        "html-validate.cmd" if sys.platform == "win32" else "html-validate"
-    )
-    binary.write_text("#!/bin/sh\n")
+    """Resolution walks up so subdirectories still find the project install.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "package.json").write_text("{}\n")
+    binary = _write_local_node_binary(tmp_path, "html-validate")
     nested = tmp_path / "src" / "pages"
     nested.mkdir(parents=True)
 
@@ -710,9 +731,98 @@ def test_find_local_node_binary_walks_up_to_project_root(tmp_path: Path) -> None
 
 
 def test_find_local_node_binary_returns_none_when_absent(tmp_path: Path) -> None:
-    """No local install resolves to None."""
+    """No local install resolves to None.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     found = find_local_node_binary("html-validate", start=tmp_path)
     assert_that(found).is_none()
+
+
+def test_find_local_node_binary_ignores_decoy_above_package_json(
+    tmp_path: Path,
+) -> None:
+    """A ``node_modules`` above the nearest ``package.json`` is not used.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    decoy = _write_local_node_binary(tmp_path, "html-validate")
+    project = tmp_path / "project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_none()
+    assert_that(decoy.is_file()).is_true()
+
+
+def test_find_local_node_binary_finds_install_inside_package_json_boundary(
+    tmp_path: Path,
+) -> None:
+    """The local install under the nearest ``package.json`` still wins.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_local_node_binary(tmp_path, "html-validate")
+    project = tmp_path / "project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / "package.json").write_text("{}\n")
+    local = _write_local_node_binary(project, "html-validate")
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_equal_to(local.resolve().as_posix())
+
+
+def test_find_local_node_binary_ignores_decoy_above_git_boundary(
+    tmp_path: Path,
+) -> None:
+    """A ``node_modules`` above the nearest ``.git`` is not used.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    _write_local_node_binary(tmp_path, "html-validate")
+    project = tmp_path / "project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / ".git").mkdir()
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_none()
+
+
+def test_find_local_node_binary_stops_at_nested_package_json(
+    tmp_path: Path,
+) -> None:
+    """A monorepo subpackage with its own ``package.json`` is the boundary.
+
+    The workspace root's ``node_modules`` must not win over a nested package
+    that has declared its own ``package.json``, even when that nested package
+    has no local install of the tool.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "package.json").write_text("{}\n")
+    (tmp_path / ".git").mkdir()
+    root_bin = _write_local_node_binary(tmp_path, "html-validate")
+    subpackage = tmp_path / "packages" / "app"
+    nested = subpackage / "src"
+    nested.mkdir(parents=True)
+    (subpackage / "package.json").write_text("{}\n")
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_none()
+    assert_that(root_bin.is_file()).is_true()
 
 
 def test_node_tool_prefers_path_binary_over_bunx(
@@ -727,7 +837,46 @@ def test_node_tool_prefers_path_binary_over_bunx(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("bunx", "markdownlint-cli2")):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
-    assert_that(cmd).is_equal_to(["markdownlint-cli2"])
+    assert_that(cmd).is_equal_to(["/usr/local/bin/markdownlint-cli2"])
+
+
+def test_node_path_branch_returns_absolute_resolved_path(
+    no_local_node_install: None,
+) -> None:
+    """A PATH hit is the shutil.which-resolved absolute path, not the bare name.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("prettier")):
+        cmd = builder.get_command("prettier", ToolName.PRETTIER)
+    assert_that(cmd).is_equal_to(["/usr/local/bin/prettier"])
+    assert_that(Path(cmd[0]).is_absolute()).is_true()
+
+
+def test_node_path_branch_normalizes_windows_which_path(
+    no_local_node_install: None,
+) -> None:
+    """A Windows PATH hit is posix-normalized so subprocess validation accepts it.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+
+    def _windows_which(name: str, *_args: object, **_kwargs: object) -> str | None:
+        if name == "prettier":
+            return r"C:\Users\me\AppData\Roaming\npm\prettier.cmd"
+        return None
+
+    with patch("shutil.which", _windows_which):
+        cmd = builder.get_command("prettier", ToolName.PRETTIER)
+
+    assert_that("\\" in cmd[0]).is_false()
+    assert_that(cmd[0]).contains("prettier.cmd")
 
 
 def test_node_tool_prefers_local_install_over_path(tmp_path: Path) -> None:
@@ -773,9 +922,10 @@ def test_prettier_falls_back_to_pinned_runner_spec(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("prettier", ToolName.PRETTIER)
-    assert_that(cmd).is_length(2)
-    assert_that(cmd[0]).is_equal_to("npx")
-    assert_that(cmd[1]).starts_with("prettier@")
+    assert_that(cmd).is_length(5)
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("prettier@")
+    assert_that(cmd[4]).is_equal_to("prettier")
 
 
 def test_runner_fallback_names_package_when_binary_differs(
@@ -807,9 +957,9 @@ def test_commitlint_runner_fallback_uses_scoped_package(
     builder = NodeJSBuilder()
     with patch("shutil.which", _which_only("npx")):
         cmd = builder.get_command("commitlint", ToolName.COMMITLINT)
-    assert_that(cmd[:2]).is_equal_to(["npx", "--package"])
-    assert_that(cmd[2]).starts_with("@commitlint/cli@")
-    assert_that(cmd[3]).is_equal_to("commitlint")
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("@commitlint/cli@")
+    assert_that(cmd[4]).is_equal_to("commitlint")
 
 
 # =============================================================================
@@ -1147,9 +1297,35 @@ def test_is_registry_fallback_command_detects_package_runners() -> None:
     """Only ``bunx``/``npx`` invocations count as the registry fallback."""
     assert_that(is_registry_fallback_command(["bunx", "html-validate@1.0.0"])).is_true()
     assert_that(is_registry_fallback_command(["npx", "html-validate@1.0.0"])).is_true()
+    assert_that(
+        is_registry_fallback_command(
+            ["npx", "--yes", "--package", "html-validate@1.0.0", "html-validate"],
+        ),
+    ).is_true()
     assert_that(is_registry_fallback_command(["/local/html-validate"])).is_false()
     assert_that(is_registry_fallback_command(["html-validate"])).is_false()
     assert_that(is_registry_fallback_command(["bunx"])).is_false()
+
+
+def test_registry_fallback_spec_round_trips_npx_yes_package_shape() -> None:
+    """``--yes`` is skipped so the spec is recovered from the npx argv."""
+    spec = "html-validate@11.5.6"
+    command = ["npx", "--yes", "--package", spec, "html-validate"]
+    assert_that(registry_fallback_spec(command)).is_equal_to(spec)
+
+
+def test_registry_fallback_spec_round_trips_package_flag_shapes() -> None:
+    """Bunx and npx ``--package`` shapes recover the spec; bunx bare-spec too."""
+    assert_that(
+        registry_fallback_spec(["bunx", "prettier@3.0.0"]),
+    ).is_equal_to("prettier@3.0.0")
+    assert_that(
+        registry_fallback_spec(["bunx", "--package", "typescript@5.9.3", "tsc"]),
+    ).is_equal_to("typescript@5.9.3")
+    # npx without ``--yes`` (the pre-#2028 shape) still recovers the spec.
+    assert_that(
+        registry_fallback_spec(["npx", "--package", "typescript@5.9.3", "tsc"]),
+    ).is_equal_to("typescript@5.9.3")
 
 
 def test_split_npm_spec_handles_scoped_packages() -> None:
