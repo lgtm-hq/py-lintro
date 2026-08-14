@@ -12,7 +12,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.enums.config_source import ConfigSource
-from lintro.ai.resolved_ai_config import ResolvedAIConfig, format_sourced_value
+from lintro.ai.resolved_ai_config import (
+    ResolvedAIConfig,
+    format_max_cost_label,
+    format_sourced_value,
+)
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -139,6 +143,13 @@ def render_ai_status(
         ai_parts.append(
             "  transport: "
             + format_sourced_value(transport_value, sources.get("transport")),
+        )
+        ai_parts.append(
+            "  max_cost_usd: "
+            + format_max_cost_label(
+                max_cost_usd=ai_config.max_cost_usd,
+                source=sources.get("max_cost_usd"),
+            ),
         )
 
     # auto_apply warning

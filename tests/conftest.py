@@ -107,6 +107,7 @@ _AI_OVERRIDE_ENV_VARS: tuple[str, ...] = (
     "LINTRO_AI_MODEL",
     "LINTRO_AI_TRANSPORT",
     "LINTRO_AI_ENABLED",
+    "LINTRO_AI_MAX_COST_USD",
 )
 
 

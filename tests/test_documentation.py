@@ -347,6 +347,7 @@ _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_AI_MODEL",
     "LINTRO_AI_TRANSPORT",
     "LINTRO_AI_ENABLED",
+    "LINTRO_AI_MAX_COST_USD",
 }
 
 # Env vars that were historically documented but are NOT read by the runtime.

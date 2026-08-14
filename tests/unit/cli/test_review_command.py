@@ -62,6 +62,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--transport")
     assert_that(result.output).contains("--provider")
     assert_that(result.output).contains("--model")
+    assert_that(result.output).contains("--max-cost-usd")
 
 
 def test_review_invalid_provider_env_exits_two(
@@ -442,6 +443,8 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
     assert_that(rendered.metadata.cost_basis).is_equal_to("billed")
     assert_that(rendered.metadata.provider_source).is_equal_to("config")
     assert_that(rendered.metadata.transport_source).is_equal_to("config")
+    assert_that(rendered.metadata.max_cost_usd).is_none()
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("config")
 
 
 def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
@@ -1417,6 +1420,7 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         transport="cli",
         provider=None,
         model=None,
+        max_cost_usd=None,
         timeout=600.0,
         context_window=None,
         semantic_chunks=False,

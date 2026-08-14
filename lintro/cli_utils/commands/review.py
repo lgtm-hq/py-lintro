@@ -192,6 +192,16 @@ ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
     help="Override ai.model for this invocation.",
 )
 @click.option(
+    "--max-cost-usd",
+    "max_cost_usd_override",
+    type=float,
+    default=None,
+    help=(
+        "Override ai.max_cost_usd for this invocation. A positive number is "
+        "the USD cap; 0 means uncapped (not a $0 cap)."
+    ),
+)
+@click.option(
     "--timeout",
     type=float,
     default=None,
@@ -265,6 +275,7 @@ def review_command(
     transport: str | None,
     provider_override: str | None,
     model_override: str | None,
+    max_cost_usd_override: float | None,
     list_agents: bool,
     advisory_tools: str | None,
     tool_options: str | None,
@@ -311,6 +322,7 @@ def review_command(
             provider=provider_override,
             model=model_override,
             transport=transport,
+            max_cost_usd=max_cost_usd_override,
         )
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -487,6 +499,8 @@ def review_command(
                 provider_source=resolved_ai.source_of("provider").value,
                 model_source=resolved_ai.source_of("model").value,
                 transport_source=resolved_ai.source_of("transport").value,
+                max_cost_usd=effective_ai_config.max_cost_usd,
+                max_cost_usd_source=resolved_ai.source_of("max_cost_usd").value,
             ),
         )
     except (AIError, ValueError) as exc:
@@ -572,6 +586,7 @@ def review_command(
                     transport=transport,
                     provider=provider_override,
                     model=model_override,
+                    max_cost_usd=max_cost_usd_override,
                     timeout=timeout,
                     context_window=context_window,
                     semantic_chunks=semantic_chunks,
@@ -595,6 +610,7 @@ def _cli_overrides(
     transport: str | None,
     provider: str | None,
     model: str | None,
+    max_cost_usd: float | None,
     timeout: float | None,
     context_window: int | None,
     semantic_chunks: bool,
@@ -612,6 +628,7 @@ def _cli_overrides(
         transport: ``--transport`` value, or None when unset.
         provider: ``--provider`` value, or None when unset.
         model: ``--model`` value, or None when unset.
+        max_cost_usd: ``--max-cost-usd`` value, or None when unset.
         timeout: ``--timeout`` value, or None when unset.
         context_window: ``--context-window`` value, or None when unset.
         semantic_chunks: Whether ``--semantic-chunks`` was passed.
@@ -631,6 +648,8 @@ def _cli_overrides(
         overrides.append(f"--provider {provider}")
     if model is not None:
         overrides.append(f"--model {model}")
+    if max_cost_usd is not None:
+        overrides.append(f"--max-cost-usd {max_cost_usd:g}")
     if timeout is not None:
         overrides.append(f"--timeout {timeout:g}")
     if context_window is not None:

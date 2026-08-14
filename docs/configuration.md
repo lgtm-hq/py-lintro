@@ -460,19 +460,21 @@ export LINTRO_AI_PROVIDER=cursor
 export LINTRO_AI_MODEL=cursor-grok-4.6-high
 export LINTRO_AI_TRANSPORT=cli
 export LINTRO_AI_ENABLED=1
+export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 ```
 
-| Variable                         | Description                                                  | Default   |
-| -------------------------------- | ------------------------------------------------------------ | --------- |
-| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
-| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
-| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
-| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
-| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
-| `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
-| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |
-| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)               | -         |
+| Variable                         | Description                                                       | Default   |
+| -------------------------------- | ----------------------------------------------------------------- | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                         | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)       | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`            | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only      | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)        | `0`       |
+| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)        | -         |
+| `LINTRO_AI_MODEL`                | Override `ai.model`                                               | -         |
+| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
+| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
+| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -2847,7 +2849,7 @@ ai:
 | `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
 | `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
 | `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `max_cost_usd`          | float  | `null`         | Legacy cost cap (USD); prefer `transports.api.max_cost_usd` / `cli.max_cost_usd_advisory`    |
+| `max_cost_usd`          | float  | `null`         | Legacy cost cap (USD); prefer transport profiles. Overridable; literal `0` = uncapped        |
 | `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
 | `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
 | `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |

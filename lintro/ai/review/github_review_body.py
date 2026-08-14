@@ -19,7 +19,7 @@ still names the sticky's fix-all for everything open across all rounds.
 from __future__ import annotations
 
 from lintro import __version__ as lintro_version
-from lintro.ai.resolved_ai_config import format_sourced_value
+from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.agent_prompts import (
     prompt_findings,
     render_agent_prompt_panel,
@@ -249,10 +249,12 @@ def _run_stats_section(
     metadata = result.metadata
     primary = run_stats_primary_cells(metadata=metadata)
 
-    transport_label = format_sourced_value(
-        sanitize_comment_text(transport, limit=40),
-        metadata.transport_source or None,
-    )
+    transport_label = ""
+    if transport:
+        transport_label = format_sourced_value(
+            sanitize_comment_text(transport, limit=40),
+            metadata.transport_source or None,
+        )
     if transport_label and auth_mode:
         transport_label = (
             f"{transport_label} · {sanitize_comment_text(auth_mode, limit=40)}"
@@ -260,6 +262,16 @@ def _run_stats_section(
     secondary: list[tuple[str, str]] = []
     if transport_label:
         secondary.append(("transport", transport_label))
+    if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
+        secondary.append(
+            (
+                "max cost",
+                format_max_cost_label(
+                    max_cost_usd=metadata.max_cost_usd,
+                    source=metadata.max_cost_usd_source or None,
+                ),
+            ),
+        )
     secondary.extend(
         [
             ("depth", str(metadata.depth)),

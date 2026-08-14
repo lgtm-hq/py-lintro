@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ResolvedAIConfig",
+    "format_max_cost_label",
     "format_sourced_value",
 ]
 
@@ -33,6 +34,27 @@ def format_sourced_value(value: str, source: ConfigSource | str | None) -> str:
     return f"{value} ({label})"
 
 
+def format_max_cost_label(
+    max_cost_usd: float | None,
+    source: ConfigSource | str | None = None,
+) -> str:
+    """Format a cost cap for display, including provenance.
+
+    ``None`` renders as ``uncapped`` so a lifted ceiling is never silent
+    (#2024).
+
+    Args:
+        max_cost_usd: Effective USD cap, or None when unlimited.
+        source: Field provenance, or empty/None to omit the suffix.
+
+    Returns:
+        ``$1.50 (env)``, ``uncapped (flag)``, or the bare label when
+        *source* is absent.
+    """
+    value = "uncapped" if max_cost_usd is None else f"${max_cost_usd:.2f}"
+    return format_sourced_value(value, source)
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedAIConfig:
     """Validated effective AI settings together with field provenance.
@@ -41,7 +63,7 @@ class ResolvedAIConfig:
         config: Effective :class:`~lintro.ai.config.AIConfig` after
             env/flag overlays and Pydantic validation.
         sources: Provenance for the override fields (``provider``,
-            ``model``, ``transport``, ``enabled``).
+            ``model``, ``transport``, ``enabled``, ``max_cost_usd``).
     """
 
     config: AIConfig

@@ -1,8 +1,6 @@
-"""Tests for the env-var and CLI-flag AI config override layer (#1970)."""
+"""Tests for the env-var and CLI-flag AI config override layer (#1970, #2024)."""
 
 from __future__ import annotations
-
-import os
 
 import pytest
 from assertpy import assert_that
@@ -12,7 +10,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.provider_enum import AIProvider
-from lintro.ai.resolved_ai_config import format_sourced_value
+from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.github_render import format_run_mechanics
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -39,6 +37,7 @@ def test_each_env_var_overrides_its_field(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("LINTRO_AI_MODEL", "cursor-grok-4.6-high")
     monkeypatch.setenv("LINTRO_AI_TRANSPORT", "cli")
     monkeypatch.setenv("LINTRO_AI_ENABLED", "1")
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "2.5")
 
     resolved = AIConfig.resolve_from_mapping(
         _mapping(provider="anthropic", model="claude-sonnet", transport="api"),
@@ -48,10 +47,12 @@ def test_each_env_var_overrides_its_field(monkeypatch: pytest.MonkeyPatch) -> No
     assert_that(resolved.config.model).is_equal_to("cursor-grok-4.6-high")
     assert_that(resolved.config.transport).is_equal_to(AITransport.CLI)
     assert_that(resolved.config.enabled).is_true()
+    assert_that(resolved.config.max_cost_usd).is_equal_to(2.5)
     assert_that(resolved.source_of("provider")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("enabled")).is_equal_to(ConfigSource.ENV)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
 
 
 def test_flag_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,6 +110,8 @@ def test_empty_mapping_uses_built_in_defaults() -> None:
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.source_of("enabled")).is_equal_to(ConfigSource.DEFAULT)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.DEFAULT)
+    assert_that(resolved.config.max_cost_usd).is_none()
 
 
 def test_invalid_provider_env_names_the_variable(
@@ -183,14 +186,92 @@ def test_enabled_one_does_not_imply_review(monkeypatch: pytest.MonkeyPatch) -> N
     assert_that(resolved.config.lint_enabled).is_false()
 
 
-def test_max_cost_usd_has_no_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A spend-cap env var is ignored; the committed cap cannot be raised."""
+def test_max_cost_usd_env_overrides_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``LINTRO_AI_MAX_COST_USD`` raises the committed cap (#2024)."""
     monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "99.0")
 
     resolved = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
 
+    assert_that(resolved.config.max_cost_usd).is_equal_to(99.0)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
+
+
+def test_max_cost_usd_flag_overrides_config() -> None:
+    """``--max-cost-usd`` overlays the committed cap (#2024)."""
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+        max_cost_usd=3.25,
+    )
+
+    assert_that(resolved.config.max_cost_usd).is_equal_to(3.25)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
+def test_max_cost_usd_flag_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The cost-cap flag wins over the env var (#2024)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "1.0")
+
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+        max_cost_usd=5.0,
+    )
+
+    assert_that(resolved.config.max_cost_usd).is_equal_to(5.0)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
+def test_max_cost_usd_zero_is_uncapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Literal ``0`` lifts the ceiling to ``None``, matching CostBudget (#2024)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "0")
+
+    from_env = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
+    from_flag = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+        max_cost_usd=0.0,
+    )
+
+    assert_that(from_env.config.max_cost_usd).is_none()
+    assert_that(from_env.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
+    assert_that(from_flag.config.max_cost_usd).is_none()
+    assert_that(from_flag.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
+def test_invalid_max_cost_usd_env_fails_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-numeric cost cap names the variable and accepted values (#2024)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "plenty")
+
+    with pytest.raises(AIConfigOverrideError) as exc_info:
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
+
+    message = str(exc_info.value)
+    assert_that(message).contains("LINTRO_AI_MAX_COST_USD='plenty'")
+    assert_that(message).contains("0 for uncapped")
+    assert_that(message).does_not_contain("Traceback")
+
+
+def test_negative_max_cost_usd_fails_loud() -> None:
+    """A negative ``--max-cost-usd`` is rejected rather than stored (#2024)."""
+    with pytest.raises(AIConfigOverrideError) as exc_info:
+        apply_cli_overrides(
+            AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+            max_cost_usd=-1.0,
+        )
+
+    message = str(exc_info.value)
+    assert_that(message).contains("--max-cost-usd=-1.0")
+    assert_that(message).contains("0 for uncapped")
+
+
+def test_whitespace_max_cost_usd_env_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whitespace-only ``LINTRO_AI_MAX_COST_USD`` leaves the mapping (#2024)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "  ")
+
+    resolved = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
+
     assert_that(resolved.config.max_cost_usd).is_equal_to(0.5)
-    assert_that(os.environ.get("LINTRO_AI_MAX_COST_USD")).is_equal_to("99.0")
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.CONFIG)
 
 
 def test_whitespace_only_env_is_treated_as_unset(
@@ -251,6 +332,12 @@ def test_format_sourced_value_annotates_known_sources() -> None:
     assert_that(format_sourced_value("cli", "flag")).is_equal_to("cli (flag)")
     assert_that(format_sourced_value("anthropic", None)).is_equal_to("anthropic")
     assert_that(format_sourced_value("anthropic", "")).is_equal_to("anthropic")
+    assert_that(
+        format_max_cost_label(max_cost_usd=None, source=ConfigSource.ENV),
+    ).is_equal_to("uncapped (env)")
+    assert_that(
+        format_max_cost_label(max_cost_usd=1.5, source="flag"),
+    ).is_equal_to("$1.50 (flag)")
 
 
 def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -272,6 +359,26 @@ def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert_that(lines).contains("  provider: openai (env)")
     assert_that("".join(lines)).contains("transport: api (config)")
+    assert_that(lines).contains("  max_cost_usd: uncapped (default)")
+
+
+def test_status_annotates_env_max_cost_usd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-execution status shows env provenance for the cost cap (#2024)."""
+    from lintro.ai.display.status import render_ai_status
+
+    monkeypatch.setattr(
+        "lintro.ai.availability.is_provider_available",
+        lambda _provider: True,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "2.5")
+
+    lines = render_ai_status(
+        ai_config={"enabled": True, "provider": "anthropic", "transport": "api"},
+        is_ci=False,
+    )
+
+    assert_that(lines).contains("  max_cost_usd: $2.50 (env)")
 
 
 def test_status_marks_enabled_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,6 +416,8 @@ def _review_result_with_sources() -> ReviewResult:
             provider_source="env",
             model_source="flag",
             transport_source="config",
+            max_cost_usd=None,
+            max_cost_usd_source="env",
         ),
         summary="Safe to merge.",
         checklist=(),
@@ -317,7 +426,7 @@ def _review_result_with_sources() -> ReviewResult:
 
 
 def test_terminal_review_annotates_provider_model_transport() -> None:
-    """Terminal output shows provider, model, and transport with sources."""
+    """Terminal output shows provider, model, transport, and max cost with sources."""
     console = Console(record=True)
     render_review_terminal(result=_review_result_with_sources(), console=console)
     text = console.export_text()
@@ -325,6 +434,7 @@ def test_terminal_review_annotates_provider_model_transport() -> None:
     assert_that(text).contains("Model: cursor-grok-4.6-high (flag)")
     assert_that(text).contains("Provider: cursor (env)")
     assert_that(text).contains("Transport: cli (config)")
+    assert_that(text).contains("Max cost: uncapped (env)")
 
 
 def test_pr_comment_mechanics_annotates_sources() -> None:
@@ -334,3 +444,4 @@ def test_pr_comment_mechanics_annotates_sources() -> None:
     assert_that(mechanics).contains("**Model:** `cursor-grok-4.6-high` (flag)")
     assert_that(mechanics).contains("**Provider:** `cursor` (env)")
     assert_that(mechanics).contains("**Transport:** `cli` (config)")
+    assert_that(mechanics).contains("**Max cost:** uncapped (env)")

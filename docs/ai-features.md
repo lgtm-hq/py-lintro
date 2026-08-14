@@ -645,30 +645,31 @@ ai:
 ```
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
-config for a single invocation. `lintro review` also accepts `--provider` and `--model`.
-Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`,
-`LINTRO_AI_ENABLED`) apply to every AI surface and lose to CLI flags. There is no
-`--enabled` flag and no override for `ai.max_cost_usd`.
+config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
+and `--max-cost-usd`. Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`,
+`LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`, `LINTRO_AI_MAX_COST_USD`) apply to every AI
+surface and lose to CLI flags. There is no `--enabled` flag.
 
 ### Invocation overrides
 
-Resolution order for `provider`, `model`, `transport`, and `enabled` is:
+Resolution order for `provider`, `model`, `transport`, `enabled`, and `max_cost_usd` is:
 
 ```text
 CLI flag > environment variable > .lintro-config.yaml > built-in default
 ```
 
-| Variable / flag                                   | Overrides      | Notes                                                                                        |
-| ------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------- |
-| `LINTRO_AI_PROVIDER` / `lintro review --provider` | `ai.provider`  | `anthropic`, `openai`, or `cursor`                                                           |
-| `LINTRO_AI_MODEL` / `lintro review --model`       | `ai.model`     | any model id; empty env falls through                                                        |
-| `LINTRO_AI_TRANSPORT` / `--transport`             | `ai.transport` | `api` or `cli`                                                                               |
-| `LINTRO_AI_ENABLED`                               | `ai.enabled`   | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
+| Variable / flag                                           | Overrides         | Notes                                                                                                |
+| --------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`     | `anthropic`, `openai`, or `cursor`                                                                   |
+| `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                                |
+| `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                                       |
+| `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag.         |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | Positive float = USD cap. **Literal `0` = uncapped** (not a $0 cap). Negative/non-numeric fail loud. |
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
 default. Review output annotates each resolved field with its source
-(`provider: cursor (env)`).
+(`provider: cursor (env)`, `max cost: uncapped (env)`).
 
 ```bash
 # Try Cursor locally without dirtying .lintro-config.yaml
@@ -676,6 +677,10 @@ LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
 
 # Same thing with flags (flags win if both are set)
 lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
+
+# Lift the committed cost cap for this run (0 = uncapped, not a $0 cap)
+LINTRO_AI_MAX_COST_USD=0 lintro review --uncommitted
+lintro review --uncommitted --max-cost-usd 0
 
 # Kill switch for this environment
 LINTRO_AI_ENABLED=0 lintro check .

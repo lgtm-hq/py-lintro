@@ -259,6 +259,54 @@ def test_run_stats_are_visible_and_ordered(
     assert_that(body).contains(f"| {lintro_version} |")
 
 
+def test_empty_transport_is_omitted_even_when_source_is_set(
+    sample_review_result: ReviewResult,
+) -> None:
+    """An empty transport stays omitted; a source suffix must not make it truthy.
+
+    ``format_sourced_value("", "config")`` is ``" (config)"``, which used to
+    pass ``if transport_label:`` and emit a blank transport cell (#1972).
+    """
+    sourced = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            transport_source="config",
+        ),
+    )
+
+    body = _body(
+        result=sourced,
+        prior_state=ReviewState(),
+        transport="",
+    )
+
+    assert_that(body).does_not_contain("| transport |")
+
+
+def test_run_stats_show_uncapped_max_cost_with_source(
+    sample_review_result: ReviewResult,
+) -> None:
+    """An uncapped overlay is visible on the PR comment stats row (#2024)."""
+    uncapped = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            max_cost_usd=None,
+            max_cost_usd_source="env",
+        ),
+    )
+
+    body = _body(
+        result=uncapped,
+        prior_state=ReviewState(),
+        transport="cli",
+    )
+
+    assert_that(body).contains("| transport | max cost |")
+    assert_that(body).contains("uncapped (env)")
+
+
 def test_estimated_token_counts_are_marked_approximate(
     sample_review_result: ReviewResult,
 ) -> None:

@@ -77,13 +77,16 @@ Contract invariants:
   parallel override layer.
 - Be consumed by execution, doctor/status, terminal review output, PR rendering, MCP,
   and advisory tools without reparsing the raw `ai:` mapping.
-- Keep security-sensitive caps monotonic: an invocation may lower a configured cap where
-  explicitly supported, never raise it (`ai.max_cost_usd` today).
+- CLI and env overlays may raise or lift `ai.max_cost_usd` (`LINTRO_AI_MAX_COST_USD` /
+  `lintro review --max-cost-usd`; literal `0` = uncapped, mapped to `None`) (#2024).
+  MCP's per-call `max_cost_usd` argument remains a monotonic clamp: it may lower the
+  effective ceiling, never raise it.
 
 Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
 `ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies
-`--provider`/`--model`/`--transport` on that object via `apply_cli_overrides`; other
-surfaces consume `resolve_ai_config()` which unwraps the same env-aware parse.
+`--provider`/`--model`/`--transport`/`--max-cost-usd` on that object via
+`apply_cli_overrides`; other surfaces consume `resolve_ai_config()` which unwraps the
+same env-aware parse.
 
 ### B. Shared review domain request and preparation
 
@@ -178,6 +181,9 @@ time.
   config and review execution architecture.
 - [#1970](https://github.com/lgtm-hq/py-lintro/issues/1970) — env/CLI override layer and
   provenance (owns `ResolvedAIConfig` implementation).
+- [#2024](https://github.com/lgtm-hq/py-lintro/issues/2024) — cost-cap overlay
+  (`LINTRO_AI_MAX_COST_USD` / `--max-cost-usd`; `0` = uncapped). Overturns the #1970
+  non-goal that forbade raising `ai.max_cost_usd`.
 - [#1923](https://github.com/lgtm-hq/py-lintro/issues/1923) — transport profiles must
   extend the same resolver.
 - [#1885](https://github.com/lgtm-hq/py-lintro/issues/1885) — provider-side `aclose()`
