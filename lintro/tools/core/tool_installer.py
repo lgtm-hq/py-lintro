@@ -23,6 +23,7 @@ import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -218,13 +219,21 @@ class ToolInstaller:
         if not tool.version_command:
             return None
 
-        main_cmd = tool.version_command[0]
-        if main_cmd not in ("sh", "bash", "cargo") and not shutil.which(main_cmd):
+        try:
+            command = self._resolved_version_command(tool)
+        except ImportError:
+            return None
+        main_cmd = command[0]
+        if (
+            main_cmd not in ("sh", "bash", "cargo")
+            and not Path(main_cmd).is_absolute()
+            and not shutil.which(main_cmd)
+        ):
             return None
 
         try:
             result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-                tool.version_command,
+                command,
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -240,6 +249,44 @@ class ToolInstaller:
             # Unknown/unparseable tool output must not abort an install batch.
             logger.debug(f"Version probe failed for {tool.name}: {exc}")
             return None
+
+    def _resolved_version_command(self, tool: ManifestTool) -> list[str]:
+        """Resolve a tool's version command the way the run will resolve it.
+
+        For npm-installed tools the manifest's ``version_command`` names a bare
+        binary, which only ever finds a global install. Since #1811 a run
+        resolves ``node_modules/.bin`` first, so planning against ``PATH`` would
+        report a tool as missing (or as the wrong version) while checks happily
+        use the project-local one — the exact "two authorities" split #2005 is
+        about. Route npm tools through the same command-builder registry the
+        executor uses, anchored on the detected project root.
+
+        Args:
+            tool: Tool whose version command is being resolved.
+
+        Returns:
+            Argv list to run for the version probe.
+        """
+        command = list(tool.version_command)
+        if tool.install_type != "npm":
+            return command
+        # Wrapper version commands (vue-tsc's bash helper) are not a Node
+        # binary name; splicing the runtime chain onto them drops the wrapper.
+        if command[0] in ("sh", "bash"):
+            return command
+
+        from lintro.plugins.execution_preparation import get_executable_command
+
+        project = self._context.environment.node_project
+        resolved = get_executable_command(
+            tool.name,
+            cwd=project.root if project is not None else None,
+        )
+        # bunx/npx is the registry fallback, not an install. Treating it as
+        # already_ok would skip the project-local add this PR exists to make.
+        if not resolved or resolved[0] in ("bunx", "npx"):
+            return command
+        return [*resolved, *command[1:]]
 
     @staticmethod
     def _version_meets_minimum(installed: str, minimum: str) -> bool:
@@ -308,6 +355,21 @@ class ToolInstaller:
                     hint = f"Upgrade {pkg} manually (not managed by Homebrew)"
             return hint
         return strategy.install_hint(*_args)
+
+    def _install_cwd(self, tool: ManifestTool) -> Path | None:
+        """Return the directory an install command should run from.
+
+        Args:
+            tool: Tool being installed.
+
+        Returns:
+            The detected Node project root for a project-local npm install, or
+            None to use the process working directory.
+        """
+        env = self._context.environment
+        if tool.install_type != "npm" or env.installs_globally():
+            return None
+        return env.node_project.root if env.node_project is not None else None
 
     @staticmethod
     def _is_brew_managed(package: str) -> bool:
@@ -435,13 +497,17 @@ class ToolInstaller:
                     command=command,
                 )
 
-            # Otherwise run the command directly
+            # Otherwise run the command directly. Node package managers walk up
+            # to the nearest package.json, but running from the project root
+            # lintro actually detected removes the ambiguity — a nested cwd must
+            # not add a dependency to a manifest lintro never looked at (#2005).
             proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 shlex.split(command),
                 capture_output=True,
                 text=True,
                 timeout=self._INSTALL_TIMEOUT_SECONDS,
                 check=False,
+                cwd=self._install_cwd(tool),
             )
             duration = time.monotonic() - start
 

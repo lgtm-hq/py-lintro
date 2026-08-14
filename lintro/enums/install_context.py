@@ -29,8 +29,10 @@ class PackageManager(StrEnum):
     CARGO = auto()
     NPM = auto()
     PIP = auto()
+    PNPM = auto()
     RUSTUP = auto()
     UV = auto()
+    YARN = auto()
 
 
 class CISystem(StrEnum):

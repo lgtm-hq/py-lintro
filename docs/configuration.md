@@ -611,6 +611,71 @@ The `--json` output includes per-tool fields: `installed`, `recommended`, `min_v
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
 `upgrade_hint`.
 
+### Node.js Package Manager Policy {#node-package-manager-policy}
+
+`lintro install` used to pick bun whenever bun happened to be on `PATH`, and to install
+**globally** regardless of what the project said. In an npm-first repository that
+created two authorities: your own commands and your editor used the project's local
+dependency, while lintro installed and upgraded a global one (#2005).
+
+**Which manager**, in priority order:
+
+1. **Explicit choice** — `lintro install --node-package-manager npm`.
+2. **`packageManager` metadata** — the Corepack field in `package.json`
+   (`"packageManager": "pnpm@9.1.0"`).
+3. **Lockfile evidence** — `bun.lock`/`bun.lockb`, `pnpm-lock.yaml`, `yarn.lock`,
+   `package-lock.json`, `npm-shrinkwrap.json`.
+4. **Available manager** — bun if installed, otherwise npm, then pnpm, then yarn. bun
+   and npm are lintro's own preference; pnpm and yarn are included so a machine that
+   only has those still gets a command it can run. This is the only step where lintro's
+   own preference decides anything.
+
+Availability does **not** veto the first three. If your project is npm-locked but only
+bun is installed, lintro still tells you to run `npm install -D …` rather than quietly
+writing a `bun.lock` into your repository.
+
+**Where it installs.** Inside a Node project (anything with a `package.json` at or above
+the working directory), lintro adds a **dev dependency** — `npm install -D <pkg>@<ver>`
+— because the project owns its tool versions and a lockfile-pinned dependency is what
+[Node.js Tool Resolution](#nodejs-tool-resolution) will run. Global installs are
+reserved for `--global` or for an environment with no project manifest at all (a bare CI
+runner, a container image, your `$HOME`). The upward search for a manifest stops at the
+first directory containing a `.git` entry, and never treats `$HOME` itself as a project
+root unless that is where you ran the command — a stray `~/package.json` must never
+collect your tools.
+
+**Project pins are never replaced implicitly.** If `package.json` declares a version
+that differs from lintro's recommendation, `--upgrade` reports the difference and asks
+for an explicit decision instead of rewriting your manifest:
+
+```console
+$ lintro install prettier --upgrade
+  Node package manager: npm (from lockfile) → project dev dependency
+  …
+  prettier   Upgrade prettier explicitly: this project pins 3.1.0 in package.json but
+             lintro recommends 3.9.4. Run `npm install -D prettier@3.9.4` to adopt
+             lintro's version, or keep the project pin.
+```
+
+The comparison is deliberately literal, not a semver range solve: a spec that names the
+recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
+conflict and upgrades normally. On a first install of a declared-but-missing package,
+those same spellings emit the manager's install-all command (`npm install`,
+`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
+would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
+resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
+deliberate: the cost of a needless question is far below the cost of silently rewriting
+someone's `package.json`.
+
+**Planning matches execution.** The version probe for npm-installed tools resolves
+through the same chain a check uses, so `lintro install` reports on the binary
+`lintro check` will actually run rather than on whatever a bare name finds on `PATH`.
+
+| Flag                                         | Effect                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------- |
+| `--node-package-manager {bun,npm,pnpm,yarn}` | Force the manager, overriding `packageManager` and lockfiles.              |
+| `--global`                                   | Install npm-managed tools globally instead of as project dev dependencies. |
+
 ### Install Lock / Export
 
 Use `lintro install --write-lock` to capture the resolved install plan:
