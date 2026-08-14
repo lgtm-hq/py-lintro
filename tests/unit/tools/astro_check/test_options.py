@@ -170,17 +170,23 @@ def test_set_options_root_invalid_bool(astro_check_plugin: AstroCheckPlugin) -> 
 # Tests for _build_command method
 
 
-def test_build_command_basic(astro_check_plugin: AstroCheckPlugin) -> None:
+def test_build_command_basic(
+    astro_check_plugin: AstroCheckPlugin,
+    no_local_node_install: None,
+) -> None:
     """Build basic command with default options.
 
     Args:
         astro_check_plugin: The AstroCheckPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
     """
     cmd = astro_check_plugin._build_command()
 
     # Should contain astro and check subcommand
     assert_that(cmd).contains("check")
-    # First element should be astro command (or bunx/npx wrapper)
+    # First element is the PATH/runner-resolved astro binary or a bunx/npx
+    # wrapper — not a project-local node_modules path.
     assert_that(cmd[0]).is_in("astro", "bunx", "npx")
 
 

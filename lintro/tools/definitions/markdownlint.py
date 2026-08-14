@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -77,38 +77,6 @@ class MarkdownlintPlugin(BaseToolPlugin):
             default_timeout=MARKDOWNLINT_DEFAULT_TIMEOUT,
         )
 
-    def _verify_tool_version(self) -> ToolResult | None:
-        """Verify that markdownlint-cli2 meets minimum version requirements.
-
-        Overrides base implementation to use the correct executable name.
-
-        Returns:
-            Optional[ToolResult]: None if version check passes, or a skip result
-                if it fails.
-        """
-        from lintro.tools.core.version_requirements import check_tool_version
-
-        # Use the correct command for markdownlint-cli2
-        command = self._get_markdownlint_command()
-        version_info = check_tool_version(self.definition.name, command)
-
-        if version_info.version_check_passed:
-            return None  # Version check passed
-
-        # Version check failed - return skip result with warning
-        skip_message = (
-            f"Skipping {self.definition.name}: {version_info.error_message}. "
-            f"Minimum required: {version_info.min_version}. "
-            f"{version_info.install_hint}"
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=True,  # Not an error, just skipping
-            output=skip_message,
-            issues_count=0,
-        )
-
     def set_options(
         self,
         timeout: int | None = None,
@@ -140,20 +108,22 @@ class MarkdownlintPlugin(BaseToolPlugin):
 
         super().set_options(**set_kwargs)
 
-    def _get_markdownlint_command(self) -> list[str]:
+    def _get_markdownlint_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command to run markdownlint-cli2.
+
+        Delegates to the shared Node.js resolution chain so a project-local
+        ``markdownlint-cli2`` devDependency wins over a global install and the
+        registry fallback carries a version pin (#1811). The previous local
+        chain had no ``npx`` branch, so on an npm-only machine a devDependency
+        was unreachable.
+
+        Args:
+            cwd: Directory markdownlint-cli2 will run in, when known.
 
         Returns:
             Command arguments for markdownlint-cli2.
         """
-        # Prefer direct executable if available (works better in Docker)
-        if shutil.which("markdownlint-cli2"):
-            return ["markdownlint-cli2"]
-        # Fallback to bunx if direct executable not found
-        if shutil.which("bunx"):
-            return ["bunx", "markdownlint-cli2"]
-        # Last resort - hope markdownlint-cli2 is in PATH
-        return ["markdownlint-cli2"]
+        return self._get_executable_command(tool_name="markdownlint", cwd=cwd)
 
     def _create_temp_markdownlint_config(
         self,
@@ -243,7 +213,9 @@ class MarkdownlintPlugin(BaseToolPlugin):
         logger.debug(f"[MarkdownlintPlugin] Working directory: {ctx.cwd}")
 
         # Build command
-        cmd: list[str] = self._get_markdownlint_command()
+        cmd: list[str] = self._get_markdownlint_command(
+            cwd=Path(ctx.cwd) if ctx.cwd else None,
+        )
 
         # Track temp config for cleanup
         temp_config_path: str | None = None

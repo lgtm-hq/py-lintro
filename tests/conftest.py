@@ -119,3 +119,23 @@ def clear_ai_config_override_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in _AI_OVERRIDE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def no_local_node_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make project-local Node resolution find nothing.
+
+    Every Node.js tool resolves ``node_modules/.bin`` before ``PATH`` and before
+    any ``bunx``/``npx`` fallback (#1811). That first branch is a real
+    filesystem walk from the execution directory, so a test that only stubs
+    ``shutil.which`` would resolve lintro's own ``node_modules`` whenever the
+    checkout happens to have dependencies installed. Use this fixture to
+    exercise the later branches deterministically.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.tools.core.command_builders.find_local_node_binary",
+        lambda *_args, **_kwargs: None,
+    )

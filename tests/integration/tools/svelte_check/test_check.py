@@ -84,7 +84,9 @@ def test_definition_has_version_command(
     version_cmd = svelte_check_plugin.definition.version_command
     assert_that(version_cmd).is_not_none()
     assert_that(version_cmd).contains("--version")
-    assert_that(version_cmd).contains("svelte-check")
+    # Resolution may yield a local path, a PATH binary, or a pinned
+    # ``bunx svelte-check@<version>`` spec (#1811); all name the package.
+    assert_that(" ".join(version_cmd or [])).contains("svelte-check")
 
 
 # --- Integration tests for svelte check command ---

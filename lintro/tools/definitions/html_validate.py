@@ -182,7 +182,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
 
         # Build command: resolve executable (local/PATH/pinned bunx) + JSON
         # formatter. ``_get_executable_command`` never yields an unpinned
-        # ``@latest`` spec for html-validate (see NodeJSBuilder.pinned_tools).
+        # ``@latest`` spec for any Node tool (see NodeJSBuilder, #1811).
         #
         # Pass ctx.cwd so node_modules/.bin resolves from the directory the
         # tool actually runs in. Without it the search starts at lintro's own
