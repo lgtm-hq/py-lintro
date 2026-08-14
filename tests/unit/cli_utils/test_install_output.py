@@ -92,7 +92,7 @@ def test_render_distinguishes_not_discoverable_from_success() -> None:
     )
 
     assert_that(output).contains("PATH  vale")
-    assert_that(output).contains("installed but not on PATH")
+    assert_that(output).contains("not discoverable")
 
 
 def test_count_outcomes_covers_every_outcome() -> None:

@@ -15,6 +15,8 @@ class InstallOutcome(StrEnum):
 
     Attributes:
         SUCCESS: Command succeeded and the tool is discoverable afterwards.
+            Unparseable version output still counts as success; STILL_OUTDATED
+            applies only when a parsed version is below ``min_version``.
         NOT_DISCOVERABLE: Command succeeded but the tool is still not
             discoverable (not on PATH, and not a project-local
             ``node_modules/.bin`` binary).

@@ -558,6 +558,23 @@ def test_check_tool_missing_not_in_path() -> None:
     assert_that(result.error).is_equal_to("not_in_path")
 
 
+def test_check_tool_missing_wrapper_host_is_not_in_path() -> None:
+    """A missing cargo host is not_in_path, not an OSError from subprocess."""
+    tool = _make_tool(
+        name="cargo_audit",
+        install_type="cargo",
+        category="rust",
+        version_command=("cargo", "audit", "--version"),
+    )
+    ctx = _make_context()
+
+    with patch("shutil.which", return_value=None):
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("not_in_path")
+
+
 def test_check_tool_missing_command_failed() -> None:
     """Tool found but version command exits non-zero."""
     tool = _make_tool()

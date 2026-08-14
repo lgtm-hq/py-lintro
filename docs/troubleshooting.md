@@ -231,7 +231,7 @@ an early failure or timeout never stops the tools after it from being installed:
 
 | Label     | Meaning                                                          |
 | --------- | ---------------------------------------------------------------- |
-| `OK`      | Command succeeded and the tool is discoverable at `min_version`. |
+| `OK`      | Discoverable after the command; a parsed version meets `min_version` (unparseable output is still OK). |
 | `PATH`    | Command succeeded, but the tool is still not discoverable.       |
 | `STALE`   | Discoverable after the command, but still below `min_version`.   |
 | `FAIL`    | Command ran and failed; re-running it unchanged will not help.   |

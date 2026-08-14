@@ -652,8 +652,9 @@ class ToolInstaller:
         bin_dir = self._install_destination_dir(tool)
         return (
             f"Install command succeeded but {tool.name} is still not "
-            f"discoverable. It was installed to {bin_dir}; add that "
-            f'directory to PATH, for example: export PATH="{bin_dir}:$PATH"'
+            f"discoverable. It was expected under {bin_dir} and was not "
+            f"found; inspect that directory, or add it to PATH, for "
+            f'example: export PATH="{bin_dir}:$PATH"'
         )
 
     def _install_destination_dir(self, tool: ManifestTool) -> Path:
@@ -671,7 +672,7 @@ class ToolInstaller:
         if tool.install_type == "npm":
             npm = shutil.which("npm")
             if npm is not None:
-                return Path(npm).resolve().parent
+                return Path(npm).parent
         if tool.install_type == "pip":
             return Path(sysconfig.get_path("scripts"))
         if tool.install_type == "cargo":

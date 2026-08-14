@@ -35,7 +35,7 @@ _SUMMARY_ORDER: tuple[InstallOutcome, ...] = (
 
 _SUMMARY_LABELS: dict[InstallOutcome, str] = {
     InstallOutcome.SUCCESS: "installed",
-    InstallOutcome.NOT_DISCOVERABLE: "installed but not on PATH",
+    InstallOutcome.NOT_DISCOVERABLE: "not discoverable",
     InstallOutcome.STILL_OUTDATED: "still below minimum version",
     InstallOutcome.FAILED: "failed",
     InstallOutcome.TIMED_OUT: "timed out",

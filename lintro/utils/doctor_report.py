@@ -190,7 +190,23 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
         )
 
     main_cmd = command[0]
-    tool_path = main_cmd if Path(main_cmd).is_absolute() else shutil.which(main_cmd)
+    if Path(main_cmd).is_absolute():
+        tool_path = main_cmd
+    else:
+        tool_path = shutil.which(main_cmd)
+        # Wrapper probes (cargo/bash/sh) count as discoverable for install
+        # verification because they cannot prove the *tool* is absent. Doctor
+        # still needs the host binary on PATH; otherwise subprocess raises
+        # FileNotFoundError and we mislabel the miss as os_error (#2026).
+        if tool_path is None and "/" not in main_cmd:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.MISSING,
+                error="not_in_path",
+                details=main_cmd,
+                install_hint=hint,
+                upgrade_hint=upgrade_hint,
+            )
 
     try:
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input

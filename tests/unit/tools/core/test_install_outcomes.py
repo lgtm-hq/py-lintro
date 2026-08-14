@@ -505,7 +505,9 @@ def test_not_discoverable_message_names_the_destination_directory(
 
     assert_that(result.outcome).is_equal_to(InstallOutcome.NOT_DISCOVERABLE)
     assert_that(result.message).contains(str(expected_bin))
+    assert_that(result.message).contains("expected under")
     assert_that(result.message).contains("PATH")
+    assert_that(result.message).does_not_contain("was installed to")
     assert_that(result.message).does_not_contain("needs manual action")
 
 
@@ -550,3 +552,41 @@ def test_npm_wrapper_probes_are_not_rewritten_by_node_resolution(
     assert_that(resolved).is_equal_to(list(command))
     mock_resolve.assert_not_called()
     assert_that(is_resolved_command_discoverable(resolved)).is_true()
+
+
+def test_global_npm_destination_uses_which_parent_not_symlink_target(
+    tmp_path: Path,
+) -> None:
+    """Global npm PATH names the executable's parent, not the symlink target.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    bindir = tmp_path / "node" / "v22.22.2" / "bin"
+    bindir.mkdir(parents=True)
+    real_npm = tmp_path / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+    real_npm.parent.mkdir(parents=True)
+    real_npm.write_text("")
+    link = bindir / "npm"
+    link.symlink_to(real_npm)
+
+    installer = _installer()
+    tool = ManifestTool(
+        name="prettier",
+        version="3.9.4",
+        min_version="3.9.4",
+        install_type="npm",
+        install_package="prettier",
+        version_command=("prettier", "--version"),
+    )
+    with (
+        patch.object(installer, "_install_cwd", return_value=None),
+        patch(
+            "lintro.tools.core.tool_installer.shutil.which",
+            return_value=str(link),
+        ),
+    ):
+        dest = installer._install_destination_dir(tool)
+
+    assert_that(dest).is_equal_to(bindir)
+    assert_that(str(dest)).does_not_contain("node_modules")
