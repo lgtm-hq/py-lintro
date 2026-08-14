@@ -18,6 +18,7 @@ from lintro.tools.core.install_plan import InstallResult
 _OUTCOME_STYLES: dict[InstallOutcome, str] = {
     InstallOutcome.SUCCESS: "green",
     InstallOutcome.NOT_DISCOVERABLE: "yellow",
+    InstallOutcome.STILL_OUTDATED: "yellow",
     InstallOutcome.FAILED: "red",
     InstallOutcome.TIMED_OUT: "yellow",
     InstallOutcome.MANUAL_BLOCKED: "yellow",
@@ -26,6 +27,7 @@ _OUTCOME_STYLES: dict[InstallOutcome, str] = {
 _SUMMARY_ORDER: tuple[InstallOutcome, ...] = (
     InstallOutcome.SUCCESS,
     InstallOutcome.NOT_DISCOVERABLE,
+    InstallOutcome.STILL_OUTDATED,
     InstallOutcome.FAILED,
     InstallOutcome.TIMED_OUT,
     InstallOutcome.MANUAL_BLOCKED,
@@ -33,7 +35,8 @@ _SUMMARY_ORDER: tuple[InstallOutcome, ...] = (
 
 _SUMMARY_LABELS: dict[InstallOutcome, str] = {
     InstallOutcome.SUCCESS: "installed",
-    InstallOutcome.NOT_DISCOVERABLE: "installed but not on PATH",
+    InstallOutcome.NOT_DISCOVERABLE: "not discoverable",
+    InstallOutcome.STILL_OUTDATED: "still below minimum version",
     InstallOutcome.FAILED: "failed",
     InstallOutcome.TIMED_OUT: "timed out",
     InstallOutcome.MANUAL_BLOCKED: "manual action required",
@@ -118,7 +121,11 @@ def unresolved_tool_names(
 
     Returns:
         Names of tools whose action failed in a way that re-running the
-        identical command cannot fix.
+        identical command cannot fix. Includes ``NOT_DISCOVERABLE`` and
+        ``STILL_OUTDATED``. The list is consumed as per-process
+        ``known_invalid``: within one run a failed remedy is never
+        re-suggested; a fresh run gets one fresh attempt. There is no
+        state file.
     """
     return [
         result.tool.name

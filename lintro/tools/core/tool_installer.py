@@ -22,7 +22,9 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
+import sysconfig
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from loguru import logger
@@ -39,6 +41,7 @@ from lintro.tools.core.install_hints import (
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.install_strategies.package_names import script_tool_name
+from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
@@ -55,7 +58,123 @@ __all__ = [
     "InstallPlan",
     "InstallResult",
     "ToolInstaller",
+    "is_resolved_command_discoverable",
+    "resolve_version_command",
 ]
+
+
+def _is_wrapper_probe(command: Sequence[str]) -> bool:
+    """Return whether *command* probes a wrapper or host binary, not the tool.
+
+    Args:
+        command: Version-command argv (manifest or resolved).
+
+    Returns:
+        True when argv[0] is ``sh``/``bash``/``cargo`` or contains ``/``.
+    """
+    if not command:
+        return False
+    main_cmd = command[0]
+    return main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd
+
+
+def _is_node_modules_bin(path: Path) -> bool:
+    """Return whether *path* is an executable under ``node_modules/.bin``.
+
+    Args:
+        path: Candidate executable path.
+
+    Returns:
+        True when the immediate parent directory is ``node_modules/.bin``.
+    """
+    return path.parent.name == ".bin" and path.parent.parent.name == "node_modules"
+
+
+def resolve_version_command(
+    tool: ManifestTool,
+    *,
+    context: RuntimeContext,
+) -> list[str]:
+    """Resolve a tool's version command the way a run will resolve it.
+
+    For npm-installed tools the manifest's ``version_command`` names a bare
+    binary, which only ever finds a global install. Since #1811 a run
+    resolves ``node_modules/.bin`` first, so planning, post-install
+    verification, and doctor must share this helper rather than each calling
+    ``shutil.which`` on PATH. The Node chain is
+    :func:`lintro.plugins.execution_preparation.get_executable_command`;
+    ``bunx``/``npx`` is the registry fallback, not an install, so this helper
+    returns the original manifest command in that case (the caller must not
+    treat the runner as evidence the tool is installed).
+
+    Args:
+        tool: Tool whose version command is being resolved.
+        context: Runtime context supplying the detected Node project root.
+
+    Returns:
+        Argv list to run for the version probe.
+    """
+    command = list(tool.version_command)
+    if tool.install_type != "npm":
+        return command
+    # Wrapper probes cannot answer whether the tool itself is discoverable
+    # (`sh`/`bash`/`cargo`, or an argv[0] containing `/`). Leave them as
+    # the manifest wrote them — the same set `_verify_discoverable` used
+    # before this helper existed — instead of splicing the Node chain on.
+    if _is_wrapper_probe(command):
+        return command
+
+    from lintro.plugins.execution_preparation import get_executable_command
+
+    project = context.environment.node_project
+    resolved = get_executable_command(
+        tool.name,
+        cwd=project.root if project is not None else None,
+    )
+    # bunx/npx is the registry fallback, not an install. Treating it as
+    # already_ok would skip the project-local add this path exists to make.
+    if not resolved or resolved[0] in REGISTRY_RUNNERS:
+        return command
+    return [*resolved, *command[1:]]
+
+
+def is_resolved_command_discoverable(command: Sequence[str]) -> bool:
+    """Report whether a resolved version-command argv shows the tool is installed.
+
+    Planning, post-install verification, and doctor share this probe so they
+    cannot disagree about a project-local ``node_modules/.bin`` binary.
+
+    * An argv whose first element is ``bunx``/``npx`` is the registry
+      fallback, not an install — not discoverable.
+    * An absolute path under ``node_modules/.bin`` that exists is
+      discoverable even when that directory is not on PATH.
+    * Wrapper probes (``sh``/``bash``/``cargo``, or a path containing ``/``
+      that is not a local Node bin) cannot answer whether the tool itself is
+      discoverable, so they count as discoverable as today.
+    * Anything else is discoverable only when ``shutil.which`` finds it.
+
+    Args:
+        command: Argv returned by :func:`resolve_version_command`.
+
+    Returns:
+        False only when the tool's own executable is provably absent; True
+        when it resolves or when no on-PATH probe applies.
+    """
+    if not command:
+        return True
+
+    main_cmd = command[0]
+    if main_cmd in REGISTRY_RUNNERS:
+        return False
+
+    main_path = Path(main_cmd)
+    if main_path.is_absolute() and _is_node_modules_bin(main_path):
+        return main_path.exists()
+
+    if _is_wrapper_probe(command):
+        return True
+
+    return shutil.which(main_cmd) is not None
 
 
 class ToolInstaller:
@@ -224,8 +343,10 @@ class ToolInstaller:
         except ImportError:
             return None
         main_cmd = command[0]
+        if main_cmd in REGISTRY_RUNNERS:
+            return None
         if (
-            main_cmd not in ("sh", "bash", "cargo")
+            main_cmd not in _INDIRECT_PROBE_COMMANDS
             and not Path(main_cmd).is_absolute()
             and not shutil.which(main_cmd)
         ):
@@ -253,13 +374,8 @@ class ToolInstaller:
     def _resolved_version_command(self, tool: ManifestTool) -> list[str]:
         """Resolve a tool's version command the way the run will resolve it.
 
-        For npm-installed tools the manifest's ``version_command`` names a bare
-        binary, which only ever finds a global install. Since #1811 a run
-        resolves ``node_modules/.bin`` first, so planning against ``PATH`` would
-        report a tool as missing (or as the wrong version) while checks happily
-        use the project-local one — the exact "two authorities" split #2005 is
-        about. Route npm tools through the same command-builder registry the
-        executor uses, anchored on the detected project root.
+        Delegates to :func:`resolve_version_command` so planning, post-install
+        verification, and doctor share one Node resolution path.
 
         Args:
             tool: Tool whose version command is being resolved.
@@ -267,26 +383,7 @@ class ToolInstaller:
         Returns:
             Argv list to run for the version probe.
         """
-        command = list(tool.version_command)
-        if tool.install_type != "npm":
-            return command
-        # Wrapper version commands (vue-tsc's bash helper) are not a Node
-        # binary name; splicing the runtime chain onto them drops the wrapper.
-        if command[0] in ("sh", "bash"):
-            return command
-
-        from lintro.plugins.execution_preparation import get_executable_command
-
-        project = self._context.environment.node_project
-        resolved = get_executable_command(
-            tool.name,
-            cwd=project.root if project is not None else None,
-        )
-        # bunx/npx is the registry fallback, not an install. Treating it as
-        # already_ok would skip the project-local add this PR exists to make.
-        if not resolved or resolved[0] in ("bunx", "npx"):
-            return command
-        return [*resolved, *command[1:]]
+        return resolve_version_command(tool, context=self._context)
 
     @staticmethod
     def _version_meets_minimum(installed: str, minimum: str) -> bool:
@@ -417,36 +514,35 @@ class ToolInstaller:
 
         return results
 
-    @staticmethod
-    def _verify_discoverable(tool: ManifestTool) -> bool:
+    def _verify_discoverable(self, tool: ManifestTool) -> bool:
         """Check whether a tool is discoverable after a successful install.
 
-        Only the executable lookup is used as evidence. A version probe can
-        fail for reasons that have nothing to do with discoverability — a
-        repo-relative wrapper script (``bash scripts/...``), a subcommand of
-        another binary (``cargo audit``), unparseable output, or a transient
-        error — and reporting those as NOT_DISCOVERABLE would mark a genuinely
-        successful install as failed and suppress the tool from later quick
-        fixes.
+        Reuses :meth:`_resolved_version_command` so a project-local
+        ``node_modules/.bin`` binary counts as discoverable even when that
+        directory is not on PATH. Only the executable lookup is used as
+        evidence. A version probe can fail for reasons that have nothing to
+        do with discoverability — a repo-relative wrapper script
+        (``bash scripts/...``), a subcommand of another binary
+        (``cargo audit``), unparseable output, or a transient error — and
+        reporting those as NOT_DISCOVERABLE would mark a genuinely successful
+        install as failed and suppress the tool from later quick fixes.
 
         Args:
             tool: Tool that was just installed.
 
         Returns:
-            False only when the tool's own executable is provably absent from
-            PATH; True when it resolves or when no on-PATH probe applies.
+            False only when the tool's own executable is provably absent;
+            True when it resolves or when no on-PATH probe applies.
         """
         if not tool.version_command:
             # Nothing to probe with — trust the exit code.
             return True
 
-        main_cmd = tool.version_command[0]
-        if main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd:
-            # The probe runs a wrapper/host binary, not the tool itself, so it
-            # cannot answer whether the tool ended up discoverable.
-            return True
-
-        return shutil.which(main_cmd) is not None
+        try:
+            command = self._resolved_version_command(tool)
+        except ImportError:
+            command = list(tool.version_command)
+        return is_resolved_command_discoverable(command)
 
     _INSTALL_TIMEOUT_SECONDS = 300
 
@@ -543,6 +639,46 @@ class ToolInstaller:
                 command=command,
             )
 
+    def _not_discoverable_message(self, tool: ManifestTool) -> str:
+        """Explain a successful command that left the tool undiscoverable.
+
+        Args:
+            tool: Tool whose binary could not be found after install.
+
+        Returns:
+            Message naming the install destination directory and the PATH
+            remedy, rather than a generic "needs manual action".
+        """
+        bin_dir = self._install_destination_dir(tool)
+        return (
+            f"Install command succeeded but {tool.name} is still not "
+            f"discoverable. It was expected under {bin_dir} and was not "
+            f"found; inspect that directory, or add it to PATH, for "
+            f'example: export PATH="{bin_dir}:$PATH"'
+        )
+
+    def _install_destination_dir(self, tool: ManifestTool) -> Path:
+        """Return the directory an install of *tool* is expected to land in.
+
+        Args:
+            tool: Tool whose binary could not be found after install.
+
+        Returns:
+            Concrete destination directory named in the PATH remedy.
+        """
+        dest = self._install_cwd(tool)
+        if dest is not None:
+            return dest / "node_modules" / ".bin"
+        if tool.install_type == "npm":
+            npm = shutil.which("npm")
+            if npm is not None:
+                return Path(npm).parent
+        if tool.install_type == "pip":
+            return Path(sysconfig.get_path("scripts"))
+        if tool.install_type == "cargo":
+            return Path.home() / ".cargo" / "bin"
+        return Path.home() / ".local" / "bin"
+
     def _verified_result(
         self,
         *,
@@ -553,30 +689,51 @@ class ToolInstaller:
     ) -> InstallResult:
         """Build the result for a command that exited zero.
 
+        After discoverability, the same local-first probe is re-run for
+        version. Exit 0 with a version still below ``min_version`` is
+        :attr:`InstallOutcome.STILL_OUTDATED`, not success, so the identical
+        command is never re-suggested within this process.
+
         Args:
             tool: Tool that was installed.
             command: Command that was run.
-            message: Success message to use when the tool is discoverable.
+            message: Success message to use when the tool is discoverable
+                and meets ``min_version``.
             duration: Elapsed seconds for the install.
 
         Returns:
-            InstallResult with SUCCESS or NOT_DISCOVERABLE.
+            InstallResult with SUCCESS, NOT_DISCOVERABLE, or STILL_OUTDATED.
         """
-        if self._verify_discoverable(tool):
+        if not self._verify_discoverable(tool):
             return InstallResult(
                 tool=tool,
-                outcome=InstallOutcome.SUCCESS,
-                message=message,
+                outcome=InstallOutcome.NOT_DISCOVERABLE,
+                message=self._not_discoverable_message(tool),
                 duration_seconds=duration,
                 command=command,
             )
+
+        installed = self._get_installed_version(tool)
+        if (
+            installed is not None
+            and tool.min_version
+            and not self._version_meets_minimum(installed, tool.min_version)
+        ):
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.STILL_OUTDATED,
+                message=(
+                    f"Install command succeeded but {tool.name} {installed} "
+                    f"is still below minimum {tool.min_version}"
+                ),
+                duration_seconds=duration,
+                command=command,
+            )
+
         return InstallResult(
             tool=tool,
-            outcome=InstallOutcome.NOT_DISCOVERABLE,
-            message=(
-                "Install command succeeded but "
-                f"{tool.name} is still not discoverable on PATH"
-            ),
+            outcome=InstallOutcome.SUCCESS,
+            message=message,
             duration_seconds=duration,
             command=command,
         )

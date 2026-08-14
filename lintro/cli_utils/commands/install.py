@@ -140,6 +140,11 @@ def install_command(
     Specify tool names to install specific tools, or use --profile for
     predefined sets.
 
+    Exits 1 when any planned action is not a full success. That includes a
+    command that ran but left the tool undiscoverable (NOT_DISCOVERABLE) or
+    still below min_version (STILL_OUTDATED), not only a non-zero install
+    command.
+
     \u000c
 
     Args:
@@ -154,7 +159,8 @@ def install_command(
         global_install: Install npm-managed tools globally.
 
     Raises:
-        SystemExit: When tool installation fails.
+        SystemExit: When any install/upgrade action is not a full success
+            (including NOT_DISCOVERABLE and STILL_OUTDATED).
         click.UsageError: When conflicting options or invalid profile given.
 
     Examples:

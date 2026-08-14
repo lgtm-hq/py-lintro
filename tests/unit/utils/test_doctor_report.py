@@ -7,7 +7,10 @@ remediation}`` health report the MCP ``lintro_doctor`` tool serves.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - only used to build the TimeoutExpired the probe must survive
+import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +22,7 @@ from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
+from lintro.tools.core.install_strategies.node_project import detect_node_project
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.utils import doctor_report
 from lintro.utils.doctor_report import (
@@ -554,6 +558,23 @@ def test_check_tool_missing_not_in_path() -> None:
     assert_that(result.error).is_equal_to("not_in_path")
 
 
+def test_check_tool_missing_wrapper_host_is_not_in_path() -> None:
+    """A missing cargo host is not_in_path, not an OSError from subprocess."""
+    tool = _make_tool(
+        name="cargo_audit",
+        install_type="cargo",
+        category="rust",
+        version_command=("cargo", "audit", "--version"),
+    )
+    ctx = _make_context()
+
+    with patch("shutil.which", return_value=None):
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("not_in_path")
+
+
 def test_check_tool_missing_command_failed() -> None:
     """Tool found but version command exits non-zero."""
     tool = _make_tool()
@@ -656,6 +677,75 @@ def test_check_tool_upgrade_hint_populated() -> None:
 
     assert_that(result.install_hint).is_not_empty()
     assert_that(result.upgrade_hint).is_not_empty()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fake shell-script binary is not executable on Windows",
+)
+def test_check_tool_agrees_project_local_npm_binary_is_installed(
+    tmp_path: Path,
+) -> None:
+    """Doctor reports a node_modules/.bin binary as installed, not missing.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "demo"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "package-lock.json").write_text("", encoding="utf-8")
+    registry = ManifestRegistry.load()
+    tool = registry.get("prettier")
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / "prettier"
+    binary.write_text(f'#!/bin/sh\necho "{tool.version}"\n', encoding="utf-8")
+    binary.chmod(0o755)
+
+    ctx = RuntimeContext(
+        install_context=InstallContext.PIP,
+        platform_label="Linux x86_64",
+        environment=InstallEnvironment(
+            install_context=InstallContext.PIP,
+            available_managers=frozenset({PackageManager.NPM}),
+            node_project=detect_node_project(tmp_path),
+        ),
+        is_ci=False,
+    )
+
+    with patch("shutil.which", return_value=None):
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_not_equal_to(ToolStatus.MISSING)
+    assert_that(result.path).is_not_none()
+    assert_that(result.path).contains("node_modules/.bin")
+    assert_that(result.installed_version).is_equal_to(tool.version)
+
+
+def test_check_tool_does_not_treat_bunx_fallback_as_installed() -> None:
+    """bunx/npx is the registry fallback, not an install doctor can trust."""
+    tool = _make_tool(
+        name="prettier",
+        version="3.9.4",
+        install_type="npm",
+        category="npm",
+        version_command=("prettier", "--version"),
+    )
+    ctx = _make_context()
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            return_value=["bunx", "prettier@3.9.4"],
+        ),
+        patch("shutil.which", return_value=None),
+    ):
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("not_in_path")
 
 
 # ── optional MCP extra ───────────────────────────────────────────────

@@ -9,6 +9,10 @@ The install-versus-upgrade decision is made per tool, mirroring
 ``ToolInstaller.plan``: a missing tool is installed, an outdated one upgraded.
 A batch-wide flag would suggest ``brew upgrade`` for a tool that is not
 installed yet, or hide an installable tool behind another tool's upgrade.
+
+``known_invalid`` is per-process only. Within one run a failed remedy
+(including ``NOT_DISCOVERABLE`` and ``STILL_OUTDATED``) is never
+re-suggested; a fresh run gets one fresh attempt. There is no state file.
 """
 
 from __future__ import annotations
@@ -75,8 +79,11 @@ def build_quick_fix(
             True for an installed-but-outdated tool and False for a missing one.
         env: The detected install environment.
         known_invalid: Tool names whose command already ran without resolving
-            the tool in this session; they are reported as blocked rather than
-            suggested again.
+            the tool in this process; they are reported as blocked rather than
+            suggested again. The set is per-process only: within one run a
+            failed remedy (including ``NOT_DISCOVERABLE`` and
+            ``STILL_OUTDATED``) is never re-suggested; a fresh run gets one
+            fresh attempt. There is no state file.
         is_brew_managed: Predicate used to confirm that Homebrew really manages
             a formula before suggesting ``brew upgrade``; defaults to the same
             check the installer uses. Injectable so tests stay off subprocess.
