@@ -25,6 +25,7 @@ dependencies.
 from __future__ import annotations
 
 import argparse
+import ast
 import difflib
 import sys
 from pathlib import Path
@@ -71,8 +72,8 @@ REGISTERING_TOOL_MODULES: tuple[str, ...] = (
 
 _FOOTER = ")\n"
 
-# Decorator that marks a definition module as contributing a registry entry.
-REGISTER_DECORATOR = "@register_tool"
+# Decorator name that marks a definition module as contributing a registry entry.
+REGISTER_TOOL_NAME = "register_tool"
 
 
 def collect_module_names(definitions_dir: Path) -> list[str]:
@@ -98,8 +99,67 @@ def collect_module_names(definitions_dir: Path) -> list[str]:
     )
 
 
+def _is_register_tool_decorator(node: ast.AST) -> bool:
+    """Return whether ``node`` is a ``register_tool`` decorator expression.
+
+    Accepts ``@register_tool``, ``@register_tool()``, and
+    ``@module.register_tool`` (a ``Name`` or ``Attribute``, optionally called).
+
+    Args:
+        node: A decorator AST node from a ``decorator_list``.
+
+    Returns:
+        True when the decorator applies ``register_tool``.
+    """
+    if isinstance(node, ast.Call):
+        return _is_register_tool_decorator(node.func)
+    if isinstance(node, ast.Name):
+        return node.id == REGISTER_TOOL_NAME
+    if isinstance(node, ast.Attribute):
+        return node.attr == REGISTER_TOOL_NAME
+    return False
+
+
+def _source_registers_tool(*, source: str, path: Path) -> bool:
+    """Return whether Python source applies ``@register_tool``.
+
+    Parsed with :mod:`ast` so comments and string literals cannot count as a
+    registration. The generator stays stdlib-only: importing the registry at
+    generation time would pull the ``lintro`` package (and its import cycle
+    with ``lintro.tools``) into minimal CI containers.
+
+    Args:
+        source: Module source text.
+        path: Path of the file, used in parse-error messages.
+
+    Returns:
+        True when a class or function in the module is decorated with
+        ``register_tool``.
+
+    Raises:
+        ValueError: When ``source`` is not valid Python.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        msg = f"could not parse {path}: {exc}"
+        raise ValueError(msg) from exc
+
+    for node in ast.walk(tree):
+        decorator_list = getattr(node, "decorator_list", None)
+        if not decorator_list:
+            continue
+        if any(_is_register_tool_decorator(dec) for dec in decorator_list):
+            return True
+    return False
+
+
 def collect_registering_module_names(definitions_dir: Path) -> list[str]:
     """Collect the definition modules that register a tool.
+
+    Registration is detected by walking each module's AST for a
+    ``register_tool`` decorator (a ``Name`` or ``Attribute``). Comments and
+    docstrings that mention the decorator do not count.
 
     Args:
         definitions_dir: Directory holding the builtin tool definition modules.
@@ -109,17 +169,26 @@ def collect_registering_module_names(definitions_dir: Path) -> list[str]:
 
     Raises:
         FileNotFoundError: When ``definitions_dir`` does not exist.
+        ValueError: When a definition file cannot be parsed as Python.
     """
     if not definitions_dir.is_dir():
         msg = f"Builtin definitions directory not found: {definitions_dir}"
         raise FileNotFoundError(msg)
 
-    return sorted(
-        path.stem
-        for path in definitions_dir.glob("*.py")
-        if not path.name.startswith("_")
-        and REGISTER_DECORATOR in path.read_text(encoding="utf-8")
-    )
+    registering: list[str] = []
+    for path in definitions_dir.glob("*.py"):
+        if path.name.startswith("_"):
+            continue
+        try:
+            registers = _source_registers_tool(
+                source=path.read_text(encoding="utf-8"),
+                path=path,
+            )
+        except ValueError:
+            raise
+        if registers:
+            registering.append(path.stem)
+    return sorted(registering)
 
 
 def render_index(module_names: list[str], registering: list[str]) -> str:
@@ -174,7 +243,7 @@ def main() -> int:
     try:
         module_names = collect_module_names(DEFINITIONS_DIR)
         registering = collect_registering_module_names(DEFINITIONS_DIR)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
 

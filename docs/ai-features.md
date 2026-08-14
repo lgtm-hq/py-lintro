@@ -555,12 +555,13 @@ ai:
   # (auto | always | never, default: auto)
   cli_bare: auto
 
-  # ── Advanced / trust (leave off unless you understand the risk) ──
-  # Pass "--trust" to the Cursor agent CLI. Security risk: the Cursor provider
-  # can be fed prompt-injectable content (e.g. fork-PR diffs), so keep this
-  # false outside fully trusted local workspaces. (bool, default: false)
-  cursor_trust_workspace: false
+  # ── Cursor workspace trust ──
+  # Choosing provider: cursor grants workspace trust (passes "--trust" to the
+  # agent CLI). Set false to restore the agent's interactive trust prompt.
+  # (bool, default: true)
+  cursor_trust_workspace: true
 
+  # ── Advanced / trust (leave off unless you understand the risk) ──
   # Let the git-native (CLI transport) review path delegate diff retrieval to
   # the provider instead of embedding a redacted diff. Security risk: a
   # delegated diff bypasses lintro's secret-redaction choke point — see the

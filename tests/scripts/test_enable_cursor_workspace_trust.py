@@ -1,8 +1,8 @@
 """Tests for ``scripts/ci/enable_cursor_workspace_trust.py``.
 
-The dogfood job has to set ``ai.cursor_trust_workspace`` on the ephemeral
-checkout: the Cursor ``agent`` CLI will not start non-interactively without
-``--trust``, and there is no env overlay for that field.
+The patcher remains until #2025. #2023 defaults ``ai.cursor_trust_workspace``
+to true (trust follows from ``provider: cursor``); the script is still
+idempotent when the field is already true, and there is no env overlay.
 """
 
 from __future__ import annotations
