@@ -28,6 +28,9 @@ RESPONSES = json.loads({responses!r})
 
 args = sys.argv[1:]
 key = args[0] if args else ""
+if key == "check" and ("--output-format" not in args or "json" not in args):
+    sys.stderr.write("check invoked without --output-format json\\n")
+    sys.exit(2)
 response = RESPONSES.get(key, {{"stdout": "", "exit": 0}})
 sys.stdout.write(response["stdout"])
 sys.stderr.write(response.get("stderr", ""))
@@ -60,30 +63,72 @@ def _write_fake_binary(
     return path
 
 
-# Verbatim shape of the rendered result table (tabulate grid + emoji + status
-# glyphs), so the row parser is exercised against production output rather than
-# a simplified stand-in.
-REAL_RESULT_TABLE = """
-+-----------------+----------+----------+-------------------+
-| Tool            | Status   | Issues   | Notes             |
-+=================+==========+==========+===================+
-| \U0001f5a4 black         | \u274c FAIL   | 1        |                   |
-+-----------------+----------+----------+-------------------+
-| \U0001f980 ruff          | \u2705 PASS   | 0        |                   |
-+-----------------+----------+----------+-------------------+
+# Production ``lintro check --output-format json`` shape (see
+# ``lintro.utils.json_output.create_json_output``): a ``results`` array of
+# per-tool objects whose ``tool`` field is the execution evidence.
+HEALTHY_CHECK_JSON = json.dumps(
+    {
+        "results": [
+            {
+                "tool": "black",
+                "success": False,
+                "issues_count": 1,
+                "skipped": False,
+                "skip_reason": None,
+                "timed_out": False,
+                "output": "",
+            },
+            {
+                "tool": "ruff",
+                "success": True,
+                "issues_count": 0,
+                "skipped": False,
+                "skip_reason": None,
+                "timed_out": False,
+                "output": "",
+            },
+        ],
+        "summary": {
+            "total_issues": 1,
+            "total_fixed": 0,
+            "total_remaining": 1,
+            "timed_out_tools": [],
+        },
+    },
+)
 
-\U0001f4ca TOTALS
-"""
-
-# Same table with every tool skipped, as a release runner with no external tool
-# binaries installed produces.
-SKIPPED_RESULT_TABLE = """
-+-----------------+----------+----------+--------------------------------+
-| \U0001f5a4 black         | \u23ed\ufe0f  SKIP | -        | executable not found           |
-+-----------------+----------+----------+--------------------------------+
-| \U0001f980 ruff          | \u23ed\ufe0f  SKIP | -        | executable not found           |
-+-----------------+----------+----------+--------------------------------+
-"""
+# Same document with every tool skipped, as a release runner with no external
+# tool binaries installed produces.
+SKIPPED_CHECK_JSON = json.dumps(
+    {
+        "results": [
+            {
+                "tool": "black",
+                "success": True,
+                "issues_count": 0,
+                "skipped": True,
+                "skip_reason": "executable not found",
+                "timed_out": False,
+                "output": "",
+            },
+            {
+                "tool": "ruff",
+                "success": True,
+                "issues_count": 0,
+                "skipped": True,
+                "skip_reason": "executable not found",
+                "timed_out": False,
+                "output": "",
+            },
+        ],
+        "summary": {
+            "total_issues": 0,
+            "total_fixed": 0,
+            "total_remaining": 0,
+            "timed_out_tools": [],
+        },
+    },
+)
 
 
 def _healthy_responses() -> dict[str, dict[str, object]]:
@@ -108,7 +153,7 @@ def _healthy_responses() -> dict[str, dict[str, object]]:
             ),
             "exit": 0,
         },
-        "check": {"stdout": REAL_RESULT_TABLE, "exit": 0},
+        "check": {"stdout": HEALTHY_CHECK_JSON, "exit": 0},
     }
 
 
@@ -348,17 +393,18 @@ def test_skip_rows_still_prove_registry_dispatch(
     smoke: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """Result rows count as evidence even when every tool is skipped.
+    """JSON results count as evidence even when every tool is skipped.
 
     Release runners have none of the external tool binaries installed, so every
-    row is a skip — the rows themselves are what prove the registry dispatched.
+    result is a skip — the result objects themselves prove the registry
+    dispatched.
 
     Args:
         smoke: Imported smoke-test module.
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {"stdout": SKIPPED_RESULT_TABLE, "exit": 0}
+    responses["check"] = {"stdout": SKIPPED_CHECK_JSON, "exit": 0}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
     assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
@@ -372,6 +418,12 @@ def test_skip_rows_still_prove_registry_dispatch(
         ("something odd\n", 3, "no-verdict-exit-code"),
         ("nothing ran here\n", 0, "no-tool-named"),
         ("Skipping ruff: executable not found\n", 0, "tool-named-in-prose-only"),
+        (
+            json.dumps({"results": [], "summary": {"total_issues": 0}}),
+            0,
+            "empty-results-array",
+        ),
+        (json.dumps(["ruff", "black"]), 0, "json-array"),
     ],
     ids=[
         "marker=no-tools-to-run",
@@ -379,6 +431,8 @@ def test_skip_rows_still_prove_registry_dispatch(
         "outcome=no-verdict",
         "outcome=no-execution-evidence",
         "outcome=prose-mention-only",
+        "outcome=empty-json-results",
+        "outcome=json-array",
     ],
 )
 def test_check_failures_are_reported(
@@ -415,7 +469,7 @@ def test_issues_found_still_counts_as_reaching_execution(
         tmp_path: Pytest-provided temporary directory.
     """
     responses = _healthy_responses()
-    responses["check"] = {"stdout": REAL_RESULT_TABLE, "exit": 1}
+    responses["check"] = {"stdout": HEALTHY_CHECK_JSON, "exit": 1}
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
 
     assert_that(smoke.check_reaches_execution(binary, ["ruff", "black"])).is_equal_to(0)
@@ -433,7 +487,27 @@ def test_underscore_tool_names_match_hyphenated_report(
     """
     responses = _healthy_responses()
     responses["check"] = {
-        "stdout": "| \U0001f527 pip-audit     | \u2705 PASS   | 0        |     |\n",
+        "stdout": json.dumps(
+            {
+                "results": [
+                    {
+                        "tool": "pip-audit",
+                        "success": True,
+                        "issues_count": 0,
+                        "skipped": False,
+                        "skip_reason": None,
+                        "timed_out": False,
+                        "output": "",
+                    },
+                ],
+                "summary": {
+                    "total_issues": 0,
+                    "total_fixed": 0,
+                    "total_remaining": 0,
+                    "timed_out_tools": [],
+                },
+            },
+        ),
         "exit": 0,
     }
     binary = _write_fake_binary(path=tmp_path / "lintro", responses=responses)
@@ -458,21 +532,49 @@ def test_matches_tool_requires_complete_identifier(smoke: ModuleType) -> None:
     ).is_true()
 
 
-def test_notes_column_cannot_satisfy_a_different_tool(smoke: ModuleType) -> None:
-    """A Notes cell mentioning another tool is not a result row for that tool.
+def test_skip_reason_cannot_satisfy_a_different_tool(smoke: ModuleType) -> None:
+    """A skip_reason mentioning another tool is not a result for that tool.
 
     Args:
         smoke: Imported smoke-test module.
     """
-    output = (
-        "| black | PASS | 0 | unable to open ruff.py |\n"
-        "| ruff-format | PASS | 0 | |\n"
-    )
-    found = smoke._tools_in_result_table(
-        output=output,
+    payload = {
+        "results": [
+            {
+                "tool": "black",
+                "success": True,
+                "issues_count": 0,
+                "skipped": False,
+                "skip_reason": "unable to open ruff.py",
+                "timed_out": False,
+                "output": "",
+            },
+            {
+                "tool": "ruff-format",
+                "success": True,
+                "issues_count": 0,
+                "skipped": False,
+                "skip_reason": None,
+                "timed_out": False,
+                "output": "",
+            },
+        ],
+    }
+    found = smoke._tools_in_check_json(
+        payload=payload,
         builtin_tools=["ruff", "black"],
     )
     assert_that(found).is_equal_to(["black"])
+
+
+def test_table_scraping_helpers_are_gone(smoke: ModuleType) -> None:
+    """The smoke test must not scrape the default result table.
+
+    Args:
+        smoke: Imported smoke-test module.
+    """
+    assert_that(hasattr(smoke, "_tools_in_result_table")).is_false()
+    assert_that(hasattr(smoke, "_result_table_tool_cell")).is_false()
 
 
 def test_missing_binary_fails(

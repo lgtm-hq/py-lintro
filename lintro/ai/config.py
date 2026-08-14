@@ -307,15 +307,12 @@ class AIConfig(BaseModel):
     )
 
     cursor_trust_workspace: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
-            "trust. Security risk: the Cursor provider is fed untrusted, "
-            "prompt-injectable content (e.g. 'lintro review --pr N' embeds "
-            "diffs from arbitrary fork PRs). Combining workspace trust with "
-            "such input could let an injected diff drive an agent operating "
-            "with full workspace trust, so this defaults to False and should "
-            "only be enabled for fully trusted local workspaces."
+            "trust. Trust follows from choosing provider: cursor, so this "
+            "defaults to True. Set false to restore the Cursor agent's "
+            "interactive trust prompt."
         ),
     )
 

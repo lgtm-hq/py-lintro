@@ -65,34 +65,14 @@ def test_get_provider_passes_model():
         )
 
 
-def test_get_provider_cursor_trust_defaults_off():
-    """Cursor provider does not trust the workspace unless opted in."""
+def test_get_provider_cursor_trust_defaults_on() -> None:
+    """Cursor provider trusts the workspace when AIConfig uses the default."""
     from lintro.ai.enums import AITransport
     from lintro.ai.providers.cursor import CursorProvider
 
     config = AIConfig(
         provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
-    )
-    with patch(
-        "lintro.ai.providers.cursor._find_agent",
-        return_value="/usr/local/bin/agent",
-    ):
-        provider = get_provider(config)
-    assert_that(isinstance(provider, CursorProvider)).is_true()
-    cursor = cast(CursorProvider, provider)
-    assert_that(cursor._trust_workspace).is_false()
-
-
-def test_get_provider_cursor_trust_threaded_when_enabled():
-    """get_provider threads cursor_trust_workspace into the provider."""
-    from lintro.ai.enums import AITransport
-    from lintro.ai.providers.cursor import CursorProvider
-
-    config = AIConfig(
-        provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
-        transport=AITransport.CLI,
-        cursor_trust_workspace=True,
     )
     with patch(
         "lintro.ai.providers.cursor._find_agent",
@@ -102,6 +82,26 @@ def test_get_provider_cursor_trust_threaded_when_enabled():
     assert_that(isinstance(provider, CursorProvider)).is_true()
     cursor = cast(CursorProvider, provider)
     assert_that(cursor._trust_workspace).is_true()
+
+
+def test_get_provider_cursor_trust_opted_out() -> None:
+    """get_provider threads an explicit cursor_trust_workspace=False opt-out."""
+    from lintro.ai.enums import AITransport
+    from lintro.ai.providers.cursor import CursorProvider
+
+    config = AIConfig(
+        provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
+        transport=AITransport.CLI,
+        cursor_trust_workspace=False,
+    )
+    with patch(
+        "lintro.ai.providers.cursor._find_agent",
+        return_value="/usr/local/bin/agent",
+    ):
+        provider = get_provider(config)
+    assert_that(isinstance(provider, CursorProvider)).is_true()
+    cursor = cast(CursorProvider, provider)
+    assert_that(cursor._trust_workspace).is_false()
 
 
 def test_get_provider_anthropic_threads_cli_bare() -> None:

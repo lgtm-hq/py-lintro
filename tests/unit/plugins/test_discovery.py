@@ -623,16 +623,21 @@ def test_shadowed_plugin_gets_no_divergence_advice(
 
 
 def test_registering_index_matches_the_real_registry() -> None:
-    """Every module the index calls registering yields a registered tool.
+    """The index's registering set is exactly the builtin registry.
 
-    The generator detects registering modules statically (``@register_tool`` in
-    the source). This is the behavioral counterpart: the binary smoke test
-    treats that subset as the expected builtin tool set, so a static-scan
-    mismatch would make released binaries fail their own registry assertion.
+    The generator detects registering modules via AST (``@register_tool`` as a
+    Name or Attribute decorator). The binary smoke test treats that subset as
+    the expected builtin tool set, so both over-counting and under-counting
+    would make released binaries fail their own registry assertion — or worse,
+    silently shrink the assertion. Equality catches both directions.
     """
     discover_builtin_tools()
 
-    registered = {name.replace("-", "_") for name in ToolRegistry.get_names()}
+    registered = {
+        name.replace("-", "_")
+        for name in ToolRegistry.get_names()
+        if ToolRegistry.get_origin(name) == ToolRegistry.BUILTIN_ORIGIN
+    }
     expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
 
-    assert_that(sorted(expected - registered)).is_empty()
+    assert_that(sorted(registered)).is_equal_to(sorted(expected))
