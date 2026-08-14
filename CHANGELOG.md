@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.115.4] - 2026-08-14
+
+### Fixed
+
+- **install**: respect the project's Node package manager and local pins (#2014)
+  (230f56b)
+
 ## [0.115.3] - 2026-08-14
 
 ### Changed
