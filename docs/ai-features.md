@@ -668,7 +668,7 @@ well as the legacy `ai.max_cost_usd` scalar.
 | `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                                |
 | `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                                       |
 | `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag.         |
-| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` and transport profile caps | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is a $0 cap). Negative/non-numeric fail loud. |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` and transport profile caps | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is a $0 cap). Negative/non-numeric/non-finite fail loud. |
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config

@@ -370,6 +370,19 @@ def test_nonnumeric_max_cost_usd_flag_fails_loud() -> None:
     assert_that(message).contains("0 for uncapped")
 
 
+def test_nonfinite_max_cost_usd_fails_loud() -> None:
+    """NaN and inf are rejected rather than stored as a cap (#2024)."""
+    for raw in ("nan", "inf", "-inf"):
+        with pytest.raises(AIConfigOverrideError) as exc_info:
+            apply_cli_overrides(
+                AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+                max_cost_usd=raw,
+            )
+        message = str(exc_info.value)
+        assert_that(message).contains(f"--max-cost-usd='{raw}'")
+        assert_that(message).contains("0 for uncapped")
+
+
 def test_whitespace_max_cost_usd_env_is_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
