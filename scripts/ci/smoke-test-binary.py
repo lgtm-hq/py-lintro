@@ -11,8 +11,10 @@ This script exercises the registry through the binary itself:
 1. ``lintro list-tools --json`` reports **every** builtin the generated index
    says exists — a partially populated registry fails just like an empty one.
 2. ``lintro config --json`` reports builtin tools in the execution order.
-3. ``lintro check`` on a throwaway sample tree reaches tool execution instead
-   of bailing out with ``No tools to run.``.
+3. ``lintro check --output-format json`` on a throwaway sample tree reaches
+   tool execution instead of bailing out with ``No tools to run.``. The JSON
+   document's ``results[].tool`` names are the execution evidence; the default
+   table renderer is never scraped.
 
 Usage:
     python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
@@ -51,10 +53,6 @@ CHECK_TIMEOUT_SECONDS = 300
 # is a fast, readable signal rather than the guard of record: the positive
 # tool-execution evidence below is what fails closed if this wording changes.
 EMPTY_REGISTRY_MARKER = "No tools to run."
-
-# Statuses rendered in the per-tool result table. Their presence in a table row
-# is what distinguishes a real result row from prose that names a tool.
-RESULT_ROW_STATUSES = ("PASS", "FAIL", "SKIP")
 
 
 def _run(
@@ -217,6 +215,18 @@ def _tool_spellings(name: str) -> set[str]:
     return {name, name.replace("_", "-"), name.replace("-", "_")}
 
 
+def _normalized_tool_name(name: str) -> str:
+    """Return the canonical spelling used to compare tool names.
+
+    Args:
+        name: Tool name as the registry or a report spells it.
+
+    Returns:
+        The name with hyphens folded to underscores.
+    """
+    return name.replace("-", "_")
+
+
 def _matches_tool(*, text: str, name: str) -> bool:
     """Check whether a complete tool identifier appears in text.
 
@@ -290,62 +300,55 @@ def check_config(binary: Path, builtin_tools: list[str]) -> int:
     return EXIT_OK
 
 
-def _result_table_tool_cell(row: str) -> str:
-    """Return the Tool column of a tabulate grid row.
+def _tools_in_check_json(
+    *,
+    payload: object,
+    builtin_tools: list[str],
+) -> list[str]:
+    """Find builtin tools that produced a per-tool JSON result.
 
-    Matching the complete row would let a Notes cell mentioning ``ruff.py``
-    satisfy builtin ``ruff``. Only the first data cell is the tool identity.
+    Only ``results[].tool`` counts: a result object exists exactly when the
+    registry handed the tool to the executor, which is the property #2006
+    broke. Skip reasons, output text, and other fields that merely mention a
+    tool are not evidence.
 
-    Args:
-        row: A stripped table row starting with ``|``.
-
-    Returns:
-        The first data cell, or the whole row when the shape is unexpected.
-    """
-    data_cells = [cell.strip() for cell in row.split("|") if cell.strip()]
-    return data_cells[0] if data_cells else row
-
-
-def _tools_in_result_table(*, output: str, builtin_tools: list[str]) -> list[str]:
-    """Find builtin tools that produced a per-tool result row.
-
-    Only rows of the rendered result table count: a row exists exactly when the
-    registry handed the tool to the executor, which is the property #2006 broke.
-    Prose lines that merely mention a tool (``Skipping ruff: executable not
-    found``) are not evidence and are ignored.
-
-    Rows with a ``SKIP`` status still count. A release runner has none of the
-    external tool binaries installed, so every row there is a skip — yet the
-    rows themselves prove the registry was populated and dispatched.
+    Skipped tools still count. A release runner has none of the external tool
+    binaries installed, so every result there is a skip — yet the result
+    objects themselves prove the registry was populated and dispatched.
 
     Args:
-        output: Combined stdout and stderr of the ``check`` run.
+        payload: Parsed ``lintro check --output-format json`` document.
         builtin_tools: Builtin tool names reported by ``list-tools --json``.
 
     Returns:
-        Sorted names of builtin tools that have a result row.
+        Sorted names of builtin tools that have a result object.
     """
-    found: set[str] = set()
-    for line in output.splitlines():
-        row = line.strip()
-        if not row.startswith("|"):
+    if not isinstance(payload, dict):
+        return []
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    reported: set[str] = set()
+    for entry in results:
+        if not isinstance(entry, dict):
             continue
-        if not any(status in row for status in RESULT_ROW_STATUSES):
+        tool = entry.get("tool")
+        if not isinstance(tool, str) or not tool:
             continue
-        tool_cell = _result_table_tool_cell(row)
-        found.update(
-            name for name in builtin_tools if _matches_tool(text=tool_cell, name=name)
-        )
-    return sorted(found)
+        reported.add(_normalized_tool_name(tool))
+    return sorted(
+        name for name in builtin_tools if _normalized_tool_name(name) in reported
+    )
 
 
 def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
     """Assert ``check`` runs tools instead of reporting an empty registry.
 
     The verdict is driven by positive evidence — the run must emit a per-tool
-    result row for at least one builtin the registry advertised — so a binary
+    JSON result for at least one builtin the registry advertised — so a binary
     that dies before tool execution fails even if it never prints the
-    empty-registry marker or a traceback.
+    empty-registry marker or a traceback. ``--output-format json`` is pinned so
+    a default table-style change cannot turn the smoke test red.
 
     Args:
         binary: Path to the lintro binary under test.
@@ -360,7 +363,7 @@ def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
         (sample_root / "sample.yaml").write_text("key: value\n")
 
         result = _run(
-            argv=[str(binary), "check", "."],
+            argv=[str(binary), "check", "--output-format", "json", "."],
             cwd=sample_root,
             timeout=CHECK_TIMEOUT_SECONDS,
         )
@@ -380,16 +383,25 @@ def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
             f"check exited {result.returncode} without a verdict:\n{output[-2000:]}",
         )
 
-    reported = _tools_in_result_table(output=output, builtin_tools=builtin_tools)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return _fail(f"check --output-format json emitted invalid JSON: {exc}")
+    if not isinstance(payload, dict):
+        return _fail("check --output-format json did not emit a JSON object")
+    if not isinstance(payload.get("results"), list):
+        return _fail("check --output-format json has no 'results' array")
+
+    reported = _tools_in_check_json(payload=payload, builtin_tools=builtin_tools)
     if not reported:
         return _fail(
-            "check produced no per-tool result rows for any builtin tool "
+            "check produced no per-tool JSON results for any builtin tool "
             f"(looked for {len(builtin_tools)} registry names):\n{output[-2000:]}",
         )
 
     print(
         f"OK: check reached tool execution (exit {result.returncode}, "
-        f"{len(reported)} builtin tools in the result table)",
+        f"{len(reported)} builtin tools in the JSON results)",
     )
     return EXIT_OK
 
