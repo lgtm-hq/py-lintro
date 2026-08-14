@@ -86,6 +86,53 @@ def test_collect_registering_module_names_skips_helper_modules(
     )
 
 
+def test_collect_registering_module_names_ignores_comments_and_docstrings(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A commented or docstring ``@register_tool`` is not a registration.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    (tmp_path / "commented.py").write_text(
+        "# @register_tool\nclass Plugin:\n    pass\n",
+    )
+    (tmp_path / "docstring.py").write_text(
+        '"""This helper mentions @register_tool in the module docstring."""\n'
+        "HELPER = True\n",
+    )
+    (tmp_path / "literal.py").write_text('DECORATOR = "@register_tool"\n')
+    (tmp_path / "real.py").write_text(_registering_module())
+    (tmp_path / "attr.py").write_text(
+        "@registry.register_tool\nclass Plugin:\n    pass\n",
+    )
+    (tmp_path / "called.py").write_text(
+        "@register_tool()\nclass Plugin:\n    pass\n",
+    )
+
+    assert_that(gen.collect_registering_module_names(tmp_path)).is_equal_to(
+        ["attr", "called", "real"],
+    )
+
+
+def test_collect_registering_module_names_fails_closed_on_syntax_error(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """An unparseable definition file is an input error, not a silent skip.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    (tmp_path / "broken.py").write_text("def (\n")
+
+    with pytest.raises(ValueError, match="could not parse"):
+        gen.collect_registering_module_names(tmp_path)
+
+
 def test_collect_module_names_rejects_missing_directory(
     gen: ModuleType,
     tmp_path: Path,
