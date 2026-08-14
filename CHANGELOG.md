@@ -13,6 +13,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **ai**: grant Cursor workspace trust by default (#2023)
+
 ### Deprecated
 
 ### Removed

@@ -11,11 +11,14 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
+from lintro.ai.providers import get_provider
 from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
 from tests.unit.ai.conftest import HANG, patch_cli_exec
@@ -443,8 +446,10 @@ async def test_cursor_cost_accrues_into_budget(provider):
     assert_that(budget.spent).is_greater_than(0.0)
 
 
-async def test_complete_omits_trust_flag_by_default(provider):
-    """The '--trust' flag is absent unless workspace trust is opted in."""
+async def test_complete_omits_trust_flag_when_constructed_directly(
+    provider: CursorProvider,
+) -> None:
+    """CursorProvider constructed without config omits '--trust'."""
     stdout = _cli_json(result="ok")
     with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
@@ -458,14 +463,49 @@ async def test_complete_omits_trust_flag_by_default(provider):
     assert_that(cmd).does_not_contain("--trust")
 
 
-async def test_complete_includes_trust_flag_when_opted_in(_mock_agent_on_path):
-    """The '--trust' flag is present only when the opt-in is set."""
+async def test_complete_includes_trust_flag_when_constructed_with_trust(
+    _mock_agent_on_path: object,
+) -> None:
+    """CursorProvider constructed with trust enabled appends '--trust'."""
     trusting = CursorProvider(cursor_trust_workspace=True)
     stdout = _cli_json(result="ok")
     with patch_cli_exec(side_effect=_fake_run_with_probes(stdout)) as mock_run:
         await trusting.complete("Hello", repo_root="/tmp/repo")
     cmd = _completion_calls(mock_run)[-1]
     assert_that(cmd).contains("--trust")
+
+
+async def test_complete_includes_trust_flag_by_default(
+    _mock_agent_on_path: object,
+) -> None:
+    """The '--trust' flag is appended when AIConfig uses the default."""
+    config = AIConfig(
+        provider=AIProvider.CURSOR,
+        transport=AITransport.CLI,
+    )
+    cursor = get_provider(config)
+    stdout = _cli_json(result="ok")
+    with patch_cli_exec(side_effect=_fake_run_with_probes(stdout)) as mock_run:
+        await cursor.complete("Hello", repo_root="/tmp/repo")
+    cmd = _completion_calls(mock_run)[-1]
+    assert_that(cmd).contains("--trust")
+
+
+async def test_complete_omits_trust_flag_when_opted_out(
+    _mock_agent_on_path: object,
+) -> None:
+    """The '--trust' flag is absent when workspace trust is explicitly false."""
+    config = AIConfig(
+        provider=AIProvider.CURSOR,
+        transport=AITransport.CLI,
+        cursor_trust_workspace=False,
+    )
+    cursor = get_provider(config)
+    stdout = _cli_json(result="ok")
+    with patch_cli_exec(side_effect=_fake_run_with_probes(stdout)) as mock_run:
+        await cursor.complete("Hello", repo_root="/tmp/repo")
+    cmd = _completion_calls(mock_run)[-1]
+    assert_that(cmd).does_not_contain("--trust")
 
 
 # -- CursorProvider._extract_json_object() ---------------------------------
