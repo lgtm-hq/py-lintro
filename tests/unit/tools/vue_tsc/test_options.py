@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -232,7 +233,8 @@ def test_build_command_basic(
         no_local_node_install: Fixture removing any project-local Node install
             from resolution.
     """
-    cmd = vue_tsc_plugin._build_command(files=[])
+    with patch("shutil.which", return_value="/usr/local/bin/vue-tsc"):
+        cmd = vue_tsc_plugin._build_command(files=[])
 
     # Should contain --noEmit and --pretty false
     assert_that(cmd).contains("--noEmit")

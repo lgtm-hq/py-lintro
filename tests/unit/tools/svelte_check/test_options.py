@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -222,7 +223,8 @@ def test_build_command_basic(
         no_local_node_install: Fixture removing any project-local Node install
             from resolution.
     """
-    cmd = svelte_check_plugin._build_command()
+    with patch("shutil.which", return_value="/usr/local/bin/svelte-check"):
+        cmd = svelte_check_plugin._build_command()
 
     # Should contain machine-verbose output format
     assert_that(cmd).contains("--output")

@@ -856,6 +856,29 @@ def test_node_path_branch_returns_absolute_resolved_path(
     assert_that(Path(cmd[0]).is_absolute()).is_true()
 
 
+def test_node_path_branch_normalizes_windows_which_path(
+    no_local_node_install: None,
+) -> None:
+    """A Windows PATH hit is posix-normalized so subprocess validation accepts it.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+
+    def _windows_which(name: str, *_args: object, **_kwargs: object) -> str | None:
+        if name == "prettier":
+            return r"C:\Users\me\AppData\Roaming\npm\prettier.cmd"
+        return None
+
+    with patch("shutil.which", _windows_which):
+        cmd = builder.get_command("prettier", ToolName.PRETTIER)
+
+    assert_that("\\" in cmd[0]).is_false()
+    assert_that(cmd[0]).contains("prettier.cmd")
+
+
 def test_node_tool_prefers_local_install_over_path(tmp_path: Path) -> None:
     """A project-local install wins over a PATH binary for a newly pinned tool."""
     local_bin = tmp_path / "node_modules" / ".bin"

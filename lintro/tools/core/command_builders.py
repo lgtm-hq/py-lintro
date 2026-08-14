@@ -652,8 +652,9 @@ class NodeJSBuilder(CommandBuilder):
 
         tool_path = shutil.which(binary_name)
         if tool_path:
-            logger.debug(f"Using {binary_name} from PATH: {tool_path}")
-            return [tool_path]
+            posix_path = Path(tool_path).as_posix().replace("\\", "/")
+            logger.debug(f"Using {binary_name} from PATH: {posix_path}")
+            return [posix_path]
 
         spec = pinned_npm_spec(package_name)
         for runner in ("bunx", "npx"):
