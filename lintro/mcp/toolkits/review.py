@@ -17,10 +17,11 @@ Three things are deliberately different from the CLI:
   rather than the reviewed tree, in the same class as the run-log directory
   :mod:`lintro.mcp.toolkits.runner` redirects. No tool argument can turn it on,
   so an agent cannot make the server write anything.
-* **Cost is capped from the server side.** ``ai.max_cost_usd`` in the
-  workspace's ``.lintro-config.yaml`` is the ceiling. The ``max_cost_usd``
-  argument can only *lower* it — a larger value is clamped, never honored — so
-  a misbehaving agent cannot raise its own spend limit.
+* **Cost is capped from the server side.** The effective ``ai.max_cost_usd``
+  (after ``LINTRO_AI_MAX_COST_USD`` / CLI overlay and the active transport
+  profile) is the ceiling. The ``max_cost_usd`` argument can only *lower*
+  it — a larger value is clamped, never honored — so a misbehaving agent
+  cannot raise its own spend limit.
 * **Unavailability is data, not a missing tool.** Without the ``[ai]`` extra, a
   usable provider, or ``ai.review: true``, the tool is still listed and returns
   a ``tool_unavailable`` envelope. An agent gets a reason it can report instead

@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from lintro.ai.config_overrides import apply_cli_overrides
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.providers.claude_auth import should_send_bare
 from lintro.ai.registry import AIProvider
+from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -23,6 +24,7 @@ __all__ = [
     "apply_transport_override",
     "format_resolved_profile_log",
     "resolve_cost_basis",
+    "resolve_max_cost_with_source",
     "resolve_transport_settings",
 ]
 
@@ -164,6 +166,40 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
         auth_mode="api_key",
         cost_basis=CostBasis.BILLED,
     )
+
+
+def resolve_max_cost_with_source(
+    resolved: ResolvedAIConfig,
+) -> tuple[float | None, ConfigSource]:
+    """Return the effective cost cap and its provenance.
+
+    Overlay (flag/env) wins, including when it stamped the profile fields.
+    Otherwise a non-null transport-profile cap is ``config``, even when the
+    legacy scalar was omitted from YAML (so the flat field's source is
+    ``default``).
+
+    Args:
+        resolved: Config plus overlay-field provenance.
+
+    Returns:
+        ``(cap, source)`` after transport-profile resolution.
+    """
+    source = resolved.source_of("max_cost_usd")
+    settings = resolve_transport_settings(resolved.config)
+    if source in (ConfigSource.FLAG, ConfigSource.ENV):
+        return settings.max_cost_usd, source
+
+    config = resolved.config
+    transport = config.transport or AITransport.API
+    profiles = config.transports
+    profile_cap = (
+        profiles.cli.max_cost_usd_advisory
+        if transport is AITransport.CLI
+        else profiles.api.max_cost_usd
+    )
+    if profile_cap is not None:
+        return profile_cap, ConfigSource.CONFIG
+    return settings.max_cost_usd, source
 
 
 def apply_resolved_transport(ai_config: AIConfig) -> AIConfig:

@@ -52,13 +52,16 @@ def render_ai_status(
         return ai_parts
 
     sources: Mapping[str, ConfigSource] | None = None
+    resolved_for_cost: ResolvedAIConfig | None = None
     if isinstance(ai_config, ResolvedAIConfig):
+        resolved_for_cost = ai_config
         sources = ai_config.sources
         ai_config = ai_config.config
     elif isinstance(ai_config, Mapping):
         from lintro.ai.config import AIConfig as _AIConfig
 
         resolved = _AIConfig.resolve_from_mapping(ai_config, diagnostics=False)
+        resolved_for_cost = resolved
         sources = resolved.sources
         ai_config = resolved.config
 
@@ -144,11 +147,21 @@ def render_ai_status(
             "  transport: "
             + format_sourced_value(transport_value, sources.get("transport")),
         )
+        from lintro.ai.transport import resolve_max_cost_with_source
+
+        cap, cap_source = (
+            resolve_max_cost_with_source(resolved_for_cost)
+            if resolved_for_cost is not None
+            else (
+                ai_config.max_cost_usd,
+                sources.get("max_cost_usd"),
+            )
+        )
         ai_parts.append(
             "  max_cost_usd: "
             + format_max_cost_label(
-                max_cost_usd=ai_config.max_cost_usd,
-                source=sources.get("max_cost_usd"),
+                max_cost_usd=cap,
+                source=cap_source,
             ),
         )
 

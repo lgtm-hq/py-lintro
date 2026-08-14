@@ -61,6 +61,7 @@ from lintro.ai.transport import (
     apply_cli_overrides,
     apply_resolved_transport,
     format_resolved_profile_log,
+    resolve_max_cost_with_source,
     resolve_transport_settings,
 )
 from lintro.config.config_loader import get_config
@@ -488,6 +489,7 @@ def review_command(
         ):
             effective_basis = CostBasis.ESTIMATED
 
+        cap, cap_source = resolve_max_cost_with_source(resolved_ai)
         result = dc_replace(
             result,
             metadata=dc_replace(
@@ -498,8 +500,8 @@ def review_command(
                 provider_source=resolved_ai.source_of("provider").value,
                 model_source=resolved_ai.source_of("model").value,
                 transport_source=resolved_ai.source_of("transport").value,
-                max_cost_usd=effective_ai_config.max_cost_usd,
-                max_cost_usd_source=resolved_ai.source_of("max_cost_usd").value,
+                max_cost_usd=cap,
+                max_cost_usd_source=cap_source.value,
             ),
         )
     except (AIError, ValueError) as exc:

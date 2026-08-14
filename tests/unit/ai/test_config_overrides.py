@@ -15,7 +15,11 @@ from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.github_render import format_run_mechanics
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.transport import apply_cli_overrides, apply_resolved_transport
+from lintro.ai.transport import (
+    apply_cli_overrides,
+    apply_resolved_transport,
+    resolve_max_cost_with_source,
+)
 from lintro.config.lintro_config import LintroConfig
 
 
@@ -295,6 +299,38 @@ def test_max_cost_usd_overlay_raises_profile_cap() -> None:
     assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
 
 
+def test_profile_only_cap_is_config_provenance() -> None:
+    """A YAML transport-profile cap is ``config``, not ``default`` (#2024)."""
+    resolved = AIConfig.resolve_from_mapping(
+        {
+            "transport": "cli",
+            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+        },
+    )
+    cap, source = resolve_max_cost_with_source(resolved)
+
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.DEFAULT)
+    assert_that(cap).is_equal_to(1.25)
+    assert_that(source).is_equal_to(ConfigSource.CONFIG)
+
+
+def test_flag_overlay_provenance_beats_profile_cap() -> None:
+    """Flag provenance is kept when the overlay lifts a profile cap."""
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(
+            {
+                "transport": "api",
+                "transports": {"api": {"max_cost_usd": 1.25}},
+            },
+        ),
+        max_cost_usd=0,
+    )
+    cap, source = resolve_max_cost_with_source(resolved)
+
+    assert_that(cap).is_none()
+    assert_that(source).is_equal_to(ConfigSource.FLAG)
+
+
 def test_invalid_max_cost_usd_env_fails_loud(monkeypatch: pytest.MonkeyPatch) -> None:
     """A non-numeric cost cap names the variable and accepted values (#2024)."""
     monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "plenty")
@@ -451,6 +487,32 @@ def test_status_annotates_env_max_cost_usd(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     assert_that(lines).contains("  max_cost_usd: $2.50 (env)")
+
+
+def test_status_annotates_profile_cap_as_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A YAML profile cap is shown as config, not uncapped default (#2024)."""
+    from lintro.ai.display.status import render_ai_status
+
+    monkeypatch.setattr(
+        "lintro.ai.availability.is_provider_available",
+        lambda _provider: True,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    lines = render_ai_status(
+        ai_config={
+            "enabled": True,
+            "provider": "anthropic",
+            "transport": "cli",
+            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+        },
+        is_ci=False,
+    )
+
+    assert_that(lines).contains("  max_cost_usd: $1.25 (config)")
+    assert_that(lines).does_not_contain("  max_cost_usd: uncapped (default)")
 
 
 def test_status_marks_enabled_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
