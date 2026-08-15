@@ -65,13 +65,13 @@ name: AI Review - Dogfood
 # filter dated from API-metered billing; under subscription billing the CI and
 # workflow diffs it skipped are exactly where recent regressions shipped.
 'on':
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions: {}
 
 concurrency:
-  group: ai-review-${{ github.ref }}
+  group: ai-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

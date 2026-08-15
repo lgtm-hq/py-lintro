@@ -322,11 +322,27 @@ def test_workflow_yaml_parses() -> None:
     assert_that(loaded).contains_key("jobs")
     assert_that(loaded["jobs"]).contains_key("ai-review")
     trigger = loaded[True] if True in loaded else loaded["on"]
-    assert_that(trigger).contains_key("pull_request")
+    assert_that(trigger).contains_key("pull_request_target")
+    assert_that(trigger).does_not_contain_key("pull_request")
+
+
+def test_workflow_concurrency_keys_on_the_pr_number() -> None:
+    """``pull_request_target`` sets ``github.ref`` to the base branch.
+
+    Keying concurrency on ``github.ref`` would cancel every in-flight review
+    whenever any other PR targeting that branch synchronized.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    concurrency = loaded["concurrency"]
+    assert_that(concurrency["group"]).is_equal_to(
+        "ai-review-${{ github.event.pull_request.number || github.ref }}",
+    )
+    assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
-    """The pull_request trigger carries no ``paths`` filter (#1902).
+    """The pull_request_target trigger carries no ``paths`` filter (#1902).
 
     The old ``lintro/**`` filter meant CI, script, and workflow PRs shipped with
     no AI review at all — the #1900 timeout bug went out exactly that way. Under
@@ -335,7 +351,7 @@ def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     trigger = loaded[True] if True in loaded else loaded["on"]
-    pull_request = trigger["pull_request"]
+    pull_request = trigger["pull_request_target"]
     assert_that(pull_request).does_not_contain_key("paths")
     assert_that(pull_request).does_not_contain_key("paths-ignore")
 
