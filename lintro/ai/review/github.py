@@ -189,7 +189,7 @@ def post_review_to_github(
     # — a round that fixed everything posts no inline comment and yet has the
     # most threads to stamp.
     inline_posted = False
-    success = _upsert_sticky(
+    success, comment_id = _upsert_sticky(
         reporter=gh_reporter,
         body=render(inline_failure=failure),
         comment_id=comment_id,
@@ -344,7 +344,8 @@ def _refresh_sticky(
         render: Callable that renders the sticky body.
         failure: Findings whose inline comments could not be posted.
         comment_ids: Finding key to inline comment id captured this round.
-        comment_id: Sticky comment id known before the upsert, or ``None``.
+        comment_id: Live sticky comment id after the upsert, or ``None``
+            when the comment was just created and must be re-located.
     """
     sticky_id = _sticky_comment_id(reporter=reporter, known=comment_id)
     if sticky_id is None:
@@ -603,8 +604,8 @@ def _sticky_comment_id(
 
     Args:
         reporter: GitHub reporter used to list PR comments.
-        known: The id known before the sticky was upserted, or ``None`` when it
-            did not exist yet.
+        known: The live sticky id after upsert, or ``None`` when it was just
+            created and must be re-located by marker.
 
     Returns:
         The comment id to update, or ``None`` when it still cannot be found.
@@ -684,7 +685,11 @@ def post_review_error_to_github(
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
+    return _upsert_sticky(
+        reporter=gh_reporter,
+        body=body,
+        comment_id=comment_id,
+    )[0]
 
 
 def _load_prior_state(
@@ -712,29 +717,44 @@ def _upsert_sticky(
     reporter: GitHubPRReporter,
     body: str,
     comment_id: int | None,
-) -> bool:
+) -> tuple[bool, int | None]:
     """Update the sticky comment in place, or create it when absent.
 
     GitHub only lets the creating actor PATCH a comment. After #2050 the
     poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
     sticky must be deleted and recreated rather than edited in place.
+
+    Args:
+        reporter: GitHub reporter used to create, edit, or replace the sticky.
+        body: Markdown body to write.
+        comment_id: Existing sticky id, or ``None`` when one has not been
+            posted yet.
+
+    Returns:
+        ``(success, live_id)``. ``live_id`` is the comment later refreshes
+        must PATCH: the original id after an in-place edit, the replacement
+        id after a delete-and-recreate, or ``None`` after a first-time
+        create (the caller re-locates by marker) or when the write failed.
     """
     if comment_id is None:
-        return reporter.post_issue_comment(body)
+        return reporter.post_issue_comment(body), None
     if reporter.update_issue_comment(comment_id=comment_id, body=body):
-        return True
+        return True, comment_id
     logger.warning(
         "Could not edit sticky comment {}; deleting and recreating "
         "(GitHub only lets the creating actor PATCH)",
         comment_id,
     )
-    if reporter.delete_issue_comment(comment_id=comment_id):
-        return reporter.post_issue_comment(body)
-    logger.warning(
-        "Failed to delete sticky comment {}; leaving it in place",
-        comment_id,
-    )
-    return False
+    if not reporter.delete_issue_comment(comment_id=comment_id):
+        logger.warning(
+            "Failed to delete sticky comment {}; leaving it in place",
+            comment_id,
+        )
+        return False, None
+    if not reporter.post_issue_comment(body):
+        return False, None
+    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    return True, None if found is None else found[0]
 
 
 def _round_diff_lines(
