@@ -39,11 +39,11 @@ _HEAD_REF_RE = re.compile(
 _GIT_HEAD_FETCH_RE = re.compile(
     r"\bgit\s+(?:fetch|pull|checkout)\b",
 )
-_GH_PR_CHECKOUT_RE = re.compile(r"\bgh\s+pr\s+checkout\b")
-_PULL_HEAD_REF_RE = re.compile(r"pull/\S*/head")
-_CHECKOUT_LIKE_RE = re.compile(
-    r"(?:^|/)(?:checkout|checkout-[^/@]+|[^/@]+-checkout)$",
+_GH_PR_CHECKOUT_RE = re.compile(
+    r"\bgh(?:\s+\S+)*\s+pr(?:\s+\S+)*\s+checkout\b",
 )
+_PULL_HEAD_REF_RE = re.compile(r"pull/\S*/head")
+_CHECKOUT_LIKE_RE = re.compile(r"checkout")
 _CURSOR_EGRESS_HOSTS = (
     "downloads.cursor.com:443",
     "api2.cursor.sh:443",
@@ -434,6 +434,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         ("evil/checkout@deadbeef", True),
         ("acme/checkout-action@1", True),
         ("acme/pr-checkout@1", True),
+        ("acme/pr-checkout-action@1", True),
         ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
         ("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9", False),
     ],
@@ -442,6 +443,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         "forked-checkout",
         "checkout-prefix",
         "checkout-suffix",
+        "checkout-infix",
         "setup-node",
         "setup-uv",
     ],
@@ -460,6 +462,8 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
     ("run_block", "banned"),
     [
         ("gh pr checkout 12\n", True),
+        ("gh --repo lgtm-hq/py-lintro pr checkout 12\n", True),
+        ("gh pr --repo lgtm-hq/py-lintro checkout 12\n", True),
         ("git fetch origin pull/12/head\n", True),
         ("git pull origin ${{ github.event.pull_request.head.sha }}\n", True),
         (
@@ -470,6 +474,8 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
     ],
     ids=[
         "gh-pr-checkout",
+        "gh-repo-pr-checkout",
+        "gh-pr-repo-checkout",
         "git-fetch-pull-head",
         "git-pull-head-sha",
         "comment-only-mention",
