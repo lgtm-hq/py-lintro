@@ -848,7 +848,8 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     cursor_egress = job_env["AI_REVIEW_CURSOR_EGRESS"]
     assert_that(cursor_egress).contains("vars.LINTRO_AI_PROVIDER == 'cursor'")
     cursor_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", cursor_egress)
-    assert_that(cursor_branch).is_not_none()
+    if cursor_branch is None:
+        pytest.fail("cursor egress expression must quote hosts and default to empty")
     parsed_hosts = set(cursor_branch.group(1).split())
     assert_that(parsed_hosts).is_equal_to(set(cursor_hosts))
     for host in parsed_hosts:
