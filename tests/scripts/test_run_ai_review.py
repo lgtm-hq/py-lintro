@@ -34,10 +34,11 @@ CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
 PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
 _PINNED_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 _HEAD_REF_RE = re.compile(
-    r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b",
+    r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
+    r"|github\.(?:head_ref|sha|ref_name|ref)\b",
 )
 _GIT_HEAD_FETCH_RE = re.compile(
-    r"\bgit\s+(?:fetch|pull|checkout)\b",
+    r"\bgit(?:\s+\S+)*\s+(?:fetch|pull|checkout)\b",
 )
 _GH_PR_CHECKOUT_RE = re.compile(
     r"\bgh(?:\s+\S+)*\s+pr(?:\s+\S+)*\s+checkout\b",
@@ -62,9 +63,10 @@ def _executable_run_text(run_block: str) -> str:
     Returns:
         Executable lines only, joined with newlines.
     """
-    joined = run_block.replace("\\\n", " ")
-    lines = [line for line in joined.splitlines() if not line.lstrip().startswith("#")]
-    return "\n".join(lines)
+    without_comments = "\n".join(
+        line for line in run_block.splitlines() if not line.lstrip().startswith("#")
+    )
+    return without_comments.replace("\\\n", " ")
 
 
 def _is_checkout_like_action(uses: str) -> bool:
@@ -509,7 +511,10 @@ def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
         ("gh --repo lgtm-hq/py-lintro pr checkout 12\n", True),
         ("gh pr --repo lgtm-hq/py-lintro checkout 12\n", True),
         ("gh pr \\\n  checkout 12\n", True),
+        ("# decoy \\\ngh pr checkout 12\n", True),
         ("git fetch origin pull/12/head\n", True),
+        ("git -C . checkout ${{ github.head_ref }}\n", True),
+        ("git --git-dir=.git fetch origin pull/12/head\n", True),
         ("git pull origin ${{ github.event.pull_request.head.sha }}\n", True),
         (
             "# gh pr checkout is banned in executable steps\npython3 scripts/ci/ai_tools_arg_pin.py\n",
@@ -522,7 +527,10 @@ def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
         "gh-repo-pr-checkout",
         "gh-pr-repo-checkout",
         "gh-pr-checkout-continued",
+        "comment-backslash-then-checkout",
         "git-fetch-pull-head",
+        "git-dash-c-checkout-head-ref",
+        "git-git-dir-fetch-pull-head",
         "git-pull-head-sha",
         "comment-only-mention",
         "pin-script",
