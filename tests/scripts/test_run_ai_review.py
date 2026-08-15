@@ -835,7 +835,7 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     assert_that(harden_steps).is_length(1)
 
     endpoints_raw = harden_steps[0]["with"]["allowed-endpoints"]
-    unconditional = re.sub(r"\$\{\{.*?\}\}", "", endpoints_raw, flags=re.DOTALL)
+    unconditional = endpoints_raw.replace("${{ env.AI_REVIEW_CURSOR_EGRESS }}", "")
     endpoints = unconditional.split()
     cursor_hosts = _CURSOR_EGRESS_HOSTS
     assert_that(endpoints).contains(
@@ -843,14 +843,14 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "nodejs.org:443",
         "release-assets.githubusercontent.com:443",
     )
-    assert_that(endpoints).does_not_contain(*cursor_hosts)
-    assert_that(endpoints).does_not_contain(
-        "api.cursor.com:443",
-        "*.cursor.sh:443",
-        "*.cursorapi.com:443",
-    )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.sh",
+        )
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.com",
+        )
 
     job_env = loaded["jobs"]["ai-review"]["env"]
     cursor_egress = job_env["AI_REVIEW_CURSOR_EGRESS"]
