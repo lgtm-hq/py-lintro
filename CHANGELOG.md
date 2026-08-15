@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.0] - 2026-08-15
+
+### Added
+
+- **ci**: post AI review comments as lintro-review[bot] (#2055) (c6a592c)
+
 ## [0.117.2] - 2026-08-15
 
 ### Fixed
