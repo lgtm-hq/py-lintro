@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.117.1] - 2026-08-15
+
+### Fixed
+
+- **ci**: harden ai-review audit, Cursor egress, and 0.50 provenance (#2051) (c00d3e3)
+
 ## [0.117.0] - 2026-08-14
 
 ### Added
