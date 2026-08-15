@@ -753,20 +753,21 @@ def _upsert_sticky(
         )
         return False, None
     logger.warning(
-        "Could not edit sticky comment {}; deleting and recreating "
-        "(GitHub only lets the creating actor PATCH)",
+        "Could not edit sticky comment {}; posting a replacement "
+        "before deleting it (GitHub only lets the creating actor PATCH)",
         comment_id,
     )
+    live_id = _post_sticky(reporter=reporter, body=body)
+    if live_id is None:
+        return False, None
     if not reporter.delete_issue_comment(comment_id=comment_id):
         logger.warning(
-            "Failed to delete sticky comment {}; leaving it in place",
+            "Posted replacement sticky {} but failed to delete {}; "
+            "both comments may remain",
+            live_id,
             comment_id,
         )
-        return False, None
-    if not _post_sticky(reporter=reporter, body=body):
-        return False, None
-    found = reporter.find_issue_comment(marker=STICKY_MARKER)
-    return True, None if found is None else found[0]
+    return True, live_id
 
 
 def _sticky_patch_status(
@@ -790,14 +791,35 @@ def _sticky_patch_status(
     status_fn = getattr(reporter, "update_issue_comment_status", None)
     if callable(status_fn):
         status = status_fn(comment_id=comment_id, body=body)
-        if isinstance(status, int):
+        if isinstance(status, int) or status is None:
             return status
     if reporter.update_issue_comment(comment_id=comment_id, body=body):
         return 200
     return 403
 
 
-def _post_sticky(*, reporter: GitHubPRReporter, body: str) -> bool:
+def _create_sticky_id(*, reporter: GitHubPRReporter, body: str) -> int | None:
+    """Create a sticky comment and return its id.
+
+    Args:
+        reporter: GitHub reporter used to post the comment.
+        body: Markdown body to write.
+
+    Returns:
+        The new comment id, or ``None`` when creation failed.
+    """
+    create_fn = getattr(reporter, "create_issue_comment", None)
+    if callable(create_fn):
+        created = create_fn(body=body)
+        if isinstance(created, int) or created is None:
+            return created
+    if not reporter.post_issue_comment(body):
+        return None
+    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    return None if found is None else found[0]
+
+
+def _post_sticky(*, reporter: GitHubPRReporter, body: str) -> int | None:
     """Create the sticky comment, retrying once after a failed POST.
 
     Args:
@@ -805,12 +827,13 @@ def _post_sticky(*, reporter: GitHubPRReporter, body: str) -> bool:
         body: Markdown body to write.
 
     Returns:
-        True when a create attempt succeeded.
+        The new comment id, or ``None`` when both create attempts failed.
     """
-    if reporter.post_issue_comment(body):
-        return True
+    created = _create_sticky_id(reporter=reporter, body=body)
+    if created is not None:
+        return created
     logger.warning("Failed to recreate sticky comment; retrying once")
-    return reporter.post_issue_comment(body)
+    return _create_sticky_id(reporter=reporter, body=body)
 
 
 def _round_diff_lines(

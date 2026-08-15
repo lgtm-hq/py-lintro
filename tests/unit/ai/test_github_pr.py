@@ -317,6 +317,24 @@ def test_update_issue_comment_status_returns_forbidden(
     assert_that(status).is_equal_to(403)
 
 
+def test_create_issue_comment_returns_id(test_token: str) -> None:
+    """create_issue_comment parses the new comment id from a 201 response."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    mock_response = MagicMock()
+    mock_response.status = 201
+    mock_response.read.return_value = json.dumps({"id": 99, "body": "hello"}).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        comment_id = reporter.create_issue_comment(body="hello")
+
+    assert_that(comment_id).is_equal_to(99)
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("POST")
+    assert_that(req.full_url).contains("/issues/5/comments")
+
+
 def test_update_issue_comment_patches(test_token: str) -> None:
     """update_issue_comment issues a PATCH to the comment endpoint."""
     reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)

@@ -693,6 +693,48 @@ class GitHubPRReporter:
         url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
         return self.api_request(method="DELETE", url=url)
 
+    def create_issue_comment(self, *, body: str) -> int | None:
+        """Post a top-level issue comment and return its id.
+
+        Args:
+            body: Comment body in Markdown.
+
+        Returns:
+            The created comment id, or ``None`` when the request failed or
+            the response did not include a numeric id.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
+        data = json.dumps({"body": body}).encode()
+        req = self._authorized_request(
+            url=url,
+            method="POST",
+            data=data,
+            content_type="application/json",
+        )
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning("Refusing non-HTTPS URL: {}", url)
+            return None
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                req,
+                timeout=30,
+            ) as resp:
+                if not (200 <= int(resp.status) < 300):
+                    return None
+                payload = json.loads(resp.read().decode())
+        except (
+            urllib.error.URLError,
+            json.JSONDecodeError,
+            OSError,
+        ) as exc:
+            logger.warning("Failed to create issue comment: {}", exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        comment_id = payload.get("id")
+        return comment_id if isinstance(comment_id, int) else None
+
     def post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
 
@@ -702,8 +744,7 @@ class GitHubPRReporter:
         Returns:
             True if posted successfully.
         """
-        url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
-        return self.api_request(method="POST", url=url, payload={"body": body})
+        return self.create_issue_comment(body=body) is not None
 
     def api_http_status(
         self,
