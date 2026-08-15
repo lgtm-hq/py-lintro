@@ -107,7 +107,9 @@ jobs:
     permissions:
       contents: read
       # `--post` maintains the sticky review comment and posts inline review
-      # comments, both of which require write access to pull requests.
+      # comments as lintro-review[bot] via the App token (#2050). The
+      # workflow GITHUB_TOKEN still needs pull-requests: write for `gh`
+      # to read the PR diff.
       pull-requests: write
     # COUPLED to ai.transports.cli.timeout (default 900 s,
     # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
@@ -223,6 +225,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra ai
 
+      - name: Mint lintro-review App token
+        id: lintro-review-app
+        # Repo-scoped installation token (#2050). Default current-repo scope —
+        # do not pass `owner:` without `repositories:`. Only the review step
+        # below sees `outputs.token`; inference credentials stay separate.
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
         env:
@@ -246,8 +259,10 @@ jobs:
           # binary the contract tests verified.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
+          # `gh` fetches the PR diff with the workflow token (contents: read).
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `--post` writes as lintro-review[bot] via the App token (#2050).
+          GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
           # Repo Actions variables named identically to the env vars they feed
           # (#1971). Unset variables keep today's pinned CI defaults (cli /
           # anthropic); a set variable is the experiment loop (`gh variable set`

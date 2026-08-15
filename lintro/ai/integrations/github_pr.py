@@ -406,7 +406,10 @@ class GitHubPRReporter:
 
         Paginates through the PR's issue comments and returns the first one
         whose body contains ``marker`` (an HTML comment used to identify a
-        sticky comment maintained across runs).
+        sticky comment maintained across runs). Matching is by marker only —
+        not by author — so the first ``lintro-review[bot]`` run updates an
+        existing ``github-actions[bot]`` sticky instead of posting a second
+        (#2050).
 
         Args:
             marker: Substring to search for (e.g. ``<!-- lintro-ai-review -->``).

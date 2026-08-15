@@ -243,6 +243,42 @@ def test_find_issue_comment_matches_marker(test_token: str) -> None:
     assert_that(found_id).is_equal_to(2)
 
 
+def test_find_issue_comment_matches_marker_regardless_of_author(
+    test_token: str,
+) -> None:
+    """Sticky lookup is by marker, so the App-token identity can take over.
+
+    The first ``lintro-review[bot]`` run must PATCH the existing
+    ``github-actions[bot]`` ``<!-- lintro-ai-review -->`` comment instead of
+    posting a second sticky (#2050).
+    """
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    page = [
+        {
+            "id": 11,
+            "body": "hello <!-- lintro-ai-review --> world",
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        },
+        {
+            "id": 12,
+            "body": "unrelated",
+            "user": {"login": "lintro-review[bot]", "type": "Bot"},
+        },
+    ]
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps(page).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_not_none()
+    found_id, _body = found or (0, "")
+    assert_that(found_id).is_equal_to(11)
+
+
 def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
     """find_issue_comment returns None when no comment carries the marker."""
     reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
