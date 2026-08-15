@@ -638,6 +638,30 @@ class GitHubPRReporter:
         thread = _dig(data, "resolveReviewThread", "thread")
         return bool(thread and thread.get("isResolved"))
 
+    def update_issue_comment_status(
+        self,
+        *,
+        comment_id: int,
+        body: str,
+    ) -> int | None:
+        """PATCH an issue comment and return the HTTP status.
+
+        Args:
+            comment_id: Numeric id of the comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            The HTTP status, or ``None`` when the request did not complete.
+            ``403`` is the actor-mismatch GitHub returns when this token did
+            not create the comment.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
+        return self.api_http_status(
+            method="PATCH",
+            url=url,
+            payload={"body": body},
+        )
+
     def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
         """Update an existing issue comment in place.
 
@@ -648,8 +672,11 @@ class GitHubPRReporter:
         Returns:
             True if the update succeeded.
         """
-        url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
-        return self.api_request(method="PATCH", url=url, payload={"body": body})
+        status = self.update_issue_comment_status(
+            comment_id=comment_id,
+            body=body,
+        )
+        return status is not None and 200 <= status < 300
 
     def delete_issue_comment(self, *, comment_id: int) -> bool:
         """Delete an issue comment by id.
@@ -678,6 +705,58 @@ class GitHubPRReporter:
         url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
         return self.api_request(method="POST", url=url, payload={"body": body})
 
+    def api_http_status(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any] | None = None,
+    ) -> int | None:
+        """Make an authenticated GitHub API request and return the status.
+
+        Args:
+            method: HTTP method.
+            url: Full API URL.
+            payload: JSON payload, or ``None`` for methods with no body.
+
+        Returns:
+            The HTTP status when GitHub answered, or ``None`` when the
+            request was refused locally or failed in transit.
+        """
+        data = None if payload is None else json.dumps(payload).encode()
+        req = self._authorized_request(
+            url=url,
+            method=method,
+            data=data,
+            content_type="application/json" if data is not None else "",
+        )
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning("Refusing non-HTTPS URL: {}", url)
+            return None
+
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                req,
+                timeout=30,
+            ) as resp:
+                return int(resp.status)
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", "replace")[:500]
+            except (AttributeError, UnicodeDecodeError, ValueError, OSError):
+                body = "<unreadable>"
+            logger.warning(
+                "GitHub API request failed: {} {} -> {}: {}",
+                method,
+                url,
+                e.code,
+                body,
+            )
+            return int(e.code)
+        except urllib.error.URLError as e:
+            logger.warning("GitHub API request error: {}", e.reason)
+            return None
+
     def api_request(
         self,
         method: str,
@@ -694,41 +773,8 @@ class GitHubPRReporter:
         Returns:
             True if the request succeeded (2xx status).
         """
-        data = None if payload is None else json.dumps(payload).encode()
-        req = self._authorized_request(
-            url=url,
-            method=method,
-            data=data,
-            content_type="application/json" if data is not None else "",
-        )
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme != "https":
-            logger.warning("Refusing non-HTTPS URL: {}", url)
-            return False
-
-        try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
-                req,
-                timeout=30,
-            ) as resp:
-                status: int = resp.status
-                return 200 <= status < 300
-        except urllib.error.HTTPError as e:
-            try:
-                body = e.read().decode("utf-8", "replace")[:500]
-            except (AttributeError, UnicodeDecodeError, ValueError, OSError):
-                body = "<unreadable>"
-            logger.warning(
-                "GitHub API request failed: {} {} -> {}: {}",
-                method,
-                url,
-                e.code,
-                body,
-            )
-            return False
-        except urllib.error.URLError as e:
-            logger.warning("GitHub API request error: {}", e.reason)
-            return False
+        status = self.api_http_status(method=method, url=url, payload=payload)
+        return status is not None and 200 <= status < 300
 
     def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
         """Deprecated alias for :meth:`fetch_pr_diff_lines`.

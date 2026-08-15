@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -248,9 +251,10 @@ def test_find_issue_comment_matches_marker_regardless_of_author(
 ) -> None:
     """Sticky lookup is by marker, so the App-token identity can take over.
 
-    The first ``lintro-review[bot]`` run must PATCH the existing
-    ``github-actions[bot]`` ``<!-- lintro-ai-review -->`` comment instead of
-    posting a second sticky (#2050).
+    The first ``lintro-review[bot]`` run finds the existing
+    ``github-actions[bot]`` ``<!-- lintro-ai-review -->`` comment by marker
+    and then deletes and recreates it — GitHub forbids PATCHing another
+    actor's comment (#2050).
     """
     reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
 
@@ -292,6 +296,25 @@ def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
         found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
 
     assert_that(found).is_none()
+
+
+def test_update_issue_comment_status_returns_forbidden(
+    test_token: str,
+) -> None:
+    """Actor-mismatch PATCH surfaces HTTP 403 instead of a bare False."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    error = urllib.error.HTTPError(
+        url="https://api.github.com/repos/owner/repo/issues/comments/42",
+        code=403,
+        msg="Forbidden",
+        hdrs=Message(),
+        fp=BytesIO(b"must be the creating actor"),
+    )
+
+    with patch("urllib.request.urlopen", side_effect=error):
+        status = reporter.update_issue_comment_status(comment_id=42, body="new")
+
+    assert_that(status).is_equal_to(403)
 
 
 def test_update_issue_comment_patches(test_token: str) -> None:

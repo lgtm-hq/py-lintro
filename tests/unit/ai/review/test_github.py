@@ -486,6 +486,60 @@ def test_upsert_sticky_supersedes_when_patch_fails() -> None:
     reporter.find_issue_comment.assert_called_once_with(marker=STICKY_MARKER)
 
 
+@pytest.mark.parametrize(
+    ("status", "should_recreate"),
+    [
+        (403, True),
+        (500, False),
+        (429, False),
+    ],
+    ids=["attr=actor_mismatch", "attr=server_error", "attr=rate_limit"],
+)
+def test_upsert_sticky_supersedes_only_on_actor_mismatch(
+    status: int,
+    should_recreate: bool,
+) -> None:
+    """Only a 403 PATCH (wrong actor) deletes the leftover sticky."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = status
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    if should_recreate:
+        assert_that(posted).is_true()
+        assert_that(live_id).is_equal_to(99)
+        reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
+        reporter.post_issue_comment.assert_called_once_with("hello")
+    else:
+        assert_that(posted).is_false()
+        assert_that(live_id).is_none()
+        reporter.delete_issue_comment.assert_not_called()
+        reporter.post_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_retries_post_after_recreate_failure() -> None:
+    """A failed create after DELETE is retried once so state is not dropped."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = 403
+    reporter.post_issue_comment.side_effect = [False, True]
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_equal_to(99)
+    assert_that(reporter.post_issue_comment.call_count).is_equal_to(2)
+
+
 def test_upsert_sticky_returns_false_when_delete_fails() -> None:
     """A failed delete leaves the prior sticky in place and reports failure."""
     reporter = _fresh_reporter()

@@ -738,8 +738,20 @@ def _upsert_sticky(
     """
     if comment_id is None:
         return reporter.post_issue_comment(body), None
-    if reporter.update_issue_comment(comment_id=comment_id, body=body):
+    status = _sticky_patch_status(
+        reporter=reporter,
+        comment_id=comment_id,
+        body=body,
+    )
+    if status is not None and 200 <= status < 300:
         return True, comment_id
+    if status != 403:
+        logger.warning(
+            "Could not edit sticky comment {} (HTTP {}); leaving it in place",
+            comment_id,
+            status,
+        )
+        return False, None
     logger.warning(
         "Could not edit sticky comment {}; deleting and recreating "
         "(GitHub only lets the creating actor PATCH)",
@@ -751,10 +763,54 @@ def _upsert_sticky(
             comment_id,
         )
         return False, None
-    if not reporter.post_issue_comment(body):
+    if not _post_sticky(reporter=reporter, body=body):
         return False, None
     found = reporter.find_issue_comment(marker=STICKY_MARKER)
     return True, None if found is None else found[0]
+
+
+def _sticky_patch_status(
+    *,
+    reporter: GitHubPRReporter,
+    comment_id: int,
+    body: str,
+) -> int | None:
+    """Return the sticky PATCH status, with a bool-reporter fallback.
+
+    Args:
+        reporter: GitHub reporter used to edit the sticky.
+        comment_id: Existing sticky id.
+        body: Markdown body to write.
+
+    Returns:
+        HTTP status when the reporter exposes one. Bool-only test doubles
+        map success to ``200`` and failure to ``403`` so the actor-mismatch
+        path stays covered without a status method.
+    """
+    status_fn = getattr(reporter, "update_issue_comment_status", None)
+    if callable(status_fn):
+        status = status_fn(comment_id=comment_id, body=body)
+        if isinstance(status, int):
+            return status
+    if reporter.update_issue_comment(comment_id=comment_id, body=body):
+        return 200
+    return 403
+
+
+def _post_sticky(*, reporter: GitHubPRReporter, body: str) -> bool:
+    """Create the sticky comment, retrying once after a failed POST.
+
+    Args:
+        reporter: GitHub reporter used to post the comment.
+        body: Markdown body to write.
+
+    Returns:
+        True when a create attempt succeeded.
+    """
+    if reporter.post_issue_comment(body):
+        return True
+    logger.warning("Failed to recreate sticky comment; retrying once")
+    return reporter.post_issue_comment(body)
 
 
 def _round_diff_lines(
