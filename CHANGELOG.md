@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.117.2] - 2026-08-15
+
+### Fixed
+
+- **ci**: run ai-review on `pull_request_target` (#2053) (36308cc)
+
 ## [0.117.1] - 2026-08-15
 
 ### Fixed
