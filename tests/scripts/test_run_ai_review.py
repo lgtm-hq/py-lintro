@@ -760,6 +760,7 @@ def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
     )
     assert_that(mint_with["permission-issues"]).is_equal_to("write")
     assert_that(mint_with["permission-pull-requests"]).is_equal_to("write")
+    assert_that(mint_with["permission-contents"]).is_equal_to("read")
     assert_that(mint_with).does_not_contain_key("owner")
     assert_that(mint_with).does_not_contain_key("repositories")
     assert_that(_is_checkout_like_action(mint["uses"])).is_false()
