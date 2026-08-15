@@ -326,6 +326,21 @@ def test_workflow_yaml_parses() -> None:
     assert_that(trigger).does_not_contain_key("pull_request")
 
 
+def test_workflow_concurrency_keys_on_the_pr_number() -> None:
+    """``pull_request_target`` sets ``github.ref`` to the base branch.
+
+    Keying concurrency on ``github.ref`` would cancel every in-flight review
+    whenever any other PR targeting that branch synchronized.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    concurrency = loaded["concurrency"]
+    assert_that(concurrency["group"]).is_equal_to(
+        "ai-review-${{ github.event.pull_request.number || github.ref }}",
+    )
+    assert_that(concurrency["cancel-in-progress"]).is_true()
+
+
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     """The pull_request_target trigger carries no ``paths`` filter (#1902).
 
