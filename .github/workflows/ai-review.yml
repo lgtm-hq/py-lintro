@@ -106,11 +106,10 @@ jobs:
       && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
-      # `--post` maintains the sticky review comment and posts inline review
-      # comments as lintro-review[bot] via the App token (#2050). The
-      # workflow GITHUB_TOKEN still needs pull-requests: write for `gh`
-      # to read the PR diff.
-      pull-requests: write
+      # `--post` writes as lintro-review[bot] via the App token (#2050).
+      # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
+      # diff, which needs pull-requests: read.
+      pull-requests: read
     # COUPLED to ai.transports.cli.timeout (default 900 s,
     # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
     # job budget must cover setup (~7 min) + the full review timeout (15 min) +
