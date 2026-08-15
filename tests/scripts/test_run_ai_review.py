@@ -62,9 +62,8 @@ def _executable_run_text(run_block: str) -> str:
     Returns:
         Executable lines only, joined with newlines.
     """
-    lines = [
-        line for line in run_block.splitlines() if not line.lstrip().startswith("#")
-    ]
+    joined = run_block.replace("\\\n", " ")
+    lines = [line for line in joined.splitlines() if not line.lstrip().startswith("#")]
     return "\n".join(lines)
 
 
@@ -458,12 +457,58 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
     assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
 
 
+_TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
+
+
+@pytest.mark.parametrize(
+    ("ref", "trusted"),
+    [
+        (_TRUSTED_CHECKOUT_REF, True),
+        ("", False),
+        ("${{ github.head_ref }}", False),
+        ("${{ github.ref }}", False),
+        ("${{ github.ref_name }}", False),
+        ("${{ github.sha }}", False),
+        ("${{ github.event.pull_request.head.sha }}", False),
+    ],
+    ids=[
+        "base-sha",
+        "omitted-ref",
+        "head-ref",
+        "github-ref",
+        "ref-name",
+        "github-sha",
+        "pr-head-sha",
+    ],
+)
+def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
+    """Only the PR base SHA is a trusted checkout ref for this job.
+
+    Args:
+        ref: A checkout ``with.ref`` value, or empty when omitted.
+        trusted: Whether the audit must accept the ref.
+    """
+    assert_that(ref == _TRUSTED_CHECKOUT_REF).is_equal_to(trusted)
+    if ref:
+        banned = any(
+            marker in ref
+            for marker in (
+                "pull_request.head",
+                "github.sha",
+                "github.head_ref",
+                "github.ref",
+            )
+        )
+        assert_that(banned).is_equal_to(not trusted)
+
+
 @pytest.mark.parametrize(
     ("run_block", "banned"),
     [
         ("gh pr checkout 12\n", True),
         ("gh --repo lgtm-hq/py-lintro pr checkout 12\n", True),
         ("gh pr --repo lgtm-hq/py-lintro checkout 12\n", True),
+        ("gh pr \\\n  checkout 12\n", True),
         ("git fetch origin pull/12/head\n", True),
         ("git pull origin ${{ github.event.pull_request.head.sha }}\n", True),
         (
@@ -476,6 +521,7 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
         "gh-pr-checkout",
         "gh-repo-pr-checkout",
         "gh-pr-repo-checkout",
+        "gh-pr-checkout-continued",
         "git-fetch-pull-head",
         "git-pull-head-sha",
         "comment-only-mention",
@@ -524,8 +570,14 @@ def test_workflow_forbids_head_ref_fetches() -> None:
 
         with_block = step.get("with") or {}
         ref = str(with_block.get("ref", ""))
+        if isinstance(uses, str) and _is_checkout_like_action(uses):
+            assert_that(ref).is_equal_to(
+                "${{ github.event.pull_request.base.sha }}",
+            )
         assert_that(ref).does_not_contain("pull_request.head")
         assert_that(ref).does_not_contain("github.sha")
+        assert_that(ref).does_not_contain("github.head_ref")
+        assert_that(ref).does_not_contain("github.ref")
         assert_that(_PULL_HEAD_REF_RE.search(ref)).is_none()
 
         run = step.get("run")
@@ -795,8 +847,12 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     job_env = loaded["jobs"]["ai-review"]["env"]
     cursor_egress = job_env["AI_REVIEW_CURSOR_EGRESS"]
     assert_that(cursor_egress).contains("vars.LINTRO_AI_PROVIDER == 'cursor'")
-    for host in cursor_hosts:
-        assert_that(cursor_egress).contains(host)
+    cursor_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", cursor_egress)
+    assert_that(cursor_branch).is_not_none()
+    parsed_hosts = set(cursor_branch.group(1).split())
+    assert_that(parsed_hosts).is_equal_to(set(cursor_hosts))
+    for host in parsed_hosts:
+        assert_that(host).described_as(host).does_not_contain("*")
     assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_CURSOR_EGRESS }}")
 
 
