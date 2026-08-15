@@ -389,16 +389,18 @@ def test_workflow_job_is_same_repo_only() -> None:
     )
 
 
-def test_workflow_job_can_write_pull_requests() -> None:
-    """The review job has pull-requests: write so --post can publish comments.
+def test_workflow_job_reads_pull_requests() -> None:
+    """The workflow token only needs contents + pull-requests read.
 
-    Contents stays read-only (the diff is fetched via ``gh``), but posting the
-    sticky comment and inline review comments requires write access to PRs.
+    ``actions/checkout`` reads the trusted base ref (``contents: read``).
+    ``gh`` fetches the PR diff (``pull-requests: read``). ``--post`` writes
+    as ``lintro-review[bot]`` via the App token (#2050), so the job-scoped
+    ``GITHUB_TOKEN`` stays read-only.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     perms = loaded["jobs"]["ai-review"]["permissions"]
-    assert_that(perms["pull-requests"]).is_equal_to("write")
+    assert_that(perms["pull-requests"]).is_equal_to("read")
     assert_that(perms["contents"]).is_equal_to("read")
 
 
@@ -716,6 +718,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9",
         "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -727,6 +730,76 @@ def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
     content = WORKFLOW.read_text(encoding="utf-8")
 
     assert_that(content).contains(action_ref)
+
+
+def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
+    """The App token is minted repo-scoped and used only for ``--post``.
+
+    ``gh`` still fetches the PR diff with the workflow ``GITHUB_TOKEN``. The
+    mint step must not pass ``owner:`` (that would mint an org-wide token)
+    and must not be a second checkout.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+
+    mint_steps = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/create-github-app-token@")
+    ]
+    assert_that(mint_steps).is_length(1)
+    mint = mint_steps[0]
+    assert_that(mint["id"]).is_equal_to("lintro-review-app")
+    assert_that(mint["uses"]).is_equal_to(
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+    )
+    mint_with = mint["with"]
+    assert_that(mint_with["app-id"]).is_equal_to(
+        "${{ secrets.LINTRO_REVIEW_APP_ID }}",
+    )
+    assert_that(mint_with["private-key"]).is_equal_to(
+        "${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}",
+    )
+    assert_that(mint_with["permission-issues"]).is_equal_to("write")
+    assert_that(mint_with["permission-pull-requests"]).is_equal_to("write")
+    assert_that(mint_with["permission-contents"]).is_equal_to("read")
+    assert_that(mint_with).does_not_contain_key("owner")
+    assert_that(mint_with).does_not_contain_key("repositories")
+    assert_that(_is_checkout_like_action(mint["uses"])).is_false()
+
+    review_steps = [
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    ]
+    assert_that(review_steps).is_length(1)
+    review_env = review_steps[0]["env"]
+    assert_that(review_env["GITHUB_TOKEN"]).is_equal_to(
+        "${{ steps.lintro-review-app.outputs.token }}",
+    )
+    assert_that(review_env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
+
+    mint_index = steps.index(mint)
+    review_index = steps.index(review_steps[0])
+    assert_that(review_index).is_equal_to(mint_index + 1)
+
+    app_secret_values = (
+        "${{ secrets.LINTRO_REVIEW_APP_ID }}",
+        "${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}",
+        "${{ steps.lintro-review-app.outputs.token }}",
+    )
+    for step in steps:
+        if step is mint or step is review_steps[0]:
+            continue
+        step_env = step.get("env") or {}
+        step_with = step.get("with") or {}
+        blob = " ".join(
+            str(value) for value in (*step_env.values(), *step_with.values())
+        )
+        for secret_value in app_secret_values:
+            assert_that(blob).described_as(
+                f"step {step.get('name')!r}",
+            ).does_not_contain(
+                secret_value,
+            )
 
 
 def test_workflow_never_puts_an_api_key_in_scope() -> None:

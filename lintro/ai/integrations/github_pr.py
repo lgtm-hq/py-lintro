@@ -406,7 +406,10 @@ class GitHubPRReporter:
 
         Paginates through the PR's issue comments and returns the first one
         whose body contains ``marker`` (an HTML comment used to identify a
-        sticky comment maintained across runs).
+        sticky comment maintained across runs). Matching is by marker only —
+        not by author — so the first ``lintro-review[bot]`` run can find an
+        existing ``github-actions[bot]`` sticky (#2050). GitHub forbids editing
+        another actor's comment; ``_upsert_sticky`` then deletes and recreates.
 
         Args:
             marker: Substring to search for (e.g. ``<!-- lintro-ai-review -->``).
@@ -635,6 +638,30 @@ class GitHubPRReporter:
         thread = _dig(data, "resolveReviewThread", "thread")
         return bool(thread and thread.get("isResolved"))
 
+    def update_issue_comment_status(
+        self,
+        *,
+        comment_id: int,
+        body: str,
+    ) -> int | None:
+        """PATCH an issue comment and return the HTTP status.
+
+        Args:
+            comment_id: Numeric id of the comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            The HTTP status, or ``None`` when the request did not complete.
+            ``403`` is the actor-mismatch GitHub returns when this token did
+            not create the comment.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
+        return self.api_http_status(
+            method="PATCH",
+            url=url,
+            payload={"body": body},
+        )
+
     def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
         """Update an existing issue comment in place.
 
@@ -645,8 +672,68 @@ class GitHubPRReporter:
         Returns:
             True if the update succeeded.
         """
+        status = self.update_issue_comment_status(
+            comment_id=comment_id,
+            body=body,
+        )
+        return status is not None and 200 <= status < 300
+
+    def delete_issue_comment(self, *, comment_id: int) -> bool:
+        """Delete an issue comment by id.
+
+        Used to supersede a sticky that this token cannot edit (GitHub binds
+        PATCH to the creating actor). Write access can still delete it.
+
+        Args:
+            comment_id: Numeric id of the comment to delete.
+
+        Returns:
+            True if the deletion succeeded.
+        """
         url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
-        return self.api_request("PATCH", url, {"body": body})
+        return self.api_request(method="DELETE", url=url)
+
+    def create_issue_comment(self, *, body: str) -> int | None:
+        """Post a top-level issue comment and return its id.
+
+        Args:
+            body: Comment body in Markdown.
+
+        Returns:
+            The created comment id, or ``None`` when the request failed or
+            the response did not include a numeric id.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
+        data = json.dumps({"body": body}).encode()
+        req = self._authorized_request(
+            url=url,
+            method="POST",
+            data=data,
+            content_type="application/json",
+        )
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning("Refusing non-HTTPS URL: {}", url)
+            return None
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                req,
+                timeout=30,
+            ) as resp:
+                if not (200 <= int(resp.status) < 300):
+                    return None
+                payload = json.loads(resp.read().decode())
+        except (
+            urllib.error.URLError,
+            json.JSONDecodeError,
+            OSError,
+        ) as exc:
+            logger.warning("Failed to create issue comment: {}", exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        comment_id = payload.get("id")
+        return comment_id if isinstance(comment_id, int) else None
 
     def post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
@@ -657,44 +744,43 @@ class GitHubPRReporter:
         Returns:
             True if posted successfully.
         """
-        url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
-        return self.api_request("POST", url, {"body": body})
+        return self.create_issue_comment(body=body) is not None
 
-    def api_request(
+    def api_http_status(
         self,
         method: str,
         url: str,
-        payload: dict[str, Any],
-    ) -> bool:
-        """Make an authenticated GitHub API request.
+        payload: dict[str, Any] | None = None,
+    ) -> int | None:
+        """Make an authenticated GitHub API request and return the status.
 
         Args:
             method: HTTP method.
             url: Full API URL.
-            payload: JSON payload.
+            payload: JSON payload, or ``None`` for methods with no body.
 
         Returns:
-            True if the request succeeded (2xx status).
+            The HTTP status when GitHub answered, or ``None`` when the
+            request was refused locally or failed in transit.
         """
-        data = json.dumps(payload).encode()
+        data = None if payload is None else json.dumps(payload).encode()
         req = self._authorized_request(
             url=url,
             method=method,
             data=data,
-            content_type="application/json",
+            content_type="application/json" if data is not None else "",
         )
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             logger.warning("Refusing non-HTTPS URL: {}", url)
-            return False
+            return None
 
         try:
             with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
                 req,
                 timeout=30,
             ) as resp:
-                status: int = resp.status
-                return 200 <= status < 300
+                return int(resp.status)
         except urllib.error.HTTPError as e:
             try:
                 body = e.read().decode("utf-8", "replace")[:500]
@@ -707,10 +793,29 @@ class GitHubPRReporter:
                 e.code,
                 body,
             )
-            return False
+            return int(e.code)
         except urllib.error.URLError as e:
             logger.warning("GitHub API request error: {}", e.reason)
-            return False
+            return None
+
+    def api_request(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        """Make an authenticated GitHub API request.
+
+        Args:
+            method: HTTP method.
+            url: Full API URL.
+            payload: JSON payload, or ``None`` for methods with no body.
+
+        Returns:
+            True if the request succeeded (2xx status).
+        """
+        status = self.api_http_status(method=method, url=url, payload=payload)
+        return status is not None and 200 <= status < 300
 
     def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
         """Deprecated alias for :meth:`fetch_pr_diff_lines`.

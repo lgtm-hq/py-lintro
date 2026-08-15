@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+from email.message import Message
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -243,6 +246,43 @@ def test_find_issue_comment_matches_marker(test_token: str) -> None:
     assert_that(found_id).is_equal_to(2)
 
 
+def test_find_issue_comment_matches_marker_regardless_of_author(
+    test_token: str,
+) -> None:
+    """Sticky lookup is by marker, so the App-token identity can take over.
+
+    The first ``lintro-review[bot]`` run finds the existing
+    ``github-actions[bot]`` ``<!-- lintro-ai-review -->`` comment by marker
+    and then deletes and recreates it — GitHub forbids PATCHing another
+    actor's comment (#2050).
+    """
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    page = [
+        {
+            "id": 11,
+            "body": "hello <!-- lintro-ai-review --> world",
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        },
+        {
+            "id": 12,
+            "body": "unrelated",
+            "user": {"login": "lintro-review[bot]", "type": "Bot"},
+        },
+    ]
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps(page).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_not_none()
+    found_id, _body = found or (0, "")
+    assert_that(found_id).is_equal_to(11)
+
+
 def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
     """find_issue_comment returns None when no comment carries the marker."""
     reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
@@ -256,6 +296,43 @@ def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
         found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
 
     assert_that(found).is_none()
+
+
+def test_update_issue_comment_status_returns_forbidden(
+    test_token: str,
+) -> None:
+    """Actor-mismatch PATCH surfaces HTTP 403 instead of a bare False."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    error = urllib.error.HTTPError(
+        url="https://api.github.com/repos/owner/repo/issues/comments/42",
+        code=403,
+        msg="Forbidden",
+        hdrs=Message(),
+        fp=BytesIO(b"must be the creating actor"),
+    )
+
+    with patch("urllib.request.urlopen", side_effect=error):
+        status = reporter.update_issue_comment_status(comment_id=42, body="new")
+
+    assert_that(status).is_equal_to(403)
+
+
+def test_create_issue_comment_returns_id(test_token: str) -> None:
+    """create_issue_comment parses the new comment id from a 201 response."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+    mock_response = MagicMock()
+    mock_response.status = 201
+    mock_response.read.return_value = json.dumps({"id": 99, "body": "hello"}).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        comment_id = reporter.create_issue_comment(body="hello")
+
+    assert_that(comment_id).is_equal_to(99)
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("POST")
+    assert_that(req.full_url).contains("/issues/5/comments")
 
 
 def test_update_issue_comment_patches(test_token: str) -> None:
@@ -274,6 +351,25 @@ def test_update_issue_comment_patches(test_token: str) -> None:
     req = mock_open.call_args[0][0]
     assert_that(req.get_method()).is_equal_to("PATCH")
     assert_that(req.full_url).contains("/issues/comments/42")
+
+
+def test_delete_issue_comment_deletes(test_token: str) -> None:
+    """delete_issue_comment issues a DELETE with no body."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.status = 204
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        result = reporter.delete_issue_comment(comment_id=42)
+
+    assert_that(result).is_true()
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("DELETE")
+    assert_that(req.full_url).contains("/issues/comments/42")
+    assert_that(req.data).is_none()
 
 
 # -- TestFormatSummaryComment: Tests for summary comment formatting. ---------

@@ -22,6 +22,7 @@ from lintro.ai.review.github import (
     _cap_body,
     _count_new_commits,
     _sticky_comment_id,
+    _upsert_sticky,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
@@ -48,6 +49,7 @@ def _fresh_reporter() -> MagicMock:
     reporter.fetch_pr_commit_shas.return_value = []
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
+    reporter.delete_issue_comment.return_value = True
     reporter.api_request.return_value = True
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
@@ -417,9 +419,208 @@ def test_post_review_updates_existing_sticky(
     assert_that(posted).is_true()
     reporter.update_issue_comment.assert_called_once()
     reporter.post_issue_comment.assert_not_called()
+    reporter.delete_issue_comment.assert_not_called()
     kwargs = reporter.update_issue_comment.call_args.kwargs
     assert_that(kwargs["comment_id"]).is_equal_to(42)
     assert_that(kwargs["body"]).contains("2 runs")
+
+
+def test_upsert_sticky_creates_when_missing() -> None:
+    """A first review posts a new sticky comment."""
+    reporter = _fresh_reporter()
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=None,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_none()
+    reporter.post_issue_comment.assert_called_once_with("hello")
+    reporter.update_issue_comment.assert_not_called()
+    reporter.delete_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_patches_when_update_succeeds() -> None:
+    """Same-actor updates edit the sticky in place."""
+    reporter = _fresh_reporter()
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_equal_to(42)
+    reporter.update_issue_comment.assert_called_once_with(
+        comment_id=42,
+        body="hello",
+    )
+    reporter.delete_issue_comment.assert_not_called()
+    reporter.post_issue_comment.assert_not_called()
+    reporter.find_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_supersedes_when_patch_fails() -> None:
+    """GitHub forbids editing another actor's comment; recreate then delete."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment.return_value = False
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_equal_to(99)
+    reporter.update_issue_comment.assert_called_once_with(
+        comment_id=42,
+        body="hello",
+    )
+    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
+    reporter.post_issue_comment.assert_called_once_with("hello")
+    reporter.find_issue_comment.assert_called_once_with(marker=STICKY_MARKER)
+
+
+@pytest.mark.parametrize(
+    ("status", "should_recreate"),
+    [
+        (403, True),
+        (500, False),
+        (429, False),
+    ],
+    ids=["attr=actor_mismatch", "attr=server_error", "attr=rate_limit"],
+)
+def test_upsert_sticky_supersedes_only_on_actor_mismatch(
+    status: int,
+    should_recreate: bool,
+) -> None:
+    """Only a 403 PATCH (wrong actor) replaces the leftover sticky."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = status
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    if should_recreate:
+        assert_that(posted).is_true()
+        assert_that(live_id).is_equal_to(99)
+        reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
+        reporter.post_issue_comment.assert_called_once_with("hello")
+    else:
+        assert_that(posted).is_false()
+        assert_that(live_id).is_none()
+        reporter.delete_issue_comment.assert_not_called()
+        reporter.post_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_retries_post_after_recreate_failure() -> None:
+    """A failed create is retried once before the leftover sticky is deleted."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = 403
+    reporter.post_issue_comment.side_effect = [False, True]
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_equal_to(99)
+    assert_that(reporter.post_issue_comment.call_count).is_equal_to(2)
+
+
+def test_upsert_sticky_keeps_replacement_when_delete_fails() -> None:
+    """A failed delete after a successful create still returns the new id."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment.return_value = False
+    reporter.delete_issue_comment.return_value = False
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(live_id).is_equal_to(99)
+    reporter.post_issue_comment.assert_called_once_with("hello")
+    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
+
+
+def test_upsert_sticky_does_not_delete_when_patch_status_unknown() -> None:
+    """A transport failure must not be treated as actor-mismatch."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = None
+
+    posted, live_id = _upsert_sticky(
+        reporter=reporter,
+        body="hello",
+        comment_id=42,
+    )
+
+    assert_that(posted).is_false()
+    assert_that(live_id).is_none()
+    reporter.delete_issue_comment.assert_not_called()
+    reporter.post_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_posts_replacement_before_deleting() -> None:
+    """Create the new sticky first so a failed POST leaves the old one."""
+    reporter = _fresh_reporter()
+    reporter.update_issue_comment_status.return_value = 403
+    reporter.find_issue_comment.return_value = (99, "hello")
+
+    _upsert_sticky(reporter=reporter, body="hello", comment_id=42)
+
+    names = [call[0] for call in reporter.method_calls]
+    assert_that(names.index("post_issue_comment")).is_less_than(
+        names.index("delete_issue_comment"),
+    )
+
+
+def test_refresh_uses_replacement_id_after_cross_actor_recreate(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A follow-up refresh must PATCH the recreated sticky, not the deleted id.
+
+    When the App token cannot edit a leftover ``github-actions[bot]`` sticky,
+    upsert deletes and recreates it. The refresh that persists inline-post
+    failure details has to target the replacement id; the deleted id 404s.
+    """
+    reporter = _fresh_reporter()
+    prior_body = build_sticky_comment(result=sample_review_result)
+    reporter.find_issue_comment.side_effect = [
+        (42, prior_body),
+        (99, "replacement"),
+    ]
+    reporter.update_issue_comment.side_effect = [False, True]
+    reporter.api_request.return_value = False
+
+    posted = post_review_to_github(
+        result=sample_review_result,
+        reporter=reporter,
+    )
+
+    assert_that(posted).is_false()
+    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
+    reporter.post_issue_comment.assert_called_once()
+    refresh = reporter.update_issue_comment.call_args_list[1]
+    assert_that(refresh.kwargs["comment_id"]).is_equal_to(99)
+    assert_that(refresh.kwargs["body"]).contains(
+        "could not be posted",
+    )
 
 
 def test_post_review_posts_inline_findings(
