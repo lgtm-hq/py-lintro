@@ -713,10 +713,28 @@ def _upsert_sticky(
     body: str,
     comment_id: int | None,
 ) -> bool:
-    """Update the sticky comment in place, or create it when absent."""
-    if comment_id is not None:
-        return reporter.update_issue_comment(comment_id=comment_id, body=body)
-    return reporter.post_issue_comment(body)
+    """Update the sticky comment in place, or create it when absent.
+
+    GitHub only lets the creating actor PATCH a comment. After #2050 the
+    poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
+    sticky must be deleted and recreated rather than edited in place.
+    """
+    if comment_id is None:
+        return reporter.post_issue_comment(body)
+    if reporter.update_issue_comment(comment_id=comment_id, body=body):
+        return True
+    logger.warning(
+        "Could not edit sticky comment {}; deleting and recreating "
+        "(GitHub only lets the creating actor PATCH)",
+        comment_id,
+    )
+    if reporter.delete_issue_comment(comment_id=comment_id):
+        return reporter.post_issue_comment(body)
+    logger.warning(
+        "Failed to delete sticky comment {}; leaving it in place",
+        comment_id,
+    )
+    return False
 
 
 def _round_diff_lines(

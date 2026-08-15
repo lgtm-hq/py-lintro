@@ -407,9 +407,9 @@ class GitHubPRReporter:
         Paginates through the PR's issue comments and returns the first one
         whose body contains ``marker`` (an HTML comment used to identify a
         sticky comment maintained across runs). Matching is by marker only —
-        not by author — so the first ``lintro-review[bot]`` run updates an
-        existing ``github-actions[bot]`` sticky instead of posting a second
-        (#2050).
+        not by author — so the first ``lintro-review[bot]`` run can find an
+        existing ``github-actions[bot]`` sticky (#2050). GitHub forbids editing
+        another actor's comment; ``_upsert_sticky`` then deletes and recreates.
 
         Args:
             marker: Substring to search for (e.g. ``<!-- lintro-ai-review -->``).
@@ -649,7 +649,22 @@ class GitHubPRReporter:
             True if the update succeeded.
         """
         url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
-        return self.api_request("PATCH", url, {"body": body})
+        return self.api_request(method="PATCH", url=url, payload={"body": body})
+
+    def delete_issue_comment(self, *, comment_id: int) -> bool:
+        """Delete an issue comment by id.
+
+        Used to supersede a sticky that this token cannot edit (GitHub binds
+        PATCH to the creating actor). Write access can still delete it.
+
+        Args:
+            comment_id: Numeric id of the comment to delete.
+
+        Returns:
+            True if the deletion succeeded.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
+        return self.api_request(method="DELETE", url=url)
 
     def post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
@@ -661,30 +676,30 @@ class GitHubPRReporter:
             True if posted successfully.
         """
         url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
-        return self.api_request("POST", url, {"body": body})
+        return self.api_request(method="POST", url=url, payload={"body": body})
 
     def api_request(
         self,
         method: str,
         url: str,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | None = None,
     ) -> bool:
         """Make an authenticated GitHub API request.
 
         Args:
             method: HTTP method.
             url: Full API URL.
-            payload: JSON payload.
+            payload: JSON payload, or ``None`` for methods with no body.
 
         Returns:
             True if the request succeeded (2xx status).
         """
-        data = json.dumps(payload).encode()
+        data = None if payload is None else json.dumps(payload).encode()
         req = self._authorized_request(
             url=url,
             method=method,
             data=data,
-            content_type="application/json",
+            content_type="application/json" if data is not None else "",
         )
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":

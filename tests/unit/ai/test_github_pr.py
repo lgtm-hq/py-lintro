@@ -312,6 +312,25 @@ def test_update_issue_comment_patches(test_token: str) -> None:
     assert_that(req.full_url).contains("/issues/comments/42")
 
 
+def test_delete_issue_comment_deletes(test_token: str) -> None:
+    """delete_issue_comment issues a DELETE with no body."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.status = 204
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        result = reporter.delete_issue_comment(comment_id=42)
+
+    assert_that(result).is_true()
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("DELETE")
+    assert_that(req.full_url).contains("/issues/comments/42")
+    assert_that(req.data).is_none()
+
+
 # -- TestFormatSummaryComment: Tests for summary comment formatting. ---------
 
 

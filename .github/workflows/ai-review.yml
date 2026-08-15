@@ -235,6 +235,8 @@ jobs:
         with:
           app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
           private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
 
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
