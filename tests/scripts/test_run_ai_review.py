@@ -32,6 +32,55 @@ PROJECT_CONFIG = REPO_ROOT / ".lintro-config.yaml"
 CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
 PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
+_PINNED_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+_HEAD_REF_RE = re.compile(
+    r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
+    r"|github\.(?:head_ref|sha|ref_name|ref)\b",
+)
+_GIT_HEAD_FETCH_RE = re.compile(
+    r"\bgit(?:\s+\S+)*\s+(?:fetch|pull|checkout)\b",
+)
+_GH_PR_CHECKOUT_RE = re.compile(
+    r"\bgh(?:\s+\S+)*\s+pr(?:\s+\S+)*\s+checkout\b",
+)
+_PULL_HEAD_REF_RE = re.compile(r"pull/\S*/head")
+_CHECKOUT_LIKE_RE = re.compile(r"checkout")
+_CURSOR_EGRESS_HOSTS = (
+    "downloads.cursor.com:443",
+    "api2.cursor.sh:443",
+    "api3.cursor.sh:443",
+    "agentn.global.api5.cursor.sh:443",
+    "repo42.cursor.sh:443",
+)
+
+
+def _executable_run_text(run_block: str) -> str:
+    """Return a ``run:`` block with full-line shell comments removed.
+
+    Args:
+        run_block: Raw workflow ``run`` string.
+
+    Returns:
+        Executable lines only, joined with newlines.
+    """
+    without_comments = "\n".join(
+        line for line in run_block.splitlines() if not line.lstrip().startswith("#")
+    )
+    return without_comments.replace("\\\n", " ")
+
+
+def _is_checkout_like_action(uses: str) -> bool:
+    """Return whether a ``uses:`` value is a checkout-like action.
+
+    Args:
+        uses: Workflow ``uses`` pin (``owner/repo@sha``).
+
+    Returns:
+        True when the action repo looks like a checkout action.
+    """
+    name = uses.split("@", 1)[0].split("#", 1)[0].strip().lower()
+    repo = name.rsplit("/", 1)[-1]
+    return bool(_CHECKOUT_LIKE_RE.search(f"/{repo}"))
 
 
 def _run_shell(
@@ -70,13 +119,17 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
 
     ``ai.review: true`` is committed so enabling the master switch does not
     rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
-    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in #1971).
+    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in
+    #2018 / 9f43a98a).
     """
     loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
     ai_section = loaded["ai"]
     assert_that(ai_section["enabled"]).is_false()
     assert_that(ai_section["review"]).is_true()
     assert_that(ai_section["max_cost_usd"]).is_equal_to(2.00)
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert_that(workflow_text).contains("#2018 / 9f43a98a")
+    assert_that(workflow_text).does_not_contain("0.50 that landed with\n# #1971")
 
 
 def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
@@ -375,6 +428,186 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     assert_that(workflow_text).does_not_contain("enable_cursor_workspace_trust")
 
 
+@pytest.mark.parametrize(
+    ("uses", "expected"),
+    [
+        (_PINNED_CHECKOUT, True),
+        ("evil/checkout@deadbeef", True),
+        ("acme/checkout-action@1", True),
+        ("acme/pr-checkout@1", True),
+        ("acme/pr-checkout-action@1", True),
+        ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
+        ("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9", False),
+    ],
+    ids=[
+        "pinned-actions-checkout",
+        "forked-checkout",
+        "checkout-prefix",
+        "checkout-suffix",
+        "checkout-infix",
+        "setup-node",
+        "setup-uv",
+    ],
+)
+def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
+    """Checkout-like ``uses:`` values are the ones the audit must pin.
+
+    Args:
+        uses: A workflow ``uses`` pin.
+        expected: Whether the pin is checkout-like.
+    """
+    assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
+
+
+_TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
+
+
+@pytest.mark.parametrize(
+    ("ref", "trusted"),
+    [
+        (_TRUSTED_CHECKOUT_REF, True),
+        ("", False),
+        ("${{ github.head_ref }}", False),
+        ("${{ github.ref }}", False),
+        ("${{ github.ref_name }}", False),
+        ("${{ github.sha }}", False),
+        ("${{ github.event.pull_request.head.sha }}", False),
+    ],
+    ids=[
+        "base-sha",
+        "omitted-ref",
+        "head-ref",
+        "github-ref",
+        "ref-name",
+        "github-sha",
+        "pr-head-sha",
+    ],
+)
+def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
+    """Only the PR base SHA is a trusted checkout ref for this job.
+
+    Args:
+        ref: A checkout ``with.ref`` value, or empty when omitted.
+        trusted: Whether the audit must accept the ref.
+    """
+    assert_that(ref == _TRUSTED_CHECKOUT_REF).is_equal_to(trusted)
+    if ref:
+        banned = any(
+            marker in ref
+            for marker in (
+                "pull_request.head",
+                "github.sha",
+                "github.head_ref",
+                "github.ref",
+            )
+        )
+        assert_that(banned).is_equal_to(not trusted)
+
+
+@pytest.mark.parametrize(
+    ("run_block", "banned"),
+    [
+        ("gh pr checkout 12\n", True),
+        ("gh --repo lgtm-hq/py-lintro pr checkout 12\n", True),
+        ("gh pr --repo lgtm-hq/py-lintro checkout 12\n", True),
+        ("gh pr \\\n  checkout 12\n", True),
+        ("# decoy \\\ngh pr checkout 12\n", True),
+        ("git fetch origin pull/12/head\n", True),
+        ("git -C . checkout ${{ github.head_ref }}\n", True),
+        ("git --git-dir=.git fetch origin pull/12/head\n", True),
+        ("git pull origin ${{ github.event.pull_request.head.sha }}\n", True),
+        (
+            "# gh pr checkout is banned in executable steps\npython3 scripts/ci/ai_tools_arg_pin.py\n",
+            False,
+        ),
+        ("python3 scripts/ci/ai_tools_arg_pin.py NODE_VERSION\n", False),
+    ],
+    ids=[
+        "gh-pr-checkout",
+        "gh-repo-pr-checkout",
+        "gh-pr-repo-checkout",
+        "gh-pr-checkout-continued",
+        "comment-backslash-then-checkout",
+        "git-fetch-pull-head",
+        "git-dash-c-checkout-head-ref",
+        "git-git-dir-fetch-pull-head",
+        "git-pull-head-sha",
+        "comment-only-mention",
+        "pin-script",
+    ],
+)
+def test_head_ref_fetch_patterns(*, run_block: str, banned: bool) -> None:
+    """Banned head-ref fetch shapes are detected in executable ``run:`` text.
+
+    Args:
+        run_block: A sample workflow ``run`` block.
+        banned: Whether the block must fail the audit.
+    """
+    executable = _executable_run_text(run_block)
+    matched = any(
+        pattern.search(executable)
+        for pattern in (
+            _GH_PR_CHECKOUT_RE,
+            _GIT_HEAD_FETCH_RE,
+            _PULL_HEAD_REF_RE,
+            _HEAD_REF_RE,
+        )
+    )
+    assert_that(matched).is_equal_to(banned)
+
+
+def test_workflow_forbids_head_ref_fetches() -> None:
+    """Head-ref fetches and checkout forks fail the structural audit (#2047).
+
+    The existing one-checkout assertion cannot see ``gh pr checkout``,
+    ``git fetch origin pull/N/head``, ``github.event.pull_request.head.sha``
+    as a checkout ref, or a forked checkout action. Those all execute
+    PR-authored code on the credential-holding job. Comments and the
+    same-repo ``head.repo.full_name`` guard are not fetches.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+
+    checkout_uses: list[str] = []
+    for step in steps:
+        uses = step.get("uses")
+        if isinstance(uses, str) and _is_checkout_like_action(uses):
+            pin = uses.split("#", 1)[0].strip()
+            checkout_uses.append(pin)
+            assert_that(pin).is_equal_to(_PINNED_CHECKOUT)
+
+        with_block = step.get("with") or {}
+        ref = str(with_block.get("ref", ""))
+        if isinstance(uses, str) and _is_checkout_like_action(uses):
+            assert_that(ref).is_equal_to(
+                "${{ github.event.pull_request.base.sha }}",
+            )
+        assert_that(ref).does_not_contain("pull_request.head")
+        assert_that(ref).does_not_contain("github.sha")
+        assert_that(ref).does_not_contain("github.head_ref")
+        assert_that(ref).does_not_contain("github.ref")
+        assert_that(_PULL_HEAD_REF_RE.search(ref)).is_none()
+
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        executable = _executable_run_text(run)
+        assert_that(_GH_PR_CHECKOUT_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not run gh pr checkout",
+        ).is_none()
+        assert_that(_GIT_HEAD_FETCH_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not git fetch/pull/checkout",
+        ).is_none()
+        assert_that(_PULL_HEAD_REF_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not fetch pull/*/head",
+        ).is_none()
+        assert_that(_HEAD_REF_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not use pull_request.head sha/ref",
+        ).is_none()
+
+    assert_that(checkout_uses).is_equal_to([_PINNED_CHECKOUT])
+
+
 def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
     """#2023 defaults ``ai.cursor_trust_workspace``; the CI patcher is gone."""
     assert_that(
@@ -601,24 +834,35 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     ]
     assert_that(harden_steps).is_length(1)
 
-    endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
+    endpoints_raw = harden_steps[0]["with"]["allowed-endpoints"]
+    unconditional = endpoints_raw.replace("${{ env.AI_REVIEW_CURSOR_EGRESS }}", "")
+    endpoints = unconditional.split()
+    cursor_hosts = _CURSOR_EGRESS_HOSTS
     assert_that(endpoints).contains(
         "registry.npmjs.org:443",
         "nodejs.org:443",
-        "downloads.cursor.com:443",
-        "api2.cursor.sh:443",
-        "api3.cursor.sh:443",
-        "agentn.global.api5.cursor.sh:443",
-        "repo42.cursor.sh:443",
         "release-assets.githubusercontent.com:443",
-    )
-    assert_that(endpoints).does_not_contain(
-        "api.cursor.com:443",
-        "*.cursor.sh:443",
-        "*.cursorapi.com:443",
     )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.sh",
+        )
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.com",
+        )
+
+    job_env = loaded["jobs"]["ai-review"]["env"]
+    cursor_egress = job_env["AI_REVIEW_CURSOR_EGRESS"]
+    assert_that(cursor_egress).contains("vars.LINTRO_AI_PROVIDER == 'cursor'")
+    cursor_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", cursor_egress)
+    if cursor_branch is None:
+        pytest.fail("cursor egress expression must quote hosts and default to empty")
+    parsed_hosts = set(cursor_branch.group(1).split())
+    assert_that(parsed_hosts).is_equal_to(set(cursor_hosts))
+    for host in parsed_hosts:
+        assert_that(host).described_as(host).does_not_contain("*")
+    assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_CURSOR_EGRESS }}")
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:

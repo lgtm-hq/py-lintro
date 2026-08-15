@@ -23,9 +23,9 @@ name: AI Review - Dogfood
 #
 # Spend ceiling is the committed `ai.max_cost_usd: 2.00` in `.lintro-config.yaml`
 # (the empirically validated value from #1976/#1977; the 0.50 that landed with
-# #1971 was a side-effect, restored here by #2025). Under the CLI transport the
-# call bills the subscription, so the figure is advisory rather than enforced
-# spend control (#1923).
+# #2018 / 9f43a98a was a side-effect, restored here by #2025). Under the CLI
+# transport the call bills the subscription, so the figure is advisory rather
+# than enforced spend control (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -121,15 +121,22 @@ jobs:
     # ceiling exactly (#1976 reviews killed at the boundary four times; #1977's
     # oscillated around 45-55 min and was killed at 50 twice).
     timeout-minutes: 75
+    # Cursor shards are appended only when the dogfood provider is Cursor.
+    # They stay out of the anthropic path so that job cannot reach Cursor
+    # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the
+    # harden-runner summary of the failed run; fix is a one-line allowlist
+    # PR on AI_REVIEW_CURSOR_EGRESS. No wildcards on this job.
+    env:
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_CURSOR_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' && 'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }}
 
     steps:
       - name: Harden Runner
         # Cursor shards observed on live dogfood (runs 31779466126 /
         # 31782811574): downloads.cursor.com, api2.cursor.sh, api3.cursor.sh,
-        # agentn.global.api5.cursor.sh, repo42.cursor.sh. A rotated shard
-        # (e.g. repo43.cursor.sh) is named in the harden-runner summary of
-        # the failed run; fix is a one-line allowlist PR. No wildcards on
-        # this job. release-assets.githubusercontent.com is setup-node's
+        # agentn.global.api5.cursor.sh, repo42.cursor.sh. Gated via
+        # AI_REVIEW_CURSOR_EGRESS so the anthropic path never allowlists
+        # them. release-assets.githubusercontent.com is setup-node's
         # GitHub releases CDN; those runs blocked it and the action fell
         # back to nodejs.org — allowlisted so Node install is not a silent
         # fallback.
@@ -151,11 +158,7 @@ jobs:
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
-            downloads.cursor.com:443
-            api2.cursor.sh:443
-            api3.cursor.sh:443
-            agentn.global.api5.cursor.sh:443
-            repo42.cursor.sh:443
+            ${{ env.AI_REVIEW_CURSOR_EGRESS }}
 
       - name: Checkout base ref (trusted lintro install)
         # Install lintro from the PR's BASE ref (main), NOT the PR head. The
