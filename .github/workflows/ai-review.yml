@@ -105,6 +105,7 @@ jobs:
       github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
+      # actions/checkout reads the trusted base ref with the workflow token.
       contents: read
       # `--post` writes as lintro-review[bot] via the App token (#2050).
       # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
@@ -261,7 +262,8 @@ jobs:
           # binary the contract tests verified.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
-          # `gh` fetches the PR diff with the workflow token (contents: read).
+          # `gh` fetches the PR diff with the workflow token
+          # (contents: read + pull-requests: read).
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # `--post` writes as lintro-review[bot] via the App token (#2050).
           GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}

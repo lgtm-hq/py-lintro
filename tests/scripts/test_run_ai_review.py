@@ -390,10 +390,12 @@ def test_workflow_job_is_same_repo_only() -> None:
 
 
 def test_workflow_job_reads_pull_requests() -> None:
-    """The workflow token only needs pull-requests: read for ``gh``.
+    """The workflow token only needs contents + pull-requests read.
 
-    ``--post`` writes as ``lintro-review[bot]`` via the App token (#2050),
-    so the job-scoped ``GITHUB_TOKEN`` stays read-only for the PR diff.
+    ``actions/checkout`` reads the trusted base ref (``contents: read``).
+    ``gh`` fetches the PR diff (``pull-requests: read``). ``--post`` writes
+    as ``lintro-review[bot]`` via the App token (#2050), so the job-scoped
+    ``GITHUB_TOKEN`` stays read-only.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
