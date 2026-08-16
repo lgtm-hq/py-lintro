@@ -167,7 +167,7 @@ def test_explicit_manifest_min_version_is_a_strict_floor() -> None:
     """
     repo_root = Path(__file__).resolve().parents[3]
     manifest = json.loads(
-        (repo_root / "lintro" / "tools" / "manifest.json").read_text()
+        (repo_root / "lintro" / "tools" / "manifest.json").read_text(),
     )
     explicit: list[dict[str, str]] = [
         entry
