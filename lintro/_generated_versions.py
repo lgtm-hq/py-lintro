@@ -9,17 +9,17 @@ Sources:
 """
 
 NPM_VERSIONS: dict[str, str] = {
-    "@astrojs/check": "0.9.9",
+    "@astrojs/check": "0.9.10",
     "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
-    "astro": "7.1.3",
-    "html-validate": "11.5.6",
+    "astro": "7.1.6",
+    "html-validate": "11.6.0",
     "markdownlint-cli2": "0.23.2",
-    "oxfmt": "0.60.0",
-    "oxlint": "1.75.0",
+    "oxfmt": "0.61.0",
+    "oxlint": "1.76.0",
     "prettier": "3.9.4",
     "stylelint": "17.14.1",
-    "svelte-check": "4.7.3",
+    "svelte-check": "4.7.4",
     "typescript": "6.0.3",
     "vue-tsc": "3.3.8",
 }
