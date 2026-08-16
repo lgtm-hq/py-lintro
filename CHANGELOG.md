@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.2] - 2026-08-16
+
+### Changed
+
+- **deps**: update docker/dockerfile:1 docker digest to ecfaec9 (#2060) (7609675)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 9a976b3 (#1817)
+  (948292e)
+- **deps**: update dependency astral-sh/uv to 0.12.2 (minor) (#1845) (b381feb)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.63.0 (minor) (#1818) (aa583ff)
+- **cli**: pin check --output-format json stdout contract (#2057) (c7d7554)
+
+### Fixed
+
+- **deps**: update linting tools (#1858) (cd98c91)
+
 ## [0.118.1] - 2026-08-16
 
 ### Fixed
