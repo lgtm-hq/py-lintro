@@ -201,7 +201,7 @@ async def test_cursor_aclose_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     from lintro.ai.providers.cursor import CursorProvider
 
     monkeypatch.setattr(cursor_mod, "_find_agent", lambda: "/usr/bin/agent")
-    provider = CursorProvider()
+    provider = CursorProvider(cursor_trust_workspace=False)
     await provider.aclose()
     await provider.aclose()
     assert_that(provider._client).is_none()

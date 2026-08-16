@@ -557,7 +557,9 @@ ai:
 
   # ── Cursor workspace trust ──
   # Choosing provider: cursor grants workspace trust (passes "--trust" to the
-  # agent CLI). Set false to restore the agent's interactive trust prompt.
+  # agent CLI). Residual risk: prompt-injectable review content (fork-PR
+  # diffs via `lintro review --pr N`) can steer a workspace-trusted agent.
+  # Set false to restore the agent's interactive trust prompt.
   # (bool, default: true)
   cursor_trust_workspace: true
 
@@ -1090,6 +1092,13 @@ persistent rate limiting:
 > the diff reaches the provider's backend verbatim**. It defaults to `false`. Enable it
 > only in a controlled, trusted environment, on diffs you have confirmed carry no
 > secrets, and only when delegated retrieval is needed for a very large diff.
+>
+> **Warning — `ai.cursor_trust_workspace` is granted by default.**
+>
+> Choosing `provider: cursor` passes `--trust` to the agent CLI. Residual risk:
+> prompt-injectable review content (fork-PR diffs via `lintro review --pr N`) can steer
+> a workspace-trusted agent. Set `cursor_trust_workspace: false` to restore the agent's
+> interactive trust prompt.
 
 ### How much source code fix mode sends
 

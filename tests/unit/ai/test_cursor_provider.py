@@ -37,7 +37,7 @@ def _mock_agent_on_path():
 @pytest.fixture()
 def provider(_mock_agent_on_path):
     """Create a CursorProvider with a mocked agent binary."""
-    return CursorProvider()
+    return CursorProvider(cursor_trust_workspace=False)
 
 
 def _cli_json(
@@ -160,7 +160,7 @@ def test_cursor_provider_raises_when_agent_missing():
         ),
         pytest.raises(AINotAvailableError, match="agent"),
     ):
-        CursorProvider()
+        CursorProvider(cursor_trust_workspace=False)
 
 
 def test_cursor_provider_default_model(provider):
@@ -171,7 +171,10 @@ def test_cursor_provider_default_model(provider):
 @pytest.mark.usefixtures("_mock_agent_on_path")
 def test_cursor_provider_custom_model():
     """Accept a custom model override."""
-    p = CursorProvider(model="claude-opus-4-8-thinking-high")
+    p = CursorProvider(
+        model="claude-opus-4-8-thinking-high",
+        cursor_trust_workspace=False,
+    )
     assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
 
 
@@ -446,10 +449,18 @@ async def test_cursor_cost_accrues_into_budget(provider):
     assert_that(budget.spent).is_greater_than(0.0)
 
 
-async def test_complete_omits_trust_flag_when_constructed_directly(
+def test_constructor_requires_cursor_trust_workspace(
+    _mock_agent_on_path: object,
+) -> None:
+    """Direct construction cannot omit ``cursor_trust_workspace``."""
+    with pytest.raises(TypeError, match="cursor_trust_workspace"):
+        CursorProvider()  # type: ignore[call-arg]  # assert required kwarg
+
+
+async def test_complete_omits_trust_flag_when_constructed_without_trust(
     provider: CursorProvider,
 ) -> None:
-    """CursorProvider constructed without config omits '--trust'."""
+    """CursorProvider constructed with trust disabled omits '--trust'."""
     stdout = _cli_json(result="ok")
     with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(

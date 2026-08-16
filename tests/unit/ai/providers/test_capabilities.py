@@ -83,7 +83,7 @@ def test_cursor_declares_sessions_without_structured_output(
     _cli_binaries_on_path: None,
 ) -> None:
     """The Cursor agent resumes sessions but has no native schema support."""
-    provider = CursorProvider()
+    provider = CursorProvider(cursor_trust_workspace=False)
 
     assert_that(provider.capabilities.supports_sessions).is_true()
     assert_that(provider.capabilities.supports_structured_output).is_false()
@@ -112,7 +112,7 @@ def test_every_provider_exposes_a_declaration(_cli_binaries_on_path: None) -> No
     providers: list[BaseAIProvider] = [
         AnthropicProvider(transport=AITransport.CLI),
         AnthropicProvider(transport=AITransport.API),
-        CursorProvider(),
+        CursorProvider(cursor_trust_workspace=False),
         OpenAIProvider(transport=AITransport.CLI),
         OpenAIProvider(transport=AITransport.API),
     ]

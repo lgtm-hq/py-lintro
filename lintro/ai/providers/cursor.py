@@ -163,7 +163,7 @@ class CursorProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
         transport: AITransport = AITransport.CLI,
-        cursor_trust_workspace: bool = False,
+        cursor_trust_workspace: bool,
     ) -> None:
         """Initialize the Cursor provider.
 
@@ -173,13 +173,11 @@ class CursorProvider(BaseAIProvider):
             max_tokens: Default max tokens for provider configuration.
             base_url: Unused; kept for provider API parity.
             transport: AI transport mode (CLI only for Cursor).
-            cursor_trust_workspace: When True, pass ``--trust`` to the
-                ``agent`` CLI, granting Cursor workspace trust. Defaults to
-                False. Enabling it is a security risk: the provider is fed
-                untrusted, prompt-injectable content (``lintro review --pr N``
-                embeds diffs from arbitrary fork PRs), so combining workspace
-                trust with such input could let an injected diff drive an
-                agent operating with full workspace trust.
+            cursor_trust_workspace: Required. When True, pass ``--trust`` to
+                the ``agent`` CLI. The default lives on
+                :class:`~lintro.ai.config.AIConfig` (currently True); this
+                constructor does not invent a second one. Callers that
+                construct a provider directly must pass the value they want.
 
         Raises:
             AINotAvailableError: When transport is not CLI or the ``agent``
