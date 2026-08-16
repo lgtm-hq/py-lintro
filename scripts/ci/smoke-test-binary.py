@@ -49,11 +49,6 @@ REGISTERING_MODULES_NAME = "REGISTERING_TOOL_MODULES"
 LIST_TIMEOUT_SECONDS = 120
 CHECK_TIMEOUT_SECONDS = 300
 
-# Keys the live CLI JSON contract tests share so a payload-shape change
-# cannot pass PR CI and then fail this script (or the reverse).
-CHECK_JSON_RESULTS_KEY = "results"
-CHECK_JSON_TOOL_KEY = "tool"
-
 # Emitted by ``lintro/utils/tool_executor.py`` when the registry is empty. It
 # is a fast, readable signal rather than the guard of record: the positive
 # tool-execution evidence below is what fails closed if this wording changes.
@@ -330,14 +325,14 @@ def _tools_in_check_json(
     """
     if not isinstance(payload, dict):
         return []
-    results = payload.get(CHECK_JSON_RESULTS_KEY)
+    results = payload.get("results")
     if not isinstance(results, list):
         return []
     reported: set[str] = set()
     for entry in results:
         if not isinstance(entry, dict):
             continue
-        tool = entry.get(CHECK_JSON_TOOL_KEY)
+        tool = entry.get("tool")
         if not isinstance(tool, str) or not tool:
             continue
         reported.add(_normalized_tool_name(tool))
@@ -394,10 +389,8 @@ def check_reaches_execution(binary: Path, builtin_tools: list[str]) -> int:
         return _fail(f"check --output-format json emitted invalid JSON: {exc}")
     if not isinstance(payload, dict):
         return _fail("check --output-format json did not emit a JSON object")
-    if not isinstance(payload.get(CHECK_JSON_RESULTS_KEY), list):
-        return _fail(
-            f"check --output-format json has no {CHECK_JSON_RESULTS_KEY!r} array",
-        )
+    if not isinstance(payload.get("results"), list):
+        return _fail("check --output-format json has no 'results' array")
 
     reported = _tools_in_check_json(payload=payload, builtin_tools=builtin_tools)
     if not reported:

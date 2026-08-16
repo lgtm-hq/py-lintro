@@ -73,15 +73,17 @@ def clean_registry() -> Generator[None]:
     Yields:
         None: Saves and restores registry state.
     """
-    original_tools = dict(ToolRegistry._tools)
-    original_instances = dict(ToolRegistry._instances)
-    original_origins = dict(ToolRegistry._origins)
+    with ToolRegistry._lock:
+        original_tools = dict(ToolRegistry._tools)
+        original_instances = dict(ToolRegistry._instances)
+        original_origins = dict(ToolRegistry._origins)
     try:
         yield
     finally:
-        ToolRegistry._tools = original_tools
-        ToolRegistry._instances = original_instances
-        ToolRegistry._origins = original_origins
+        with ToolRegistry._lock:
+            ToolRegistry._tools = original_tools
+            ToolRegistry._instances = original_instances
+            ToolRegistry._origins = original_origins
 
 
 @pytest.fixture
@@ -93,16 +95,18 @@ def empty_registry() -> Generator[None]:
     Yields:
         None: Clears and restores registry state.
     """
-    original_tools = dict(ToolRegistry._tools)
-    original_instances = dict(ToolRegistry._instances)
-    original_origins = dict(ToolRegistry._origins)
+    with ToolRegistry._lock:
+        original_tools = dict(ToolRegistry._tools)
+        original_instances = dict(ToolRegistry._instances)
+        original_origins = dict(ToolRegistry._origins)
     ToolRegistry.clear()
     try:
         yield
     finally:
-        ToolRegistry._tools = original_tools
-        ToolRegistry._instances = original_instances
-        ToolRegistry._origins = original_origins
+        with ToolRegistry._lock:
+            ToolRegistry._tools = original_tools
+            ToolRegistry._instances = original_instances
+            ToolRegistry._origins = original_origins
 
 
 @pytest.fixture
