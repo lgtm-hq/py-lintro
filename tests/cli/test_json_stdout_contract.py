@@ -10,7 +10,7 @@ gate weeks later. These tests pin the same contract against the live CLI.
 from __future__ import annotations
 
 import json
-import shutil
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -19,18 +19,14 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
+from lintro.plugins._builtin_index import REGISTERING_TOOL_MODULES
 from lintro.plugins.discovery import discover_builtin_tools
 from lintro.plugins.registry import ToolRegistry
 
-# Tools that are registered builtins but are not installed by ``uv sync``.
-# Used to force the degraded (unavailable-tool) path without mocking.
-_UNAVAILABLE_TOOL_CANDIDATES: tuple[str, ...] = (
-    "hadolint",
-    "actionlint",
-    "gitleaks",
-    "taplo",
-    "shellcheck",
-)
+# Always-registered optional builtin used to force the degraded path. The
+# executable is hidden via an isolated PATH so the test does not depend on
+# whether ``install-tools.sh --local`` put the binary on the host.
+_UNAVAILABLE_TOOL = "hadolint"
 
 
 @pytest.fixture
@@ -43,23 +39,47 @@ def cli_runner() -> CliRunner:
     return CliRunner()
 
 
-def _ensure_builtin_origins() -> None:
-    """Restore builtin origin labels after cross-test registry pollution.
+@pytest.fixture(autouse=True)
+def isolated_registry() -> Generator[None]:
+    """Snapshot and restore the full registry, including origins.
 
-    Plugin unit tests call ``ToolRegistry.clear()`` and restore ``_tools`` /
-    ``_instances`` without ``_origins``. ``get_origin`` then returns
-    ``"unknown"``, which would make the smoke-gate builtin filter fail even
-    though the CLI still emitted a valid JSON document. Re-stamp missing
-    origins so this contract test matches a clean process.
+    Yields:
+        None: Registry snapshot for the test duration.
+    """
+    with ToolRegistry._lock:
+        original_tools = dict(ToolRegistry._tools)
+        original_instances = dict(ToolRegistry._instances)
+        original_origins = dict(ToolRegistry._origins)
+    try:
+        yield
+    finally:
+        with ToolRegistry._lock:
+            ToolRegistry._tools = original_tools
+            ToolRegistry._instances = original_instances
+            ToolRegistry._origins = original_origins
+
+
+def _require_discovered_builtin_origins() -> None:
+    """Discover builtins and fail if any registered tool lacks an origin.
+
+    Plugin fixtures that restore ``_tools`` / ``_instances`` without
+    ``_origins`` used to make ``get_origin`` return ``unknown``. Restamping
+    those as ``builtin`` would hide the same class of bug the smoke gate
+    counts. Fail instead so polluting fixtures stay visible.
 
     Returns:
         None.
     """
     discover_builtin_tools()
     with ToolRegistry._lock:
-        for name in ToolRegistry._tools:
-            if name not in ToolRegistry._origins:
-                ToolRegistry._origins[name] = ToolRegistry.BUILTIN_ORIGIN
+        missing = sorted(
+            name for name in ToolRegistry._tools if name not in ToolRegistry._origins
+        )
+    if missing:
+        pytest.fail(
+            "tool origins missing after discover_builtin_tools(); "
+            f"registry pollution left {missing} without origin",
+        )
 
 
 def _parse_stdout_json(result: Any) -> Any:
@@ -74,40 +94,70 @@ def _parse_stdout_json(result: Any) -> Any:
 
     Returns:
         The parsed JSON payload.
-
-    Raises:
-        json.JSONDecodeError: When stdout is not a single JSON document.
     """
     return json.loads(result.stdout)
+
+
+def _assert_tool_metadata_entries(tools: Any) -> None:
+    """Assert every list-tools value is a mapping with ``origin``.
+
+    Args:
+        tools: Parsed ``list-tools --json`` payload.
+
+    Returns:
+        None.
+    """
+    assert_that(tools).is_instance_of(dict)
+    assert_that(tools).is_not_empty()
+    for name, meta in tools.items():
+        assert_that(meta).described_as(f"metadata for {name}").is_instance_of(dict)
+        assert_that(meta).described_as(f"metadata for {name}").contains_key("origin")
+
+
+def _assert_result_entries(results: Any) -> None:
+    """Assert every check result is a mapping with ``tool``.
+
+    Args:
+        results: Parsed ``results`` array from ``check --output-format json``.
+
+    Returns:
+        None.
+    """
+    assert_that(results).is_instance_of(list)
+    assert_that(results).is_not_empty()
+    for entry in results:
+        assert_that(entry).is_instance_of(dict)
+        assert_that(entry).contains_key("tool")
 
 
 def test_list_tools_json_stdout_is_a_single_document(
     cli_runner: CliRunner,
 ) -> None:
-    """``list-tools --json`` stdout is one JSON object of tool metadata.
+    """``list-tools --json`` stdout is one JSON object of every builtin.
 
-    The smoke test consumes a non-empty dict whose values carry ``origin``
-    so it can count builtin tools.
+    The smoke test requires every ``REGISTERING_TOOL_MODULES`` name to
+    appear as ``origin==builtin``, not merely a non-empty builtin set.
 
     Args:
         cli_runner: Click test runner instance.
     """
-    _ensure_builtin_origins()
+    _require_discovered_builtin_origins()
     result = cli_runner.invoke(cli, ["list-tools", "--json"])
 
     assert_that(result.exit_code).is_equal_to(0)
     tools = _parse_stdout_json(result)
-    assert_that(tools).is_instance_of(dict)
-    assert_that(tools).is_not_empty()
-
-    builtins = [
-        name
-        for name, meta in tools.items()
-        if isinstance(meta, dict) and meta.get("origin") == "builtin"
-    ]
-    assert_that(builtins).is_not_empty()
+    _assert_tool_metadata_entries(tools)
     assert_that(tools).contains_key("ruff")
     assert_that(tools["ruff"]).contains_key("origin")
+
+    builtins = [name for name, meta in tools.items() if meta.get("origin") == "builtin"]
+    reported = {name.replace("-", "_") for name in builtins}
+    missing = [
+        name
+        for name in REGISTERING_TOOL_MODULES
+        if name.replace("-", "_") not in reported
+    ]
+    assert_that(missing).is_empty()
 
 
 def test_config_json_stdout_is_a_single_document(
@@ -143,15 +193,18 @@ def test_check_json_stdout_is_a_single_document(
 ) -> None:
     """``check --output-format json`` stdout is one JSON object with results.
 
-    The smoke test consumes ``results[].tool`` as evidence the registry
-    dispatched a builtin. A small fixture tree plus ``ruff`` (always
-    present in the test venv) is enough to pin that shape.
+    The smoke gate runs the default all-tools argv (300s timeout) on
+    ``sample.py`` + ``sample.yaml``. This test keeps ``--tools ruff`` because
+    ``pytest.ini`` caps each test at 120s; list-tools above pins builtin
+    completeness instead. A small fixture tree plus ``ruff`` (always present
+    in the test venv) is enough to pin the stdout shape.
 
     Args:
         cli_runner: Click test runner instance.
         tmp_path: Temporary directory for the fixture tree.
     """
     (tmp_path / "sample.py").write_text("x = 1\n")
+    (tmp_path / "sample.yaml").write_text("key: value\n")
 
     result = cli_runner.invoke(
         cli,
@@ -170,26 +223,31 @@ def test_check_json_stdout_is_a_single_document(
     assert_that(payload).is_instance_of(dict)
     assert_that(payload).contains_key("results")
     results = payload["results"]
-    assert_that(results).is_instance_of(list)
-    assert_that(results).is_not_empty()
-    tool_names = [entry.get("tool") for entry in results if isinstance(entry, dict)]
+    _assert_result_entries(results)
+    tool_names = [entry["tool"] for entry in results]
     assert_that(tool_names).contains("ruff")
 
 
 def test_check_json_unavailable_tool_keeps_stdout_pure(
     cli_runner: CliRunner,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unavailable-tool warnings go to stderr; stdout stays one JSON document.
+
+    PATH is isolated so ``hadolint`` is missing regardless of host installs.
+    The result object must name that tool the same way the smoke gate counts
+    ``results[].tool``.
 
     Args:
         cli_runner: Click test runner instance.
         tmp_path: Temporary directory for the fixture tree.
+        monkeypatch: Pytest monkeypatch fixture.
     """
     (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (tmp_path / "sample.py").write_text("x = 1\n")
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
 
-    tool = _first_unavailable_tool()
     result = cli_runner.invoke(
         cli,
         [
@@ -197,7 +255,7 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
             "--output-format",
             "json",
             "--tools",
-            tool,
+            _UNAVAILABLE_TOOL,
             str(tmp_path),
         ],
     )
@@ -206,26 +264,11 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
     payload = _parse_stdout_json(result)
     assert_that(payload).is_instance_of(dict)
     assert_that(payload).contains_key("results")
-    assert_that(result.stderr).is_not_empty()
-    stderr_text = result.stderr.lower()
-    assert_that(
-        "skip" in stderr_text or "not found" in stderr_text or "warning" in stderr_text,
-    ).is_true()
-
-
-def _first_unavailable_tool() -> str:
-    """Return a registered builtin whose executable is not on PATH.
-
-    Returns:
-        Tool name to pass to ``--tools``.
-
-    Raises:
-        pytest.fail: When every candidate binary is unexpectedly installed.
-    """
-    for name in _UNAVAILABLE_TOOL_CANDIDATES:
-        if shutil.which(name) is None:
-            return name
-    pytest.fail(
-        "expected at least one optional tool to be missing from PATH; "
-        f"found all of {_UNAVAILABLE_TOOL_CANDIDATES}",
-    )
+    results = payload["results"]
+    _assert_result_entries(results)
+    tool_names = [entry["tool"] for entry in results]
+    assert_that(tool_names).contains(_UNAVAILABLE_TOOL)
+    skipped = next(entry for entry in results if entry["tool"] == _UNAVAILABLE_TOOL)
+    assert_that(skipped.get("skipped")).is_true()
+    assert_that(skipped.get("skip_reason")).is_not_none()
+    assert_that(result.stderr.lower()).contains(_UNAVAILABLE_TOOL)
