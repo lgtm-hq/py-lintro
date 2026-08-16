@@ -158,6 +158,33 @@ def test_get_min_version_raises_keyerror_for_unknown_tool() -> None:
         get_min_version("nonexistent_tool")  # type: ignore[arg-type]
 
 
+def test_explicit_manifest_min_version_is_a_strict_floor() -> None:
+    """Manifest ``min_version`` stays below the recommended pin.
+
+    Renovate updates ``version`` only. An explicit ``min_version`` is the
+    parser-compatibility floor so a still-installed previous pin is not
+    skipped after a recommended bump.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    manifest = json.loads(
+        (repo_root / "lintro" / "tools" / "manifest.json").read_text()
+    )
+    explicit: list[dict[str, str]] = [
+        entry
+        for entry in manifest["tools"]
+        if isinstance(entry, dict) and entry.get("min_version")
+    ]
+    assert_that(explicit).is_not_empty()
+    for entry in explicit:
+        name = entry["name"]
+        recommended = entry["version"]
+        floor = entry["min_version"]
+        tool_name = normalize_tool_name(name)
+        assert_that(get_min_version(tool_name=tool_name)).is_equal_to(floor)
+        assert_that(get_tool_version(tool_name=tool_name)).is_equal_to(recommended)
+        assert_that(compare_versions(floor, recommended)).is_less_than(0)
+
+
 def test_get_tool_version_supports_companion_packages() -> None:
     """Companion npm packages should resolve via get_tool_version."""
     repo_root = Path(__file__).resolve().parents[3]
