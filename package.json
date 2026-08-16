@@ -34,7 +34,7 @@
   },
   "overrides": {
     "defu": "6.1.7",
-    "devalue": "5.8.2",
+    "devalue": "5.9.0",
     "esbuild": "^0.28.1",
     "fast-uri": "4.1.2",
     "js-yaml": "^4.3.1",
