@@ -230,6 +230,9 @@ jobs:
         # Repo-scoped installation token (#2050). Default current-repo scope —
         # do not pass `owner:` without `repositories:`. Only the review step
         # below sees `outputs.token`; inference credentials stay separate.
+        # Request only permissions the App installation grants. Asking for
+        # `permission-contents: read` 422s the whole mint when Contents is
+        # not on the install; compare then degrades instead of posting nothing.
         # yamllint disable-line rule:line-length
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -237,7 +240,6 @@ jobs:
           private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
           permission-issues: write
           permission-pull-requests: write
-          permission-contents: read
 
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
