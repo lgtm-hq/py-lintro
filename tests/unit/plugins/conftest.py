@@ -99,7 +99,7 @@ def empty_registry() -> Generator[None]:
         original_tools = dict(ToolRegistry._tools)
         original_instances = dict(ToolRegistry._instances)
         original_origins = dict(ToolRegistry._origins)
-    ToolRegistry.clear()
+        ToolRegistry.clear()
     try:
         yield
     finally:

@@ -29,6 +29,7 @@ from lintro.plugins.registry import ToolRegistry
 _UNAVAILABLE_TOOL = "hadolint"
 _CHECK_JSON_RESULTS_KEY = "results"
 _CHECK_JSON_TOOL_KEY = "tool"
+_TRACEBACK_MARKER = "Traceback (most recent call last)"
 
 
 @pytest.fixture
@@ -82,6 +83,63 @@ def _require_discovered_builtin_origins() -> None:
             "tool origins missing after discover_builtin_tools(); "
             f"registry pollution left {missing} without origin",
         )
+
+
+def _invoke_cli(cli_runner: CliRunner, args: list[str]) -> Any:
+    """Invoke the CLI the way the smoke gate fails closed on crashes.
+
+    ``CliRunner.invoke`` defaults to ``catch_exceptions=True``, which can
+    hide a post-JSON traceback the subprocess smoke script would reject.
+
+    Args:
+        cli_runner: Click test runner instance.
+        args: CLI arguments after the program name.
+
+    Returns:
+        The Click ``Result`` from the invocation.
+    """
+    result = cli_runner.invoke(cli, args, catch_exceptions=False)
+    combined = f"{result.output}\n{result.stderr}"
+    assert_that(combined).does_not_contain(_TRACEBACK_MARKER)
+    return result
+
+
+def _isolate_tool_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Hide host tool binaries so check results take the skip path.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory used as an empty PATH.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+
+
+def _simulate_release_smoke_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reproduce the Nuitka smoke runner: empty PATH, no ``python -m`` fallback.
+
+    Source-tree tests run inside a venv, so emptying PATH alone still lets
+    ``PythonBundledBuilder`` invoke ruff/black/mypy via ``sys.executable -m``.
+    The release binary skips that fallback; pretend we are compiled so the
+    default-argv contract sees the all-skip document the smoke gate parses.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory used as an empty PATH.
+
+    Returns:
+        None.
+    """
+    _isolate_tool_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "lintro.tools.core.command_builders.is_compiled_binary",
+        lambda: True,
+    )
 
 
 def _parse_stdout_json(result: Any) -> Any:
@@ -144,7 +202,7 @@ def test_list_tools_json_stdout_is_a_single_document(
         cli_runner: Click test runner instance.
     """
     _require_discovered_builtin_origins()
-    result = cli_runner.invoke(cli, ["list-tools", "--json"])
+    result = _invoke_cli(cli_runner, ["list-tools", "--json"])
 
     assert_that(result.exit_code).is_equal_to(0)
     tools = _parse_stdout_json(result)
@@ -173,7 +231,7 @@ def test_config_json_stdout_is_a_single_document(
     Args:
         cli_runner: Click test runner instance.
     """
-    result = cli_runner.invoke(cli, ["config", "--json"])
+    result = _invoke_cli(cli_runner, ["config", "--json"])
 
     assert_that(result.exit_code).is_equal_to(0)
     payload = _parse_stdout_json(result)
@@ -211,8 +269,8 @@ def test_check_json_stdout_is_a_single_document(
     (tmp_path / "sample.yaml").write_text("key: value\n")
     monkeypatch.chdir(tmp_path)
 
-    result = cli_runner.invoke(
-        cli,
+    result = _invoke_cli(
+        cli_runner,
         [
             "check",
             "--output-format",
@@ -242,8 +300,9 @@ def test_check_json_default_argv_stdout_is_a_single_document(
     """Default all-tools ``check`` argv matches the release smoke gate.
 
     Chdirs into the fixture tree so repo ``.lintro-config.yaml`` (and
-    ``auto_install_deps: true``) is not loaded. Timeout is 300s to match
-    ``CHECK_TIMEOUT_SECONDS`` in the smoke script.
+    ``auto_install_deps: true``) is not loaded. PATH is emptied so every
+    result is a skip — the environment the Nuitka smoke gate actually
+    consumes. Timeout is 300s to match ``CHECK_TIMEOUT_SECONDS``.
 
     Args:
         cli_runner: Click test runner instance.
@@ -253,8 +312,9 @@ def test_check_json_default_argv_stdout_is_a_single_document(
     (tmp_path / "sample.py").write_text("x = 1\n")
     (tmp_path / "sample.yaml").write_text("key: value\n")
     monkeypatch.chdir(tmp_path)
+    _simulate_release_smoke_environment(monkeypatch, tmp_path)
 
-    result = cli_runner.invoke(cli, ["check", "--output-format", "json", "."])
+    result = _invoke_cli(cli_runner, ["check", "--output-format", "json", "."])
 
     assert_that(result.exit_code).is_in(0, 1)
     payload = _parse_stdout_json(result)
@@ -262,7 +322,15 @@ def test_check_json_default_argv_stdout_is_a_single_document(
     assert_that(payload).contains_key(_CHECK_JSON_RESULTS_KEY)
     results = payload[_CHECK_JSON_RESULTS_KEY]
     _assert_result_entries(results)
-    reported = {str(entry[_CHECK_JSON_TOOL_KEY]).replace("-", "_") for entry in results}
+    by_tool = {str(entry[_CHECK_JSON_TOOL_KEY]): entry for entry in results}
+    # sample.py + sample.yaml would execute these if the venv/PATH tools
+    # were visible. They must take the skip path the smoke gate sees.
+    for name in ("ruff", "black", "bandit", "yamllint", "mypy"):
+        assert_that(by_tool).contains_key(name)
+        assert_that(by_tool[name].get("skipped")).described_as(
+            f"{name} should skip without PATH or python -m tools",
+        ).is_true()
+    reported = {name.replace("-", "_") for name in by_tool}
     expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
     assert_that(reported & expected).is_not_empty()
 
@@ -286,10 +354,10 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
     (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (tmp_path / "sample.py").write_text("x = 1\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    _isolate_tool_path(monkeypatch, tmp_path)
 
-    result = cli_runner.invoke(
-        cli,
+    result = _invoke_cli(
+        cli_runner,
         [
             "check",
             "--output-format",
