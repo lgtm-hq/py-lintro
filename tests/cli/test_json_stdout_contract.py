@@ -9,9 +9,11 @@ gate weeks later. These tests pin the same contract against the live CLI.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from collections.abc import Generator
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -23,10 +25,31 @@ from lintro.plugins._builtin_index import REGISTERING_TOOL_MODULES
 from lintro.plugins.discovery import discover_builtin_tools
 from lintro.plugins.registry import ToolRegistry
 
+_SMOKE_SCRIPT = (
+    Path(__file__).resolve().parents[2] / "scripts" / "ci" / "smoke-test-binary.py"
+)
+
 # Always-registered optional builtin used to force the degraded path. The
 # executable is hidden via an isolated PATH so the test does not depend on
 # whether ``install-tools.sh --local`` put the binary on the host.
 _UNAVAILABLE_TOOL = "hadolint"
+
+
+def _load_smoke_module() -> ModuleType:
+    """Load ``scripts/ci/smoke-test-binary.py`` for shared JSON keys.
+
+    Returns:
+        The smoke-test module.
+    """
+    spec = importlib.util.spec_from_file_location("smoke_test_binary", _SMOKE_SCRIPT)
+    if spec is None or spec.loader is None:
+        pytest.fail(f"could not load {_SMOKE_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_SMOKE = _load_smoke_module()
 
 
 @pytest.fixture
@@ -127,7 +150,7 @@ def _assert_result_entries(results: Any) -> None:
     assert_that(results).is_not_empty()
     for entry in results:
         assert_that(entry).is_instance_of(dict)
-        assert_that(entry).contains_key("tool")
+        assert_that(entry).contains_key(_SMOKE.CHECK_JSON_TOOL_KEY)
 
 
 def test_list_tools_json_stdout_is_a_single_document(
@@ -221,11 +244,48 @@ def test_check_json_stdout_is_a_single_document(
     assert_that(result.exit_code).is_in(0, 1)
     payload = _parse_stdout_json(result)
     assert_that(payload).is_instance_of(dict)
-    assert_that(payload).contains_key("results")
-    results = payload["results"]
+    assert_that(payload).contains_key(_SMOKE.CHECK_JSON_RESULTS_KEY)
+    results = payload[_SMOKE.CHECK_JSON_RESULTS_KEY]
     _assert_result_entries(results)
-    tool_names = [entry["tool"] for entry in results]
+    tool_names = [entry[_SMOKE.CHECK_JSON_TOOL_KEY] for entry in results]
     assert_that(tool_names).contains("ruff")
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(300)
+def test_check_json_default_argv_stdout_is_a_single_document(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default all-tools ``check`` argv matches the release smoke gate.
+
+    Chdirs into the fixture tree so repo ``.lintro-config.yaml`` (and
+    ``auto_install_deps: true``) is not loaded. Timeout is 300s to match
+    ``CHECK_TIMEOUT_SECONDS`` in the smoke script.
+
+    Args:
+        cli_runner: Click test runner instance.
+        tmp_path: Temporary directory for the fixture tree.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "sample.py").write_text("x = 1\n")
+    (tmp_path / "sample.yaml").write_text("key: value\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = cli_runner.invoke(cli, ["check", "--output-format", "json", "."])
+
+    assert_that(result.exit_code).is_in(0, 1)
+    payload = _parse_stdout_json(result)
+    assert_that(payload).is_instance_of(dict)
+    assert_that(payload).contains_key(_SMOKE.CHECK_JSON_RESULTS_KEY)
+    results = payload[_SMOKE.CHECK_JSON_RESULTS_KEY]
+    _assert_result_entries(results)
+    reported = _SMOKE._tools_in_check_json(
+        payload=payload,
+        builtin_tools=list(REGISTERING_TOOL_MODULES),
+    )
+    assert_that(reported).is_not_empty()
 
 
 def test_check_json_unavailable_tool_keeps_stdout_pure(
@@ -263,12 +323,13 @@ def test_check_json_unavailable_tool_keeps_stdout_pure(
     assert_that(result.exit_code).is_in(0, 1)
     payload = _parse_stdout_json(result)
     assert_that(payload).is_instance_of(dict)
-    assert_that(payload).contains_key("results")
-    results = payload["results"]
+    assert_that(payload).contains_key(_SMOKE.CHECK_JSON_RESULTS_KEY)
+    results = payload[_SMOKE.CHECK_JSON_RESULTS_KEY]
     _assert_result_entries(results)
-    tool_names = [entry["tool"] for entry in results]
+    tool_key = _SMOKE.CHECK_JSON_TOOL_KEY
+    tool_names = [entry[tool_key] for entry in results]
     assert_that(tool_names).contains(_UNAVAILABLE_TOOL)
-    skipped = next(entry for entry in results if entry["tool"] == _UNAVAILABLE_TOOL)
+    skipped = next(entry for entry in results if entry[tool_key] == _UNAVAILABLE_TOOL)
     assert_that(skipped.get("skipped")).is_true()
     assert_that(skipped.get("skip_reason")).is_not_none()
-    assert_that(result.stderr.lower()).contains(_UNAVAILABLE_TOOL)
+    assert_that(result.stderr.lower()).contains("skipping")
