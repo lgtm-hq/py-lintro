@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.1] - 2026-08-16
+
+### Fixed
+
+- **ci**: mint lintro-review token without contents:read (#2058) (a66976e)
+
 ## [0.118.0] - 2026-08-15
 
 ### Added
