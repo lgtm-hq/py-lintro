@@ -1880,7 +1880,7 @@ runtime. Branches 3 and 4 emit a one-time warning because they require network a
 the npm registry, and a failure on either path is reported with install guidance rather
 than html-validate's raw error.
 
-**Node runtime requirement:** the pinned html-validate (currently `11.5.6`) declares
+**Node runtime requirement:** the pinned html-validate (currently `11.6.0`) declares
 `engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
 reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
 21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.

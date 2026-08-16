@@ -71,7 +71,7 @@ RUN echo "Smoke-testing tool stack..." && \
     echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD /app/.venv/bin/python -m lintro --version || exit 1
+    CMD ["/app/.venv/bin/python", "-m", "lintro", "--version"]
 
 # Minimal non-root smoke: confirm the gosu privilege drop works and the tools
 # group can execute the permission-sensitive toolchains under /opt/bun and
@@ -129,7 +129,7 @@ RUN useradd -m lintro && \
     chown -R lintro:lintro /app /code
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD /app/.venv/bin/python -m lintro --version || exit 1
+    CMD ["/app/.venv/bin/python", "-m", "lintro", "--version"]
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
 # the UID/GID that owns the mounted /code volume and drop privileges to it via
