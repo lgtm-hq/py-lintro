@@ -29,4 +29,6 @@ fi
 echo "Serving dist with ASTRO_BASE=${ASTRO_BASE}"
 echo "Open: http://127.0.0.1:4321${ASTRO_BASE}"
 # Bind IPv4 explicitly — default astro preview may listen on ::1 only, breaking 127.0.0.1.
+# Astro 7.2 backgrounds preview in AI-agent environments; keep this wrapper attached.
+export ASTRO_PREVIEW_BACKGROUND="${ASTRO_PREVIEW_BACKGROUND:-0}"
 exec bunx astro preview --host 127.0.0.1 --port 4321 "$@"
