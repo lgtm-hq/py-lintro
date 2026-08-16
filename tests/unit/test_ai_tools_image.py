@@ -26,6 +26,9 @@ _ROOT_DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _INSTALLER = _REPO_ROOT / "scripts" / "utils" / "install-ai-tools.sh"
 _RENOVATE = _REPO_ROOT / "renovate.json"
 _WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
+_LINTRO_TOOLS_FROM = re.compile(
+    r"^FROM ghcr\.io/lgtm-hq/lintro-tools:latest@sha256:([a-f0-9]{64}) AS ",
+)
 
 # Cursor ships the agent CLI only as a tarball behind https://cursor.com/install
 # — no registry, no release feed, and no checksum sidecar — so there is nothing
@@ -80,6 +83,24 @@ def _from_line(*, stage: str) -> str:
     )
 
 
+def _lintro_tools_digest(*, dockerfile: Path) -> str:
+    """Return the digest-pinned lintro-tools FROM digest in *dockerfile*.
+
+    Args:
+        dockerfile: Dockerfile that must contain exactly one lintro-tools pin.
+
+    Returns:
+        The 64-character sha256 digest.
+    """
+    matches = [
+        match.group(1)
+        for line in _read(dockerfile).splitlines()
+        if (match := _LINTRO_TOOLS_FROM.match(line))
+    ]
+    assert_that(matches).is_length(1)
+    return matches[0]
+
+
 def _contract_binaries() -> list[str]:
     return sorted({contract.binary for contract in CLI_CONTRACTS.values()})
 
@@ -120,6 +141,19 @@ def test_ai_tools_image_builds_on_the_pinned_tools_base() -> None:
     assert_that(from_lines[0]).matches(
         r"^FROM ghcr\.io/lgtm-hq/lintro-tools:latest@sha256:[a-f0-9]{64} AS ",
     )
+
+
+def test_root_and_ai_tools_dockerfiles_pin_the_same_lintro_tools_digest() -> None:
+    """The app image and ai-tools base must consume the same tools layer.
+
+    After a manifest bump the drift gate on main has no ``--allow-version-lag``.
+    Pinning two different lintro-tools digests would rebuild one image on
+    current tools and leave the other on the pre-bump layer (#1858).
+    """
+    root_digest = _lintro_tools_digest(dockerfile=_ROOT_DOCKERFILE)
+    ai_digest = _lintro_tools_digest(dockerfile=_AI_TOOLS_DOCKERFILE)
+
+    assert_that(root_digest).is_equal_to(ai_digest)
 
 
 def test_ai_tools_dockerfile_passes_every_arg_to_the_installer() -> None:
