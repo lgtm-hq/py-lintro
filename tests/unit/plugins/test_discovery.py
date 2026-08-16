@@ -9,18 +9,26 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+import lintro.tools.definitions as definitions_package
+from lintro.plugins._builtin_index import (
+    BUILTIN_TOOL_MODULES,
+    REGISTERING_TOOL_MODULES,
+)
 from lintro.plugins.discovery import (
-    BUILTIN_DEFINITIONS_PATH,
+    BUILTIN_DEFINITIONS_PACKAGE,
     ENTRY_POINT_GROUP,
     ENV_ENABLE_EXTERNAL_PLUGINS,
     _load_external_entry_point,
+    _module_names_from_package_scan,
     discover_all_tools,
     discover_builtin_tools,
     discover_external_plugins,
+    get_builtin_module_names,
     get_known_plugin_tool_names,
     is_discovered,
     reset_discovery,
 )
+from lintro.plugins.registry import ToolRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -56,34 +64,68 @@ def test_discover_builtin_tools_loads_tools() -> None:
 
 def test_discover_builtin_tools_skips_private_modules() -> None:
     """Skip modules starting with underscore."""
-    # Verify __init__.py exists in the definitions path
-    init_file = BUILTIN_DEFINITIONS_PATH / "__init__.py"
-    assert_that(init_file.exists()).is_true()
-
-    # Get count of non-private .py files
-    non_private_files = [
-        f for f in BUILTIN_DEFINITIONS_PATH.glob("*.py") if not f.name.startswith("_")
-    ]
-    expected_count = len(non_private_files)
+    module_names = get_builtin_module_names()
+    assert_that([n for n in module_names if n.startswith("_")]).is_empty()
 
     result = discover_builtin_tools()
 
-    # Result should match non-private files, proving private files were skipped
-    assert_that(result).is_equal_to(expected_count)
+    assert_that(result).is_equal_to(len(module_names))
 
 
-def test_discover_builtin_tools_handles_missing_path(tmp_path: Path) -> None:
-    """Handle missing definitions path gracefully.
-
-    Args:
-        tmp_path: Temporary directory path for testing.
-    """
-    with patch(
-        "lintro.plugins.discovery.BUILTIN_DEFINITIONS_PATH",
-        tmp_path / "nonexistent",
+def test_discover_builtin_tools_without_known_modules() -> None:
+    """Report zero loaded tools when no builtin module names are known."""
+    with (
+        patch("lintro.plugins.discovery.BUILTIN_TOOL_MODULES", ()),
+        patch(
+            "lintro.plugins.discovery._module_names_from_package_scan",
+            return_value=set(),
+        ),
     ):
         result = discover_builtin_tools()
         assert_that(result).is_equal_to(0)
+
+
+def test_discover_builtin_tools_uses_index_without_source_dir() -> None:
+    """Import builtin modules from the index when the package has no path.
+
+    Mirrors a frozen Nuitka onefile binary, where the definitions source
+    directory is never materialized and the package scan yields nothing.
+    """
+    with patch(
+        "lintro.plugins.discovery._module_names_from_package_scan",
+        return_value=set(),
+    ):
+        result = discover_builtin_tools()
+
+    assert_that(result).is_equal_to(len(BUILTIN_TOOL_MODULES))
+    assert_that(result).is_greater_than(0)
+
+
+def test_module_names_from_package_scan_handles_unscannable_package() -> None:
+    """Return an empty set when the definitions package exposes no path."""
+    package = MagicMock()
+    package.__path__ = []
+    with patch("importlib.import_module", return_value=package):
+        assert_that(_module_names_from_package_scan()).is_empty()
+
+
+def test_module_names_from_package_scan_handles_import_error() -> None:
+    """Degrade to an empty set when the definitions package cannot import."""
+    with patch("importlib.import_module", side_effect=ImportError("boom")):
+        assert_that(_module_names_from_package_scan()).is_empty()
+
+
+def test_get_builtin_module_names_unions_index_and_scan() -> None:
+    """Combine the generated index with modules found by the package scan."""
+    with patch(
+        "lintro.plugins.discovery._module_names_from_package_scan",
+        return_value={"ruff", "not_yet_indexed"},
+    ):
+        names = get_builtin_module_names()
+
+    assert_that(names).contains("not_yet_indexed")
+    assert_that(names).contains(*BUILTIN_TOOL_MODULES)
+    assert_that(list(names)).is_equal_to(sorted(names))
 
 
 # =============================================================================
@@ -386,14 +428,14 @@ def test_reset_discovery_resets_discovery_state() -> None:
 # =============================================================================
 
 
-def test_builtin_definitions_path_exists() -> None:
-    """Builtin definitions path exists."""
-    assert_that(BUILTIN_DEFINITIONS_PATH.exists()).is_true()
+def test_builtin_definitions_package_matches_import_path() -> None:
+    """The configured definitions package matches the real package."""
+    assert_that(definitions_package.__name__).is_equal_to(BUILTIN_DEFINITIONS_PACKAGE)
 
 
-def test_builtin_definitions_path_is_directory() -> None:
-    """Builtin definitions path is a directory."""
-    assert_that(BUILTIN_DEFINITIONS_PATH.is_dir()).is_true()
+def test_builtin_index_is_non_empty() -> None:
+    """The generated builtin index lists tool modules."""
+    assert_that(list(BUILTIN_TOOL_MODULES)).is_not_empty()
 
 
 def test_entry_point_group_value() -> None:
@@ -578,3 +620,24 @@ def test_shadowed_plugin_gets_no_divergence_advice(
     assert_that(loaded).is_equal_to(0)
     assert_that(output).contains("avoid shadowing it")
     assert_that(output).does_not_contain("registers the tool under")
+
+
+def test_registering_index_matches_the_real_registry() -> None:
+    """The index's registering set is exactly the builtin registry.
+
+    The generator detects registering modules via AST (``@register_tool`` as a
+    Name or Attribute decorator). The binary smoke test treats that subset as
+    the expected builtin tool set, so both over-counting and under-counting
+    would make released binaries fail their own registry assertion — or worse,
+    silently shrink the assertion. Equality catches both directions.
+    """
+    discover_builtin_tools()
+
+    registered = {
+        name.replace("-", "_")
+        for name in ToolRegistry.get_names()
+        if ToolRegistry.get_origin(name) == ToolRegistry.BUILTIN_ORIGIN
+    }
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+
+    assert_that(sorted(registered)).is_equal_to(sorted(expected))

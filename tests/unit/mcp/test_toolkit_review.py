@@ -179,6 +179,11 @@ def _metadata(
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
         duration_seconds=12.5,
+        phase_timings={
+            "context_collection": 0.1,
+            "provider": 12.0,
+            "parse_merge": 0.4,
+        },
     )
 
 
@@ -429,6 +434,13 @@ def test_review_returns_findings_and_run_metadata(
     assert_that(run["model"]).is_equal_to("test-model")
     assert_that(run["cost_usd"]).is_equal_to(0.25)
     assert_that(run["duration_seconds"]).is_equal_to(12.5)
+    assert_that(run["phase_timings"]).is_equal_to(
+        {
+            "context_collection": 0.1,
+            "provider": 12.0,
+            "parse_merge": 0.4,
+        },
+    )
     assert_that(run["chunks"]).is_equal_to({"total": 2, "reviewed": 1})
     assert_that(run["partial"]).is_false()
     assert_that(payload["budget"]["exceeded"]).is_false()
@@ -449,6 +461,28 @@ def test_review_passes_depth_and_strictness_through(
     assert_that(result.isError).is_false()
     assert_that(calls[0]["depth"]).is_equal_to(3)
     assert_that(calls[0]["sensitivity"].strictness.value).is_equal_to("focused")
+
+
+def test_review_applies_the_resolved_transport_profile(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A CLI transport profile's timeout reaches the orchestrator config.
+
+    ``_execute_review`` is the only MCP path that resolves transport
+    profiles; if ``apply_resolved_transport`` is unwired, the orchestrator
+    would run a CLI review on the API-sized 60s default (#1923).
+    """
+    (repo / ".lintro-config.yaml").write_text(
+        _CONFIG + ("  transport: cli\n  transports:\n    cli:\n      timeout: 555.0\n"),
+        encoding="utf-8",
+    )
+    calls = stub_ai()
+
+    result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.isError).is_false()
+    assert_that(calls[0]["ai_config"].api_timeout).is_equal_to(555.0)
 
 
 def test_review_clamps_the_requested_budget_to_the_configured_ceiling(
@@ -575,6 +609,40 @@ def test_review_surfaces_a_provider_failure_with_its_taxonomy(
         "kind",
         "provider",
         "retryable",
+    )
+
+
+def test_review_maps_a_too_large_diff_to_invalid_input(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A diff-size refusal raised inside ``run_review`` is invalid input.
+
+    The CLI byte ceiling (#1967) raises ``ReviewContextError`` after context
+    collection; without the dedicated handler it would be misreported as a
+    provider/execution failure instead of a size refusal the caller can fix
+    with ``paths`` or the api transport.
+    """
+    from lintro.ai.review.enums.review_context_error_code import (
+        ReviewContextErrorCode,
+    )
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    stub_ai(
+        error=ReviewContextError(
+            "diff exceeds ai.cli_max_diff_bytes",
+            code=ReviewContextErrorCode.DIFF_TOO_LARGE,
+        ),
+    )
+
+    result, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.isError).is_true()
+    assert_that(payload["error"]["code"]).is_equal_to(
+        McpErrorCode.INVALID_INPUT.value,
+    )
+    assert_that(payload["error"]["detail"]["context_error"]).is_equal_to(
+        "diff-too-large",
     )
 
 

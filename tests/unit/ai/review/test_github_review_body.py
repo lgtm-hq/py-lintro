@@ -14,7 +14,6 @@ from lintro.ai.review.github_review_body import (
     REVIEW_BODY_FOOTER,
     build_review_body,
 )
-from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
@@ -26,7 +25,6 @@ def _body(
     result: ReviewResult,
     prior_state: ReviewState,
     head_sha: str = "fb740b2aaaa",
-    sticky_url: str = "",
     transport: str = "",
     auth_mode: str = "",
     config_source: str = "",
@@ -38,7 +36,6 @@ def _body(
         result: Review result under test.
         prior_state: State decoded before this round.
         head_sha: Head sha reviewed in this round.
-        sticky_url: URL of the sticky status comment.
         transport: Provider transport used for the round.
         auth_mode: Authentication mode used by the transport.
         config_source: Description of where the run's settings came from.
@@ -58,7 +55,6 @@ def _body(
         prior_state=prior_state,
         match=match,
         head_sha=head_sha,
-        sticky_url=sticky_url,
         transport=transport,
         auth_mode=auth_mode,
         config_source=config_source,
@@ -156,33 +152,30 @@ def test_header_names_the_reviewed_commit_range(
     assert_that(body).contains("commits `484f51c..fb740b2`")
 
 
-# --- fix prompt and the dedup rule -----------------------------------------
+# --- fix prompt -------------------------------------------------------------
 
 
-def test_prompt_panel_points_at_sticky_when_scopes_are_identical(
+def test_prompt_panel_renders_inline_when_scopes_are_identical(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Round 1 findings are all open findings, so the panel is not duplicated."""
-    body = _body(
-        result=sample_review_result,
-        prior_state=ReviewState(),
-        sticky_url="https://github.com/owner/name/pull/7#issuecomment-1",
-    )
-
-    assert_that(body).contains("⚡ Fix prompt: identical to the")
-    assert_that(body).contains("#issuecomment-1")
-    assert_that(body).does_not_contain("Fix prompt — this round's")
-    assert_that(body).does_not_contain("Show prompt")
-
-
-def test_pointer_renders_unlinked_when_the_sticky_id_is_unknown(
-    sample_review_result: ReviewResult,
-) -> None:
-    """A sticky created in this same run has no id yet; no dead link is emitted."""
+    """Round 1 findings are all open findings, and still get the full panel."""
     body = _body(result=sample_review_result, prior_state=ReviewState())
 
-    assert_that(body).contains("sticky comment's fix-all this round")
-    assert_that(body).does_not_contain("]()")
+    assert_that(body).contains("⚡ **Fix prompt — this round's 2 findings only**")
+    assert_that(body).contains("<details><summary>Show prompt</summary>")
+    assert_that(body).does_not_contain("identical to the")
+
+
+def test_prompt_panel_keeps_the_cross_round_sticky_footer(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The inline panel still points at the sticky's fix-all for all-open work."""
+    body = _body(result=sample_review_result, prior_state=ReviewState())
+
+    assert_that(body).contains(
+        "For everything still open across all rounds, use the sticky comment's "
+        "fix-all prompt",
+    )
 
 
 def test_prompt_panel_renders_when_older_findings_remain_open(
@@ -229,7 +222,7 @@ def test_prompt_panel_renders_when_older_findings_remain_open(
 def test_no_prompt_section_when_the_round_found_nothing(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A clean round has nothing to fix, so neither panel nor pointer appears."""
+    """A clean round has nothing to fix, so no prompt panel appears at all."""
     clean = replace(sample_review_result, findings=())
 
     body = _body(result=clean, prior_state=ReviewState())
@@ -254,11 +247,64 @@ def test_run_stats_are_visible_and_ordered(
 
     assert_that(body).contains("**📊 Run stats**")
     stats_index = body.index("**📊 Run stats**")
-    details_index = body.index("<details>")
-    assert_that(stats_index).is_less_than(details_index)
+    # Not hidden inside a collapsible: every <details> opened before the stats
+    # (the fix prompt's) is already closed by the time they render, and the
+    # commits collapsible only opens after them.
+    assert_that(body.count("<details>", 0, stats_index)).is_equal_to(
+        body.count("</details>", 0, stats_index),
+    )
+    assert_that(stats_index).is_less_than(body.index("<details><summary>📥 Commits"))
     assert_that(body).contains("| model | est. cost | tokens in | tokens out |")
     assert_that(body).contains("cli · subscription")
     assert_that(body).contains(f"| {lintro_version} |")
+
+
+def test_empty_transport_is_omitted_even_when_source_is_set(
+    sample_review_result: ReviewResult,
+) -> None:
+    """An empty transport stays omitted; a source suffix must not make it truthy.
+
+    ``format_sourced_value("", "config")`` is ``" (config)"``, which used to
+    pass ``if transport_label:`` and emit a blank transport cell (#1972).
+    """
+    sourced = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            transport_source="config",
+        ),
+    )
+
+    body = _body(
+        result=sourced,
+        prior_state=ReviewState(),
+        transport="",
+    )
+
+    assert_that(body).does_not_contain("| transport |")
+
+
+def test_run_stats_show_uncapped_max_cost_with_source(
+    sample_review_result: ReviewResult,
+) -> None:
+    """An uncapped overlay is visible on the PR comment stats row (#2024)."""
+    uncapped = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            max_cost_usd=None,
+            max_cost_usd_source="env",
+        ),
+    )
+
+    body = _body(
+        result=uncapped,
+        prior_state=ReviewState(),
+        transport="cli",
+    )
+
+    assert_that(body).contains("| transport | max cost |")
+    assert_that(body).contains("uncapped (env)")
 
 
 def test_estimated_token_counts_are_marked_approximate(
@@ -433,7 +479,11 @@ def test_long_file_lists_are_summarized_not_dumped(
 def test_body_truncation_leaves_a_visible_marker(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Oversized content is cut with a marker, never silently."""
+    """Oversized content is cut with a marker, never silently.
+
+    The prompt panel now renders on every round (#1956), so the size guard has
+    to hold on a round whose findings are exactly the PR's open set too.
+    """
     finding = sample_review_result.findings[0]
     bulk = tuple(
         replace(finding, title=f"Finding {index}", line=index + 1)
@@ -446,13 +496,10 @@ def test_body_truncation_leaves_a_visible_marker(
         round_number=1,
         head_sha="fb740b2aaa",
     )
-    # One extra still-open record makes this round a strict subset of the open
-    # set, so the full prompt panel renders instead of the sticky pointer.
-    carried = FindingRecord(fingerprint="carried", title="Older finding")
     body = build_review_body(
         result=result,
-        prior_state=_prior_state(rounds=1),
-        match=replace(match, records=(*match.records, carried)),
+        prior_state=ReviewState(),
+        match=match,
         head_sha="fb740b2aaa",
     )
 

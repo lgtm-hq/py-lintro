@@ -13,6 +13,15 @@ class AIError(LintroError):
     """Base exception for all AI-related errors."""
 
 
+class AIConfigOverrideError(AIError):
+    """An env-var or CLI-flag AI config override failed validation.
+
+    Raised at config resolution so a typo'd provider or transport never
+    silently falls through to the committed default. The message names the
+    variable or flag and the accepted values.
+    """
+
+
 class AICostBudgetExceededError(AIError):
     """The configured AI cost budget (``ai.max_cost_usd``) was reached.
 

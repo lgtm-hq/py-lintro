@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -170,18 +173,26 @@ def test_set_options_root_invalid_bool(astro_check_plugin: AstroCheckPlugin) -> 
 # Tests for _build_command method
 
 
-def test_build_command_basic(astro_check_plugin: AstroCheckPlugin) -> None:
+def test_build_command_basic(
+    astro_check_plugin: AstroCheckPlugin,
+    no_local_node_install: None,
+) -> None:
     """Build basic command with default options.
 
     Args:
         astro_check_plugin: The AstroCheckPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
     """
-    cmd = astro_check_plugin._build_command()
+    with patch("shutil.which", return_value="/usr/local/bin/astro"):
+        cmd = astro_check_plugin._build_command()
 
     # Should contain astro and check subcommand
     assert_that(cmd).contains("check")
-    # First element should be astro command (or bunx/npx wrapper)
-    assert_that(cmd[0]).is_in("astro", "bunx", "npx")
+    # First element is the PATH/runner-resolved astro binary or a bunx/npx
+    # wrapper — not a project-local node_modules path.
+    assert_that(Path(cmd[0]).name).is_in("astro", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
 
 
 def test_build_command_with_root(astro_check_plugin: AstroCheckPlugin) -> None:

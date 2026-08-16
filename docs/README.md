@@ -16,6 +16,8 @@ configuring, and contributing to Lintro.
 - **[Configuration Guide](configuration.md)** - Tool configuration and customization
 - **[AI Features](ai-features.md)** - AI-powered summaries, explanations, and fix
   suggestions
+- **[AI review transports](ai-review-transports.md)** - API vs CLI profiles,
+  credentials, timeouts, and cost provenance
 - **[MCP Server](mcp.md)** - Optional stdio MCP server for agent hosts
 - **[Docker Usage](docker.md)** - Using Lintro with Docker
 

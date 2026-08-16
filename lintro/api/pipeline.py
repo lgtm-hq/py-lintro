@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import click
+
 from lintro.utils.execution.run_renderer import (
     make_result_display,
     render_needs_ai_enrichment,
@@ -52,18 +54,25 @@ def _ai_status_lines(ctx: RunContext) -> list[str] | None:
     Returns:
         list[str] | None: Rich-markup lines for the summary's AI row, or
         ``None`` when no summary will be shown.
+
+    Raises:
+        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
     """
     if ctx.clean_stdout_output or ctx.score_only:
         return None
 
+    from lintro.ai.exceptions import AIConfigOverrideError
     from lintro.ai.interface import render_ai_status
     from lintro.utils.environment import detect_ci_environment
 
     ci_env = detect_ci_environment()
-    return render_ai_status(
-        ai_config=getattr(ctx.lintro_config, "ai", None),
-        is_ci=ci_env is not None and ci_env.is_ci,
-    )
+    try:
+        return render_ai_status(
+            ai_config=getattr(ctx.lintro_config, "ai", None),
+            is_ci=ci_env is not None and ci_env.is_ci,
+        )
+    except AIConfigOverrideError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 def _sarif_enrichment(
@@ -211,6 +220,9 @@ def run_lint_artifact(
     Returns:
         RunArtifact: The rendered run's results, totals, health score, and
         exit code.
+
+    Raises:
+        click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
     """
     del stream, no_log  # accepted for signature stability; not yet implemented
 
@@ -250,16 +262,20 @@ def run_lint_artifact(
     )
 
     if ai_enabled:
+        from lintro.ai.exceptions import AIConfigOverrideError
         from lintro.ai.interface import enhance_artifact
 
-        artifact = enhance_artifact(
-            artifact,
-            ctx=ctx,
-            output_format=output_format,
-            ai_fix=ai_fix,
-            transport=transport,
-            fail_under=fail_under,
-        )
+        try:
+            artifact = enhance_artifact(
+                artifact,
+                ctx=ctx,
+                output_format=output_format,
+                ai_fix=ai_fix,
+                transport=transport,
+                fail_under=fail_under,
+            )
+        except AIConfigOverrideError as exc:
+            raise click.UsageError(str(exc)) from exc
 
     render_run(
         artifact,

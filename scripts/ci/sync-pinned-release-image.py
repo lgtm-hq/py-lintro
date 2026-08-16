@@ -32,9 +32,19 @@ Digests are resolved through the GitHub Packages API on ``api.github.com``
 rather than the registry: the Version-PR job's egress allowlist permits the
 former and not ``ghcr.io``. Standard library only, for the same reason.
 
+**Known gap — the release path currently reaches this with no token.** The
+upstream ``reusable-release-version-pr.yml`` step that runs the repo's
+version-update script passes only ``NEXT_VERSION``/``SCRIPT_PATH``, so this
+warns ``no GH_TOKEN/GITHUB_TOKEN in environment`` and no-ops on every release
+(lgtm-hq/lgtm-ci#849). The pin therefore froze at 0.94.3 and the nightly
+digest-lag gate failed once a manifest tool version moved (#1787). Until that
+lands upstream, the pin must be refreshed by running this script manually with
+``GH_TOKEN`` set. CI reaches it by import (``finalize-version-pr.py``), so the
+command line above is a local path and uses ``uv`` per the repo standard.
+
 Usage:
-    python3 scripts/ci/sync-pinned-release-image.py
-    python3 scripts/ci/sync-pinned-release-image.py --dry-run
+    uv run python scripts/ci/sync-pinned-release-image.py
+    uv run python scripts/ci/sync-pinned-release-image.py --dry-run
 """
 
 from __future__ import annotations
@@ -82,6 +92,20 @@ def _warn(message: str) -> None:
         message: Human-readable explanation of what was skipped and why.
     """
     print(f"::warning::sync-pinned-release-image: {message}", file=sys.stderr)
+
+
+def _error(message: str) -> None:
+    """Emit a GitHub Actions error annotation without failing the caller.
+
+    Reserved for misconfiguration — a missing credential is a permanent skip
+    on every release, not the transient network hiccup ``_warn`` covers, so it
+    is surfaced at error level. The exit code stays 0 by design: the release
+    PR must not be blocked by the pin sync (lgtm-hq/lgtm-ci#849, #1787).
+
+    Args:
+        message: Human-readable explanation of what was skipped and why.
+    """
+    print(f"::error::sync-pinned-release-image: {message}", file=sys.stderr)
 
 
 def _version_key(version: str) -> tuple[int, ...]:
@@ -279,7 +303,12 @@ def main(argv: list[str] | None = None) -> int:
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
     if not token:
-        _warn("no GH_TOKEN/GITHUB_TOKEN in environment; pin unchanged")
+        _error(
+            "no GH_TOKEN/GITHUB_TOKEN in environment; pin unchanged. This is a "
+            "permanent skip, not a transient failure — see lgtm-hq/lgtm-ci#849. "
+            "Refresh manually: GH_TOKEN=... uv run python "
+            "scripts/ci/sync-pinned-release-image.py",
+        )
         return 0
 
     resolved = latest_published_release(_fetch_package_versions(token))

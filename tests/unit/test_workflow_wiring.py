@@ -1855,6 +1855,68 @@ def test_build_binary_job_timeout_leaves_diagnostic_headroom() -> None:
         assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
 
 
+def test_build_binary_job_timeout_covers_compile_and_smoke() -> None:
+    """The job deadline must cover compile + smoke + diagnostic headroom.
+
+    The smoke-test step can use 20 minutes on its own. A 35-minute job with a
+    25-minute compile bound can cancel a valid smoke test before that step's
+    own timeout fires.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        job = workflow["jobs"][job_id]
+        steps = job["steps"]
+        compile_timeout = next(
+            step["timeout-minutes"]
+            for step in steps
+            if step.get("name") == "Build binary"
+        )
+        smoke_timeout = next(
+            step["timeout-minutes"]
+            for step in steps
+            if step.get("name") == "Smoke-test tool registry"
+        )
+        headroom = job["timeout-minutes"] - compile_timeout - smoke_timeout
+        assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
+
+
+def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
+    """The universal macOS binary is smoke-tested after lipo, not only per-arch.
+
+    Lipo can produce a binary that will not launch even when both inputs
+    passed the per-arch smoke test. The post-lipo artifact must be exercised
+    independently, with the same script, timeout, and checkout coverage the
+    per-arch jobs use.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    job = workflow["jobs"]["create-universal-binary"]
+    steps = job["steps"]
+    by_name = {step.get("name"): step for step in steps}
+
+    smoke = by_name["Smoke-test tool registry"]
+    assert_that(smoke["timeout-minutes"]).is_equal_to(20)
+    assert_that(smoke["run"]).is_equal_to(
+        "python3 scripts/ci/smoke-test-binary.py binaries/lintro-macos-universal",
+    )
+
+    names = [step.get("name") for step in steps]
+    assert_that(names.index("Create universal binary")).is_less_than(
+        names.index("Smoke-test tool registry"),
+    )
+    assert_that(names.index("Smoke-test tool registry")).is_less_than(
+        names.index("Upload universal artifact"),
+    )
+
+    checkout = by_name["Checkout scripts"]
+    sparse = checkout["with"]["sparse-checkout"]
+    assert_that(sparse).contains("scripts")
+    assert_that(sparse).contains("lintro/plugins")
+
+    assert_that(
+        job["timeout-minutes"] - smoke["timeout-minutes"],
+    ).is_greater_than_or_equal_to(10)
+
+
 def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
     """Build binary is bracketed by the #1707 sampler with failure-only upload.
 
@@ -2573,6 +2635,64 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
     )
     # A bare timeout string is too broad to auto-rerun on.
     assert_that(signatures).does_not_contain("context deadline exceeded")
+
+
+# --- AI CLI contract Tier 1 required-check safety (#1119 / #1609) -----------
+#
+# Epic #1609 shipped the free flag-surface check with the intent that it becomes
+# a required gate. Requiring the context before ``merge_group:`` exists arms the
+# #1196 absent-required-check merge-queue trap. These constants and the test
+# below pin the Tier 1 job to the same always-report shape as the dependency
+# vulnerability gate.
+
+_AI_CONTRACT_WORKFLOW = "ai-contract-tests.yml"
+_AI_CONTRACT_TIER1_JOB = "tier1-flag-surface"
+_AI_CONTRACT_TIER1_CONTEXT = "🧾 AI CLI Flag Surface (Tier 1)"
+
+
+def _ai_contract_tier1_job() -> dict[str, Any]:
+    """Return the Tier 1 AI CLI flag-surface job definition.
+
+    Returns:
+        The ``tier1-flag-surface`` job mapping.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_AI_CONTRACT_TIER1_JOB])
+
+
+def test_ai_contract_tier1_is_required_check_safe() -> None:
+    """Tier 1 must always report its context (#1119 / #1196).
+
+    A ``paths:`` filter, or a job-level ``if:``, would stop the context from
+    ever being created — which deadlocks the merge queue the moment the
+    context is added to the ``checks-py-lintro`` ruleset. Tier 1 is cheap
+    enough to run unconditionally (help probes only), so it stays a plain job
+    with no path filter and no job-level ``if:``.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key(_GITHUB_PULL_REQUEST_EVENT)
+    assert_that(triggers).contains_key("merge_group")
+    for event in (_GITHUB_PULL_REQUEST_EVENT, "merge_group"):
+        assert_that(triggers[event] or {}).does_not_contain_key("paths")
+        assert_that(triggers[event] or {}).does_not_contain_key("paths-ignore")
+    assert_that(triggers["merge_group"]["types"]).contains("checks_requested")
+
+    job = _ai_contract_tier1_job()
+    assert_that(job["name"]).is_equal_to(_AI_CONTRACT_TIER1_CONTEXT)
+    assert_that(job).does_not_contain_key("if")
+    # A skipped reusable *caller* collapses its nested contexts, so the gate
+    # must stay a plain job that always reports its own check run.
+    assert_that(job).does_not_contain_key("uses")
+    assert_that(job).contains_key("runs-on")
+
+    # The README's admin PUT recipe is the third copy of the context string;
+    # pin it to the constant so a job rename cannot leave the recipe stale.
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    assert_that(readme).contains(_AI_CONTRACT_TIER1_CONTEXT)
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

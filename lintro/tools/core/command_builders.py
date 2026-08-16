@@ -457,6 +457,12 @@ def find_local_node_binary(
     the project's own install. A local install is lockfile-tracked, so it is
     preferred over any registry fetch.
 
+    The walk stops at the nearest ancestor that contains ``package.json`` or
+    ``.git`` (a file or directory). That marker directory is still searched;
+    directories above it are not, so a decoy ``node_modules`` outside the
+    project — or a monorepo root above a nested package with its own
+    ``package.json`` — cannot win.
+
     On Windows the package manager writes a ``.cmd`` shim; the extension-less
     shim there is a shell script that cannot be executed with ``shell=False``.
 
@@ -474,6 +480,8 @@ def find_local_node_binary(
         candidate = directory / "node_modules" / ".bin" / name
         if candidate.is_file():
             return candidate.as_posix()
+        if (directory / "package.json").is_file() or (directory / ".git").exists():
+            break
     return None
 
 
@@ -499,19 +507,53 @@ def pinned_npm_spec(package_name: str) -> str:
 
 @register_command_builder
 class NodeJSBuilder(CommandBuilder):
-    """Builder for Node.js tools (Astro, Markdownlint, TypeScript, Vue-tsc).
+    """Builder for every Node.js tool Lintro can run.
 
-    Uses bunx to run Node.js tools when available, falling back to
-    direct tool invocation if bunx is not found.
+    **Resolution mode: one chain for all Node tools** (#1811). Each tool is
+    resolved as ``node_modules/.bin`` (walked upward from the execution
+    directory) → binary on ``PATH`` → package runner carrying an explicit
+    version pin → bare binary name.
+
+    The chain used to be opt-in via a ``pinned_tools`` set that contained only
+    ``html-validate``; every other Node tool went straight to
+    ``bunx <binary>``/``npx <binary>``. That is now the default, because the
+    per-tool rationale is identical for all of them:
+
+    - **A project-local install wins.** Node is the one ecosystem Lintro
+      supports that has a standard project-local install location, and it is
+      lockfile-pinned. A checked project that declares the tool as a
+      devDependency has already answered "which version should run"; nothing
+      Lintro knows beats that. Resolution is anchored on the execution
+      directory rather than Lintro's own cwd (#1727).
+    - **Then ``PATH``.** A global install (``bun add -g``, ``npm install -g``)
+      or a Homebrew formula is a deliberate user choice and is reproducible
+      offline. Bare ``bunx``/``npx`` never consults ``PATH``, so on any machine
+      with ``bun`` or ``npm`` those installs were previously unreachable.
+    - **Then a version-pinned runner, never ``@latest``.** Without the pin the
+      package manager resolves ``@latest`` on every run, so a broken upstream
+      release takes down every consumer at once with nothing to roll back to.
+      This branch also needs registry access and imposes the pinned package's
+      own ``engines`` floor on the consumer, so it announces itself (#1767).
+
+    No Node tool is exempt. The chain degrades to exactly the old behaviour
+    (``bunx``/``npx``) whenever there is no local and no ``PATH`` install, so
+    keeping a tool off it could only ever mean "prefer a less specific answer",
+    which no tool wants. That also makes ``verify_tool_version`` — which
+    resolves through this registry — check the binary the run will actually
+    use, for every tool rather than just for ``html-validate``.
     """
 
     _package_names: dict[ToolName, str] | None = None
     _binary_names: dict[ToolName, str] | None = None
-    _pinned_tools: frozenset[ToolName] | None = None
 
     @property
     def package_names(self) -> dict[ToolName, str]:
         """Get mapping of tools to npm package names.
+
+        These are the names published to the npm registry, so they must match
+        ``lintro/_tool_packages.py`` and ``package.json`` exactly: the registry
+        fallback installs this name at the pinned version, and
+        :func:`pinned_npm_spec` looks the pin up by it.
 
         Returns:
             Dictionary mapping ToolName to npm package name.
@@ -521,11 +563,12 @@ class NodeJSBuilder(CommandBuilder):
 
             self._package_names = {
                 ToolName.ASTRO_CHECK: "astro",
-                ToolName.COMMITLINT: "commitlint",
+                ToolName.COMMITLINT: "@commitlint/cli",
                 ToolName.HTML_VALIDATE: "html-validate",
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
+                ToolName.PRETTIER: "prettier",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
@@ -547,28 +590,12 @@ class NodeJSBuilder(CommandBuilder):
             from lintro.enums.tool_name import ToolName
 
             self._binary_names = {
-                ToolName.TSC: "tsc",  # Package is "typescript", binary is "tsc"
+                # Package is "typescript", binary is "tsc"
+                ToolName.TSC: "tsc",
+                # Package is "@commitlint/cli", binary is "commitlint"
+                ToolName.COMMITLINT: "commitlint",
             }
         return self._binary_names
-
-    @property
-    def pinned_tools(self) -> frozenset[ToolName]:
-        """Get tools whose registry fallback must be version-pinned.
-
-        For these tools a consumer-local install is preferred, then a binary
-        on PATH, and only then a ``bunx``/``npx`` invocation carrying an
-        explicit version. Without the pin the package manager resolves
-        ``@latest`` on every run, so a broken upstream release takes down
-        every consumer at once with nothing to roll back to.
-
-        Returns:
-            Frozen set of ToolName members that require a pinned spec.
-        """
-        if self._pinned_tools is None:
-            from lintro.enums.tool_name import ToolName
-
-            self._pinned_tools = frozenset({ToolName.HTML_VALIDATE})
-        return self._pinned_tools
 
     def can_handle(self, tool_name_enum: ToolName | None) -> bool:
         """Check if this builder handles the tool.
@@ -593,6 +620,22 @@ class NodeJSBuilder(CommandBuilder):
         it is the fragile path: it needs registry access and imposes the pinned
         package's own ``engines`` floor on the consumer's runtime (#1767).
 
+        When the executable name differs from the package name (``tsc`` in
+        ``typescript``, ``commitlint`` in ``@commitlint/cli``) the runner is
+        given both via ``--package``; bare ``bunx typescript`` would look for a
+        ``typescript`` executable that does not exist. ``npx`` always uses
+        ``--yes --package spec binary`` so a CI/non-TTY run cannot hang on an
+        install prompt, even when the names match. ``bunx`` keeps the shorter
+        ``[bunx, spec]`` form when they match.
+
+        ``--package`` (``-p``) is assumed present on both runners. Verified
+        against bun 1.3.14 (``bunx --help`` documents ``-p, --package <package>``
+        as "Specify package to install when binary name differs from package
+        name") and npm 11, where ``npx --package`` predates npm 7. The repo pins
+        no minimum bun version, so if a very old bun ever needs supporting, this
+        is the branch to revisit — it degrades to a runner error, not a silently
+        wrong binary.
+
         Args:
             binary_name: Executable name (``node_modules/.bin`` entry).
             package_name: npm package name used for the registry fallback.
@@ -607,14 +650,21 @@ class NodeJSBuilder(CommandBuilder):
             logger.debug(f"Using project-local {binary_name}: {local}")
             return [local]
 
-        if shutil.which(binary_name):
-            logger.debug(f"Using {binary_name} from PATH")
-            return [binary_name]
+        tool_path = shutil.which(binary_name)
+        if tool_path:
+            posix_path = Path(tool_path).as_posix().replace("\\", "/")
+            logger.debug(f"Using {binary_name} from PATH: {posix_path}")
+            return [posix_path]
 
         spec = pinned_npm_spec(package_name)
         for runner in ("bunx", "npx"):
             if shutil.which(runner):
-                command = [runner, spec]
+                if runner == "npx":
+                    command = ["npx", "--yes", "--package", spec, binary_name]
+                elif package_name == binary_name:
+                    command = [runner, spec]
+                else:
+                    command = [runner, "--package", spec, binary_name]
                 notify_registry_fallback_selected(command)
                 return command
         return [binary_name]
@@ -639,7 +689,8 @@ class NodeJSBuilder(CommandBuilder):
                 use the process working directory.
 
         Returns:
-            Command list to execute the tool via bunx/npx or directly.
+            Command list to execute the tool locally, from PATH, or via a
+            version-pinned bunx/npx invocation.
         """
         if tool_name_enum is None:
             return [tool_name]
@@ -650,20 +701,13 @@ class NodeJSBuilder(CommandBuilder):
             self.package_names.get(tool_name_enum, tool_name),
         )
 
-        # Pinned tools never resolve @latest: local install -> PATH -> pinned spec
-        if tool_name_enum in self.pinned_tools:
-            return self._get_pinned_command(
-                binary_name=binary_name,
-                package_name=self.package_names.get(tool_name_enum, tool_name),
-                start=start,
-            )
-
-        # Prefer bunx (bun), fall back to npx (npm), then direct tool invocation
-        if shutil.which("bunx"):
-            return ["bunx", binary_name]
-        if shutil.which("npx"):
-            return ["npx", binary_name]
-        return [binary_name]
+        # Every Node tool uses the same chain and never resolves @latest:
+        # project-local install -> PATH -> pinned spec (#1811).
+        return self._get_pinned_command(
+            binary_name=binary_name,
+            package_name=self.package_names.get(tool_name_enum, tool_name),
+            start=start,
+        )
 
     def get_command(
         self,

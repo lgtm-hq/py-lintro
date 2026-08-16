@@ -8,6 +8,7 @@ from rich.text import Text
 
 from lintro.ai.cost import format_cost
 from lintro.ai.display.shared import cost_str, print_section_header
+from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.checklist_display import (
     cleared_answers,
     orphan_concerns,
@@ -46,12 +47,28 @@ def render_review_terminal(
     metadata = result.metadata
     prompt_questions = question_map or {}
 
+    transport_label = format_sourced_value(
+        metadata.transport or "unset",
+        metadata.transport_source,
+    )
+    max_cost_parts = ""
+    if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
+        cap_label = format_max_cost_label(
+            max_cost_usd=metadata.max_cost_usd,
+            source=metadata.max_cost_usd_source,
+        )
+        max_cost_parts = f" | Max cost: {cap_label}"
     header_detail = (
-        f"Model: {metadata.model} | Context: {metadata.context_window:,} | "
+        f"Model: {format_sourced_value(metadata.model, metadata.model_source)} | "
+        f"Provider: "
+        f"{format_sourced_value(metadata.provider, metadata.provider_source)} | "
+        f"Transport: {transport_label} | "
+        f"Context: {metadata.context_window:,} | "
         f"Depth: {metadata.depth} | Strictness: {metadata.strictness} | Chunks: "
         f"{metadata.chunks_current}/{metadata.chunks_total} | "
         f"Files: {metadata.files_reviewed}/{metadata.files_total} | "
         f"Structured checks: {metadata.checklist_items}"
+        f"{max_cost_parts}"
     )
     token_info = cost_str(
         metadata.token_usage.get("prompt", 0),

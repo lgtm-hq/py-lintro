@@ -351,6 +351,14 @@ class AnthropicProvider(BaseAIProvider):
         with self._session_lock:
             self._session_id = None
 
+    async def aclose(self) -> None:
+        """Close the Anthropic SDK client and any superseded loop-stale clients.
+
+        Idempotent. CLI transport holds no poolable HTTP client; this still
+        clears any API-transport client created earlier on this instance.
+        """
+        await super().aclose()
+
     async def _complete_cli(
         self,
         prompt: str,
@@ -371,11 +379,13 @@ class AnthropicProvider(BaseAIProvider):
         # sent when the binary can reach an API key. Forcing it locked every
         # subscription-authenticated user out of this transport (#1838).
         bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
+        # Prompt rides on stdin (#1967): a single argv element on Linux is
+        # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not
+        # be passed as the ``-p``/``--print`` value.
         cmd = [
             self._cli._binary_path,
             *(("--bare",) if bare else ()),
-            "-p",
-            prompt,
+            "--print",
             "--output-format",
             "json",
             "--permission-mode",
@@ -415,6 +425,7 @@ class AnthropicProvider(BaseAIProvider):
         result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
+            input_text=prompt,
             timeout=timeout,
             cwd=working_dir,
         )

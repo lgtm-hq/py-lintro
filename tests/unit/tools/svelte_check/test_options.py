@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -209,21 +212,29 @@ def test_set_options_tsconfig_invalid_type(
 # Tests for _build_command method
 
 
-def test_build_command_basic(svelte_check_plugin: SvelteCheckPlugin) -> None:
+def test_build_command_basic(
+    svelte_check_plugin: SvelteCheckPlugin,
+    no_local_node_install: None,
+) -> None:
     """Build basic command with default options.
 
     Args:
         svelte_check_plugin: The SvelteCheckPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
     """
-    cmd = svelte_check_plugin._build_command()
+    with patch("shutil.which", return_value="/usr/local/bin/svelte-check"):
+        cmd = svelte_check_plugin._build_command()
 
     # Should contain machine-verbose output format
     assert_that(cmd).contains("--output")
     assert_that(cmd).contains("machine-verbose")
-    # First element should be svelte-check command (or bunx/npx wrapper)
-    assert_that(cmd[0]).is_in("svelte-check", "bunx", "npx")
-    # svelte-check must appear somewhere in the command
-    assert_that(cmd).contains("svelte-check")
+    # First element is the PATH/runner-resolved svelte-check binary or a bunx/npx
+    # wrapper — not a project-local node_modules path.
+    assert_that(Path(cmd[0]).name).is_in("svelte-check", "bunx", "npx")
+    assert_that(Path(cmd[0]).parts).does_not_contain("node_modules")
+    # The svelte-check package must be named somewhere in the command
+    assert_that(" ".join(cmd)).contains("svelte-check")
 
 
 def test_build_command_with_threshold(

@@ -208,26 +208,36 @@ def test_set_options_invalid_type(
 # =============================================================================
 
 
-def test_get_tsc_command_with_tsc_available(tsc_plugin: TscPlugin) -> None:
+def test_get_tsc_command_with_tsc_available(
+    tsc_plugin: TscPlugin,
+    no_local_node_install: None,
+) -> None:
     """Return direct tsc command when available.
 
     Args:
         tsc_plugin: The TscPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
     with patch("shutil.which", return_value="/usr/bin/tsc"):
         cmd = tsc_plugin._get_tsc_command()
 
-    assert_that(cmd).is_equal_to(["tsc"])
+    assert_that(cmd).is_equal_to(["/usr/bin/tsc"])
 
 
-def test_get_tsc_command_with_bunx_fallback(tsc_plugin: TscPlugin) -> None:
+def test_get_tsc_command_with_bunx_fallback(
+    tsc_plugin: TscPlugin,
+    no_local_node_install: None,
+) -> None:
     """Fall back to bunx when tsc not directly available.
 
     Args:
         tsc_plugin: The TscPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
 
-    def which_side_effect(cmd: str) -> str | None:
+    def which_side_effect(cmd: str, **_kwargs: object) -> str | None:
         if cmd == "tsc":
             return None
         if cmd == "bunx":
@@ -237,17 +247,26 @@ def test_get_tsc_command_with_bunx_fallback(tsc_plugin: TscPlugin) -> None:
     with patch("shutil.which", side_effect=which_side_effect):
         cmd = tsc_plugin._get_tsc_command()
 
-    assert_that(cmd).is_equal_to(["bunx", "tsc"])
+    # tsc ships inside the ``typescript`` package, so the runner needs
+    # ``--package`` to find the executable (#1811).
+    assert_that(cmd[:2]).is_equal_to(["bunx", "--package"])
+    assert_that(cmd[2]).starts_with("typescript@")
+    assert_that(cmd[3]).is_equal_to("tsc")
 
 
-def test_get_tsc_command_with_npx_fallback(tsc_plugin: TscPlugin) -> None:
+def test_get_tsc_command_with_npx_fallback(
+    tsc_plugin: TscPlugin,
+    no_local_node_install: None,
+) -> None:
     """Fall back to npx when tsc and bunx not available.
 
     Args:
         tsc_plugin: The TscPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
 
-    def which_side_effect(cmd: str) -> str | None:
+    def which_side_effect(cmd: str, **_kwargs: object) -> str | None:
         if cmd == "npx":
             return "/usr/bin/npx"
         return None
@@ -255,14 +274,24 @@ def test_get_tsc_command_with_npx_fallback(tsc_plugin: TscPlugin) -> None:
     with patch("shutil.which", side_effect=which_side_effect):
         cmd = tsc_plugin._get_tsc_command()
 
-    assert_that(cmd).is_equal_to(["npx", "tsc"])
+    # tsc ships inside the ``typescript`` package, so the runner needs
+    # ``--package`` to find the executable (#1811). npx is always
+    # non-interactive (#2028).
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("typescript@")
+    assert_that(cmd[4]).is_equal_to("tsc")
 
 
-def test_get_tsc_command_fallback_to_tsc(tsc_plugin: TscPlugin) -> None:
+def test_get_tsc_command_fallback_to_tsc(
+    tsc_plugin: TscPlugin,
+    no_local_node_install: None,
+) -> None:
     """Fall back to tsc when nothing else available.
 
     Args:
         tsc_plugin: The TscPlugin instance to test.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
     with patch("shutil.which", return_value=None):
         cmd = tsc_plugin._get_tsc_command()

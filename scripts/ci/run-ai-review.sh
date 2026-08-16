@@ -24,22 +24,22 @@ set -euo pipefail
 # lintro's own machine-readable error envelope — the failure taxonomy is not
 # re-implemented in shell.
 #
-# Transport: the review runs on the `cli` transport (pinned in
-# enable_review_config.py), so the credential is CLAUDE_CODE_OAUTH_TOKEN — the
-# `claude` binary's OAuth session — not ANTHROPIC_API_KEY, whose account has no
-# balance (#1894). The missing-credential guard below checks that variable
-# accordingly; checking the API key would report "no credential" on a perfectly
-# authenticated run, and vice versa.
+# Default transport is `cli` (workflow fallback when LINTRO_AI_TRANSPORT is
+# unset). The credential depends on LINTRO_AI_PROVIDER (#1971): anthropic uses
+# CLAUDE_CODE_OAUTH_TOKEN (the `claude` CLI OAuth session, not ANTHROPIC_API_KEY
+# whose account has no balance — #1894); cursor uses CURSOR_API_KEY. Checking
+# the wrong variable would report "no credential" on a perfectly authenticated
+# run, and vice versa.
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
-# invoking this script, so the lintro that runs with CLAUDE_CODE_OAUTH_TOKEN is
+# invoking this script, so the lintro that runs with the provider credential is
 # trusted code — never the PR head. The PR diff is fetched independently by
 # `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
 # as data and never executed with the token.
 #
 # Fork PRs never reach this script: the workflow's job guard requires the head
-# repo to be the base repo, so an empty CLAUDE_CODE_OAUTH_TOKEN means the secret
-# is genuinely missing — a visible failure, not a skip.
+# repo to be the base repo, so an empty credential means the secret is
+# genuinely missing — a visible failure, not a skip.
 #
 # Usage:
 #   PR_NUMBER=<n> CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
@@ -48,12 +48,18 @@ set -euo pipefail
 #
 # Environment:
 #   CLAUDE_CODE_OAUTH_TOKEN Claude Code OAuth token used by the `claude` CLI.
-#                           Empty => visible failure.
+#                           Required when LINTRO_AI_PROVIDER is anthropic
+#                           (the default). Empty => visible failure.
+#   CURSOR_API_KEY          Cursor CLI key. Required when LINTRO_AI_PROVIDER
+#                           is cursor. Empty => visible failure.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
-#   AI_REVIEW_MAX_COST_USD  Optional spend cap (advisory under CLI transport).
+#   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
+#   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
+#   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
+#   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -87,15 +93,25 @@ NOT_INVOKED_STATUS=-2
 report_not_invoked() {
 	python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NOT_INVOKED_STATUS" \
+		--transport "$transport" \
 		--reason "$1"
 	exit 1
 }
 
 pr_number="${1:-${PR_NUMBER:-}}"
 
-if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+# bash-3.2-safe (macOS system bash): `${var,,}` is bash 4+ only (#2025).
+provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
+transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$provider" == "cursor" ]]; then
+	credential="${CURSOR_API_KEY:-}"
+else
+	credential="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+fi
+if [[ -z "$credential" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
-		--status "$NO_CREDENTIAL_STATUS"
+		--status "$NO_CREDENTIAL_STATUS" \
+		--transport "$transport"
 fi
 
 if [[ -z "$pr_number" ]]; then
@@ -103,15 +119,6 @@ if [[ -z "$pr_number" ]]; then
 fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
-
-# Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
-# reads ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch
-# it here rather than passing non-existent flags. The config comes from the base
-# ref, not the PR, so a PR cannot loosen the cost cap. Transport/provider are
-# pinned too.
-if ! uv run python "${script_dir}/enable_review_config.py"; then
-	report_not_invoked "Could not enable AI review in .lintro-config.yaml; see the log above."
-fi
 
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
@@ -126,26 +133,32 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-# --timeout 900: the default ai.api_timeout (60s) is sized for streaming API
-# chunks; a CLI-transport turn runs the whole review in one `claude` invocation
-# and needs minutes (#1900). 600s proved too tight for large diffs — PR #1916's
-# review was killed at the boundary while smaller PRs completed — so the cap is
-# sized for the biggest diffs this repo reviews.
+# Timeout comes from ai.transports.cli.timeout (default 900s) — no hand-tuned
+# --timeout at this call site (#1923). The default ai.api_timeout (60s) is
+# sized for streaming API chunks; a CLI turn runs the whole review in one
+# agent invocation and needs minutes.
 #
-# COUPLED to ai-review.yml's `timeout-minutes`: this timeout must fire BEFORE
-# the Actions runner kills the job, or the review dies without a JSON envelope
-# and classify_review_outcome.py reads a truncated file. Invariant (enforced by
-# tests/scripts/test_run_ai_review.py): ceil(--timeout / 60) + setup overhead
-# (~7 min: harden-runner, checkout, Node+claude install, uv sync) + posting
-# margin < timeout-minutes. Bump both together.
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --timeout 900 --post --output json >"$output_file" 2>&1
+# COUPLED to ai-review.yml's `timeout-minutes`: the resolved CLI timeout must
+# fire BEFORE the Actions runner kills the job, or the review dies without a
+# JSON envelope and classify_review_outcome.py reads a truncated file.
+# Invariant (enforced by tests/scripts/test_run_ai_review.py):
+# ceil(cli_timeout / 60) + setup overhead (~7 min) + posting margin
+# < timeout-minutes. Bump both together.
+#
+# CLI_REVIEW_TIMEOUT_SECONDS documents the profile default the job budget
+# must cover; tests/scripts/test_run_ai_review.py asserts it matches
+# lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
+# shellcheck disable=SC2034  # documentation variable read by the wiring test
+CLI_REVIEW_TIMEOUT_SECONDS=900
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
 review_status=$?
 set -e
 
 cat "$output_file"
 
 # Exits 0 only when a review was produced; the classifier writes the annotation
-# and job summary either way.
+# and job summary either way. --transport names the failure vocabulary (#1923).
 python3 "${script_dir}/classify_review_outcome.py" \
 	--status "$review_status" \
+	--transport "$transport" \
 	--output-file "$output_file"

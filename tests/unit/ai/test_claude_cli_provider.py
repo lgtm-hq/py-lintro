@@ -62,7 +62,7 @@ def test_claude_cli_init_cli_transport_available(_mock_claude_on_path: None) -> 
 
 
 async def test_claude_cli_complete_success(_mock_claude_on_path: None) -> None:
-    """Parse JSON output from a successful claude -p invocation."""
+    """Parse JSON output from a successful claude --print invocation."""
     provider = AnthropicProvider(
         model="claude-sonnet-4-6",
         transport=AITransport.CLI,
@@ -81,9 +81,13 @@ async def test_claude_cli_complete_success(_mock_claude_on_path: None) -> None:
     assert_that(response.content).contains("summary")
     assert_that(response.provider).is_equal_to(AIProvider.ANTHROPIC)
     cmd = mock_run.call_args.args[0]
-    assert_that(cmd).contains("--bare", "-p", "--output-format", "json")
+    assert_that(cmd).contains("--bare", "--print", "--output-format", "json")
     assert_that(cmd).contains("--append-system-prompt", "Be concise")
     assert_that(cmd).contains("--model", "claude-sonnet-4-6")
+    assert_that(cmd).does_not_contain("Review this diff")
+    assert_that(mock_run.transport_calls[-1].input_text).is_equal_to(
+        "Review this diff",
+    )
 
 
 async def test_claude_cli_complete_cli_schema_flag_when_requested(

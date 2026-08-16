@@ -18,18 +18,52 @@ from pathlib import Path
 import click
 from rich.console import Console
 
+from lintro.cli_utils.install_output import (
+    render_install_results,
+    render_outcome_summary,
+    unresolved_tool_names,
+)
 from lintro.cli_utils.onboarding import (
     is_interactive_tty,
     print_install_next_steps,
 )
+from lintro.enums.install_context import PackageManager
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_lock import (
     InstallLock,
     InstallLockEntry,
     write_install_lock,
 )
+from lintro.tools.core.install_strategies.node_project import NODE_MANAGERS
 from lintro.tools.core.tool_installer import ToolInstaller
 from lintro.tools.core.tool_registry import ManifestRegistry
+
+#: Node package managers accepted by ``--node-package-manager``, keyed by
+#: the string the user types. Sorted so ``--help`` lists them stably.
+NODE_MANAGERS_BY_NAME: dict[str, PackageManager] = {
+    manager.value: manager for manager in sorted(NODE_MANAGERS)
+}
+
+
+def _display_node_policy(console: Console, context: RuntimeContext) -> None:
+    """Show which Node package manager was chosen and on what evidence.
+
+    Silence here was the original bug report's real complaint: lintro picked
+    bun because bun was on PATH and never said so (#2005).
+
+    Args:
+        console: Rich console to print to.
+        context: Detected runtime context.
+    """
+    env = context.environment
+    if env.node_project is None:
+        return
+    manager, source = env.node_manager()
+    scope = "global" if env.installs_globally() else "project dev dependency"
+    console.print(
+        f"  [dim]Node package manager:[/dim] {manager} "
+        f"[dim](from {source.value.replace('_', ' ')}) → {scope}[/dim]",
+    )
 
 
 @click.command()
@@ -69,15 +103,36 @@ from lintro.tools.core.tool_registry import ManifestRegistry
     is_flag=True,
     help="Write resolved install plan to .lintro-install.lock.json.",
 )
+@click.option(
+    "--node-package-manager",
+    type=click.Choice(list(NODE_MANAGERS_BY_NAME)),
+    default=None,
+    help=(
+        "Force the Node.js package manager for npm-installed tools. Overrides "
+        "the project's packageManager field and lockfile evidence."
+    ),
+)
+@click.option(
+    "--global",
+    "global_install",
+    is_flag=True,
+    help=(
+        "Install npm-managed tools globally instead of as project dev "
+        "dependencies. Inside a Node project, lintro adds dev dependencies by "
+        "default so the project keeps owning its tool versions."
+    ),
+)
 def install_command(
     tools: tuple[str, ...],
     profile: str | None,
+    node_package_manager: str | None,
     *,
     upgrade: bool,
     dry_run: bool,
     install_all: bool,
     yes: bool,
     write_lock: bool,
+    global_install: bool,
 ) -> None:
     """Install or upgrade external tools used by lintro.
 
@@ -85,19 +140,27 @@ def install_command(
     Specify tool names to install specific tools, or use --profile for
     predefined sets.
 
+    Exits 1 when any planned action is not a full success. That includes a
+    command that ran but left the tool undiscoverable (NOT_DISCOVERABLE) or
+    still below min_version (STILL_OUTDATED), not only a non-zero install
+    command.
+
     \u000c
 
     Args:
         tools: Tool names to install (positional args).
         profile: Named profile to install.
+        node_package_manager: Force a Node.js package manager for npm tools.
         upgrade: Upgrade existing tools.
         dry_run: Show plan only.
         install_all: Install all tools.
         yes: Skip interactive prompts.
         write_lock: Write install lock file after planning.
+        global_install: Install npm-managed tools globally.
 
     Raises:
-        SystemExit: When tool installation fails.
+        SystemExit: When any install/upgrade action is not a full success
+            (including NOT_DISCOVERABLE and STILL_OUTDATED).
         click.UsageError: When conflicting options or invalid profile given.
 
     Examples:
@@ -110,8 +173,16 @@ def install_command(
     console = Console()
 
     registry = ManifestRegistry.load()
-    context = RuntimeContext.detect()
+    context = RuntimeContext.detect(
+        node_package_manager=(
+            NODE_MANAGERS_BY_NAME[node_package_manager]
+            if node_package_manager
+            else None
+        ),
+        prefer_global=global_install,
+    )
     installer = ToolInstaller(registry, context)
+    _display_node_policy(console, context)
 
     # Determine tool list — reject conflicting selectors
     tool_list: list[str] | None = list(tools) if tools else None
@@ -219,30 +290,26 @@ def install_command(
     console.print()
     results = installer.execute(plan)
 
-    # Report results
+    # Report results — every planned action is attempted, so each one gets a
+    # numbered line even when an earlier action failed or timed out.
     succeeded = sum(1 for r in results if r.success)
     failed = sum(1 for r in results if not r.success)
 
-    for r in results:
-        if r.success:
-            console.print(
-                f"  [green]OK[/green]  {r.tool.name} "
-                f"[dim]({r.duration_seconds:.1f}s)[/dim]",
-            )
-        else:
-            console.print(f"  [red]FAIL[/red]  {r.tool.name}: {r.message}")
+    render_install_results(console, results)
 
     console.print()
+    render_outcome_summary(console, results)
     has_issues = failed > 0 or plan.skipped or plan.outdated or plan.manual
 
-    if failed > 0:
-        console.print(
-            f"  [yellow]{succeeded} installed, {failed} failed[/yellow]",
-        )
-    elif has_issues:
-        console.print(f"  [green]{succeeded} tools installed.[/green]")
-    else:
+    if not has_issues:
         console.print(f"  [green]All {succeeded} tools installed.[/green]")
+
+    unresolved = unresolved_tool_names(results)
+    if unresolved:
+        console.print(
+            "  [yellow]Re-running the same command will not help for: "
+            f"{', '.join(unresolved)}[/yellow]",
+        )
 
     if plan.outdated:
         console.print(

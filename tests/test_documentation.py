@@ -343,6 +343,11 @@ _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_DOCKER",
     "LINTRO_CONFIG",
     "LINTRO_ENABLE_EXTERNAL_PLUGINS",
+    "LINTRO_AI_PROVIDER",
+    "LINTRO_AI_MODEL",
+    "LINTRO_AI_TRANSPORT",
+    "LINTRO_AI_ENABLED",
+    "LINTRO_AI_MAX_COST_USD",
 }
 
 # Env vars that were historically documented but are NOT read by the runtime.

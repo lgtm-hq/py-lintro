@@ -21,6 +21,202 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.1] - 2026-08-16
+
+### Fixed
+
+- **ci**: mint lintro-review token without contents:read (#2058) (a66976e)
+
+## [0.118.0] - 2026-08-15
+
+### Added
+
+- **ci**: post AI review comments as lintro-review[bot] (#2055) (c6a592c)
+
+## [0.117.2] - 2026-08-15
+
+### Fixed
+
+- **ci**: run ai-review on `pull_request_target` (#2053) (36308cc)
+
+## [0.117.1] - 2026-08-15
+
+### Fixed
+
+- **ci**: harden ai-review audit, Cursor egress, and 0.50 provenance (#2051) (c00d3e3)
+
+## [0.117.0] - 2026-08-14
+
+### Added
+
+- **ai**: add cost-cap override via env and flag (#2033) (d27971f)
+
+## [0.116.2] - 2026-08-14
+
+### Changed
+
+- **ai**: remove PR-head side-checkout and re-tighten the ai-review trust boundary
+  (#2036) (ccb2fe5)
+
+### Fixed
+
+- **tools**: make npx fallback non-interactive and bound `node_modules` walk (#2034)
+  (8139a7b)
+
+## [0.116.1] - 2026-08-14
+
+### Fixed
+
+- **install**: verify local-first discoverability and version progress (#2031) (ae30403)
+
+## [0.116.0] - 2026-08-14
+
+### Added
+
+- **ai**: grant cursor workspace trust by default (#2030) (a2b2898)
+
+### Changed
+
+- **build**: derive builtin index via AST and smoke-test JSON output (#2032) (706bd52)
+
+## [0.115.4] - 2026-08-14
+
+### Fixed
+
+- **install**: respect the project's Node package manager and local pins (#2014)
+  (230f56b)
+
+## [0.115.3] - 2026-08-14
+
+### Changed
+
+- **ci**: extract inline shell from build-binary.yml into dedicated scripts (#1439)
+  (4ddc701)
+
+### Fixed
+
+- **build**: discover builtin tools from a compiled module index (#2009) (4a8aea1)
+
+## [0.115.2] - 2026-08-14
+
+### Fixed
+
+- **tools**: resolve every Node tool through the pinned local-first chain (#2013)
+  (05076fe)
+
+## [0.115.1] - 2026-08-13
+
+### Changed
+
+- **ai**: drive AI-review config via repo Actions variables (#2018) (9f43a98)
+
+### Fixed
+
+- **install**: make install retries convergent and actionable (#2012) (73dd323)
+
+## [0.115.0] - 2026-08-13
+
+### Added
+
+- **ai**: add env-var and CLI-flag override layer for AI config (#2016) (a3ca539)
+
+## [0.114.1] - 2026-08-11
+
+### Fixed
+
+- **ci**: re-pin dogfood release image to 0.113.3 (#2007) (e0515ef)
+
+## [0.114.0] - 2026-08-11
+
+### Added
+
+- **ai**: transport-aware AI review config and reporting (#1923) (#1981) (6e2cbdc)
+
+## [0.113.3] - 2026-08-11
+
+### Fixed
+
+- **ai**: harden CLI transport for large diffs (#1967) (#1982) (ce471b7)
+
+## [0.113.2] - 2026-08-10
+
+### Changed
+
+- **ai**: honor `max_parallel_calls` under cost caps (#1969) (#1978) (39e10a8)
+
+### Fixed
+
+- **ai**: fence untrusted review prompt fields with boundary markers (#1884) (#1979)
+  (1332c8a)
+
+## [0.113.1] - 2026-08-09
+
+### Changed
+
+- **ai**: raise ai-review ceiling to 75 until parallel fan-out lands (#1990) (e82d053)
+
+### Fixed
+
+- **ai**: cap sticky comment with state block and harden marker parse (#1866) (#1977)
+  (c5b0b00)
+
+## [0.113.0] - 2026-08-09
+
+### Added
+
+- **ai**: add close/aclose lifecycle to AI provider clients (#1885) (#1976) (28d1658)
+
+### Changed
+
+- **ai**: phase 1 ADR and characterization tests for review architecture (#1972) (#1980)
+  (1fef3b6)
+- **ai**: raise ai-review job ceiling for stacked review calls (#1989) (33a864f)
+- **ci**: make AI CLI Tier 1 contract check merge-queue safe (#1119) (#1975) (fee0226)
+
+## [0.112.7] - 2026-08-08
+
+### Fixed
+
+- **ci**: bump lintro-tools digest for markdownlint-cli2 0.23.2 (#1987) (72e9a51)
+
+## [0.112.6] - 2026-08-08
+
+### Fixed
+
+- **deps**: remediate nanoid and js-yaml security advisories (#1983) (ea88a24)
+
+## [0.112.5] - 2026-08-07
+
+### Fixed
+
+- **review**: keep the mission-control sticky when a run fails (#1960) (b817258)
+
+## [0.112.4] - 2026-08-07
+
+### Fixed
+
+- **deps**: bump js-yaml to 4.3.1 for GHSA-5p4m-2wfm-xmqj (#1964) (e98e010)
+
+## [0.112.3] - 2026-08-06
+
+### Fixed
+
+- **review**: render the sticky This-run stats as badge tables (#1958) (b215467)
+
+## [0.112.2] - 2026-08-06
+
+### Fixed
+
+- **review**: always render the fix prompt inline in the per-review comment (#1957)
+  (ac24f20)
+
+## [0.112.1] - 2026-08-06
+
+### Fixed
+
+- **review**: close mock-parity gaps from the #1905 comment-surfaces audit (#1952)
+  (3fd782e)
+
 ## [0.112.0] - 2026-08-06
 
 ### Added

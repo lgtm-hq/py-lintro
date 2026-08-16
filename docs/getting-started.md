@@ -55,6 +55,12 @@ lintro install --profile recommended
 lintro check .
 ```
 
+Inside a Node project, `lintro install` adds npm-managed tools as **dev dependencies**
+using the manager your project already uses (`packageManager` field, then lockfile), not
+whichever manager happens to be on `PATH`. Use `--global` for a machine-wide install and
+`--node-package-manager` to force a specific manager — see
+[Node.js Package Manager Policy](configuration.md#node-package-manager-policy).
+
 ## Requirements
 
 ### Python Version
@@ -82,18 +88,19 @@ are centrally managed in `manifest.json` and `pyproject.toml`:
 ### Optional External Tools
 
 Some tools require separate installation. Their minimum versions are also managed in
-`pyproject.toml`. Node.js tools do not all resolve the same way — some prefer a binary
-on `PATH` (a `-g` or Homebrew install), others are only ever run through `bunx`/`npx`
-and so must be a dependency of the project you check. See
-[Node.js Tool Resolution](configuration.md#nodejs-tool-resolution) before choosing an
-install mode.
+`pyproject.toml`. Every Node.js tool resolves the same way — the checked project's
+`node_modules/.bin` first, then a binary on `PATH`, then a version-pinned `bunx`/`npx`
+fetch — so a project devDependency (`bun add -D <pkg>` / `npm install -D <pkg>`) is
+always the best install, and a global (`-g`) or Homebrew install is a working fallback.
+See [Node.js Tool Resolution](configuration.md#nodejs-tool-resolution) for the full
+order and for what changed.
 
-- `prettier` - JavaScript/TypeScript formatter (install via npm)
+- `prettier` - JavaScript/TypeScript formatter (`bun add -D prettier` or
+  `npm install -D prettier`)
 - `commitlint` - Conventional Commits message linter
-  (`bun add -g @commitlint/cli @commitlint/config-conventional` or
-  `brew install commitlint`); resolved from `PATH` first with only a `bunx` fallback, so
-  a devDependency is unreachable without `bun`; requires a commitlint config, skipped
-  otherwise
+  (`bun add -D @commitlint/cli @commitlint/config-conventional` or
+  `npm install -D @commitlint/cli @commitlint/config-conventional`); requires a
+  commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
@@ -109,10 +116,9 @@ install mode.
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
   `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
-- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (install into the project you check
-  with `bun add -D stylelint` or `npm install -D stylelint`; it is run through
-  `bunx`/`npx`, which never consult `PATH`); skips cleanly when no stylelint config is
-  found — add one (e.g. `.stylelintrc.json`) to enable linting
+- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -D stylelint` or
+  `npm install -D stylelint`); skips cleanly when no stylelint config is found — add one
+  (e.g. `.stylelintrc.json`) to enable linting
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
@@ -123,12 +129,12 @@ install mode.
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database
   (`go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest` or GitHub
   releases)
-- `typescript` - TypeScript compiler for type checking (`brew install typescript`,
-  `bun add -g typescript`, or `npm install -g typescript`; a project devDependency also
-  works via the `bunx`/`npx` fallback)
-- `astro` - Astro type checker for `.astro` files (install locally with
-  `bun add -d astro @astrojs/check` or `npm install --save-dev astro @astrojs/check`,
-  then invoke with `bunx astro check` or `npx astro check`)
+- `typescript` - TypeScript compiler for type checking (`bun add -D typescript` or
+  `npm install -D typescript`; a global install is used when no project-local one
+  exists)
+- `astro` - Astro type checker for `.astro` files (`bun add astro` and
+  `bun add -D @astrojs/check`, or `npm install astro` and
+  `npm install -D @astrojs/check`)
 - `svelte-check` - Svelte type checker for `.svelte` files (install locally with
   `bun add -D svelte-check` or `npm install -D svelte-check`)
 - `vue-tsc` - Vue TypeScript type checker for `.vue` files (`bun add -D vue-tsc` or

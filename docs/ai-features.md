@@ -422,17 +422,41 @@ ai:
   # suggestions returned. (int >= 1, default: 20)
   max_fix_attempts: 20
 
-  # Concurrent API calls during fix generation. (int 1–20, default: 5)
+  # Concurrent AI provider calls (fixes and review chunk fan-out).
+  # Honored even when max_cost_usd is set. (int 1–20, default: 5)
   max_parallel_calls: 5
 
-  # Hard ceiling on total spend per AI session, in USD; the run stops
-  # requesting fixes once the estimate reaches the cap. null disables it.
+  # Spend ceiling per AI session, in USD; the run stops
+  # scheduling new calls once spent+reserved reaches the cap. null disables
+  # it. A cost cap does NOT force serial execution — chunk reviews still
+  # fan out up to max_parallel_calls. Trade-off: calls already in flight
+  # when the ceiling is hit still finish, so the final total may overshoot
+  # by up to (max_parallel_calls − 1) in-flight calls' cost.
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
   # Token budget for a fix prompt before context is trimmed — a soft budget,
   # see "Data & Privacy". (int >= 1000, default: 12000)
   max_prompt_tokens: 12000
+
+  # ── CLI-transport review limits (#1967) ───────────────────────
+  # Per-chunk diff token budget under --transport cli; forces the semantic
+  # chunker to split diffs a single CLI turn cannot finish.
+  # (int >= 1000, default: 24000)
+  cli_max_diff_tokens: 24000
+
+  # Hard ceiling on the full unified-diff byte size under --transport cli;
+  # larger diffs fail fast with a --paths / --transport api advisory.
+  # (int >= 10000, default: 1500000)
+  cli_max_diff_bytes: 1500000
+
+  # Max findings one CLI review call may emit. The cap is a prompt contract
+  # (the model is instructed to stop at the cap and summarize overflow), not
+  # a post-parse truncation; a chunk that still exhausts the 32k output cap
+  # retries once with a tighter cap, and truncated responses fall back to
+  # the schema-retry / unstructured-recovery ladder.
+  # (int 1–50, default: 12)
+  cli_max_findings_per_call: 12
 
   # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
   max_refinement_attempts: 1
@@ -531,12 +555,13 @@ ai:
   # (auto | always | never, default: auto)
   cli_bare: auto
 
-  # ── Advanced / trust (leave off unless you understand the risk) ──
-  # Pass "--trust" to the Cursor agent CLI. Security risk: the Cursor provider
-  # can be fed prompt-injectable content (e.g. fork-PR diffs), so keep this
-  # false outside fully trusted local workspaces. (bool, default: false)
-  cursor_trust_workspace: false
+  # ── Cursor workspace trust ──
+  # Choosing provider: cursor grants workspace trust (passes "--trust" to the
+  # agent CLI). Set false to restore the agent's interactive trust prompt.
+  # (bool, default: true)
+  cursor_trust_workspace: true
 
+  # ── Advanced / trust (leave off unless you understand the risk) ──
   # Let the git-native (CLI transport) review path delegate diff retrieval to
   # the provider instead of embedding a redacted diff. Security risk: a
   # delegated diff bypasses lintro's secret-redaction choke point — see the
@@ -598,6 +623,10 @@ Lintro reaches a provider one of two ways, selected by `ai.transport`:
 - **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
   Cursor's `agent`).
 
+Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures are
+**transport-scoped** — see [AI review transports](ai-review-transports.md) for the
+decision table and `ai.transports.*` profiles (#1923).
+
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
 `ai.review` is enabled. Omitting it is not fatal: `lintro doctor` reports the config as
 incompatible, and the provider factory falls back to `api` so an existing run keeps
@@ -617,7 +646,50 @@ ai:
 ```
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
-config for a single invocation.
+config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
+and `--max-cost-usd`. Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`,
+`LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`, `LINTRO_AI_MAX_COST_USD`) apply to every AI
+surface and lose to CLI flags. There is no `--enabled` flag.
+
+### Invocation overrides
+
+Resolution order for `provider`, `model`, `transport`, `enabled`, and `max_cost_usd` is:
+
+```text
+CLI flag > environment variable > .lintro-config.yaml > built-in default
+```
+
+Overlays replace the active transport profile's cost cap
+(`ai.transports.api.max_cost_usd` / `ai.transports.cli.max_cost_usd_advisory`) as well
+as the legacy `ai.max_cost_usd` scalar.
+
+| Variable / flag                                           | Overrides         | Notes                                                                                        |
+| --------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------- |
+| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`     | `anthropic`, `openai`, or `cursor`                                                           |
+| `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                        |
+| `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
+| `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is $0). Invalid fails loud.   |
+
+Unset variables are absent (fall through). Invalid values fail at resolution with a
+message naming the variable and the accepted values — they never silently use the config
+default. Review output annotates each resolved field with its source
+(`provider: cursor (env)`, `max cost: uncapped (env)`).
+
+```bash
+# Try Cursor locally without dirtying .lintro-config.yaml
+LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
+
+# Same thing with flags (flags win if both are set)
+lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
+
+# Lift the committed cost cap for this run (0 = uncapped, not a $0 cap)
+LINTRO_AI_MAX_COST_USD=0 lintro review --uncommitted
+lintro review --uncommitted --max-cost-usd 0
+
+# Kill switch for this environment
+LINTRO_AI_ENABLED=0 lintro check .
+```
 
 ### Transport authentication
 
@@ -737,7 +809,12 @@ developer's login.
   binary's egress and version predictable under an egress allowlist.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
-  subscription, not a metered key.
+  subscription (or, in bare mode with a reachable API key, that key — see the billing
+  note above). Setting a cap does **not** serialize provider calls: review chunks still
+  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
+  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
+  calls' cost. Review metadata records per-phase timings (`context_collection`,
+  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.
@@ -900,13 +977,12 @@ cosign-signed. The `ai` variant is a strict superset built `FROM` the base image
 `full` stage, so nothing is lost by using it — it is simply larger, which is why the
 lint image stays free of it.
 
-To use AI features, pass your API key as an environment variable. The **provider** comes
-from `ai.provider` in the `.lintro-config.yaml` of the mounted workspace — there is no
-provider CLI flag or environment override, and exporting `OPENAI_API_KEY` alone does not
-switch lintro off its `anthropic` default. `--transport` is the one part of the AI
-config the CLI can override per run. The examples pass the key by **name** (`-e VAR`, no
-`=value`), so the secret is inherited from the shell's environment instead of appearing
-in the container's argument list.
+To use AI features, pass your API key as an environment variable. The **provider**
+defaults to `ai.provider` in the mounted `.lintro-config.yaml`, and can be overridden
+per run with `LINTRO_AI_PROVIDER` or `lintro review --provider` without editing that
+file. `--transport` (and `LINTRO_AI_TRANSPORT`) override the invocation path. The
+examples pass the key by **name** (`-e VAR`, no `=value`), so the secret is inherited
+from the shell's environment instead of appearing in the container's argument list.
 
 ```bash
 # API transport, with `ai: {provider: anthropic}` in the mounted config

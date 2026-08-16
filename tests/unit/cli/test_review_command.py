@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -59,6 +60,185 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--show-checklist")
     assert_that(result.output).contains("--timeout")
     assert_that(result.output).contains("--transport")
+    assert_that(result.output).contains("--provider")
+    assert_that(result.output).contains("--model")
+    assert_that(result.output).contains("--max-cost-usd")
+
+
+def test_review_invalid_provider_env_exits_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo'd ``LINTRO_AI_PROVIDER`` is a usage error, not a traceback."""
+    monkeypatch.setenv("LINTRO_AI_PROVIDER", "cursur")
+    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("LINTRO_AI_PROVIDER='cursur'")
+    assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
+    """Non-numeric ``--max-cost-usd`` uses the overlay error, not Click's float."""
+    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "plenty"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("--max-cost-usd='plenty'")
+    assert_that(result.output).contains("0 for uncapped")
+    assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_review_max_cost_flag_beats_transport_profile() -> None:
+    """``--max-cost-usd 0`` lifts a YAML transport-profile cap (#2024)."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai={
+            "enabled": True,
+            "review": True,
+            "transport": "cli",
+            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+        },
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "0"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    provider_config = mock_get_provider.call_args.args[0]
+    assert_that(provider_config.max_cost_usd).is_none()
+    rendered = mock_render.call_args.kwargs["result"]
+    assert_that(rendered.metadata.max_cost_usd).is_none()
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
+
+
+def test_review_profile_cap_provenance_is_config() -> None:
+    """A YAML-only transport-profile cap is sourced as config, not default."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai={
+            "enabled": True,
+            "review": True,
+            "transport": "cli",
+            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
+        },
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    rendered = mock_render.call_args.kwargs["result"]
+    assert_that(rendered.metadata.max_cost_usd).is_equal_to(1.25)
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("config")
 
 
 def test_review_alias_rev_works() -> None:
@@ -275,6 +455,231 @@ def test_review_passes_transport_override_to_provider() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     provider_config = mock_get_provider.call_args.args[0]
     assert_that(provider_config.transport.value).is_equal_to("cli")
+
+
+def test_review_passes_provider_and_model_overrides_to_provider() -> None:
+    """--provider and --model override config when resolving the provider."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+        ) as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch("lintro.cli_utils.commands.review.render_review_output"),
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="cursor-grok-4.6-high",
+            name="cursor",
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--provider",
+                "cursor",
+                "--model",
+                "cursor-grok-4.6-high",
+                "--transport",
+                "cli",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    provider_config = mock_get_provider.call_args.args[0]
+    assert_that(provider_config.provider.value).is_equal_to("cursor")
+    assert_that(provider_config.model).is_equal_to("cursor-grok-4.6-high")
+    assert_that(provider_config.transport.value).is_equal_to("cli")
+
+
+def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
+    """The rendered result carries transport, auth_mode, and cost_basis.
+
+    ``review_command`` overwrites the orchestrator metadata with the resolved
+    transport profile (#1923); sticky state and the PR comment read these
+    fields, so a regression here silently mislabels cost provenance.
+    """
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai={
+            "enabled": True,
+            "review": True,
+            "provider": "anthropic",
+            "transport": "api",
+        },
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    rendered = mock_render.call_args.kwargs["result"]
+    assert_that(rendered.metadata.transport).is_equal_to("api")
+    assert_that(rendered.metadata.auth_mode).is_equal_to("api_key")
+    assert_that(rendered.metadata.cost_basis).is_equal_to("billed")
+    assert_that(rendered.metadata.provider_source).is_equal_to("config")
+    assert_that(rendered.metadata.transport_source).is_equal_to("config")
+    assert_that(rendered.metadata.max_cost_usd).is_none()
+    assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("default")
+
+
+def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
+    """An api run with locally estimated tokens must not claim ``billed``.
+
+    The profile resolves BILLED before the run; when the orchestrator sets
+    ``token_usage_estimated`` (provider returned no usage counters) the
+    stamped basis is reconciled to ESTIMATED so sticky state and the PR
+    comment stay honest (#1923).
+    """
+    from dataclasses import replace as dc_replace
+
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    estimated_result = _empty_result()
+    estimated_result = dc_replace(
+        estimated_result,
+        metadata=dc_replace(estimated_result.metadata, token_usage_estimated=True),
+    )
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=estimated_result,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    rendered = mock_render.call_args.kwargs["result"]
+    assert_that(rendered.metadata.cost_basis).is_equal_to("estimated")
 
 
 def test_review_exits_zero_without_p1_findings() -> None:
@@ -1173,6 +1578,9 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         depth=None,
         strictness=None,
         transport="cli",
+        provider=None,
+        model=None,
+        max_cost_usd=None,
         timeout=600.0,
         context_window=None,
         semantic_chunks=False,

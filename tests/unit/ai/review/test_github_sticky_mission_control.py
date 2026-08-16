@@ -496,9 +496,17 @@ def test_this_run_badges_lead_with_the_model_and_name_the_transport(
         ),
     )
 
-    assert_that(body).contains("**This run** — model `claude-sonnet-4-20250514`")
-    assert_that(body).contains("est. cost")
-    assert_that(body).contains("transport `cli · subscription`")
+    assert_that(body).contains("**This run**")
+    assert_that(body).contains(
+        "| model | est. cost | tokens in | tokens out |",
+    )
+    assert_that(body).contains(
+        "| `claude-sonnet-4-20250514` | $0.0500 | 1,000 | 200 |",
+    )
+    assert_that(body).contains(
+        "| transport | depth | files | checks | duration |",
+    )
+    assert_that(body).contains("| cli · subscription | 2 | 3 | 3 | 0s |")
 
 
 def test_body_never_nests_details_more_than_one_level(

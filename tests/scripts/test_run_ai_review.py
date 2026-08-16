@@ -1,58 +1,86 @@
 """Tests for the dogfood AI review CI helpers.
 
-Covers the ``enable_review_config.py`` config patcher, the graceful-skip
-behaviour of ``run-ai-review.sh``, the review CLI flags the script relies on,
-and that the ``ai-review.yml`` workflow parses as valid YAML.
+Covers the graceful-skip behaviour of ``run-ai-review.sh``, the review CLI
+flags the script relies on, and that the ``ai-review.yml`` workflow parses as
+valid YAML and feeds ``LINTRO_AI_*`` from repo Actions variables (#1971).
 """
 
 from __future__ import annotations
 
-import importlib.util
 import math
 import os
 import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 import yaml
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai import transport
 from lintro.cli import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_SCRIPT = REPO_ROOT / "scripts" / "ci" / "enable_review_config.py"
 SHELL_SCRIPT = REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ai-review.yml"
+PROJECT_CONFIG = REPO_ROOT / ".lintro-config.yaml"
 
-#: The guarded provider credential. The dogfood runs the ``cli`` transport, so
-#: the secret in scope is the ``claude`` CLI's OAuth token, never an API key.
+#: Guarded provider credentials. Anthropic dogfood uses the ``claude`` CLI
+#: OAuth token; Cursor dogfood uses ``CURSOR_API_KEY``.
 CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
+PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
+_PINNED_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+_HEAD_REF_RE = re.compile(
+    r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
+    r"|github\.(?:head_ref|sha|ref_name|ref)\b",
+)
+_GIT_HEAD_FETCH_RE = re.compile(
+    r"\bgit(?:\s+\S+)*\s+(?:fetch|pull|checkout)\b",
+)
+_GH_PR_CHECKOUT_RE = re.compile(
+    r"\bgh(?:\s+\S+)*\s+pr(?:\s+\S+)*\s+checkout\b",
+)
+_PULL_HEAD_REF_RE = re.compile(r"pull/\S*/head")
+_CHECKOUT_LIKE_RE = re.compile(r"checkout")
+_CURSOR_EGRESS_HOSTS = (
+    "downloads.cursor.com:443",
+    "api2.cursor.sh:443",
+    "api3.cursor.sh:443",
+    "agentn.global.api5.cursor.sh:443",
+    "repo42.cursor.sh:443",
+)
 
 
-def _load_config_module() -> ModuleType:
-    """Load enable_review_config.py as an importable module.
+def _executable_run_text(run_block: str) -> str:
+    """Return a ``run:`` block with full-line shell comments removed.
+
+    Args:
+        run_block: Raw workflow ``run`` string.
 
     Returns:
-        The loaded module exposing its public helpers.
-
-    Raises:
-        RuntimeError: When the module spec cannot be created.
+        Executable lines only, joined with newlines.
     """
-    spec = importlib.util.spec_from_file_location(
-        "enable_review_config",
-        CONFIG_SCRIPT,
+    without_comments = "\n".join(
+        line for line in run_block.splitlines() if not line.lstrip().startswith("#")
     )
-    if spec is None or spec.loader is None:
-        msg = f"Unable to load module from {CONFIG_SCRIPT}"
-        raise RuntimeError(msg)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["enable_review_config"] = module
-    spec.loader.exec_module(module)
-    return module
+    return without_comments.replace("\\\n", " ")
+
+
+def _is_checkout_like_action(uses: str) -> bool:
+    """Return whether a ``uses:`` value is a checkout-like action.
+
+    Args:
+        uses: Workflow ``uses`` pin (``owner/repo@sha``).
+
+    Returns:
+        True when the action repo looks like a checkout action.
+    """
+    name = uses.split("@", 1)[0].split("#", 1)[0].strip().lower()
+    repo = name.rsplit("/", 1)[-1]
+    return bool(_CHECKOUT_LIKE_RE.search(f"/{repo}"))
 
 
 def _run_shell(
@@ -79,81 +107,49 @@ def _run_shell(
     )
 
 
-def test_resolve_max_cost_defaults_when_unset() -> None:
-    """An unset or blank cost value falls back to the default cap."""
-    module = _load_config_module()
+def test_patch_script_is_gone() -> None:
+    """The YAML-patching workaround must not return (#1971)."""
+    assert_that(CONFIG_SCRIPT.exists()).is_false()
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).does_not_contain("enable_review_config.py")
 
-    assert_that(module.resolve_max_cost_usd(raw_value=None)).is_equal_to(
-        module.DEFAULT_MAX_COST_USD,
+
+def test_committed_config_keeps_ai_off_with_review_ready() -> None:
+    """Local default stays AI-off; CI turns it on via ``LINTRO_AI_ENABLED=1``.
+
+    ``ai.review: true`` is committed so enabling the master switch does not
+    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
+    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in
+    #2018 / 9f43a98a).
+    """
+    loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
+    ai_section = loaded["ai"]
+    assert_that(ai_section["enabled"]).is_false()
+    assert_that(ai_section["review"]).is_true()
+    assert_that(ai_section["max_cost_usd"]).is_equal_to(2.00)
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert_that(workflow_text).contains("#2018 / 9f43a98a")
+    assert_that(workflow_text).does_not_contain("0.50 that landed with\n# #1971")
+
+
+def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
+    """The review step overlays provider/model/transport from Actions variables."""
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    review_steps = [
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    ]
+    assert_that(review_steps).is_length(1)
+    env = review_steps[0]["env"]
+    assert_that(env["LINTRO_AI_ENABLED"]).is_equal_to("1")
+    assert_that(env["LINTRO_AI_TRANSPORT"]).is_equal_to(
+        "${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}",
     )
-    assert_that(module.resolve_max_cost_usd(raw_value="  ")).is_equal_to(
-        module.DEFAULT_MAX_COST_USD,
+    assert_that(env["LINTRO_AI_PROVIDER"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}",
     )
-
-
-def test_resolve_max_cost_parses_value() -> None:
-    """A valid numeric string parses into a float cap."""
-    module = _load_config_module()
-
-    assert_that(module.resolve_max_cost_usd(raw_value="1.25")).is_equal_to(1.25)
-
-
-def test_resolve_max_cost_rejects_negative() -> None:
-    """A negative cost value raises ValueError."""
-    module = _load_config_module()
-
-    assert_that(module.resolve_max_cost_usd).raises(ValueError).when_called_with(
-        raw_value="-1",
-    )
-
-
-def test_patch_config_enables_ai_and_bounds_cost() -> None:
-    """Patching enables AI, pins transport/provider, and sets the cost cap."""
-    module = _load_config_module()
-
-    data = {"ai": {"enabled": False, "model": "keep-me"}, "review": {"depth": 1}}
-    patched = module.patch_config(data=data, max_cost_usd=0.5)
-
-    assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(patched["ai"]["transport"]).is_equal_to("cli")
-    assert_that(patched["ai"]["provider"]).is_equal_to("anthropic")
-    assert_that(patched["ai"]["max_cost_usd"]).is_equal_to(0.5)
-    # Unrelated values are preserved.
-    assert_that(patched["ai"]["model"]).is_equal_to("keep-me")
-    assert_that(patched["review"]["depth"]).is_equal_to(1)
-
-
-def test_patch_config_creates_ai_section_when_missing() -> None:
-    """A missing ai section is created rather than raising."""
-    module = _load_config_module()
-
-    patched = module.patch_config(data={}, max_cost_usd=0.25)
-
-    assert_that(patched["ai"]["enabled"]).is_true()
-    assert_that(patched["ai"]["max_cost_usd"]).is_equal_to(0.25)
-
-
-def test_main_patches_config_file(tmp_path: Path) -> None:
-    """main() writes the enabled AI settings back to the target file."""
-    module = _load_config_module()
-    config_file = tmp_path / ".lintro-config.yaml"
-    config_file.write_text("ai:\n  enabled: false\n", encoding="utf-8")
-
-    exit_code = module.main(argv=["--config", str(config_file)])
-
-    assert_that(exit_code).is_equal_to(0)
-    reloaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    assert_that(reloaded["ai"]["enabled"]).is_true()
-    assert_that(reloaded["ai"]["transport"]).is_equal_to("cli")
-
-
-def test_main_returns_error_when_config_missing(tmp_path: Path) -> None:
-    """main() returns a non-zero code when the config file is absent."""
-    module = _load_config_module()
-
-    exit_code = module.main(argv=["--config", str(tmp_path / "missing.yaml")])
-
-    assert_that(exit_code).is_equal_to(1)
+    assert_that(env["LINTRO_AI_MODEL"]).is_equal_to("${{ vars.LINTRO_AI_MODEL }}")
+    assert_that(env).does_not_contain_key("AI_REVIEW_MAX_COST_USD")
 
 
 def test_shell_help_exits_zero() -> None:
@@ -180,6 +176,92 @@ def test_shell_fails_visibly_without_oauth_token() -> None:
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
     assert_that(result.stderr).contains("nothing was reviewed")
+
+
+def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> None:
+    """Cursor overlay must not treat a Claude token as the Cursor credential.
+
+    ``LINTRO_AI_PROVIDER=cursor`` with only ``CLAUDE_CODE_OAUTH_TOKEN`` set is
+    how #2018's first dogfood run looked after the Actions variables flipped:
+    the wrapper would have proceeded, then crashed inside ``get_provider``.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            CURSOR_CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_lowercases_provider_without_bash4_syntax() -> None:
+    """Provider matching must work on bash 3.2 (no ``${var,,}``)."""
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).does_not_contain("${provider,,}")
+    assert_that(shell_text).contains("tr '[:upper:]' '[:lower:]'")
+
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            CURSOR_CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "CURSOR",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_no_credential_path_respects_transport_overlay() -> None:
+    """A missing credential must classify against ``LINTRO_AI_TRANSPORT``.
+
+    Hardcoding ``--transport cli`` on the no-credential path mislabels an
+    ``api`` overlay as a CLI OAuth failure (#2025).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            "LINTRO_AI_TRANSPORT": "API",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("[api]")
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("[cli]")
+
+
+def test_shell_accepts_cursor_key_without_claude_token() -> None:
+    """A Cursor key satisfies the guard even when the Claude token is absent.
+
+    The failure here must be the missing PR number (classifier, invoked), not
+    a missing-credential skip — otherwise flipping the provider variable would
+    still demand the Anthropic secret.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            CURSOR_CREDENTIAL_ENV: "dummy-cursor-key",
+            "LINTRO_AI_PROVIDER": "cursor",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).contains("No PR number provided")
+    assert_that(result.stdout).does_not_contain("no provider credential")
 
 
 def test_shell_fails_visibly_without_pr_number() -> None:
@@ -240,11 +322,27 @@ def test_workflow_yaml_parses() -> None:
     assert_that(loaded).contains_key("jobs")
     assert_that(loaded["jobs"]).contains_key("ai-review")
     trigger = loaded[True] if True in loaded else loaded["on"]
-    assert_that(trigger).contains_key("pull_request")
+    assert_that(trigger).contains_key("pull_request_target")
+    assert_that(trigger).does_not_contain_key("pull_request")
+
+
+def test_workflow_concurrency_keys_on_the_pr_number() -> None:
+    """``pull_request_target`` sets ``github.ref`` to the base branch.
+
+    Keying concurrency on ``github.ref`` would cancel every in-flight review
+    whenever any other PR targeting that branch synchronized.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    concurrency = loaded["concurrency"]
+    assert_that(concurrency["group"]).is_equal_to(
+        "ai-review-${{ github.event.pull_request.number || github.ref }}",
+    )
+    assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
-    """The pull_request trigger carries no ``paths`` filter (#1902).
+    """The pull_request_target trigger carries no ``paths`` filter (#1902).
 
     The old ``lintro/**`` filter meant CI, script, and workflow PRs shipped with
     no AI review at all — the #1900 timeout bug went out exactly that way. Under
@@ -253,7 +351,7 @@ def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     trigger = loaded[True] if True in loaded else loaded["on"]
-    pull_request = trigger["pull_request"]
+    pull_request = trigger["pull_request_target"]
     assert_that(pull_request).does_not_contain_key("paths")
     assert_that(pull_request).does_not_contain_key("paths-ignore")
 
@@ -291,16 +389,18 @@ def test_workflow_job_is_same_repo_only() -> None:
     )
 
 
-def test_workflow_job_can_write_pull_requests() -> None:
-    """The review job has pull-requests: write so --post can publish comments.
+def test_workflow_job_reads_pull_requests() -> None:
+    """The workflow token only needs contents + pull-requests read.
 
-    Contents stays read-only (the diff is fetched via ``gh``), but posting the
-    sticky comment and inline review comments requires write access to PRs.
+    ``actions/checkout`` reads the trusted base ref (``contents: read``).
+    ``gh`` fetches the PR diff (``pull-requests: read``). ``--post`` writes
+    as ``lintro-review[bot]`` via the App token (#2050), so the job-scoped
+    ``GITHUB_TOKEN`` stays read-only.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     perms = loaded["jobs"]["ai-review"]["permissions"]
-    assert_that(perms["pull-requests"]).is_equal_to("write")
+    assert_that(perms["pull-requests"]).is_equal_to("read")
     assert_that(perms["contents"]).is_equal_to("read")
 
 
@@ -311,6 +411,14 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     SHA so PR-controlled code never executes with the provider credential in
     scope. The PR itself is still reviewed via ``gh`` (diff fetched over the
     API), independent of the checked-out tree.
+
+    Strict trust boundary (#2025): this job may have exactly one
+    ``actions/checkout``. A second checkout with any ``path:`` (the #2018
+    ``.ai-review-installer`` side-checkout of ``github.sha``) executes
+    PR-authored code on the credential-holding job. Two-PR bootstrap:
+    new CI scripts land inert in PR 1; the workflow step that invokes them
+    lands in PR 2 after PR 1 is on main. Never land a new script and its
+    first workflow invocation in the same PR.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -325,31 +433,233 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 
     checkout = checkout_steps[0]
     assert_that(checkout).contains_key("with")
+    assert_that(checkout["with"]).does_not_contain_key("path")
     # Structurally assert the checkout pins to the trusted base ref. A harmless
     # head-ref mention in a comment/log elsewhere in the file must not false-fail
     # this, so we assert on the parsed step rather than banning text file-wide.
     assert_that(checkout["with"]["ref"]).is_equal_to(
         "${{ github.event.pull_request.base.sha }}",
     )
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert_that(workflow_text).contains("TWO-PR BOOTSTRAP")
+    assert_that(workflow_text).does_not_contain(".ai-review-installer")
+    assert_that(workflow_text).does_not_contain("enable_cursor_workspace_trust")
+
+
+@pytest.mark.parametrize(
+    ("uses", "expected"),
+    [
+        (_PINNED_CHECKOUT, True),
+        ("evil/checkout@deadbeef", True),
+        ("acme/checkout-action@1", True),
+        ("acme/pr-checkout@1", True),
+        ("acme/pr-checkout-action@1", True),
+        ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
+        ("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9", False),
+    ],
+    ids=[
+        "pinned-actions-checkout",
+        "forked-checkout",
+        "checkout-prefix",
+        "checkout-suffix",
+        "checkout-infix",
+        "setup-node",
+        "setup-uv",
+    ],
+)
+def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
+    """Checkout-like ``uses:`` values are the ones the audit must pin.
+
+    Args:
+        uses: A workflow ``uses`` pin.
+        expected: Whether the pin is checkout-like.
+    """
+    assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
+
+
+_TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
+
+
+@pytest.mark.parametrize(
+    ("ref", "trusted"),
+    [
+        (_TRUSTED_CHECKOUT_REF, True),
+        ("", False),
+        ("${{ github.head_ref }}", False),
+        ("${{ github.ref }}", False),
+        ("${{ github.ref_name }}", False),
+        ("${{ github.sha }}", False),
+        ("${{ github.event.pull_request.head.sha }}", False),
+    ],
+    ids=[
+        "base-sha",
+        "omitted-ref",
+        "head-ref",
+        "github-ref",
+        "ref-name",
+        "github-sha",
+        "pr-head-sha",
+    ],
+)
+def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
+    """Only the PR base SHA is a trusted checkout ref for this job.
+
+    Args:
+        ref: A checkout ``with.ref`` value, or empty when omitted.
+        trusted: Whether the audit must accept the ref.
+    """
+    assert_that(ref == _TRUSTED_CHECKOUT_REF).is_equal_to(trusted)
+    if ref:
+        banned = any(
+            marker in ref
+            for marker in (
+                "pull_request.head",
+                "github.sha",
+                "github.head_ref",
+                "github.ref",
+            )
+        )
+        assert_that(banned).is_equal_to(not trusted)
+
+
+@pytest.mark.parametrize(
+    ("run_block", "banned"),
+    [
+        ("gh pr checkout 12\n", True),
+        ("gh --repo lgtm-hq/py-lintro pr checkout 12\n", True),
+        ("gh pr --repo lgtm-hq/py-lintro checkout 12\n", True),
+        ("gh pr \\\n  checkout 12\n", True),
+        ("# decoy \\\ngh pr checkout 12\n", True),
+        ("git fetch origin pull/12/head\n", True),
+        ("git -C . checkout ${{ github.head_ref }}\n", True),
+        ("git --git-dir=.git fetch origin pull/12/head\n", True),
+        ("git pull origin ${{ github.event.pull_request.head.sha }}\n", True),
+        (
+            "# gh pr checkout is banned in executable steps\npython3 scripts/ci/ai_tools_arg_pin.py\n",
+            False,
+        ),
+        ("python3 scripts/ci/ai_tools_arg_pin.py NODE_VERSION\n", False),
+    ],
+    ids=[
+        "gh-pr-checkout",
+        "gh-repo-pr-checkout",
+        "gh-pr-repo-checkout",
+        "gh-pr-checkout-continued",
+        "comment-backslash-then-checkout",
+        "git-fetch-pull-head",
+        "git-dash-c-checkout-head-ref",
+        "git-git-dir-fetch-pull-head",
+        "git-pull-head-sha",
+        "comment-only-mention",
+        "pin-script",
+    ],
+)
+def test_head_ref_fetch_patterns(*, run_block: str, banned: bool) -> None:
+    """Banned head-ref fetch shapes are detected in executable ``run:`` text.
+
+    Args:
+        run_block: A sample workflow ``run`` block.
+        banned: Whether the block must fail the audit.
+    """
+    executable = _executable_run_text(run_block)
+    matched = any(
+        pattern.search(executable)
+        for pattern in (
+            _GH_PR_CHECKOUT_RE,
+            _GIT_HEAD_FETCH_RE,
+            _PULL_HEAD_REF_RE,
+            _HEAD_REF_RE,
+        )
+    )
+    assert_that(matched).is_equal_to(banned)
+
+
+def test_workflow_forbids_head_ref_fetches() -> None:
+    """Head-ref fetches and checkout forks fail the structural audit (#2047).
+
+    The existing one-checkout assertion cannot see ``gh pr checkout``,
+    ``git fetch origin pull/N/head``, ``github.event.pull_request.head.sha``
+    as a checkout ref, or a forked checkout action. Those all execute
+    PR-authored code on the credential-holding job. Comments and the
+    same-repo ``head.repo.full_name`` guard are not fetches.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+
+    checkout_uses: list[str] = []
+    for step in steps:
+        uses = step.get("uses")
+        if isinstance(uses, str) and _is_checkout_like_action(uses):
+            pin = uses.split("#", 1)[0].strip()
+            checkout_uses.append(pin)
+            assert_that(pin).is_equal_to(_PINNED_CHECKOUT)
+
+        with_block = step.get("with") or {}
+        ref = str(with_block.get("ref", ""))
+        if isinstance(uses, str) and _is_checkout_like_action(uses):
+            assert_that(ref).is_equal_to(
+                "${{ github.event.pull_request.base.sha }}",
+            )
+        assert_that(ref).does_not_contain("pull_request.head")
+        assert_that(ref).does_not_contain("github.sha")
+        assert_that(ref).does_not_contain("github.head_ref")
+        assert_that(ref).does_not_contain("github.ref")
+        assert_that(_PULL_HEAD_REF_RE.search(ref)).is_none()
+
+        run = step.get("run")
+        if not isinstance(run, str):
+            continue
+        executable = _executable_run_text(run)
+        assert_that(_GH_PR_CHECKOUT_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not run gh pr checkout",
+        ).is_none()
+        assert_that(_GIT_HEAD_FETCH_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not git fetch/pull/checkout",
+        ).is_none()
+        assert_that(_PULL_HEAD_REF_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not fetch pull/*/head",
+        ).is_none()
+        assert_that(_HEAD_REF_RE.search(executable)).described_as(
+            f"step {step.get('name')!r} must not use pull_request.head sha/ref",
+        ).is_none()
+
+    assert_that(checkout_uses).is_equal_to([_PINNED_CHECKOUT])
+
+
+def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
+    """#2023 defaults ``ai.cursor_trust_workspace``; the CI patcher is gone."""
+    assert_that(
+        (REPO_ROOT / "scripts" / "ci" / "enable_cursor_workspace_trust.py").exists(),
+    ).is_false()
+    names = [
+        str(step.get("name", ""))
+        for step in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+            "ai-review"
+        ]["steps"]
+    ]
+    assert_that(names).does_not_contain("Enable Cursor workspace trust")
+    assert_that(names).does_not_contain(
+        "Checkout cursor-agent installer (matches this workflow)",
+    )
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """CLAUDE_CODE_OAUTH_TOKEN is injected only into the final review step env.
+    """Provider credentials are injected only into the final review step env.
 
-    The secret must not appear in workflow- or job-level env maps, nor in
+    Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
-    paths never receive the token before the trusted base-ref install completes.
+    paths never receive a token before the trusted base-ref install completes.
     This is the ordering control audited in #1317.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
-    if workflow_env is not None:
-        assert_that(workflow_env).does_not_contain_key(CREDENTIAL_ENV)
-
     job_env = loaded["jobs"]["ai-review"].get("env")
-    if job_env is not None:
-        assert_that(job_env).does_not_contain_key(CREDENTIAL_ENV)
+    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        if workflow_env is not None:
+            assert_that(workflow_env).does_not_contain_key(credential_env)
+        if job_env is not None:
+            assert_that(job_env).does_not_contain_key(credential_env)
 
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -364,12 +674,17 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
         "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
     )
+    assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(
+        "${{ secrets.CURSOR_API_KEY }}",
+    )
     for step in steps:
         if step is review_step:
             continue
-        assert_that(step.get("env") or {}).described_as(
-            f"step {step.get('name')!r}",
-        ).does_not_contain_key(CREDENTIAL_ENV)
+        step_env = step.get("env") or {}
+        for credential_env in PROVIDER_CREDENTIAL_ENVS:
+            assert_that(step_env).described_as(
+                f"step {step.get('name')!r}",
+            ).does_not_contain_key(credential_env)
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
@@ -403,6 +718,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9",
         "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -414,6 +730,76 @@ def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
     content = WORKFLOW.read_text(encoding="utf-8")
 
     assert_that(content).contains(action_ref)
+
+
+def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
+    """The App token is minted repo-scoped and used only for ``--post``.
+
+    ``gh`` still fetches the PR diff with the workflow ``GITHUB_TOKEN``. The
+    mint step must not pass ``owner:`` (that would mint an org-wide token)
+    and must not be a second checkout.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+
+    mint_steps = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/create-github-app-token@")
+    ]
+    assert_that(mint_steps).is_length(1)
+    mint = mint_steps[0]
+    assert_that(mint["id"]).is_equal_to("lintro-review-app")
+    assert_that(mint["uses"]).is_equal_to(
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+    )
+    mint_with = mint["with"]
+    assert_that(mint_with["app-id"]).is_equal_to(
+        "${{ secrets.LINTRO_REVIEW_APP_ID }}",
+    )
+    assert_that(mint_with["private-key"]).is_equal_to(
+        "${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}",
+    )
+    assert_that(mint_with["permission-issues"]).is_equal_to("write")
+    assert_that(mint_with["permission-pull-requests"]).is_equal_to("write")
+    assert_that(mint_with).does_not_contain_key("permission-contents")
+    assert_that(mint_with).does_not_contain_key("owner")
+    assert_that(mint_with).does_not_contain_key("repositories")
+    assert_that(_is_checkout_like_action(mint["uses"])).is_false()
+
+    review_steps = [
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    ]
+    assert_that(review_steps).is_length(1)
+    review_env = review_steps[0]["env"]
+    assert_that(review_env["GITHUB_TOKEN"]).is_equal_to(
+        "${{ steps.lintro-review-app.outputs.token }}",
+    )
+    assert_that(review_env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
+
+    mint_index = steps.index(mint)
+    review_index = steps.index(review_steps[0])
+    assert_that(review_index).is_equal_to(mint_index + 1)
+
+    app_secret_values = (
+        "${{ secrets.LINTRO_REVIEW_APP_ID }}",
+        "${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}",
+        "${{ steps.lintro-review-app.outputs.token }}",
+    )
+    for step in steps:
+        if step is mint or step is review_steps[0]:
+            continue
+        step_env = step.get("env") or {}
+        step_with = step.get("with") or {}
+        blob = " ".join(
+            str(value) for value in (*step_env.values(), *step_with.values())
+        )
+        for secret_value in app_secret_values:
+            assert_that(blob).described_as(
+                f"step {step.get('name')!r}",
+            ).does_not_contain(
+                secret_value,
+            )
 
 
 def test_workflow_never_puts_an_api_key_in_scope() -> None:
@@ -459,11 +845,12 @@ def test_workflow_forbids_bare_mode_for_the_cli_transport() -> None:
 
 
 def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
-    """The claude CLI version is resolved, not hard-coded in the workflow.
+    """Agent CLI versions are resolved, not hard-coded in the workflow.
 
     A second pin site would drift from ``docker/ai-tools.Dockerfile``, and the
     dogfood would then review with a CLI version the contract tests never
-    checked.
+    checked. Cursor's calendar build id is not semver, so it is resolved
+    without ``--exact``.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
@@ -471,17 +858,51 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     resolve_steps = [
         step for step in steps if "ai_tools_arg_pin.py" in str(step.get("run", ""))
     ]
-    assert_that(resolve_steps).is_length(1)
-    assert_that(resolve_steps[0]["id"]).is_equal_to("pins")
+    assert_that(resolve_steps).is_length(2)
 
-    install_steps = [
+    claude_pins = next(step for step in resolve_steps if step.get("id") == "pins")
+    pin_run = claude_pins["run"]
+    assert_that(pin_run).contains("NODE_VERSION")
+    assert_that(pin_run).contains("CLAUDE_CODE_VERSION")
+    assert_that(pin_run).contains("--exact")
+    assert_that(pin_run).does_not_contain("CURSOR_AGENT_VERSION")
+
+    cursor_pins = next(
+        step for step in resolve_steps if step.get("id") == "cursor-pins"
+    )
+    assert_that(cursor_pins["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}",
+    )
+    assert_that(cursor_pins["run"]).contains("CURSOR_AGENT_VERSION")
+    assert_that(cursor_pins["run"]).contains("CURSOR_AGENT_SHA256_X64")
+    assert_that(cursor_pins["run"]).does_not_contain("--exact")
+
+    claude_install_steps = [
         step
         for step in steps
         if str(step.get("run", "")).strip() == "scripts/ci/install-claude-cli.sh"
     ]
-    assert_that(install_steps).is_length(1)
-    assert_that(install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
+    assert_that(claude_install_steps).is_length(1)
+    assert_that(claude_install_steps[0]["env"]["CLAUDE_CODE_VERSION"]).is_equal_to(
         "${{ steps.pins.outputs.claude-code-version }}",
+    )
+
+    cursor_install_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).strip() == "scripts/ci/install-cursor-agent.sh"
+    ]
+    assert_that(cursor_install_steps).is_length(1)
+    cursor_install = cursor_install_steps[0]
+    assert_that(cursor_install["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}",
+    )
+    cursor_env = cursor_install["env"]
+    assert_that(cursor_env["CURSOR_AGENT_VERSION"]).is_equal_to(
+        "${{ steps.cursor-pins.outputs.cursor-agent-version }}",
+    )
+    assert_that(cursor_env["CURSOR_AGENT_SHA256_X64"]).is_equal_to(
+        "${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
 
@@ -502,34 +923,82 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     ]
     assert_that(harden_steps).is_length(1)
 
-    endpoints = harden_steps[0]["with"]["allowed-endpoints"].split()
-    assert_that(endpoints).contains("registry.npmjs.org:443", "nodejs.org:443")
+    endpoints_raw = harden_steps[0]["with"]["allowed-endpoints"]
+    unconditional = endpoints_raw.replace("${{ env.AI_REVIEW_CURSOR_EGRESS }}", "")
+    endpoints = unconditional.split()
+    cursor_hosts = _CURSOR_EGRESS_HOSTS
+    assert_that(endpoints).contains(
+        "registry.npmjs.org:443",
+        "nodejs.org:443",
+        "release-assets.githubusercontent.com:443",
+    )
+    for endpoint in endpoints:
+        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.sh",
+        )
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "cursor.com",
+        )
+
+    job_env = loaded["jobs"]["ai-review"]["env"]
+    cursor_egress = job_env["AI_REVIEW_CURSOR_EGRESS"]
+    assert_that(cursor_egress).contains("vars.LINTRO_AI_PROVIDER == 'cursor'")
+    cursor_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", cursor_egress)
+    if cursor_branch is None:
+        pytest.fail("cursor egress expression must quote hosts and default to empty")
+    parsed_hosts = set(cursor_branch.group(1).split())
+    assert_that(parsed_hosts).is_equal_to(set(cursor_hosts))
+    for host in parsed_hosts:
+        assert_that(host).described_as(host).does_not_contain("*")
+    assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_CURSOR_EGRESS }}")
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:
-    """The lintro ``--timeout`` fires before the runner's ``timeout-minutes``.
+    """The CLI transport profile timeout fires before the job ``timeout-minutes``.
 
     The two values are load-bearing together: when the job budget is exhausted
     first, the Actions runner kills the review mid-flight, no JSON error
     envelope is written, and ``classify_review_outcome.py`` reads a truncated
     output file (how PR #1916's review died under 600 s / 15 min). The
-    invariant is ``ceil(--timeout / 60) + setup overhead + posting margin <=
+    invariant is ``ceil(cli_timeout / 60) + setup overhead + posting margin <=
     timeout-minutes``, with ~7 minutes observed for harden-runner + checkout +
     Node/claude install + uv sync, and a 1-minute posting margin. Bump the two
-    values together, in scripts/ci/run-ai-review.sh and ai-review.yml.
+    values together — ``CLI_REVIEW_TIMEOUT_SECONDS`` in run-ai-review.sh (kept
+    in sync with ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
+    ``timeout-minutes`` in ai-review.yml. The review invocation itself must
+    not pass a hand-tuned ``--timeout`` once the profile default covers it
+    (#1923).
     """
     setup_overhead_minutes = 7
     posting_margin_minutes = 1
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    # Collapse backslash continuations so a flag wrapped onto its own line
+    # cannot hide from the single-line assertion below.
+    joined_text = shell_text.replace("\\\n", " ")
+    command_lines = [
+        line
+        for line in joined_text.splitlines()
+        if "uv run lintro review" in line and not line.lstrip().startswith("#")
+    ]
+    assert_that(command_lines).is_length(1)
+    assert_that(command_lines[0]).does_not_contain("--timeout")
+
     timeout_matches = re.findall(
-        r"lintro review .*--timeout (\d+)",
+        r"^CLI_REVIEW_TIMEOUT_SECONDS=(\d+)\s*$",
         shell_text,
+        flags=re.MULTILINE,
     )
     assert_that(timeout_matches).described_as(
-        "run-ai-review.sh must pass exactly one --timeout to lintro review",
+        "run-ai-review.sh must declare CLI_REVIEW_TIMEOUT_SECONDS for the "
+        "job-budget invariant (kept in sync with DEFAULT_CLI_TIMEOUT)",
     ).is_length(1)
-    review_timeout_minutes = math.ceil(int(timeout_matches[0]) / 60)
+    assert_that(float(timeout_matches[0])).described_as(
+        "the CLI_REVIEW_TIMEOUT_SECONDS documentation variable in "
+        "run-ai-review.sh has drifted from transport.DEFAULT_CLI_TIMEOUT",
+    ).is_equal_to(transport.DEFAULT_CLI_TIMEOUT)
+    review_timeout_minutes = math.ceil(transport.DEFAULT_CLI_TIMEOUT / 60)
 
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
@@ -537,9 +1006,9 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     budget = review_timeout_minutes + setup_overhead_minutes
     budget += posting_margin_minutes
     assert_that(job_timeout_minutes).described_as(
-        f"timeout-minutes ({job_timeout_minutes}) must cover the review "
-        f"--timeout ({review_timeout_minutes} min) plus "
+        f"timeout-minutes ({job_timeout_minutes}) must cover the CLI profile "
+        f"timeout ({review_timeout_minutes} min) plus "
         f"{setup_overhead_minutes} min setup and "
         f"{posting_margin_minutes} min posting margin — bump it together "
-        "with --timeout in run-ai-review.sh",
+        "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
     ).is_greater_than_or_equal_to(budget)

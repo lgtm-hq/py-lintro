@@ -100,6 +100,7 @@ def post_review_to_github(
     question_map: dict[int, str] | None = None,
     transport: str = "",
     auth_mode: str = "",
+    cost_basis: str = "",
     config_source: str = "",
     auto_resolve: bool = True,
 ) -> bool:
@@ -120,6 +121,8 @@ def post_review_to_github(
         question_map: Prompt id to question text for linked display.
         transport: Provider transport used for this round (e.g. ``cli``).
         auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost
+            (``billed`` / ``estimated`` / ``unpriceable``).
         config_source: Human-readable description of where this run's settings
             came from, shown under the review body's run stats.
         auto_resolve: ``review.auto_resolve``. When false, an addressed thread
@@ -154,6 +157,7 @@ def post_review_to_github(
             diff_lines=diff_lines,
             transport=transport,
             auth_mode=auth_mode,
+            cost_basis=cost_basis,
             inline_failure=inline_failure,
             inline_comment_ids=comment_ids,
             repo=gh_reporter.repo or "",
@@ -185,28 +189,21 @@ def post_review_to_github(
     # — a round that fixed everything posts no inline comment and yet has the
     # most threads to stamp.
     inline_posted = False
-    success = _upsert_sticky(
+    success, comment_id = _upsert_sticky(
         reporter=gh_reporter,
         body=render(inline_failure=failure),
         comment_id=comment_id,
     )
 
     if inline_findings:
-        # Built after the sticky upsert so the dedup pointer can resolve the
-        # sticky's real id — including on round 1, where it did not exist a
-        # moment ago and the pointer would otherwise render unlinked (#1910).
+        # The body is self-contained — it carries its own fix prompt inline
+        # (#1956) — so it needs nothing from the sticky upsert above and the
+        # ordering here is driven only by the inline-failure fallback.
         review_body = build_review_body(
             result=result,
             prior_state=prior_state,
             match=match,
             head_sha=head_sha,
-            sticky_url=_sticky_url(
-                reporter=gh_reporter,
-                comment_id=_sticky_comment_id(
-                    reporter=gh_reporter,
-                    known=comment_id,
-                ),
-            ),
             transport=transport,
             auth_mode=auth_mode,
             config_source=config_source,
@@ -347,7 +344,8 @@ def _refresh_sticky(
         render: Callable that renders the sticky body.
         failure: Findings whose inline comments could not be posted.
         comment_ids: Finding key to inline comment id captured this round.
-        comment_id: Sticky comment id known before the upsert, or ``None``.
+        comment_id: Live sticky comment id after the upsert, or ``None``
+            when the comment was just created and must be re-located.
     """
     sticky_id = _sticky_comment_id(reporter=reporter, known=comment_id)
     if sticky_id is None:
@@ -606,8 +604,8 @@ def _sticky_comment_id(
 
     Args:
         reporter: GitHub reporter used to list PR comments.
-        known: The id known before the sticky was upserted, or ``None`` when it
-            did not exist yet.
+        known: The live sticky id after upsert, or ``None`` when it was just
+            created and must be re-located by marker.
 
     Returns:
         The comment id to update, or ``None`` when it still cannot be found.
@@ -616,30 +614,6 @@ def _sticky_comment_id(
         return known
     found = reporter.find_issue_comment(marker=STICKY_MARKER)
     return None if found is None else found[0]
-
-
-def _sticky_url(
-    *,
-    reporter: GitHubPRReporter,
-    comment_id: int | None,
-) -> str:
-    """Build the browser URL of the sticky comment, when its id is known.
-
-    Args:
-        reporter: GitHub reporter carrying repo and PR context.
-        comment_id: Sticky comment id as resolved after the upsert, or ``None``
-            when it could not be located at all.
-
-    Returns:
-        The comment's anchor URL, or an empty string when the id is unknown —
-        the pointer then renders unlinked rather than as a dead link.
-    """
-    if comment_id is None:
-        return ""
-    return (
-        f"https://github.com/{reporter.repo}/pull/{reporter.pr_number}"
-        f"#issuecomment-{comment_id}"
-    )
 
 
 def _count_new_commits(
@@ -682,6 +656,11 @@ def post_review_error_to_github(
 ) -> bool:
     """Post (or update) the sticky comment with a formatted API-error message.
 
+    When the sticky already carries a successful round, the failure is rendered
+    as a banner over a re-render of that round's board rather than replacing it
+    (#1954). The persisted state is passed through untouched either way, so a
+    failed round never advances the round counter or edits tracked findings.
+
     Args:
         error: The exception raised during review.
         provider: Provider identifier used for provider-aware classification.
@@ -703,8 +682,14 @@ def post_review_error_to_github(
         provider=provider,
         metadata=metadata,
         prior_state=prior_state,
+        repo=repo or gh_reporter.repo or "",
+        pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )
-    return _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
+    return _upsert_sticky(
+        reporter=gh_reporter,
+        body=body,
+        comment_id=comment_id,
+    )[0]
 
 
 def _load_prior_state(
@@ -732,11 +717,123 @@ def _upsert_sticky(
     reporter: GitHubPRReporter,
     body: str,
     comment_id: int | None,
-) -> bool:
-    """Update the sticky comment in place, or create it when absent."""
-    if comment_id is not None:
-        return reporter.update_issue_comment(comment_id=comment_id, body=body)
-    return reporter.post_issue_comment(body)
+) -> tuple[bool, int | None]:
+    """Update the sticky comment in place, or create it when absent.
+
+    GitHub only lets the creating actor PATCH a comment. After #2050 the
+    poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
+    sticky must be deleted and recreated rather than edited in place.
+
+    Args:
+        reporter: GitHub reporter used to create, edit, or replace the sticky.
+        body: Markdown body to write.
+        comment_id: Existing sticky id, or ``None`` when one has not been
+            posted yet.
+
+    Returns:
+        ``(success, live_id)``. ``live_id`` is the comment later refreshes
+        must PATCH: the original id after an in-place edit, the replacement
+        id after a delete-and-recreate, or ``None`` after a first-time
+        create (the caller re-locates by marker) or when the write failed.
+    """
+    if comment_id is None:
+        return reporter.post_issue_comment(body), None
+    status = _sticky_patch_status(
+        reporter=reporter,
+        comment_id=comment_id,
+        body=body,
+    )
+    if status is not None and 200 <= status < 300:
+        return True, comment_id
+    if status != 403:
+        logger.warning(
+            "Could not edit sticky comment {} (HTTP {}); leaving it in place",
+            comment_id,
+            status,
+        )
+        return False, None
+    logger.warning(
+        "Could not edit sticky comment {}; posting a replacement "
+        "before deleting it (GitHub only lets the creating actor PATCH)",
+        comment_id,
+    )
+    live_id = _post_sticky(reporter=reporter, body=body)
+    if live_id is None:
+        return False, None
+    if not reporter.delete_issue_comment(comment_id=comment_id):
+        logger.warning(
+            "Posted replacement sticky {} but failed to delete {}; "
+            "both comments may remain",
+            live_id,
+            comment_id,
+        )
+    return True, live_id
+
+
+def _sticky_patch_status(
+    *,
+    reporter: GitHubPRReporter,
+    comment_id: int,
+    body: str,
+) -> int | None:
+    """Return the sticky PATCH status, with a bool-reporter fallback.
+
+    Args:
+        reporter: GitHub reporter used to edit the sticky.
+        comment_id: Existing sticky id.
+        body: Markdown body to write.
+
+    Returns:
+        HTTP status when the reporter exposes one. Bool-only test doubles
+        map success to ``200`` and failure to ``403`` so the actor-mismatch
+        path stays covered without a status method.
+    """
+    status_fn = getattr(reporter, "update_issue_comment_status", None)
+    if callable(status_fn):
+        status = status_fn(comment_id=comment_id, body=body)
+        if isinstance(status, int) or status is None:
+            return status
+    if reporter.update_issue_comment(comment_id=comment_id, body=body):
+        return 200
+    return 403
+
+
+def _create_sticky_id(*, reporter: GitHubPRReporter, body: str) -> int | None:
+    """Create a sticky comment and return its id.
+
+    Args:
+        reporter: GitHub reporter used to post the comment.
+        body: Markdown body to write.
+
+    Returns:
+        The new comment id, or ``None`` when creation failed.
+    """
+    create_fn = getattr(reporter, "create_issue_comment", None)
+    if callable(create_fn):
+        created = create_fn(body=body)
+        if isinstance(created, int) or created is None:
+            return created
+    if not reporter.post_issue_comment(body):
+        return None
+    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    return None if found is None else found[0]
+
+
+def _post_sticky(*, reporter: GitHubPRReporter, body: str) -> int | None:
+    """Create the sticky comment, retrying once after a failed POST.
+
+    Args:
+        reporter: GitHub reporter used to post the comment.
+        body: Markdown body to write.
+
+    Returns:
+        The new comment id, or ``None`` when both create attempts failed.
+    """
+    created = _create_sticky_id(reporter=reporter, body=body)
+    if created is not None:
+        return created
+    logger.warning("Failed to recreate sticky comment; retrying once")
+    return _create_sticky_id(reporter=reporter, body=body)
 
 
 def _round_diff_lines(

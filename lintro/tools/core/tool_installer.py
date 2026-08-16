@@ -22,19 +22,35 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
+import sysconfig
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from loguru import logger
 
+from lintro.enums.install_outcome import InstallOutcome
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_hints import (
+    SCRIPT_HINT_PREFIX,
+    has_install_script,
+    install_script_path,
+    is_brew_managed,
+    is_manual_hint,
+)
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
+from lintro.tools.core.install_strategies.package_names import script_tool_name
+from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
 )
+
+#: Version-probe entrypoints that run a wrapper or host binary rather than the
+#: tool's own executable, so they cannot prove the tool is on PATH.
+_INDIRECT_PROBE_COMMANDS = frozenset({"sh", "bash", "cargo"})
 
 # Re-export so existing ``from lintro.tools.core.tool_installer import InstallPlan``
 # continues to work.
@@ -42,7 +58,123 @@ __all__ = [
     "InstallPlan",
     "InstallResult",
     "ToolInstaller",
+    "is_resolved_command_discoverable",
+    "resolve_version_command",
 ]
+
+
+def _is_wrapper_probe(command: Sequence[str]) -> bool:
+    """Return whether *command* probes a wrapper or host binary, not the tool.
+
+    Args:
+        command: Version-command argv (manifest or resolved).
+
+    Returns:
+        True when argv[0] is ``sh``/``bash``/``cargo`` or contains ``/``.
+    """
+    if not command:
+        return False
+    main_cmd = command[0]
+    return main_cmd in _INDIRECT_PROBE_COMMANDS or "/" in main_cmd
+
+
+def _is_node_modules_bin(path: Path) -> bool:
+    """Return whether *path* is an executable under ``node_modules/.bin``.
+
+    Args:
+        path: Candidate executable path.
+
+    Returns:
+        True when the immediate parent directory is ``node_modules/.bin``.
+    """
+    return path.parent.name == ".bin" and path.parent.parent.name == "node_modules"
+
+
+def resolve_version_command(
+    tool: ManifestTool,
+    *,
+    context: RuntimeContext,
+) -> list[str]:
+    """Resolve a tool's version command the way a run will resolve it.
+
+    For npm-installed tools the manifest's ``version_command`` names a bare
+    binary, which only ever finds a global install. Since #1811 a run
+    resolves ``node_modules/.bin`` first, so planning, post-install
+    verification, and doctor must share this helper rather than each calling
+    ``shutil.which`` on PATH. The Node chain is
+    :func:`lintro.plugins.execution_preparation.get_executable_command`;
+    ``bunx``/``npx`` is the registry fallback, not an install, so this helper
+    returns the original manifest command in that case (the caller must not
+    treat the runner as evidence the tool is installed).
+
+    Args:
+        tool: Tool whose version command is being resolved.
+        context: Runtime context supplying the detected Node project root.
+
+    Returns:
+        Argv list to run for the version probe.
+    """
+    command = list(tool.version_command)
+    if tool.install_type != "npm":
+        return command
+    # Wrapper probes cannot answer whether the tool itself is discoverable
+    # (`sh`/`bash`/`cargo`, or an argv[0] containing `/`). Leave them as
+    # the manifest wrote them — the same set `_verify_discoverable` used
+    # before this helper existed — instead of splicing the Node chain on.
+    if _is_wrapper_probe(command):
+        return command
+
+    from lintro.plugins.execution_preparation import get_executable_command
+
+    project = context.environment.node_project
+    resolved = get_executable_command(
+        tool.name,
+        cwd=project.root if project is not None else None,
+    )
+    # bunx/npx is the registry fallback, not an install. Treating it as
+    # already_ok would skip the project-local add this path exists to make.
+    if not resolved or resolved[0] in REGISTRY_RUNNERS:
+        return command
+    return [*resolved, *command[1:]]
+
+
+def is_resolved_command_discoverable(command: Sequence[str]) -> bool:
+    """Report whether a resolved version-command argv shows the tool is installed.
+
+    Planning, post-install verification, and doctor share this probe so they
+    cannot disagree about a project-local ``node_modules/.bin`` binary.
+
+    * An argv whose first element is ``bunx``/``npx`` is the registry
+      fallback, not an install — not discoverable.
+    * An absolute path under ``node_modules/.bin`` that exists is
+      discoverable even when that directory is not on PATH.
+    * Wrapper probes (``sh``/``bash``/``cargo``, or a path containing ``/``
+      that is not a local Node bin) cannot answer whether the tool itself is
+      discoverable, so they count as discoverable as today.
+    * Anything else is discoverable only when ``shutil.which`` finds it.
+
+    Args:
+        command: Argv returned by :func:`resolve_version_command`.
+
+    Returns:
+        False only when the tool's own executable is provably absent; True
+        when it resolves or when no on-PATH probe applies.
+    """
+    if not command:
+        return True
+
+    main_cmd = command[0]
+    if main_cmd in REGISTRY_RUNNERS:
+        return False
+
+    main_path = Path(main_cmd)
+    if main_path.is_absolute() and _is_node_modules_bin(main_path):
+        return main_path.exists()
+
+    if _is_wrapper_probe(command):
+        return True
+
+    return shutil.which(main_cmd) is not None
 
 
 class ToolInstaller:
@@ -115,11 +247,7 @@ class ToolInstaller:
         Returns:
             True if the hint requires manual action.
         """
-        return (
-            hint.startswith(("See ", "Install ", "Upgrade "))
-            or "https://" in hint
-            or "http://" in hint
-        )
+        return is_manual_hint(hint)
 
     def _plan_tool(
         self,
@@ -158,7 +286,7 @@ class ToolInstaller:
                 hint = self._get_install_command(tool, upgrade=True)
                 if self._is_manual_hint(hint):
                     if self._has_install_script(tool):
-                        hint = f"via install-tools.sh ({tool.name})"
+                        hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
                     else:
                         plan.manual.append((tool, hint))
                         return
@@ -176,7 +304,7 @@ class ToolInstaller:
         hint = self._get_install_command(tool)
         if self._is_manual_hint(hint):
             if self._has_install_script(tool):
-                hint = f"via install-tools.sh ({tool.name})"
+                hint = f"{SCRIPT_HINT_PREFIX} ({tool.name})"
             else:
                 plan.manual.append((tool, hint))
                 return
@@ -210,13 +338,23 @@ class ToolInstaller:
         if not tool.version_command:
             return None
 
-        main_cmd = tool.version_command[0]
-        if main_cmd not in ("sh", "bash", "cargo") and not shutil.which(main_cmd):
+        try:
+            command = self._resolved_version_command(tool)
+        except ImportError:
+            return None
+        main_cmd = command[0]
+        if main_cmd in REGISTRY_RUNNERS:
+            return None
+        if (
+            main_cmd not in _INDIRECT_PROBE_COMMANDS
+            and not Path(main_cmd).is_absolute()
+            and not shutil.which(main_cmd)
+        ):
             return None
 
         try:
             result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-                tool.version_command,
+                command,
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -228,6 +366,24 @@ class ToolInstaller:
             return extract_version_from_output(output, tool.name)
         except (subprocess.TimeoutExpired, OSError):
             return None
+        except ValueError as exc:
+            # Unknown/unparseable tool output must not abort an install batch.
+            logger.debug(f"Version probe failed for {tool.name}: {exc}")
+            return None
+
+    def _resolved_version_command(self, tool: ManifestTool) -> list[str]:
+        """Resolve a tool's version command the way the run will resolve it.
+
+        Delegates to :func:`resolve_version_command` so planning, post-install
+        verification, and doctor share one Node resolution path.
+
+        Args:
+            tool: Tool whose version command is being resolved.
+
+        Returns:
+            Argv list to run for the version probe.
+        """
+        return resolve_version_command(tool, context=self._context)
 
     @staticmethod
     def _version_meets_minimum(installed: str, minimum: str) -> bool:
@@ -297,6 +453,21 @@ class ToolInstaller:
             return hint
         return strategy.install_hint(*_args)
 
+    def _install_cwd(self, tool: ManifestTool) -> Path | None:
+        """Return the directory an install command should run from.
+
+        Args:
+            tool: Tool being installed.
+
+        Returns:
+            The detected Node project root for a project-local npm install, or
+            None to use the process working directory.
+        """
+        env = self._context.environment
+        if tool.install_type != "npm" or env.installs_globally():
+            return None
+        return env.node_project.root if env.node_project is not None else None
+
     @staticmethod
     def _is_brew_managed(package: str) -> bool:
         """Check if a package is installed via Homebrew.
@@ -307,128 +478,269 @@ class ToolInstaller:
         Returns:
             True if brew manages this package.
         """
-        if not shutil.which("brew"):
-            return False
-        try:
-            result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled; binary resolved from a known command, no user shell input
-                ["brew", "list", "--formula", package],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, OSError):
-            return False
+        return is_brew_managed(package)
 
     def execute(self, plan: InstallPlan) -> list[InstallResult]:
         """Execute an installation plan.
+
+        Every planned action is attempted, in order. A non-zero exit or a
+        timeout for one tool never aborts the batch: the failure is recorded
+        and the next action still runs, so the returned list always has one
+        entry per planned action.
 
         Args:
             plan: The plan to execute.
 
         Returns:
-            List of results for each install/upgrade action.
+            List of results for each install/upgrade action, in plan order.
         """
         results: list[InstallResult] = []
+        actions: list[tuple[ManifestTool, str]] = [
+            *plan.to_install,
+            *[(tool, command) for tool, _current_ver, command in plan.to_upgrade],
+        ]
+        total = len(actions)
 
-        for tool, command in plan.to_install:
+        for index, (tool, command) in enumerate(actions, start=1):
+            logger.info(f"[{index}/{total}] {tool.name}: {command}")
             result = self._run_install(tool, command)
-            results.append(result)
-
-        for tool, _current_ver, command in plan.to_upgrade:
-            result = self._run_install(tool, command)
+            result.step = index
+            result.total_steps = total
+            logger.info(
+                f"[{index}/{total}] {tool.name}: "
+                f"{result.outcome.label} — {result.message}",
+            )
             results.append(result)
 
         return results
+
+    def _verify_discoverable(self, tool: ManifestTool) -> bool:
+        """Check whether a tool is discoverable after a successful install.
+
+        Reuses :meth:`_resolved_version_command` so a project-local
+        ``node_modules/.bin`` binary counts as discoverable even when that
+        directory is not on PATH. Only the executable lookup is used as
+        evidence. A version probe can fail for reasons that have nothing to
+        do with discoverability — a repo-relative wrapper script
+        (``bash scripts/...``), a subcommand of another binary
+        (``cargo audit``), unparseable output, or a transient error — and
+        reporting those as NOT_DISCOVERABLE would mark a genuinely successful
+        install as failed and suppress the tool from later quick fixes.
+
+        Args:
+            tool: Tool that was just installed.
+
+        Returns:
+            False only when the tool's own executable is provably absent;
+            True when it resolves or when no on-PATH probe applies.
+        """
+        if not tool.version_command:
+            # Nothing to probe with — trust the exit code.
+            return True
+
+        try:
+            command = self._resolved_version_command(tool)
+        except ImportError:
+            command = list(tool.version_command)
+        return is_resolved_command_discoverable(command)
+
+    _INSTALL_TIMEOUT_SECONDS = 300
 
     def _run_install(
         self,
         tool: ManifestTool,
         command: str,
     ) -> InstallResult:
-        """Run an install command for a tool.
+        """Run an install command for a tool and classify the outcome.
 
         Args:
             tool: Tool being installed.
             command: Shell command string.
 
         Returns:
-            InstallResult.
+            InstallResult carrying a classified :class:`InstallOutcome`; this
+            method never raises, so the caller can continue with the next tool.
         """
-        logger.info(f"Installing {tool.name}: {command}")
         start = time.monotonic()
 
         try:
-            # Script-backed installs: the planner sets "via install-tools.sh"
+            # Script-backed installs: the planner sets the script hint prefix
             # when a helper script is available for binary tools
-            if command.startswith("via install-tools.sh"):
+            if command.startswith(SCRIPT_HINT_PREFIX):
                 result = self._install_via_script(tool)
                 if result:
                     return result
                 return InstallResult(
                     tool=tool,
-                    success=False,
+                    outcome=InstallOutcome.MANUAL_BLOCKED,
                     message="install-tools.sh not found",
                     duration_seconds=time.monotonic() - start,
+                    command=command,
                 )
 
             # Non-executable hints: try install script for binary tools,
             # otherwise report as manual
-            if self._is_manual_hint(command):
+            if is_manual_hint(command):
                 if tool.install_type == "binary":
                     result = self._install_via_script(tool)
                     if result:
                         return result
                 return InstallResult(
                     tool=tool,
-                    success=False,
+                    outcome=InstallOutcome.MANUAL_BLOCKED,
                     message=f"Manual install required: {command}",
                     duration_seconds=0.0,
+                    command=command,
                 )
 
-            # Otherwise run the command directly
+            # Otherwise run the command directly. Node package managers walk up
+            # to the nearest package.json, but running from the project root
+            # lintro actually detected removes the ambiguity — a nested cwd must
+            # not add a dependency to a manifest lintro never looked at (#2005).
             proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 shlex.split(command),
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=self._INSTALL_TIMEOUT_SECONDS,
                 check=False,
+                cwd=self._install_cwd(tool),
             )
             duration = time.monotonic() - start
 
             if proc.returncode == 0:
-                return InstallResult(
+                return self._verified_result(
                     tool=tool,
-                    success=True,
+                    command=command,
                     message="Installed successfully",
-                    duration_seconds=duration,
+                    duration=duration,
                 )
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"Command failed (exit {proc.returncode}): {proc.stderr[:200]}",
                 duration_seconds=duration,
+                command=command,
             )
         except subprocess.TimeoutExpired:
+            minutes = self._INSTALL_TIMEOUT_SECONDS // 60
             return InstallResult(
                 tool=tool,
-                success=False,
-                message="Installation timed out (5 min)",
+                outcome=InstallOutcome.TIMED_OUT,
+                message=f"Installation timed out ({minutes} min)",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )
         except OSError as e:
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"OS error: {e}",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )
+
+    def _not_discoverable_message(self, tool: ManifestTool) -> str:
+        """Explain a successful command that left the tool undiscoverable.
+
+        Args:
+            tool: Tool whose binary could not be found after install.
+
+        Returns:
+            Message naming the install destination directory and the PATH
+            remedy, rather than a generic "needs manual action".
+        """
+        bin_dir = self._install_destination_dir(tool)
+        return (
+            f"Install command succeeded but {tool.name} is still not "
+            f"discoverable. It was expected under {bin_dir} and was not "
+            f"found; inspect that directory, or add it to PATH, for "
+            f'example: export PATH="{bin_dir}:$PATH"'
+        )
+
+    def _install_destination_dir(self, tool: ManifestTool) -> Path:
+        """Return the directory an install of *tool* is expected to land in.
+
+        Args:
+            tool: Tool whose binary could not be found after install.
+
+        Returns:
+            Concrete destination directory named in the PATH remedy.
+        """
+        dest = self._install_cwd(tool)
+        if dest is not None:
+            return dest / "node_modules" / ".bin"
+        if tool.install_type == "npm":
+            npm = shutil.which("npm")
+            if npm is not None:
+                return Path(npm).parent
+        if tool.install_type == "pip":
+            return Path(sysconfig.get_path("scripts"))
+        if tool.install_type == "cargo":
+            return Path.home() / ".cargo" / "bin"
+        return Path.home() / ".local" / "bin"
+
+    def _verified_result(
+        self,
+        *,
+        tool: ManifestTool,
+        command: str,
+        message: str,
+        duration: float,
+    ) -> InstallResult:
+        """Build the result for a command that exited zero.
+
+        After discoverability, the same local-first probe is re-run for
+        version. Exit 0 with a version still below ``min_version`` is
+        :attr:`InstallOutcome.STILL_OUTDATED`, not success, so the identical
+        command is never re-suggested within this process.
+
+        Args:
+            tool: Tool that was installed.
+            command: Command that was run.
+            message: Success message to use when the tool is discoverable
+                and meets ``min_version``.
+            duration: Elapsed seconds for the install.
+
+        Returns:
+            InstallResult with SUCCESS, NOT_DISCOVERABLE, or STILL_OUTDATED.
+        """
+        if not self._verify_discoverable(tool):
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.NOT_DISCOVERABLE,
+                message=self._not_discoverable_message(tool),
+                duration_seconds=duration,
+                command=command,
+            )
+
+        installed = self._get_installed_version(tool)
+        if (
+            installed is not None
+            and tool.min_version
+            and not self._version_meets_minimum(installed, tool.min_version)
+        ):
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.STILL_OUTDATED,
+                message=(
+                    f"Install command succeeded but {tool.name} {installed} "
+                    f"is still below minimum {tool.min_version}"
+                ),
+                duration_seconds=duration,
+                command=command,
+            )
+
+        return InstallResult(
+            tool=tool,
+            outcome=InstallOutcome.SUCCESS,
+            message=message,
+            duration_seconds=duration,
+            command=command,
+        )
 
     @staticmethod
     def _has_install_script(tool: ManifestTool) -> bool:
         """Check if an install script exists for a binary tool.
-
-        Reuses the same script lookup as _install_via_script.
 
         Args:
             tool: Tool to check.
@@ -436,17 +748,7 @@ class ToolInstaller:
         Returns:
             True if a script can handle this tool.
         """
-        if tool.install_type != "binary":
-            return False
-        if not shutil.which("bash"):
-            return False
-        script = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "utils"
-            / "install-tools.sh"
-        )
-        return script.exists()
+        return has_install_script(tool)
 
     def _install_via_script(self, tool: ManifestTool) -> InstallResult | None:
         """Try to install a binary tool via install-tools.sh.
@@ -457,20 +759,7 @@ class ToolInstaller:
         Returns:
             InstallResult if script was found and executed, None otherwise.
         """
-        # Look for install-tools.sh relative to the lintro package
-        script_paths = [
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "utils"
-            / "install-tools.sh",
-        ]
-
-        script = None
-        for p in script_paths:
-            if p.exists():
-                script = p
-                break
-
+        script = install_script_path()
         if not script:
             logger.debug(
                 "install-tools.sh not found for binary install "
@@ -478,8 +767,9 @@ class ToolInstaller:
             )
             return None
 
-        tool_arg = tool.name.replace("_", "-")
+        tool_arg = script_tool_name(tool.name)
         cmd = ["bash", str(script), "--tools", tool_arg]
+        command = shlex.join(cmd)
 
         start = time.monotonic()
         try:
@@ -488,27 +778,38 @@ class ToolInstaller:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=300,
+                timeout=self._INSTALL_TIMEOUT_SECONDS,
             )
             duration = time.monotonic() - start
 
             if proc.returncode == 0:
-                return InstallResult(
+                return self._verified_result(
                     tool=tool,
-                    success=True,
+                    command=command,
                     message="Installed via install-tools.sh",
-                    duration_seconds=duration,
+                    duration=duration,
                 )
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.FAILED,
                 message=f"install-tools.sh failed: {proc.stderr[:200]}",
                 duration_seconds=duration,
+                command=command,
             )
-        except (subprocess.TimeoutExpired, OSError) as exc:
+        except subprocess.TimeoutExpired:
+            minutes = self._INSTALL_TIMEOUT_SECONDS // 60
             return InstallResult(
                 tool=tool,
-                success=False,
+                outcome=InstallOutcome.TIMED_OUT,
+                message=f"install-tools.sh timed out ({minutes} min)",
+                duration_seconds=time.monotonic() - start,
+                command=command,
+            )
+        except OSError as exc:
+            return InstallResult(
+                tool=tool,
+                outcome=InstallOutcome.FAILED,
                 message=f"install-tools.sh execution failed: {exc}",
                 duration_seconds=time.monotonic() - start,
+                command=command,
             )

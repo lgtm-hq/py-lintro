@@ -31,14 +31,67 @@ from lintro.ai.enums import (
     ConfidenceLevel,
     SanitizeMode,
 )
+from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.registry import AIProvider
+from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 __all__ = [
     "AIBudgetConfig",
     "AIConfig",
     "AIOutputConfig",
     "AIProviderConfig",
+    "AITransportProfiles",
+    "ApiTransportProfile",
+    "CliTransportProfile",
+    "ResolvedAIConfig",
 ]
+
+
+class ApiTransportProfile(BaseModel):
+    """Operational knobs for the metered API transport (#1923)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timeout: float | None = Field(
+        default=None,
+        ge=1.0,
+        description="Stream-sized per-call timeout in seconds (default 60).",
+    )
+    max_cost_usd: float | None = Field(
+        default=None,
+        ge=0,
+        description="Enforced spend ceiling for metered API billing.",
+    )
+
+
+class CliTransportProfile(BaseModel):
+    """Operational knobs for the subscription CLI transport (#1923)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timeout: float | None = Field(
+        default=None,
+        ge=1.0,
+        description="Whole-turn timeout in seconds (default 900).",
+    )
+    max_cost_usd_advisory: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Advisory cost bound under subscription billing; lintro cannot "
+            "enforce spend on the CLI path."
+        ),
+    )
+
+
+class AITransportProfiles(BaseModel):
+    """Transport-scoped AI review profiles (#1923)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api: ApiTransportProfile = Field(default_factory=ApiTransportProfile)
+    cli: CliTransportProfile = Field(default_factory=CliTransportProfile)
+
 
 _SUPPRESS_DIAGNOSTICS: ContextVar[bool] = ContextVar(
     "ai_config_suppress_diagnostics",
@@ -106,6 +159,14 @@ class AIConfig(BaseModel):
             "How to invoke the provider: 'api' (SDK) or 'cli' (local binary)."
         ),
     )
+    transports: AITransportProfiles = Field(
+        default_factory=AITransportProfiles,
+        description=(
+            "Per-transport operational profiles (timeout and cost caps). "
+            "Resolution: transport profile → legacy api_timeout/max_cost_usd "
+            "→ built-in default (api: 60s; cli: 900s)."
+        ),
+    )
     model: str | None = None
     api_key_env: str | None = None
     api_base_url: str | None = Field(
@@ -133,7 +194,17 @@ class AIConfig(BaseModel):
         description="Maximum number of issues to attempt fixing per run. "
         "Counts API calls made, not suggestions returned.",
     )
-    max_parallel_calls: int = Field(default=5, ge=1, le=20)
+    max_parallel_calls: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Concurrent AI provider calls for fixes and review chunk fan-out. "
+            "Honored even when max_cost_usd is set. With n concurrent calls and "
+            "no per-call reserve estimate, a session may overshoot max_cost_usd "
+            "by up to n − 1 in-flight calls' cost."
+        ),
+    )
     max_retries: int = Field(default=2, ge=0, le=10)
     api_timeout: float = Field(default=60.0, ge=1.0)
     validate_after_group: bool = False
@@ -198,7 +269,10 @@ class AIConfig(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Maximum total cost in USD per AI session." " None disables the limit."
+            "Maximum total cost in USD per AI session. None disables the limit. "
+            "A cost cap does not serialize provider calls: under "
+            "max_parallel_calls=n concurrent workers the final total may "
+            "exceed this ceiling by up to n − 1 in-flight calls' cost."
         ),
     )
     max_prompt_tokens: int = Field(
@@ -233,15 +307,12 @@ class AIConfig(BaseModel):
     )
 
     cursor_trust_workspace: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
-            "trust. Security risk: the Cursor provider is fed untrusted, "
-            "prompt-injectable content (e.g. 'lintro review --pr N' embeds "
-            "diffs from arbitrary fork PRs). Combining workspace trust with "
-            "such input could let an injected diff drive an agent operating "
-            "with full workspace trust, so this defaults to False and should "
-            "only be enabled for fully trusted local workspaces."
+            "trust. Trust follows from choosing provider: cursor, so this "
+            "defaults to True. Set false to restore the Cursor agent's "
+            "interactive trust prompt."
         ),
     )
 
@@ -278,6 +349,36 @@ class AIConfig(BaseModel):
             "diff in the prompt even for large diffs. Only enable this for "
             "trusted diffs with no secrets concern when the efficiency of "
             "delegated git retrieval on very large diffs is required."
+        ),
+    )
+    cli_max_diff_tokens: int = Field(
+        default=24_000,
+        ge=1_000,
+        description=(
+            "Per-chunk diff token budget under --transport cli. The "
+            "context-window budget alone is far too large for a single CLI "
+            "call (timeout / 32k output-token exhaustion on ~1.5k-line PRs); "
+            "this ceiling forces the semantic chunker to split large diffs."
+        ),
+    )
+    cli_max_diff_bytes: int = Field(
+        default=1_500_000,
+        ge=10_000,
+        description=(
+            "Hard ceiling on the full unified-diff byte size under "
+            "--transport cli. Diffs above this fail with an actionable "
+            "advisory to use --paths filtering or --transport api instead of "
+            "spawning an unbounded number of CLI chunks."
+        ),
+    )
+    cli_max_findings_per_call: int = Field(
+        default=12,
+        ge=1,
+        le=50,
+        description=(
+            "Maximum findings a single CLI review call may emit. Bounds the "
+            "JSON response so the model cannot hit the ~32k output-token cap "
+            "mid-object; overflow is summarized rather than truncated."
         ),
     )
     transcript_logging: bool = Field(
@@ -354,6 +455,12 @@ class AIConfig(BaseModel):
         rejected, because ``AIConfig`` itself forbids extras and a stale key
         in ``.lintro-config.yaml`` must not break the whole run.
 
+        Environment overrides (``LINTRO_AI_PROVIDER``, ``LINTRO_AI_MODEL``,
+        ``LINTRO_AI_TRANSPORT``, ``LINTRO_AI_ENABLED``,
+        ``LINTRO_AI_MAX_COST_USD``) are applied here so every consumer of
+        :meth:`from_mapping` — execution, status, doctor, MCP — sees the
+        same effective values (#1970, #2024).
+
         This is the boundary that keeps :mod:`lintro.config` free of any
         knowledge of ``AIConfig``'s field set (see issue #724): the loader
         stores the ``ai:`` section verbatim and the AI layer parses it.
@@ -367,23 +474,60 @@ class AIConfig(BaseModel):
                 must not duplicate its output; resolvers leave it True.
 
         Returns:
-            AIConfig: Parsed AI configuration.
+            AIConfig: Parsed AI configuration after env overlays.
         """
-        if not data:
-            return cls()
+        return cls.resolve_from_mapping(data, diagnostics=diagnostics).config
 
-        known_fields = set(cls.model_fields)
-        unknown = set(data) - known_fields
-        if unknown and diagnostics:
-            logger.warning(
-                "Unknown AI config keys ignored: {}",
-                ", ".join(sorted(unknown)),
-            )
-        filtered = {k: v for k, v in data.items() if k in known_fields}
+    @classmethod
+    def resolve_from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        diagnostics: bool = True,
+    ) -> ResolvedAIConfig:
+        """Parse ``ai:`` into effective values plus per-field provenance.
+
+        Env overlays are applied after the mapping is validated so a
+        ``LINTRO_AI_ENABLED=1`` overlay cannot trigger the legacy
+        ``ai.enabled``-only sub-toggle default. Invalid env values fail
+        here and never fall through to the config default.
+
+        Args:
+            data: Raw ``ai`` section from config, or None when absent.
+            diagnostics: Whether this parse may emit user-facing diagnostics.
+
+        Returns:
+            Validated config together with provenance for ``provider``,
+            ``model``, ``transport``, ``enabled``, and ``max_cost_usd``.
+        """
+        from lintro.ai.config_overrides import (
+            OVERRIDE_FIELDS,
+            apply_env_overrides,
+        )
+
+        filtered: dict[str, Any] = {}
+        if data:
+            known_fields = set(cls.model_fields)
+            unknown = set(data) - known_fields
+            if unknown and diagnostics:
+                logger.warning(
+                    "Unknown AI config keys ignored: {}",
+                    ", ".join(sorted(unknown)),
+                )
+            filtered = {k: v for k, v in data.items() if k in known_fields}
+
         if diagnostics:
-            return cls(**filtered)
-        with _suppressed_diagnostics():
-            return cls(**filtered)
+            config = cls(**filtered) if filtered else cls()
+        else:
+            with _suppressed_diagnostics():
+                config = cls(**filtered) if filtered else cls()
+
+        sources: dict[str, ConfigSource] = {
+            field: (ConfigSource.CONFIG if field in filtered else ConfigSource.DEFAULT)
+            for field in OVERRIDE_FIELDS
+        }
+        config, sources = apply_env_overrides(config, sources)
+        return ResolvedAIConfig(config=config, sources=sources)
 
     # -- Effective feature state -------------------------------------------
 
@@ -450,6 +594,9 @@ class AIConfig(BaseModel):
             cache_max_entries=self.cache_max_entries,
             context_lines=self.context_lines,
             fix_search_radius=self.fix_search_radius,
+            cli_max_diff_tokens=self.cli_max_diff_tokens,
+            cli_max_diff_bytes=self.cli_max_diff_bytes,
+            cli_max_findings_per_call=self.cli_max_findings_per_call,
         )
 
     @property

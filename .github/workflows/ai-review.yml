@@ -11,17 +11,21 @@ name: AI Review - Dogfood
 # through `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data,
 # never run with the token. See the security note on the job below.
 #
-# TRANSPORT (#1894): the review runs on the `cli` transport — the pinned
-# `claude` binary, authenticated by the CLAUDE_CODE_OAUTH_TOKEN subscription
-# session — not on the `api` transport. The ANTHROPIC_API_KEY account's balance
-# is depleted, which is what turned this check red on every PR after #1826 made
-# a credential failure visible. The CLI is *not* sent `--bare` (LINTRO_CLI_BARE:
-# never): bare mode disables OAuth session login and authenticates only against
-# an API key, which is precisely the credential that does not work here (#1838).
+# TRANSPORT (#1894/#1971): the review runs on the `cli` transport. Repo Actions
+# variables pick the provider (`LINTRO_AI_PROVIDER`, default anthropic). Anthropic
+# uses the pinned `claude` binary and CLAUDE_CODE_OAUTH_TOKEN; Cursor uses the
+# pinned `agent` binary and CURSOR_API_KEY. The ANTHROPIC_API_KEY account's
+# balance is depleted, which is what turned this check red on every PR after
+# #1826 made a credential failure visible. The CLI is *not* sent `--bare`
+# (LINTRO_CLI_BARE: never): bare mode disables OAuth session login and
+# authenticates only against an API key, which is precisely the credential that
+# does not work for the Anthropic dogfood (#1838).
 #
-# The AI_REVIEW_MAX_COST_USD cap below is API-path accounting: lintro can only
-# price tokens it billed itself. Under the CLI transport the call bills the
-# subscription, so the cap is advisory rather than enforced spend control.
+# Spend ceiling is the committed `ai.max_cost_usd: 2.00` in `.lintro-config.yaml`
+# (the empirically validated value from #1976/#1977; the 0.50 that landed with
+# #2018 / 9f43a98a was a side-effect, restored here by #2025). Under the CLI
+# transport the call bills the subscription, so the figure is advisory rather
+# than enforced spend control (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -42,24 +46,32 @@ name: AI Review - Dogfood
 # following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
-#   3. Secret ordering: CLAUDE_CODE_OAUTH_TOKEN is injected only into the final
-#      review step env, after the trusted base-ref checkout, the pinned CLI
-#      install, and uv sync.
+#   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN and
+#      CURSOR_API_KEY) are injected only into the final review step env, after
+#      the trusted base-ref checkout, the pinned CLI installs, and uv sync.
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
+#
+# TWO-PR BOOTSTRAP (#2025): this job checks out only the trusted base ref.
+# GitHub runs the workflow YAML from the PR, so a brand-new script invoked
+# here would be missing on the PR that introduces it. Convention: PR 1 lands
+# the script inert (no workflow step calls it yet); PR 2, after PR 1 is on
+# main, adds the step that invokes it. Never land a new script and its first
+# workflow invocation in the same PR. A second `actions/checkout` (any
+# `path:`) fails the audit in tests/scripts/test_run_ai_review.py.
 
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
 # workflow diffs it skipped are exactly where recent regressions shipped.
 'on':
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions: {}
 
 concurrency:
-  group: ai-review-${{ github.ref }}
+  group: ai-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -77,11 +89,15 @@ jobs:
     #
     # SECURITY: lintro is installed from the PR's trusted BASE ref
     # (pull_request.base.sha, i.e. main), never the PR head, so the code that
-    # runs with the CLAUDE_CODE_OAUTH_TOKEN secret is always trusted — a PR
-    # cannot substitute its own lintro/** to exfiltrate the token. The `claude`
-    # CLI is installed at a version pinned in the base ref's Dockerfile for the
-    # same reason. The PR is reviewed as data: `lintro review --pr <N>` fetches
-    # the diff via `gh` (GitHub API), it does not execute the PR's working tree.
+    # runs with the provider credential is always trusted — a PR cannot
+    # substitute its own lintro/** to exfiltrate the token. Agent CLI versions
+    # are pinned in the base ref's Dockerfile for the same reason. Cursor
+    # install is gated on `vars.LINTRO_AI_PROVIDER == 'cursor'` and runs
+    # `scripts/ci/install-cursor-agent.sh` from this trusted checkout — never
+    # a PR-head side-checkout. New installer scripts follow the two-PR
+    # bootstrap convention in the file header. The PR is reviewed as data:
+    # `lintro review --pr <N>` fetches the diff via `gh` (GitHub API), it
+    # does not execute the PR's working tree.
     # Trade-off: a PR that breaks the review code itself won't be caught by this
     # job (that is covered by the unit tests in tests/), which is the correct
     # security posture. The credential is therefore safe to enable.
@@ -89,20 +105,43 @@ jobs:
       github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
+      # actions/checkout reads the trusted base ref with the workflow token.
       contents: read
-      # `--post` maintains the sticky review comment and posts inline review
-      # comments, both of which require write access to pull requests.
-      pull-requests: write
-    # COUPLED to run-ai-review.sh's `--timeout` (currently 900 s): the job
-    # budget must cover setup (~7 min) + the full review timeout (15 min) +
+      # `--post` writes as lintro-review[bot] via the App token (#2050).
+      # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
+      # diff, which needs pull-requests: read.
+      pull-requests: read
+    # COUPLED to ai.transports.cli.timeout (default 900 s,
+    # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
+    # job budget must cover setup (~7 min) + the full review timeout (15 min) +
     # posting margin, so lintro's own timeout always fires before the runner
     # kills the job — a runner kill truncates the JSON envelope the outcome
     # classifier reads. Invariant enforced by tests/scripts/
-    # test_run_ai_review.py; bump both values together.
-    timeout-minutes: 30
+    # test_run_ai_review.py; bump both values together. 75 (was 30, then 50) because
+    # custom-agent passes stack additional per-call --timeout budgets on top
+    # of the main review call, and provider-heavy diffs were hitting the old
+    # ceiling exactly (#1976 reviews killed at the boundary four times; #1977's
+    # oscillated around 45-55 min and was killed at 50 twice).
+    timeout-minutes: 75
+    # Cursor shards are appended only when the dogfood provider is Cursor.
+    # They stay out of the anthropic path so that job cannot reach Cursor
+    # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the
+    # harden-runner summary of the failed run; fix is a one-line allowlist
+    # PR on AI_REVIEW_CURSOR_EGRESS. No wildcards on this job.
+    env:
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_CURSOR_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' && 'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }}
 
     steps:
       - name: Harden Runner
+        # Cursor shards observed on live dogfood (runs 31779466126 /
+        # 31782811574): downloads.cursor.com, api2.cursor.sh, api3.cursor.sh,
+        # agentn.global.api5.cursor.sh, repo42.cursor.sh. Gated via
+        # AI_REVIEW_CURSOR_EGRESS so the anthropic path never allowlists
+        # them. release-assets.githubusercontent.com is setup-node's
+        # GitHub releases CDN; those runs blocked it and the action fell
+        # back to nodejs.org — allowlisted so Node install is not a silent
+        # fallback.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -113,6 +152,7 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
@@ -120,6 +160,7 @@ jobs:
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
+            ${{ env.AI_REVIEW_CURSOR_EGRESS }}
 
       - name: Checkout base ref (trusted lintro install)
         # Install lintro from the PR's BASE ref (main), NOT the PR head. The
@@ -144,6 +185,15 @@ jobs:
           python3 scripts/ci/ai_tools_arg_pin.py NODE_VERSION CLAUDE_CODE_VERSION \
             --exact --format github >>"$GITHUB_OUTPUT"
 
+      - name: Resolve pinned cursor agent version
+        id: cursor-pins
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
+        # Calendar build id is not semver, so this resolves without --exact.
+        # Gated so the anthropic path never touches the Cursor tarball pins.
+        run: |
+          python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION \
+            CURSOR_AGENT_SHA256_X64 --format github >>"$GITHUB_OUTPUT"
+
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -153,6 +203,14 @@ jobs:
         env:
           CLAUDE_CODE_VERSION: ${{ steps.pins.outputs.claude-code-version }}
         run: scripts/ci/install-claude-cli.sh
+
+      - name: Install pinned cursor agent CLI
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' }}
+        env:
+          CURSOR_AGENT_VERSION: ${{ steps.cursor-pins.outputs.cursor-agent-version }}
+          # yamllint disable-line rule:line-length
+          CURSOR_AGENT_SHA256_X64: ${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}
+        run: scripts/ci/install-cursor-agent.sh
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -167,6 +225,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra ai
 
+      - name: Mint lintro-review App token
+        id: lintro-review-app
+        # Repo-scoped installation token (#2050). Default current-repo scope —
+        # do not pass `owner:` without `repositories:`. Only the review step
+        # below sees `outputs.token`; inference credentials stay separate.
+        # Request only permissions the App installation grants. Asking for
+        # `permission-contents: read` 422s the whole mint when Contents is
+        # not on the install; compare then degrades instead of posting nothing.
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
         env:
@@ -177,6 +251,10 @@ jobs:
           # lintro's bare-mode detection think a bare `claude` call could
           # authenticate (LINTRO_CLI_BARE pins the decision regardless).
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Cursor CLI auth when LINTRO_AI_PROVIDER=cursor. Empty when the
+          # org/repo secret is unset — the wrapper then fails visibly rather
+          # than posting nothing.
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           # `never` == do not send `--bare`, so the CLI uses its OAuth session
           # (#1838/#1859). AUTO would resolve the same way with no API key in
           # scope; pinning it keeps CI deterministic if that ever changes.
@@ -186,6 +264,19 @@ jobs:
           # binary the contract tests verified.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
+          # `gh` fetches the PR diff with the workflow token
+          # (contents: read + pull-requests: read).
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_REVIEW_MAX_COST_USD: '2.00'
+          # `--post` writes as lintro-review[bot] via the App token (#2050).
+          GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
+          # Repo Actions variables named identically to the env vars they feed
+          # (#1971). Unset variables keep today's pinned CI defaults (cli /
+          # anthropic); a set variable is the experiment loop (`gh variable set`
+          # → next run → `gh variable delete`). Empty MODEL falls through to
+          # the provider/config default. LINTRO_AI_ENABLED is hardcoded: CI
+          # always turns the master switch on; the committed YAML stays
+          # `enabled: false` for local checkouts.
+          LINTRO_AI_ENABLED: '1'
+          LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
+          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
+          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}

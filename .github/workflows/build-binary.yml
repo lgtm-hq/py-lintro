@@ -34,7 +34,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.11.33'
+  UV_VERSION: '0.12.2'
 
 jobs:
   get-release-info:
@@ -148,9 +148,11 @@ jobs:
     name: Build macOS Binary
     needs: get-release-info
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
-    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
-    # job deadline can preempt the failure-only OOM evidence upload.
-    timeout-minutes: 35
+    # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
+    # The smoke step's 20-minute budget used to sit inside a 35-minute job
+    # that already spent 25 minutes on compile, so the parent could cancel a
+    # valid smoke test.
+    timeout-minutes: 60
     permissions:
       contents: write
     strategy:
@@ -255,24 +257,28 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          # Fail if binary can't execute --version (required for valid build)
-          ./dist/nuitka/lintro --version
-          # Show help output for debugging (non-fatal)
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-macos-${{ matrix.arch }}
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
-      - name: Calculate SHA256
+      # matrix.arch reaches the shell via env, not template expansion: on
+      # workflow_call inputs.arch is a free-form string that feeds this matrix
+      # (same hardening as the Build binary step above).
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-macos-${{ matrix.arch }}"
-          SHA=$(shasum -a 256 "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for ${{ matrix.arch }}: $SHA"
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          "dist/nuitka/lintro-macos-$BUILD_ARCH"
+          "$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -282,8 +288,11 @@ jobs:
           retention-days: 7
 
       - name: Save SHA256 to file
+        env:
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
-          echo "${{ steps.sha256.outputs.sha256 }}" > sha256-${{ matrix.arch }}.txt
+          echo "$SHA256" > "sha256-$BUILD_ARCH.txt"
 
       - name: Upload SHA256 file
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -306,9 +315,11 @@ jobs:
     name: Build Linux Binary
     needs: get-release-info
     runs-on: ${{ matrix.runner }}
-    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
-    # job deadline can preempt the failure-only OOM evidence upload.
-    timeout-minutes: 35
+    # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
+    # The smoke step's 20-minute budget used to sit inside a 35-minute job
+    # that already spent 25 minutes on compile, so the parent could cancel a
+    # valid smoke test.
+    timeout-minutes: 60
     permissions:
       contents: write
     strategy:
@@ -405,22 +416,27 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          ./dist/nuitka/lintro --version
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-linux-${{ matrix.arch }}
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. This asserts the registry is actually populated.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
-      - name: Calculate SHA256
+      # Kept symmetric with the macOS job: both call sites pass the arch
+      # through env so the two never drift apart.
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-linux-${{ matrix.arch }}"
-          SHA=$(sha256sum "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for linux-${{ matrix.arch }}: $SHA"
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          "dist/nuitka/lintro-linux-$BUILD_ARCH"
+          "linux-$BUILD_ARCH"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -457,7 +473,10 @@ jobs:
     name: Create Universal Binary
     needs: [get-release-info, build-macos]
     runs-on: macos-latest
-    timeout-minutes: 10
+    # download/lipo/upload (~10 min) + 20 min smoke + 5 min headroom.
+    # The smoke step's 20-minute budget must not sit inside the previous
+    # 10-minute job deadline or the parent would cancel a valid smoke test.
+    timeout-minutes: 35
     permissions:
       contents: write
     if: inputs.arch == 'universal'
@@ -471,7 +490,22 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
             uploads.github.com:443
+
+      # Needed for scripts/build/create_universal.sh and the binary smoke
+      # test (scripts/ci/smoke-test-binary.py reads the generated builtin
+      # index under lintro/plugins). The codeload /
+      # objects.githubusercontent.com endpoints above are what actions/checkout
+      # fetches through, and match the other sparse-checkout jobs here.
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts
+            lintro/plugins
+          persist-credentials: false
 
       - name: Download arm64 binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -486,17 +520,21 @@ jobs:
           path: binaries/
 
       - name: Create universal binary
-        run: |
-          lipo -create \
-            binaries/lintro-macos-arm64 \
-            binaries/lintro-macos-x86_64 \
-            -output binaries/lintro-macos-universal
-          chmod +x binaries/lintro-macos-universal
+        run: >-
+          scripts/build/create_universal.sh
+          binaries/lintro-macos-arm64
+          binaries/lintro-macos-x86_64
+          binaries/lintro-macos-universal
 
-      - name: Verify universal binary
-        run: |
-          file binaries/lintro-macos-universal
-          ls -lh binaries/lintro-macos-universal
+      # #2006: --version/--help pass even when the frozen binary ships an empty
+      # tool registry. Lipo can also produce a binary that will not launch, so
+      # the post-lipo artifact is smoke-tested independently of the per-arch
+      # inputs.
+      - name: Smoke-test tool registry
+        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
+        # the cold onefile extraction each of the three invocations may pay.
+        timeout-minutes: 20
+        run: python3 scripts/ci/smoke-test-binary.py binaries/lintro-macos-universal
 
       - name: Upload universal artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -586,7 +624,7 @@ jobs:
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@666482503128c40a09ed21b955456e46d6bdfcbe # v0.63.0
         with:
           formula: lintro
           version: ${{ steps.version.outputs.version }}

@@ -15,7 +15,6 @@ Example:
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,25 +109,22 @@ class SvelteCheckPlugin(BaseToolPlugin):
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 
-    def _get_svelte_check_command(self) -> list[str]:
+    def _get_svelte_check_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command to run svelte-check.
 
-        Prefers direct svelte-check executable, falls back to bunx/npx.
+        Delegates to the shared Node.js resolution chain: a project-local
+        ``svelte-check`` install wins, then ``PATH``, then a version-pinned
+        ``bunx``/``npx`` invocation (#1811). svelte-check is almost always a
+        devDependency of the Svelte project it checks, so the local install is
+        the one that matches the project's Svelte version.
+
+        Args:
+            cwd: Directory svelte-check will run in, when known.
 
         Returns:
             Command arguments for svelte-check.
         """
-        # Prefer direct executable if available
-        if shutil.which("svelte-check"):
-            return ["svelte-check"]
-        # Try bunx (bun)
-        if shutil.which("bunx"):
-            return ["bunx", "svelte-check"]
-        # Try npx (npm)
-        if shutil.which("npx"):
-            return ["npx", "svelte-check"]
-        # Last resort
-        return ["svelte-check"]
+        return self._get_executable_command(tool_name="svelte-check", cwd=cwd)
 
     def _find_svelte_config(self, cwd: Path) -> Path | None:
         """Find svelte config file in the working directory.
@@ -149,11 +145,14 @@ class SvelteCheckPlugin(BaseToolPlugin):
     def _build_command(
         self,
         options: dict[str, object] | None = None,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Build the svelte-check invocation command.
 
         Args:
             options: Options dict to use for flags. Defaults to self.options.
+            cwd: Directory svelte-check will run in, used to resolve a
+                project-local install.
 
         Returns:
             A list of command arguments ready to be executed.
@@ -161,7 +160,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
         if options is None:
             options = self.options
 
-        cmd: list[str] = self._get_svelte_check_command()
+        cmd: list[str] = self._get_svelte_check_command(cwd=cwd)
 
         # Use machine-verbose output for parseable format
         cmd.extend(["--output", "machine-verbose"])
@@ -279,7 +278,10 @@ class SvelteCheckPlugin(BaseToolPlugin):
                 )
 
         # Build command
-        cmd = self._build_command(options=merged_options)
+        cmd = self._build_command(
+            options=merged_options,
+            cwd=Path(ctx.cwd) if ctx.cwd else None,
+        )
         logger.debug("[svelte-check] Running with cwd={} and cmd={}", ctx.cwd, cmd)
 
         try:

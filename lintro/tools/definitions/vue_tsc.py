@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 from lintro._tool_versions import get_min_version
@@ -96,25 +97,34 @@ class VueTscPlugin(TypeScriptCheckerPlugin):
 
     @functools.cached_property
     def _vue_tsc_cmd(self) -> list[str]:
-        """Get the command to run vue-tsc.
+        """Get the command to run vue-tsc, resolved from the process directory.
 
-        Prefers direct vue-tsc executable, falls back to bunx/npx.
-        The result is cached so that repeated accesses (e.g. from the
-        ``definition`` property and ``_build_command``) reuse the stored
-        command without repeated ``shutil.which()`` lookups.
+        Used for the ``version_command`` in :attr:`definition`, which is built
+        before any execution directory is known. The result is cached so that
+        repeated accesses reuse the stored command without repeating the
+        filesystem walk. :meth:`_command_prefix` re-resolves with the real
+        execution directory when running the checker.
 
         Returns:
             Command arguments for vue-tsc.
         """
         return self._resolve_binary_command("vue-tsc")
 
-    def _command_prefix(self) -> list[str]:
+    def _command_prefix(self, cwd: Path | None = None) -> list[str]:
         """Return the vue-tsc command prefix.
+
+        Resolves the project-local ``vue-tsc`` install first, then ``PATH``,
+        then a version-pinned ``bunx``/``npx`` invocation (#1811).
+
+        Args:
+            cwd: Directory vue-tsc will run in, when known.
 
         Returns:
             Command argument list for vue-tsc.
         """
-        return list(self._vue_tsc_cmd)
+        if cwd is None:
+            return list(self._vue_tsc_cmd)
+        return self._resolve_binary_command("vue-tsc", cwd=cwd)
 
     def _parse_output(self, output: str) -> list[Any]:
         """Parse raw vue-tsc output into structured issues.

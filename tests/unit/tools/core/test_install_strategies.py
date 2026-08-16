@@ -10,7 +10,7 @@ from lintro.tools.core.install_strategies import (
     get_strategy,
     strategy_registry,
 )
-from lintro.tools.core.install_strategies.brew_names import BREW_FORMULA_NAMES
+from lintro.tools.core.install_strategies.package_names import BREW_FORMULA_NAMES
 
 PM = PackageManager
 

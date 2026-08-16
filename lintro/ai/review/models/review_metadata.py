@@ -37,6 +37,30 @@ class ReviewMetadata:
         stopped_reason (str): Human-readable reason a partial review stopped
             (e.g. "cost cap"). Empty for a complete review.
         duration_seconds (float): Wall-clock duration of the review run.
+        transport (str): Transport used for the review (``api`` or ``cli``).
+            Empty for legacy records that predate transport stamping.
+        auth_mode (str): How the provider call authenticated —
+            ``api_key`` or ``subscription`` (see
+            ``lintro.ai.transport.AuthMode``). Empty when unknown.
+        cost_basis (str): Provenance of ``cost_estimate_usd`` — ``billed``,
+            ``estimated``, or ``unpriceable`` (#1923). Empty when unknown.
+        provider_source (str): Provenance of ``provider`` — ``flag``,
+            ``env``, ``config``, or ``default`` (#1970). Empty on legacy
+            records.
+        model_source (str): Provenance of ``model`` (#1970). Empty on
+            legacy records.
+        transport_source (str): Provenance of ``transport`` (#1970). Empty
+            on legacy records.
+        max_cost_usd (float | None): Effective ``ai.max_cost_usd`` ceiling
+            for this run. ``None`` means uncapped (#2024). Unset on
+            legacy records (same default, so they must not be labeled
+            uncapped without ``max_cost_usd_source``).
+        max_cost_usd_source (str): Provenance of ``max_cost_usd`` (#2024).
+            Empty on legacy records.
+        phase_timings (dict[str, float]): Per-phase wall-clock seconds for
+            regression visibility. Keys include ``context_collection``,
+            ``provider`` (chunk + custom-agent provider calls), and
+            ``parse_merge``.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -67,6 +91,15 @@ class ReviewMetadata:
     chunks_reviewed: int = 0
     stopped_reason: str = ""
     duration_seconds: float = 0.0
+    transport: str = ""
+    auth_mode: str = ""
+    cost_basis: str = ""
+    provider_source: str = ""
+    model_source: str = ""
+    transport_source: str = ""
+    max_cost_usd: float | None = None
+    max_cost_usd_source: str = ""
+    phase_timings: dict[str, float] = field(default_factory=dict)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

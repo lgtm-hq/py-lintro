@@ -598,47 +598,67 @@ def test_get_executable_command_python_bundled_tools_python_module_in_venv(
 
 def test_get_executable_command_nodejs_tool_with_bunx(
     fake_tool_plugin: FakeToolPlugin,
+    no_local_node_install: None,
 ) -> None:
-    """Verify Node.js tools return bunx command when bunx is available.
+    """Verify a Node.js tool on PATH is preferred over bunx (#1811).
 
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
     from lintro.enums.tool_name import ToolName
 
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    with patch("shutil.which", return_value="/usr/bin/markdownlint-cli2"):
         result = fake_tool_plugin._get_executable_command(ToolName.MARKDOWNLINT)
 
-        assert_that(result).contains("bunx", "markdownlint-cli2")
+        assert_that(result).is_equal_to(["/usr/bin/markdownlint-cli2"])
 
 
 def test_get_executable_command_astro_check_with_bunx(
     fake_tool_plugin: FakeToolPlugin,
+    no_local_node_install: None,
 ) -> None:
-    """Verify astro-check resolves to bunx astro command."""
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    """Verify astro-check resolves to the astro binary on PATH.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        no_local_node_install: Fixture removing any project-local Node
+            install from resolution.
+    """
+    with patch("shutil.which", return_value="/usr/bin/astro"):
         result = fake_tool_plugin._get_executable_command("astro-check")
 
-        assert_that(result).is_equal_to(["bunx", "astro"])
+        assert_that(result).is_equal_to(["/usr/bin/astro"])
 
 
 def test_get_executable_command_vue_tsc_with_bunx(
     fake_tool_plugin: FakeToolPlugin,
+    no_local_node_install: None,
 ) -> None:
-    """Verify vue-tsc resolves to bunx vue-tsc command."""
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    """Verify vue-tsc resolves to the vue-tsc binary on PATH.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        no_local_node_install: Fixture removing any project-local Node
+            install from resolution.
+    """
+    with patch("shutil.which", return_value="/usr/bin/vue-tsc"):
         result = fake_tool_plugin._get_executable_command("vue-tsc")
 
-        assert_that(result).is_equal_to(["bunx", "vue-tsc"])
+        assert_that(result).is_equal_to(["/usr/bin/vue-tsc"])
 
 
 def test_get_executable_command_nodejs_tool_without_bunx(
     fake_tool_plugin: FakeToolPlugin,
+    no_local_node_install: None,
 ) -> None:
     """Verify Node.js tools return tool name when bunx is not available.
 
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        no_local_node_install: Fixture removing any project-local
+            Node install from resolution.
     """
     from lintro.enums.tool_name import ToolName
 

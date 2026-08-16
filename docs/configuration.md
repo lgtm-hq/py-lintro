@@ -376,8 +376,8 @@ running the tools that need a project's dependency tree to work: `tsc`, `vue-tsc
 
 It does **not** apply to standalone Node.js binaries such as `prettier`, `oxlint`,
 `oxfmt`, `stylelint` or `markdownlint-cli2`. Those run fine without a local
-`node_modules`: `oxlint`, `oxfmt` and `stylelint` are fetched on demand by `bunx`/`npx`,
-while `prettier` and `markdownlint-cli2` are resolved from `PATH` — see
+`node_modules`: if the project has not installed them, resolution falls through to a
+binary on `PATH` and then to a version-pinned `bunx`/`npx` fetch — see
 [Node.js Tool Resolution](#nodejs-tool-resolution). When one of them cannot be resolved
 at all, Lintro reports a `⏭️ SKIP` row with the reason instead of a pass — installing
 project dependencies would not have helped.
@@ -453,15 +453,28 @@ export LINTRO_DOCKER=1
 
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+
+# AI config overlays (flag > env > .lintro-config.yaml > default). See
+# docs/ai-features.md "Invocation overrides".
+export LINTRO_AI_PROVIDER=cursor
+export LINTRO_AI_MODEL=cursor-grok-4.6-high
+export LINTRO_AI_TRANSPORT=cli
+export LINTRO_AI_ENABLED=1
+export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 ```
 
-| Variable                         | Description                                                  | Default   |
-| -------------------------------- | ------------------------------------------------------------ | --------- |
-| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
-| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
-| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
-| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
+| Variable                         | Description                                                       | Default   |
+| -------------------------------- | ----------------------------------------------------------------- | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                         | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)       | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`            | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only      | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)        | `0`       |
+| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)        | -         |
+| `LINTRO_AI_MODEL`                | Override `ai.model`                                               | -         |
+| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
+| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
+| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -599,6 +612,71 @@ lintro doctor --json               # machine-readable output for CI
 The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
 `upgrade_hint`.
+
+### Node.js Package Manager Policy {#node-package-manager-policy}
+
+`lintro install` used to pick bun whenever bun happened to be on `PATH`, and to install
+**globally** regardless of what the project said. In an npm-first repository that
+created two authorities: your own commands and your editor used the project's local
+dependency, while lintro installed and upgraded a global one (#2005).
+
+**Which manager**, in priority order:
+
+1. **Explicit choice** — `lintro install --node-package-manager npm`.
+2. **`packageManager` metadata** — the Corepack field in `package.json`
+   (`"packageManager": "pnpm@9.1.0"`).
+3. **Lockfile evidence** — `bun.lock`/`bun.lockb`, `pnpm-lock.yaml`, `yarn.lock`,
+   `package-lock.json`, `npm-shrinkwrap.json`.
+4. **Available manager** — bun if installed, otherwise npm, then pnpm, then yarn. bun
+   and npm are lintro's own preference; pnpm and yarn are included so a machine that
+   only has those still gets a command it can run. This is the only step where lintro's
+   own preference decides anything.
+
+Availability does **not** veto the first three. If your project is npm-locked but only
+bun is installed, lintro still tells you to run `npm install -D …` rather than quietly
+writing a `bun.lock` into your repository.
+
+**Where it installs.** Inside a Node project (anything with a `package.json` at or above
+the working directory), lintro adds a **dev dependency** — `npm install -D <pkg>@<ver>`
+— because the project owns its tool versions and a lockfile-pinned dependency is what
+[Node.js Tool Resolution](#nodejs-tool-resolution) will run. Global installs are
+reserved for `--global` or for an environment with no project manifest at all (a bare CI
+runner, a container image, your `$HOME`). The upward search for a manifest stops at the
+first directory containing a `.git` entry, and never treats `$HOME` itself as a project
+root unless that is where you ran the command — a stray `~/package.json` must never
+collect your tools.
+
+**Project pins are never replaced implicitly.** If `package.json` declares a version
+that differs from lintro's recommendation, `--upgrade` reports the difference and asks
+for an explicit decision instead of rewriting your manifest:
+
+```console
+$ lintro install prettier --upgrade
+  Node package manager: npm (from lockfile) → project dev dependency
+  …
+  prettier   Upgrade prettier explicitly: this project pins 3.1.0 in package.json but
+             lintro recommends 3.9.4. Run `npm install -D prettier@3.9.4` to adopt
+             lintro's version, or keep the project pin.
+```
+
+The comparison is deliberately literal, not a semver range solve: a spec that names the
+recommended version exactly — `3.9.4`, `^3.9.4`, `~3.9.4`, `=3.9.4`, `v3.9.4` — is not a
+conflict and upgrades normally. On a first install of a declared-but-missing package,
+those same spellings emit the manager's install-all command (`npm install`,
+`bun install`, …) so the lockfile pin is restored, rather than a versioned add that
+would rewrite the range. Anything else, including a wider range such as `^3.9.0` that a
+resolver _would_ satisfy with 3.9.4, is reported so you decide. Erring toward asking is
+deliberate: the cost of a needless question is far below the cost of silently rewriting
+someone's `package.json`.
+
+**Planning matches execution.** The version probe for npm-installed tools resolves
+through the same chain a check uses, so `lintro install` reports on the binary
+`lintro check` will actually run rather than on whatever a bare name finds on `PATH`.
+
+| Flag                                         | Effect                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------- |
+| `--node-package-manager {bun,npm,pnpm,yarn}` | Force the manager, overriding `packageManager` and lockfiles.              |
+| `--global`                                   | Install npm-managed tools globally instead of as project dev dependencies. |
 
 ### Install Lock / Export
 
@@ -809,50 +887,58 @@ Rationale:
 
 ### Node.js Tool Resolution {#nodejs-tool-resolution}
 
-How Lintro locates a Node.js tool decides which install actually works, and the answer
-is not the same for every tool. Four resolution modes are in use; the tool's own
-definition, not a single shared code path, decides which one applies.
+**Every Node.js tool resolves the same way.** There is one chain, implemented once in
+`NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
+`astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
+`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
-**1. Runner-only tools — install as a project dependency.** `oxlint`, `oxfmt` and
-`stylelint` go through `NodeJSBuilder` in `lintro/tools/core/command_builders.py`:
+1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
+   checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
+   package with its own `package.json` stops there; a decoy `node_modules` above that
+   boundary is ignored. This is the preferred answer: it is lockfile-pinned, offline,
+   and it is the same binary your editor and your own `npm run` scripts use.
+2. **the `PATH`-resolved absolute path of `<binary>`** — a global install (`bun add -g`,
+   `npm install -g`) or a Homebrew formula.
+3. **`bunx <package>@<pinned>` / `npx --yes --package <package>@<pinned> <binary>`** — a
+   registry fetch at the version Lintro pins in its manifest. `bunx` is tried first,
+   then `npx`. `bunx` keeps the short form when the executable name matches the package
+   name (`bunx prettier@<pinned>`); it uses `--package` when they differ
+   (`bunx --package typescript@<pinned> tsc`). `npx` always uses `--yes --package` so it
+   cannot hang waiting for a TTY prompt.
+4. **bare `<binary>`** — last resort, fails if nothing is installed.
 
-1. `bunx <binary>` — if `bunx` is available.
-2. `npx <binary>` — if only `npx` is available.
-3. bare `<binary>` — if neither runner exists.
+`@latest` is never resolved at runtime, for any tool. Branch 3 emits a one-time warning
+because it needs network access to the npm registry and imposes the pinned package's own
+`engines` floor on your runtime; a failure on that branch is reported with install
+guidance rather than the tool's raw error.
 
-`bunx`/`npx` resolve the **checked project's** `node_modules/.bin` first and otherwise
-fetch the package from the npm registry. Neither branch looks at `PATH`, so a global
-install (`bun add -g`, `npm install -g`) or a Homebrew formula is not what Lintro picks
-up on any machine that has `bun` or `npm`. Install these as a dependency of the project
-you check (`bun add -D <pkg>` / `npm install -D <pkg>`); that also pins the version
-through your lockfile instead of resolving `@latest` at check time.
+**Which install should I use?** A project devDependency (`bun add -D <pkg>` /
+`npm install -D <pkg>`) is the best answer for every Node tool — it wins the chain and
+pins the version through your lockfile. A global or Homebrew install is a valid fallback
+and is used whenever no project-local install is present.
 
-**2. `PATH`-first tools — a global install is what they prefer.** `commitlint`,
-`markdownlint-cli2`, `tsc`, `vue-tsc` and `svelte-check` resolve in their own tool
-definitions, and each checks the binary **before** any runner:
+> **Changed after v0.115.0 (#1811).** The chain above used to apply only to
+> `html-validate`. Other Node tools either went straight to
+> `bunx <binary>`/`npx <binary>` (never consulting `PATH`, and resolving `@latest`) or
+> preferred `PATH` ahead of any project-local install. Two consequences worth checking
+> after upgrading:
+>
+> - **A project-local install now wins.** If a project pins an older tool version as a
+>   devDependency while you relied on a newer global one, Lintro now runs the local pin
+>   — the same version your editor runs. Remove the devDependency, or upgrade it, if you
+>   wanted the global.
+> - **`prettier` is no longer `PATH`-only.** It previously had no Node builder at all
+>   and was resolved as a bare `prettier` name against `PATH`; a project's
+>   lockfile-pinned prettier was never used. It now follows the same chain as everything
+>   else.
+>
+> Also fixed on the way: `commitlint` and `markdownlint-cli2` had no `npx` branch, so on
+> a machine with npm but no bun a devDependency was unreachable and the tool reported a
+> skip. Both now resolve like every other Node tool.
 
-1. `<binary>` from `PATH` — a global install (`-g`) or a Homebrew formula.
-2. `bunx <binary>`.
-3. `npx <binary>` — **not available for `commitlint` or `markdownlint-cli2`**, which
-   fall straight through to step 4.
-4. bare `<binary>` — fails if nothing is installed.
-
-The `npx` gap matters: on a machine with npm but no bun, a `commitlint` or
-`markdownlint-cli2` devDependency is never reached and the tool reports a skip. Install
-those two globally, or make sure `bun` is available.
-
-**3. Local-first with a runner fallback.** `astro check` prefers the project's
-`node_modules/.bin/astro` (which also avoids the interactive "install @astrojs/check?"
-prompt that hangs without a TTY), then `PATH`, then `bunx`/`npx`. `html-validate` uses a
-similar chain with a **version-pinned** registry fallback; see
-[html-validate Configuration](#html-validate-configuration) for the full order. A global
-install works for both, though a project-local one is preferred.
-
-**4. `PATH` only.** `prettier` has no Node-specific builder at all — the command builder
-registry falls through to its bare-name default and the OS resolves `prettier` against
-`PATH`. A global install (`npm install -g prettier`, `brew install prettier`) is
-therefore the correct one; a project devDependency alone does not put `prettier` on
-`PATH`.
+Because the version check (`verify_tool_version`) resolves through this same chain, the
+binary Lintro version-gates is now the binary Lintro runs, for every Node tool rather
+than just for `html-validate`.
 
 ### Python Tools
 
@@ -1337,15 +1423,16 @@ wraps `tsc --noEmit` to check types without generating output files.
 brew install typescript
 
 # npm
-npm install -g typescript
+npm install -D typescript
 
 # bun
-bun add -g typescript
+bun add -D typescript
 ```
 
-Lintro prefers a `tsc` binary on `PATH` and only falls back to `bunx`/`npx`, so any of
-the above works; a project-local devDependency is picked up through the `bunx`/`npx`
-fallback. See [Node.js Tool Resolution](#nodejs-tool-resolution).
+A project devDependency is preferred: a type checker must match the project's own
+TypeScript version, because a different compiler reports different diagnostics. A global
+or Homebrew `tsc` is used when the project has no local install. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `tsconfig.json`
 
@@ -1415,8 +1502,8 @@ bun add -D oxlint
 npm install -D oxlint
 ```
 
-Lintro invokes oxlint via `bunx`/`npx`, which resolve the project's `node_modules` and
-not `PATH` — a global or Homebrew install is not what gets used. See
+Lintro prefers the project's own `node_modules/.bin/oxlint`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch, so a global or Homebrew install works too. See
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxlintrc.json`
@@ -1500,8 +1587,8 @@ bun add -D stylelint stylelint-config-standard
 npm install -D stylelint stylelint-config-standard
 ```
 
-Lintro invokes stylelint via `bunx`/`npx`, which resolve the project's `node_modules`
-and not `PATH` — a global install is not what gets used. See
+Lintro prefers the project's own `node_modules/.bin/stylelint`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch, so a global install works too. See
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.stylelintrc.json`
@@ -1565,8 +1652,8 @@ bun add -D oxfmt
 npm install -D oxfmt
 ```
 
-Lintro invokes oxfmt via `bunx`/`npx`, which resolve the project's `node_modules` and
-not `PATH` — a global or Homebrew install is not what gets used. See
+Lintro prefers the project's own `node_modules/.bin/oxfmt`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch, so a global or Homebrew install works too. See
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxfmtrc.json` or `.oxfmtrc.jsonc`
@@ -1624,11 +1711,18 @@ template expressions.
 
 ```bash
 # bun (recommended)
-bun add astro
+bun add -D @astrojs/check
 
 # npm
-npm install astro
+npm install -D @astrojs/check
 ```
+
+`astro check` needs `@astrojs/check`, and Lintro runs Astro with `CI=1` so its
+interactive "install @astrojs/check?" prompt cannot complete. Add that package as a
+devDependency; `astro` is already a production dependency in an Astro project, and
+installing it with `-D` would move it out of `dependencies`. A project-local install of
+`@astrojs/check` is strongly preferred here; see
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Native Config:** `astro.config.mjs`, `astro.config.ts`, or `astro.config.js`
 
@@ -1768,17 +1862,17 @@ most reliable branch of Lintro's executable resolution, it is lockfile-pinned, a
 needs no registry access at check time. A global install (`-g`) does _not_ populate
 `node_modules/.bin`, so it lands on a later, weaker branch.
 
-html-validate is the only tool on this pinned chain; see
-[Node.js Tool Resolution](#nodejs-tool-resolution) for how the other Node.js tools
-resolve.
+html-validate uses the shared Node.js chain — as of a release after v0.115.0 (#1811) so
+does every other Node.js tool; see [Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **Executable resolution order:**
 
 1. `node_modules/.bin/html-validate`, searched upward from the directory being checked
-   (the target project's own install, not Lintro's).
-2. `html-validate` on `PATH` (e.g. a global install).
+   until the nearest `package.json` or `.git`.
+2. the `PATH`-resolved absolute path of `html-validate` (e.g. a global install).
 3. `bunx html-validate@<pinned>` — registry fallback, only if `bunx` is available.
-4. `npx html-validate@<pinned>` — registry fallback, only if `npx` is available.
+4. `npx --yes --package html-validate@<pinned> html-validate` — registry fallback, only
+   if `npx` is available.
 5. bare `html-validate` (fails if nothing is installed).
 
 `<pinned>` is the version Lintro pins in its manifest; `@latest` is never resolved at
@@ -2602,11 +2696,10 @@ file-based tools, it inspects git state: Lintro runs `commitlint --last` to vali
 repository's most recent commit message.
 
 - Requires a config; Lintro skips it as a non-error when none is present.
-- Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
-  `npm install -g @commitlint/cli @commitlint/config-conventional`, or
-  `brew install commitlint`. Lintro checks `PATH` first and falls back only to `bunx` —
-  there is no `npx` branch, so a devDependency is unreachable without `bun`. See
-  [Node.js Tool Resolution](#nodejs-tool-resolution).
+- Install: `bun add -D @commitlint/cli @commitlint/config-conventional` or
+  `npm install -D @commitlint/cli @commitlint/config-conventional`. A project
+  devDependency is preferred; a global or Homebrew install is used when there is no
+  local one. See [Node.js Tool Resolution](#nodejs-tool-resolution).
 - Cannot auto-fix — amend the commit to satisfy the rules.
 
 **File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
@@ -2744,33 +2837,35 @@ ai:
 
 ### Full AI Config Reference
 
-| Setting                 | Type   | Default     | Description                                      |
-| ----------------------- | ------ | ----------- | ------------------------------------------------ |
-| `enabled`               | bool   | `false`     | Master switch; ANDs with `lint` / `review`       |
-| `lint`                  | bool   | `false`     | Enable AI lint summaries on `chk`/`fmt`          |
-| `review`                | bool   | `false`     | Enable the `lintro review` AI diff review        |
-| `provider`              | string | `anthropic` | AI provider (`anthropic` or `openai`)            |
-| `model`                 | string | (default)   | Model override                                   |
-| `api_key_env`           | string | (default)   | Custom env var for API key                       |
-| `default_fix`           | bool   | `false`     | Always run `--fix` in check                      |
-| `auto_apply`            | bool   | `false`     | Apply fixes without confirmation                 |
-| `auto_apply_safe_fixes` | bool   | `true`      | Auto-apply safe-style fixes in non-interactive   |
-| `max_tokens`            | int    | `4096`      | Max tokens per request                           |
-| `max_fix_attempts`      | int    | `20`        | Max issues to attempt fixing per run             |
-| `max_parallel_calls`    | int    | `5`         | Concurrent API calls (1-20)                      |
-| `max_retries`           | int    | `2`         | Max retries for transient errors (0-10)          |
-| `api_timeout`           | float  | `60.0`      | API request timeout in seconds                   |
-| `validate_after_group`  | bool   | `false`     | Validate immediately after each accepted group   |
-| `show_cost_estimate`    | bool   | `true`      | Show token/cost info in output                   |
-| `context_lines`         | int    | `15`        | Lines of context sent for fix generation (1-100) |
-| `fix_search_radius`     | int    | `5`         | Line search radius for fix application (1-50)    |
-| `checkpoint_retention`  | int    | `10`        | Git checkpoint refs kept (>=0; 0 = current only) |
-| `checkpoint_fmt`        | bool   | `false`     | Git checkpoint before `lintro format` mutations  |
-| `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
-| `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
-| `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
-| `transcript_logging`    | bool   | `false`     | Opt-in NDJSON logging of AI provider traffic     |
-| `transcript_retention`  | int    | `10`        | Max transcript files kept under `.lintro-cache`  |
+| Setting                 | Type   | Default        | Description                                                                                  |
+| ----------------------- | ------ | -------------- | -------------------------------------------------------------------------------------------- |
+| `enabled`               | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                   |
+| `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
+| `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
+| `provider`              | string | `anthropic`    | AI provider (`anthropic` or `openai`)                                                        |
+| `model`                 | string | (default)      | Model override                                                                               |
+| `api_key_env`           | string | (default)      | Custom env var for API key                                                                   |
+| `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                  |
+| `auto_apply`            | bool   | `false`        | Apply fixes without confirmation                                                             |
+| `auto_apply_safe_fixes` | bool   | `true`         | Auto-apply safe-style fixes in non-interactive                                               |
+| `max_tokens`            | int    | `4096`         | Max tokens per request                                                                       |
+| `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
+| `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
+| `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
+| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `0` = uncapped (YAML `0` is $0)                     |
+| `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
+| `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
+| `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |
+| `show_cost_estimate`    | bool   | `true`         | Show token/cost info in output                                                               |
+| `context_lines`         | int    | `15`           | Lines of context sent for fix generation (1-100)                                             |
+| `fix_search_radius`     | int    | `5`            | Line search radius for fix application (1-50)                                                |
+| `checkpoint_retention`  | int    | `10`           | Git checkpoint refs kept (>=0; 0 = current only)                                             |
+| `checkpoint_fmt`        | bool   | `false`        | Git checkpoint before `lintro format` mutations                                              |
+| `retry_base_delay`      | float  | `1.0`          | Initial retry delay in seconds (min 0.1)                                                     |
+| `retry_max_delay`       | float  | `30.0`         | Maximum retry delay in seconds (min 1.0)                                                     |
+| `retry_backoff_factor`  | float  | `2.0`          | Retry delay multiplier (min 1.0)                                                             |
+| `transcript_logging`    | bool   | `false`        | Opt-in NDJSON logging of AI provider traffic                                                 |
+| `transcript_retention`  | int    | `10`           | Max transcript files kept under `.lintro-cache`                                              |
 
 ### Idiom Review Tool (`idiom-review`)
 
@@ -2962,7 +3057,7 @@ quality:
 # Tool installation
 install-tools:
 	pip install ruff pydoclint
-	npm install -g prettier
+	npm install -D prettier
 ```
 
 <!-- markdownlint-enable MD010 -->

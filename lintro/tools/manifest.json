@@ -74,7 +74,7 @@
     },
     {
       "name": "astro_check",
-      "version": "7.1.3",
+      "version": "7.1.6",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -202,7 +202,7 @@
     },
     {
       "name": "hadolint",
-      "version": "2.14.0",
+      "version": "2.15.1",
       "install": {
         "type": "binary"
       },
@@ -214,7 +214,7 @@
     },
     {
       "name": "html_validate",
-      "version": "11.5.6",
+      "version": "11.6.0",
       "install": {
         "type": "npm",
         "package": "html-validate"
@@ -227,7 +227,7 @@
     },
     {
       "name": "markdownlint",
-      "version": "0.23.1",
+      "version": "0.23.2",
       "install": {
         "type": "npm",
         "package": "markdownlint-cli2"
@@ -266,7 +266,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.60.0",
+      "version": "0.61.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -279,7 +279,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.75.0",
+      "version": "1.76.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -446,7 +446,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.7.3",
+      "version": "4.7.4",
       "install": {
         "type": "npm",
         "package": "svelte-check",
@@ -498,7 +498,7 @@
     },
     {
       "name": "vale",
-      "version": "3.15.2",
+      "version": "3.17.0",
       "install": {
         "type": "binary"
       },
