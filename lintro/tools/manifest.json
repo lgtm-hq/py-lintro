@@ -256,7 +256,7 @@
     },
     {
       "name": "osv_scanner",
-      "version": "2.5.0",
+      "version": "2.5.1",
       "min_version": "2.4.0",
       "install": {
         "type": "binary",
