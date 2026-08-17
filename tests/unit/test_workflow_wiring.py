@@ -838,6 +838,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".actrc",
         ".allstar",
         ".codecov.yml",
+        ".cursor",
         ".dockerignore",
         ".gitattributes",
         ".github",
