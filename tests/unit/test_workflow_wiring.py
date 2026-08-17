@@ -1603,19 +1603,21 @@ def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
 def test_test_jobs_omit_pypi_publish_endpoints(job_id: str) -> None:
     """Test jobs must not allowlist PyPI publish/alt-index hosts (#1351).
 
-    ``pytest`` only downloads dependencies from real PyPI, so the test jobs
-    need ``pypi.org`` and ``files.pythonhosted.org`` but never the publish or
-    alternate-index hosts. Allowlisting ``upload.test.pypi.org`` makes
-    harden-runner attempt to resolve it via dns.google, which fails and trips
-    ``agent.service: Failed`` — benign noise that masks genuine egress signals.
+    ``pytest`` only downloads from real PyPI. ``allowed-endpoints-mode:
+    replace`` is load-bearing so ``egress-preset: pypi`` cannot merge
+    publish hosts back in. ``upload.test.pypi.org`` was never in this
+    caller list; the omit assertion keeps the preset from reintroducing it.
+
+    Args:
+        job_id: Test job whose egress allowlist is under test.
     """
     workflow = _load_workflow(name="test-ci.yml")
-    allowed = set(workflow["jobs"][job_id]["with"]["allowed-endpoints"].split())
+    job_with = workflow["jobs"][job_id]["with"]
+    allowed = set(job_with["allowed-endpoints"].split())
 
-    # Needed for dependency downloads.
+    assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("replace")
     assert_that(allowed).contains("pypi.org:443")
     assert_that(allowed).contains("files.pythonhosted.org:443")
-    # Publish/alt-index hosts must be absent — they only add egress noise.
     assert_that(allowed).does_not_contain("test.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.test.pypi.org:443")

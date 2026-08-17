@@ -60,12 +60,10 @@ jobs:
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
       # non-empty value must include the pypi preset baseline. Test jobs only
-      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org); the
-      # publish/alt-index hosts (test.pypi.org, upload.pypi.org,
-      # upload.test.pypi.org) are never reached by pytest and only add
-      # harden-runner egress noise — upload.test.pypi.org fails to resolve via
-      # dns.google, tripping "agent.service: Failed" and masking real egress
-      # signals. Omit them (#1351).
+      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
+      # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
+      # replace-mode so egress-preset: pypi cannot reintroduce them or
+      # upload.test.pypi.org (#1351).
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -106,12 +104,10 @@ jobs:
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
       # non-empty value must include the pypi preset baseline. Test jobs only
-      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org); the
-      # publish/alt-index hosts (test.pypi.org, upload.pypi.org,
-      # upload.test.pypi.org) are never reached by pytest and only add
-      # harden-runner egress noise — upload.test.pypi.org fails to resolve via
-      # dns.google, tripping "agent.service: Failed" and masking real egress
-      # signals. Omit them (#1351).
+      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
+      # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
+      # replace-mode so egress-preset: pypi cannot reintroduce them or
+      # upload.test.pypi.org (#1351).
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
