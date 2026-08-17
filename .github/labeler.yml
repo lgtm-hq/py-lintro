@@ -10,7 +10,10 @@
 #     and build-binary.yml → ci + release
 #   scripts/ci/release-*, scripts/ci/homebrew/**, scripts/ci/npm/**
 #     → ci + release
+#   scripts/ci/classify-release-tag.py, check-release-version-skew.py,
+#     and finalize-version-pr.py → ci + release
 #   scripts/ci/testing/** → ci + testing
+#   test_samples/**/*.md → testing + documentation
 #   npm/**/package.json → release only
 #   .github/workflows/*security*.yml, *codeql*.yml → ci + security
 #   lintro/tools/definitions/{bandit,gitleaks,semgrep}.py → enhancement + security
