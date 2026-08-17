@@ -471,3 +471,23 @@ def test_security_md_supports_current_minor() -> None:
     assert_that("\n".join(supported_rows)).described_as(
         f"SECURITY.md must support current line {current_line}",
     ).contains(current_line)
+
+
+def test_html_validate_docs_pin_matches_manifest() -> None:
+    """Configuration docs must stamp the current html-validate pin."""
+    from lintro._tool_versions import get_tool_version
+
+    pin = get_tool_version(tool_name="html-validate")
+    assert_that(pin).is_not_none()
+    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    assert_that(config_doc).described_as(
+        "docs/configuration.md must name the current html-validate pin",
+    ).contains(f"currently `{pin}`")
+
+
+def test_preview_serve_disables_astro_agent_background() -> None:
+    """Local preview must stay attached unless a caller opts into background."""
+    script = Path("scripts/ci/site/preview-serve.sh").read_text(encoding="utf-8")
+    assert_that(script).described_as(
+        "preview-serve.sh must default ASTRO_PREVIEW_BACKGROUND to 0",
+    ).contains('ASTRO_PREVIEW_BACKGROUND="${ASTRO_PREVIEW_BACKGROUND:-0}"')
