@@ -21,6 +21,33 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.3] - 2026-08-17
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to dcc2020 (#2075)
+  (3110b7b)
+- **deps**: update dependency google/osv-scanner to 2.5.0 (minor) (#2073) (85778db)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.118.1 (minor) (#2074)
+  (280b0d3)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 2bece1f
+  (#2061) (8eb3853)
+- **deps**: update dependency devalue to 5.9.0 (minor) (#2072) (1efa950)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 131636a (#2070)
+  (4f023cd)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.63.2 (patch) (#2068) (dab343b)
+- **deps**: update dependency golang to 1.26.6 (patch) (#2067) (f73cff6)
+- **deps**: update dependency svelte to 5.56.9 (patch) (#2069) (ea21558)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to fe4f492 -
+  abandoned (#2062) (5450272)
+- **deps**: update dependency astral-sh/uv to 0.12.5 (patch) (#2065) (6abbed3)
+- **deps**: update python:3.14-slim docker digest to ce40764 (#2063) (8a8c0eb)
+- **deps**: pin lintro-tools digest to 48a00d2 after #1858 (#2066) (9e5c80c)
+
+### Fixed
+
+- **deps**: update linting tools (#2071) (3ef7322)
+
 ## [0.118.2] - 2026-08-16
 
 ### Changed
