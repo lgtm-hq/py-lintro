@@ -6,8 +6,10 @@
 #   renovate.json → maintenance + infrastructure
 #   pyproject.toml → dependencies + release
 #   lintro/__init__.py → enhancement + release
-#   .github/workflows/release-*.yml, publish-*.yml, docker-*-publish.yml, build-binary.yml → ci + release
-#   scripts/ci/release-*, scripts/ci/homebrew/**, scripts/ci/npm/** → ci + release
+#   .github/workflows/release-*.yml, publish-*.yml, docker-*-publish.yml,
+#     and build-binary.yml → ci + release
+#   scripts/ci/release-*, scripts/ci/homebrew/**, scripts/ci/npm/**
+#     → ci + release
 #   scripts/ci/testing/** → ci + testing
 #   npm/**/package.json → release only
 #   .github/workflows/*security*.yml, *codeql*.yml → ci + security
