@@ -33,9 +33,9 @@ FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:160969bcf9aaf98e386336267ad4a911
 # agent CLI only as a tarball behind https://cursor.com/install, with no
 # registry or release feed to query -- so it is bumped by hand; the weekly
 # rebuild keeps everything around it fresh regardless.
-ARG NODE_VERSION=24.18.0
-ARG CLAUDE_CODE_VERSION=2.1.220
-ARG CODEX_VERSION=0.145.0
+ARG NODE_VERSION=24.19.0
+ARG CLAUDE_CODE_VERSION=2.1.232
+ARG CODEX_VERSION=0.147.0
 ARG CURSOR_AGENT_VERSION=2026.07.23-e383d2b
 # Cursor ships no checksum sidecar, so both architectures' hashes are pinned
 # here by hand and bumped together with CURSOR_AGENT_VERSION. Recompute with:
