@@ -6,9 +6,12 @@
 #   renovate.json → maintenance + infrastructure
 #   pyproject.toml → dependencies + release
 #   lintro/__init__.py → enhancement + release
-#   release-*.yml, publish-*.yml, build-binary.yml → ci + release
-#   scripts/ci/release-*, homebrew/**, npm/** → ci + release
+#   .github/workflows/release-*.yml, publish-*.yml, docker-*-publish.yml, build-binary.yml → ci + release
+#   scripts/ci/release-*, scripts/ci/homebrew/**, scripts/ci/npm/** → ci + release
 #   scripts/ci/testing/** → ci + testing
+#   npm/**/package.json → release only
+#   .github/workflows/*security*.yml, *codeql*.yml → ci + security
+#   lintro/tools/definitions/{bandit,gitleaks,semgrep}.py → enhancement + security
 ---
 enhancement:
   - changed-files:
@@ -74,18 +77,18 @@ release:
       - any-glob-to-any-file:
           - '.github/workflows/release-*.yml'
           - '.github/workflows/publish-*.yml'
+          - '.github/workflows/docker-*-publish.yml'
           - '.github/workflows/build-binary.yml'
           - 'CHANGELOG.md'
           - 'pyproject.toml'
           - 'lintro/__init__.py'
-          - 'package.json'
-          - 'apps/site/package.json'
           - 'npm/**/package.json'
-          - '.node-version'
           - 'tools/ascii_resizer/pyproject.toml'
           - 'tools/ascii_resizer/__init__.py'
           - 'scripts/ci/release-*'
           - 'scripts/ci/classify-release-tag.py'
+          - 'scripts/ci/check-release-version-skew.py'
+          - 'scripts/ci/finalize-version-pr.py'
           - 'scripts/ci/homebrew/**'
           - 'scripts/ci/npm/**'
 
