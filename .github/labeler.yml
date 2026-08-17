@@ -1,9 +1,14 @@
 # Configuration for actions/labeler
 # Maps file paths to labels for automatic PR labeling
 #
-# Note: Some files intentionally match multiple labels. For example, CHANGELOG.md
-# matches both "documentation" and "release", and renovate.json matches both
-# "maintenance" and "infrastructure".
+# Note: Several paths intentionally match multiple labels:
+#   CHANGELOG.md → documentation + release
+#   renovate.json → maintenance + infrastructure
+#   pyproject.toml → dependencies + release
+#   lintro/__init__.py → enhancement + release
+#   release-*.yml, publish-*.yml, build-binary.yml → ci + release
+#   scripts/ci/release-*, homebrew/**, npm/** → ci + release
+#   scripts/ci/testing/** → ci + testing
 ---
 enhancement:
   - changed-files:
@@ -51,9 +56,9 @@ security:
       - any-glob-to-any-file:
           - '.github/workflows/*security*.yml'
           - '.github/workflows/*codeql*.yml'
-          - 'lintro/tools/bandit.py'
-          - 'lintro/tools/gitleaks.py'
-          - 'lintro/tools/semgrep.py'
+          - 'lintro/tools/definitions/bandit.py'
+          - 'lintro/tools/definitions/gitleaks.py'
+          - 'lintro/tools/definitions/semgrep.py'
 
 testing:
   - changed-files:
