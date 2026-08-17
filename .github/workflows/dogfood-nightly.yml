@@ -48,7 +48,7 @@ jobs:
       # and Renovate has a version to bump. Do not hand-edit one site alone —
       # tests/unit/test_workflow_wiring.py fails on a partial bump.
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro:0.113.3@sha256:0edf4ddc57f4e0cb5bd07626c8ab25e686e5a68cfc43cabbab7979e61b79460f
+        ghcr.io/lgtm-hq/py-lintro:0.118.1@sha256:9d79f71c5cb447b50c995f393af2055e26649434ae08318cee6bd99f44ab17ef
 
   verify-pinned-image-tools:
     name: 🔎 Verify Pinned Image Tools
@@ -93,7 +93,7 @@ jobs:
           # Same pinned release image dogfood-full lints with; bumped as one
           # set by Renovate (see the dogfood-full job above).
           IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.113.3@sha256:0edf4ddc57f4e0cb5bd07626c8ab25e686e5a68cfc43cabbab7979e61b79460f
+            ghcr.io/lgtm-hq/py-lintro:0.118.1@sha256:9d79f71c5cb447b50c995f393af2055e26649434ae08318cee6bd99f44ab17ef
         run: scripts/ci/verify-image-manifest-tools.sh
 
   # No-silent-skip gate (#1510, epic #1508): dogfood-full runs an external
@@ -169,7 +169,7 @@ jobs:
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.113.3@sha256:0edf4ddc57f4e0cb5bd07626c8ab25e686e5a68cfc43cabbab7979e61b79460f
+            ghcr.io/lgtm-hq/py-lintro:0.118.1@sha256:9d79f71c5cb447b50c995f393af2055e26649434ae08318cee6bd99f44ab17ef
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
