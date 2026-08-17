@@ -34,12 +34,31 @@ def _globs_for(*, label: str) -> list[str]:
     return list(rules[0]["changed-files"][0]["any-glob-to-any-file"])
 
 
+def _to_gitignore(*, pattern: str) -> str:
+    """Anchor basename-only globs so they match like minimatch, not gitignore.
+
+    ``actions/labeler`` treats ``pyproject.toml`` as the repo-root file.
+    Unanchored gitignore would also match ``tools/ascii_resizer/pyproject.toml``.
+
+    Args:
+        pattern: Labeler glob, optionally negated with ``!``.
+
+    Returns:
+        Equivalent gitignore pattern.
+    """
+    negated = pattern.startswith("!")
+    body = pattern[1:] if negated else pattern
+    if "/" not in body and "**" not in body:
+        body = f"/{body}"
+    return f"!{body}" if negated else body
+
+
 def _labels_for(*, path: str) -> set[str]:
     """Return every labeler label whose globs match ``path``.
 
-    Matching uses ``pathspec.GitIgnoreSpec`` so ``**`` and ``!`` follow the
-    same gitignore-style rules this repo already prefers over a hand-rolled
-    minimatch dialect.
+    Matching uses ``pathspec.GitIgnoreSpec`` after anchoring basename-only
+    globs so ``**`` / ``!`` stay gitignore-style while root files stay
+    root-only, matching ``actions/labeler`` minimatch.
 
     Args:
         path: Repository-relative POSIX path.
@@ -49,7 +68,9 @@ def _labels_for(*, path: str) -> set[str]:
     """
     matched: set[str] = set()
     for label in _load_labeler():
-        spec = GitIgnoreSpec.from_lines(_globs_for(label=label))
+        spec = GitIgnoreSpec.from_lines(
+            _to_gitignore(pattern=pattern) for pattern in _globs_for(label=label)
+        )
         if spec.match_file(path):
             matched.add(label)
     return matched
@@ -60,8 +81,11 @@ def _labels_for(*, path: str) -> set[str]:
     [
         ("tests/unit/test_labeler_rules.py", {"testing"}),
         ("pytest.ini", {"testing"}),
+        ("tox.ini", {"testing"}),
         ("test_samples/README.md", {"testing", "documentation"}),
         ("pyproject.toml", {"dependencies", "release"}),
+        ("tools/ascii_resizer/pyproject.toml", {"release"}),
+        ("tools/ascii_resizer/__init__.py", {"release"}),
         ("renovate.json", {"maintenance", "infrastructure"}),
         ("CHANGELOG.md", {"documentation", "release"}),
         ("lintro/__init__.py", {"enhancement", "release"}),
@@ -77,6 +101,11 @@ def _labels_for(*, path: str) -> set[str]:
             ".github/workflows/docker-tools-publish.yml",
             {"ci", "release"},
         ),
+        (".github/workflows/release-version-pr.yml", {"ci", "release"}),
+        (".github/workflows/publish-pypi-on-tag.yml", {"ci", "release"}),
+        (".github/workflows/build-binary.yml", {"ci", "release"}),
+        ("scripts/ci/release-bump-only.sh", {"ci", "release"}),
+        ("scripts/ci/homebrew/get-release-info.sh", {"ci", "release"}),
         (".github/workflows/docker-ci.yml", {"ci"}),
         (".allstar/allstar.yaml", {"infrastructure"}),
         (
