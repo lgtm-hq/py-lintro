@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.4] - 2026-08-17
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to a93fc25
+  (#2081) (faf3daa)
+- **deps**: update ai agent clis (#2076) (4c81c19)
+- **deps**: update github-actions (#2077) (6f54eeb)
+- **deps**: pin lintro-tools digest after linting-tools rebuild (#2080) (5d5a11e)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.41.14 (minor) (#2078) (a3ad1e6)
+
 ## [0.118.3] - 2026-08-17
 
 ### Changed
