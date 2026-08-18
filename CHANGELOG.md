@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.120.0] - 2026-08-18
+
+### Added
+
+- **mcp**: migrate to mcp SDK 2.x and drop the 1.x implementation (#2113) (28eaafc)
+
 ## [0.119.0] - 2026-08-18
 
 ### Added
