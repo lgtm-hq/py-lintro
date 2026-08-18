@@ -268,6 +268,20 @@ def test_cli_has_versions_command(cli_runner: CliRunner) -> None:
     assert_that(result.exit_code).is_equal_to(0)
 
 
+def test_cli_has_badge_command(cli_runner: CliRunner) -> None:
+    """Verify badge command is registered.
+
+    Args:
+        cli_runner: The Click CLI test runner.
+    """
+    result = cli_runner.invoke(cli, ["badge", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains(
+        "Generate a shields.io markdown badge for the project health score.",
+    )
+
+
 def test_cli_has_list_tools_command(cli_runner: CliRunner) -> None:
     """Verify list-tools command is registered.
 

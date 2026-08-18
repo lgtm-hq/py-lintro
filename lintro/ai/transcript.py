@@ -101,6 +101,7 @@ def _infer_command() -> str:
         "versions",
         "licenses",
         "completions",
+        "badge",
     }
     for arg in sys.argv[1:]:
         if arg.startswith("-"):
