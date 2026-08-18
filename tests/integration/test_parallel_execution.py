@@ -21,7 +21,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -29,6 +29,7 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
+from lintro.plugins.base import BaseToolPlugin
 from lintro.utils.async_tool_executor import (
     AsyncToolExecutor,
     get_parallel_batches,
@@ -447,7 +448,10 @@ def test_parallel_preserves_input_ordering_contract() -> None:
     with AsyncToolExecutor(max_workers=4) as executor:
         results = asyncio.run(
             executor.run_tools_parallel(
-                tools=[("slow", slow), ("fast", fast)],
+                tools=cast(
+                    list[tuple[str, BaseToolPlugin]],
+                    [("slow", slow), ("fast", fast)],
+                ),
                 paths=[],
                 action=Action.CHECK,
             ),
@@ -472,7 +476,10 @@ def test_parallel_isolates_tool_failures() -> None:
     with AsyncToolExecutor(max_workers=4) as executor:
         results = asyncio.run(
             executor.run_tools_parallel(
-                tools=[("boom", boom), ("healthy", healthy)],
+                tools=cast(
+                    list[tuple[str, BaseToolPlugin]],
+                    [("boom", boom), ("healthy", healthy)],
+                ),
                 paths=[],
                 action=Action.CHECK,
             ),
