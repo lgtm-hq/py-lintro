@@ -49,7 +49,8 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 # digest-pinned tools image still ships the previous version.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     chmod +x /app/scripts/utils/install-semgrep.sh && \
-    /app/scripts/utils/install-semgrep.sh --docker
+    /app/scripts/utils/install-semgrep.sh --docker && \
+    UV_SYSTEM_PYTHON=1 uv pip uninstall --system -y semgrep || true
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

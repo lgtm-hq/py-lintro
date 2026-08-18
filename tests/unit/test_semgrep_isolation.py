@@ -98,6 +98,8 @@ def test_install_semgrep_script_uses_locked_sync() -> None:
     assert_that(text).contains("uv pip sync")
     assert_that(text).contains("uv pip check")
     assert_that(text).contains("requirements-semgrep.txt")
+    assert_that(text).contains("pysemgrep")
+    assert_that(text).contains("semgrep-core")
     executable_lines = [
         line
         for line in text.splitlines()
@@ -132,6 +134,7 @@ def test_ci_dockerfile_installs_isolated_semgrep() -> None:
     assert_that(text).contains("COPY requirements-semgrep.txt")
     assert_that(text).contains("COPY scripts/utils/install-semgrep.sh")
     assert_that(text).contains("install-semgrep.sh --docker")
+    assert_that(text).contains("uv pip uninstall --system")
     assert_that(text).contains("/opt/semgrep-venv")
     assert_that(text).contains("semgrep --version")
 

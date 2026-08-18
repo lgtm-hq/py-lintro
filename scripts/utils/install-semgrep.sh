@@ -129,7 +129,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	echo "[DRY-RUN] Would create venv at $VENV_DIR"
 	echo "[DRY-RUN] Would uv pip sync $REQUIREMENTS_FILE into that venv"
 	echo "[DRY-RUN] Would uv pip check --python $VENV_DIR/bin/python"
-	echo "[DRY-RUN] Would symlink $VENV_DIR/bin/semgrep -> $BIN_DIR/semgrep"
+	echo "[DRY-RUN] Would symlink semgrep, pysemgrep, and semgrep-core into $BIN_DIR"
 	exit 0
 fi
 
@@ -152,7 +152,15 @@ if [ ! -x "$VENV_DIR/bin/semgrep" ]; then
 	exit 1
 fi
 
-ln -sfn "$VENV_DIR/bin/semgrep" "$BIN_DIR/semgrep"
+# The `semgrep` console script appends this venv's bin to the *end* of PATH
+# and re-execs `pysemgrep`. A leftover system install (the digest-pinned
+# tools image still ships 1.151.0) would win unless those names are also
+# replaced on PATH.
+for name in semgrep pysemgrep semgrep-core; do
+	if [ -x "$VENV_DIR/bin/$name" ]; then
+		ln -sfn "$VENV_DIR/bin/$name" "$BIN_DIR/$name"
+	fi
+done
 
 echo "Installed isolated semgrep from $REQUIREMENTS_FILE"
 echo "  venv: $VENV_DIR"
