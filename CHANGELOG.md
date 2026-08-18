@@ -31,7 +31,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **tools**: isolate semgrep into its own locked environment (85fcd07)
 - **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.118.5 (patch) (#2103)
   (f3cd599)
 - **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to b296b88
