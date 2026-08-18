@@ -22,6 +22,7 @@ Run ``python3 scripts/ci/generate-tool-versions.py`` to regenerate.
 Sources:
     - package.json (npm devDependencies)
     - pyproject.toml (pypi dependency tables)
+    - requirements-semgrep.txt (isolated semgrep pin)
     - lintro/_tool_packages.py (seed mapping)
 """
 '''

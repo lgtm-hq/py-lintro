@@ -116,6 +116,7 @@ RUN ARCH=$(uname -m) && \
 COPY lintro/ /app/lintro/
 COPY scripts/ /app/scripts/
 COPY package.json /app/package.json
+COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup
@@ -137,9 +138,9 @@ RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     rustup default stable && \
     rm -rf /opt/rustup/toolchains/*/share/doc
 
-RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
-    chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun && \
-    chmod -R a+rX /opt/cargo /opt/rustup /opt/bun
+RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
+    chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
+    chmod -R a+rX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv
 
 RUN echo "=== Verifying all tools ===" && \
     bun --version && uv --version && go version && \

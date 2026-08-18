@@ -4,7 +4,7 @@ This module is the only hand-maintained piece of the tool-version system.
 Everything else (`lintro/_generated_versions.py`, version fields in
 `lintro/tools/manifest.json`) is produced by
 `scripts/ci/generate-tool-versions.py` from these seeds combined with
-`package.json` and `pyproject.toml`.
+`package.json`, `pyproject.toml`, and `requirements-semgrep.txt`.
 
 A `None` value marks a companion package: a dependency that lintro pins
 because it ships alongside a tool, but which is not itself exposed as a
@@ -15,6 +15,7 @@ Adding a new npm or pypi tool:
     1. Add the `ToolName` enum member in `lintro/enums/tool_name.py`.
     2. Add the package name to the appropriate mapping below.
     3. Pin the package in `package.json` (npm) or `pyproject.toml` (pypi).
+       Semgrep is the exception: pin it in `requirements-semgrep.txt`.
     4. Run `python3 scripts/ci/generate-tool-versions.py`.
 
 Tools installed from neither npm nor pypi (standalone binaries, cargo,

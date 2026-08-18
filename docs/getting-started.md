@@ -103,8 +103,9 @@ order and for what changed.
   commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
-- `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
-  `pip install semgrep`, or `brew install semgrep`)
+- `semgrep` - Security scanner and code analyzer (`./scripts/utils/install-semgrep.sh`
+  from a checkout, `uv tool install semgrep`, or `brew install semgrep`). Not included
+  in `lintro[tools]`.
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled

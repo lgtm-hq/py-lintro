@@ -59,6 +59,7 @@ from lintro._tool_versions import (
     get_tool_version,
 )
 from lintro.enums.tool_name import ToolName
+from lintro.tools.core.install_hints import SEMGREP_ISOLATED_INSTALL_HINT
 
 # Module-level set to track logged warnings and prevent duplicates
 # during parallel execution
@@ -211,9 +212,7 @@ def get_install_hints() -> dict[str, str]:
         "cargo_audit": "Install via: cargo install cargo-audit (v{version}+)",
         "cargo_deny": "Install via: cargo install cargo-deny (v{version}+)",
         "biome": "Install via: bun add -d @biomejs/biome@>={version}",
-        "semgrep": (
-            "Install via: pip install semgrep>={version} or brew install semgrep"
-        ),
+        "semgrep": SEMGREP_ISOLATED_INSTALL_HINT,
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"
         ),

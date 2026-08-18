@@ -148,6 +148,10 @@ jobs:
               # Build/packaging metadata feeding tool resolution.
               - 'Makefile'
               - 'MANIFEST.in'
+              # Isolated semgrep lockfile: a pin bump changes the min version
+              # dogfood enforces for every file.
+              - 'requirements-semgrep.in'
+              - 'requirements-semgrep.txt'
               # Tool configs and manifests at any depth (pyproject.toml
               # carries ruff/pydoclint/bandit config; package manifests and
               # lockfiles steer prettier/osv-scanner; tsconfig steers ts

@@ -1364,12 +1364,21 @@ main() {
 	fi # html-validate
 
 	if should_install "semgrep"; then
-		# Install semgrep (security scanner)
-		echo -e "${BLUE}Installing semgrep...${NC}"
-		SEMGREP_VERSION=$(get_tool_version "semgrep") || exit 1
+		# Isolated lockfile install (#2104): never share lintro's resolver.
+		echo -e "${BLUE}Installing semgrep (isolated venv)...${NC}"
+		SEMGREP_INSTALL_ARGS=()
+		if [ "$VERBOSE" -eq 1 ]; then
+			SEMGREP_INSTALL_ARGS+=(--verbose)
+		fi
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			SEMGREP_INSTALL_ARGS+=(--docker)
+		else
+			SEMGREP_INSTALL_ARGS+=(--local)
+		fi
+		SEMGREP_INSTALL_ARGS+=(--bin-dir "$BIN_DIR")
 		if [ $DRY_RUN -eq 1 ]; then
-			log_info "[DRY-RUN] Would install semgrep==${SEMGREP_VERSION}"
-		elif install_python_package "semgrep" "$SEMGREP_VERSION"; then
+			log_info "[DRY-RUN] Would run install-semgrep.sh ${SEMGREP_INSTALL_ARGS[*]}"
+		elif "$SCRIPT_DIR/install-semgrep.sh" "${SEMGREP_INSTALL_ARGS[@]}"; then
 			echo -e "${GREEN}✓ semgrep installed successfully${NC}"
 		else
 			echo -e "${RED}✗ Failed to install semgrep${NC}"

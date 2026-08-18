@@ -141,8 +141,130 @@ def read_pyproject_versions(
     return versions
 
 
+def read_requirements_pin(
+    path: Path,
+    package: str,
+    repo_root: Path | None = None,
+) -> str:
+    """Read an exact ``package==version`` pin from a requirements.txt file.
+
+    Ignores comments, extras, and environment markers. The package must appear
+    exactly once with an ``==`` pin.
+
+    Args:
+        path: Path to the requirements file.
+        package: Package name to extract (case-insensitive PEP 503).
+        repo_root: Used to format error paths relative to the repo, if given.
+
+    Returns:
+        The pinned version string.
+
+    Raises:
+        GenerationError: If the file is missing, the package is absent, the
+            pin is not exact, or the package appears more than once.
+    """
+    if not path.exists():
+        raise GenerationError(
+            f"requirements file not found: {_display_path(path, repo_root)}",
+        )
+
+    needle = _normalize_package_name(package)
+    found: list[str] = []
+    for spec in _requirement_specs(path.read_text()):
+        match = _SPEC_RE.match(spec)
+        if match is None:
+            continue
+        if _normalize_package_name(match.group("name")) != needle:
+            continue
+        op = match.group("op")
+        version = match.group("version")
+        if op != "==" or not version:
+            raise GenerationError(
+                f"package '{package}' in {_display_path(path, repo_root)} "
+                f"must be pinned with == (got {spec!r})",
+            )
+        found.append(version)
+
+    if not found:
+        raise GenerationError(
+            f"package '{package}' not found with an == pin in "
+            f"{_display_path(path, repo_root)}",
+        )
+    if len(found) > 1:
+        raise GenerationError(
+            f"package '{package}' has multiple pins in "
+            f"{_display_path(path, repo_root)}: {found}",
+        )
+    return found[0]
+
+
+def _requirement_specs(text: str) -> list[str]:
+    """Yield ``name==version`` specs, dropping comments, hashes, and wraps.
+
+    ``uv pip compile --generate-hashes`` emits backslash-continued lines
+    and ``--hash=`` flags. Those must not hide the package pin.
+
+    Args:
+        text: Raw requirements file contents.
+
+    Returns:
+        PEP 508 requirement strings with pip CLI flags removed.
+    """
+    specs: list[str] = []
+    buf = ""
+    for raw_line in text.splitlines():
+        without_comment = raw_line.split("#", 1)[0].rstrip()
+        if without_comment.endswith("\\"):
+            buf += without_comment[:-1] + " "
+            continue
+        line = f"{buf}{without_comment}".strip()
+        buf = ""
+        spec = _strip_pip_flags(line)
+        if spec:
+            specs.append(spec)
+    trailing = _strip_pip_flags(buf.strip())
+    if trailing:
+        specs.append(trailing)
+    return specs
+
+
+def _strip_pip_flags(line: str) -> str:
+    """Remove ``--hash`` / other pip CLI flags from a requirement line.
+
+    Args:
+        line: A (possibly joined) requirement line.
+
+    Returns:
+        The requirement specifier, or empty if the line was flags-only.
+    """
+    if not line:
+        return ""
+    tokens = [token for token in line.split() if not token.startswith("--")]
+    return " ".join(tokens)
+
+
+def _normalize_package_name(name: str) -> str:
+    """PEP 503 package-name normalization.
+
+    Args:
+        name: Raw package name.
+
+    Returns:
+        Normalized package name.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def _display_path(path: Path, repo_root: Path | None) -> str:
-    """Format a path relative to ``repo_root`` if possible, else absolute."""
+    """Format a path relative to ``repo_root`` if possible, else absolute.
+
+    Args:
+        path: Path to display.
+        repo_root: Optional repository root for relative formatting.
+
+    Returns:
+        Relative path string when possible, otherwise the original path.
+    """
     if repo_root is None:
         return str(path)
     try:

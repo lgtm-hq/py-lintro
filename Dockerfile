@@ -32,6 +32,8 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
+COPY requirements-semgrep.txt /app/requirements-semgrep.txt
+COPY scripts/utils/install-semgrep.sh /app/scripts/utils/install-semgrep.sh
 
 ARG WITH_AI=false
 
@@ -41,6 +43,15 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     else \
       uv sync --dev --extra full --extra tools --no-progress; \
     fi && (uv cache clean || true)
+
+# Semgrep lives in an isolated venv, not lintro[tools] (#2104). Drop the
+# digest-pinned tools image's leftover system copy first — `uv pip uninstall`
+# deletes RECORD-listed paths, including any /usr/local/bin/semgrep symlink
+# already created — then re-sync from this build's lockfile.
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    (UV_SYSTEM_PYTHON=1 uv pip uninstall --system semgrep || true) && \
+    chmod +x /app/scripts/utils/install-semgrep.sh && \
+    /app/scripts/utils/install-semgrep.sh --docker
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -55,6 +66,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN getent group tools >/dev/null || groupadd -r tools && \
     id -u lintro >/dev/null 2>&1 || useradd -m -G tools lintro && \
     mkdir -p /code && \
+    chgrp -R tools /opt/semgrep-venv && \
+    chmod -R g+rwX /opt/semgrep-venv && \
+    chmod -R a+rX /opt/semgrep-venv && \
     chown -R lintro:lintro /app /code
 
 # Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
@@ -67,7 +81,7 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 # tool set is still enforced at tools-image build time in docker/tools.Dockerfile.
 RUN echo "Smoke-testing tool stack..." && \
     ruff --version && prettier --version && rustfmt --version && \
-    shellcheck --version && \
+    shellcheck --version && semgrep --version && \
     echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -80,6 +94,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
     gosu lintro cargo clippy --version && \
+    gosu lintro semgrep --version && \
     echo "Non-root tool smoke check passed."
 
 # No USER directive: the container starts as root so entrypoint.sh can detect

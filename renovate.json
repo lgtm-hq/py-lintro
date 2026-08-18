@@ -4,7 +4,8 @@
     "local>lgtm-hq/.github:renovate-config"
   ],
   "allowedCommands": [
-    "python3 scripts/ci/generate-tool-versions.py"
+    "python3 scripts/ci/generate-tool-versions.py",
+    "scripts/ci/compile-semgrep-lock.sh"
   ],
   "packageRules": [
     {
@@ -142,6 +143,7 @@
         "custom.regex",
         "npm",
         "pep621",
+        "pip_requirements",
         "uv"
       ],
       "matchFileNames": [
@@ -167,11 +169,38 @@
         ],
         "executionMode": "branch"
       }
+    },
+    {
+      "description": "Recompile the isolated semgrep lockfile after its .in pin changes",
+      "matchManagers": ["pip_requirements"],
+      "matchFileNames": [
+        "requirements-semgrep.in"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "scripts/ci/compile-semgrep-lock.sh",
+          "python3 scripts/ci/generate-tool-versions.py"
+        ],
+        "fileFilters": [
+          "requirements-semgrep.txt",
+          "lintro/_generated_versions.py",
+          "lintro/tools/manifest.json"
+        ],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in",
+      "matchFileNames": [
+        "requirements-semgrep.txt"
+      ],
+      "enabled": false
     }
   ],
   "pip_requirements": {
     "managerFilePatterns": [
-      "/^requirements.*\\.txt$/"
+      "/^requirements.*\\.txt$/",
+      "/^requirements-semgrep\\.in$/"
     ]
   },
   "lockFileMaintenance": {
