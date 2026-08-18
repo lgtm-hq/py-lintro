@@ -133,8 +133,11 @@ def test_ci_dockerfile_installs_isolated_semgrep() -> None:
     text = dockerfile.read_text(encoding="utf-8")
     assert_that(text).contains("COPY requirements-semgrep.txt")
     assert_that(text).contains("COPY scripts/utils/install-semgrep.sh")
-    assert_that(text).contains("install-semgrep.sh --docker")
-    assert_that(text).contains("uv pip uninstall --system")
+    uninstall_at = text.find("uv pip uninstall --system")
+    install_at = text.find("install-semgrep.sh --docker")
+    assert_that(uninstall_at).is_not_equal_to(-1)
+    assert_that(install_at).is_not_equal_to(-1)
+    assert_that(uninstall_at).is_less_than(install_at)
     assert_that(text).contains("/opt/semgrep-venv")
     assert_that(text).contains("semgrep --version")
 

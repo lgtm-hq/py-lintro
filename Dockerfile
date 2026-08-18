@@ -44,13 +44,14 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
       uv sync --dev --extra full --extra tools --no-progress; \
     fi && (uv cache clean || true)
 
-# Semgrep lives in an isolated venv, not lintro[tools] (#2104). Re-sync from
-# this build's lockfile so dogfood uses the pinned binary even while the
-# digest-pinned tools image still ships the previous version.
+# Semgrep lives in an isolated venv, not lintro[tools] (#2104). Drop the
+# digest-pinned tools image's leftover system copy first — `uv pip uninstall`
+# deletes RECORD-listed paths, including any /usr/local/bin/semgrep symlink
+# already created — then re-sync from this build's lockfile.
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    (UV_SYSTEM_PYTHON=1 uv pip uninstall --system semgrep || true) && \
     chmod +x /app/scripts/utils/install-semgrep.sh && \
-    /app/scripts/utils/install-semgrep.sh --docker && \
-    UV_SYSTEM_PYTHON=1 uv pip uninstall --system -y semgrep || true
+    /app/scripts/utils/install-semgrep.sh --docker
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
