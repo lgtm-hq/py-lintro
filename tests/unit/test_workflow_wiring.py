@@ -848,31 +848,24 @@ def test_test_ci_reusables_wire_pipeline_skip() -> None:
         assert_that(job["with"]["pipeline-skip"]).is_false()
 
 
-def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None:
-    """Required gate greens only on intentional path-skip after changes success.
+def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
+    """Required coverage gate mirrors test-gate with no pipeline=false shortcut.
 
-    A failed changes job must never take the success shortcut — even if
-    pipeline were somehow empty/false — and must mirror test-gate instead.
+    The Python matrix always runs (#2108), so a path-skip success shortcut
+    would false-green this required check while tests actually failed.
     """
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains("changes", "test-gate")
-    upstream = _normalize_github_expr(gate["with"]["upstream-result"])
-    assert_that(upstream).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.changes.result == 'success' && "
-            "needs.changes.outputs.pipeline == 'false' && 'success' "
-            "|| needs.test-gate.outputs.result }}",
-        ),
+    assert_that(gate["needs"]).contains(
+        "changes",
+        "test-gate",
     )
-    passed_output = _normalize_github_expr(gate["with"]["passed-output"])
-    assert_that(passed_output).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.changes.result == 'success' && "
-            "needs.changes.outputs.pipeline == 'false' && 'true' "
-            "|| needs.test-gate.outputs.passed }}",
-        ),
+    assert_that(gate["with"]["upstream-result"]).is_equal_to(
+        "${{ needs.test-gate.outputs.result }}",
+    )
+    assert_that(gate["with"]["passed-output"]).is_equal_to(
+        "${{ needs.test-gate.outputs.passed }}",
     )
 
 

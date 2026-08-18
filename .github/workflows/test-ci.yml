@@ -16,8 +16,9 @@ name: CI - Tests
 # callers always run (`if: '!cancelled()'` fail-open on classifier failure —
 # empty pipeline != 'false' → full matrix). merge_group, push, and
 # workflow_dispatch always run the full matrix. The test-suite-coverage gate
-# reports success only when changes succeeded and the matrix was path-skipped;
-# otherwise it mirrors test-gate.
+# always mirrors test-gate: the Python matrix no longer path-skips (#2108), so
+# a pipeline=false shortcut would false-green a required check while tests
+# actually ran and failed.
 #
 # Do NOT pass pipeline-skip=true to these Python reusables (#2108). When
 # reusable-test-python skips its `test` job via `if: !inputs.pipeline-skip`,
@@ -223,11 +224,8 @@ jobs:
           fi
 
   # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
-  # Always-green gate: reports success only when changes succeeded AND the
-  # matrix was intentionally path-skipped (pipeline == 'false'). A failed
-  # changes job never takes the success shortcut — empty pipeline fails open
-  # into the full matrix via !cancelled() on the reusable callers, and this
-  # gate mirrors test-gate.
+  # Mirrors test-gate. Do not shortcut on pipeline=false: the Python matrix
+  # always runs (#2108), so a skip-shaped success would hide a real failure.
   test-suite-coverage:
     needs: [changes, test-gate]
     if: always() && !cancelled()
@@ -239,18 +237,8 @@ jobs:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
-      upstream-result: >-
-        ${{
-          needs.changes.result == 'success' &&
-          needs.changes.outputs.pipeline == 'false' && 'success'
-          || needs.test-gate.outputs.result
-        }}
-      passed-output: >-
-        ${{
-          needs.changes.result == 'success' &&
-          needs.changes.outputs.pipeline == 'false' && 'true'
-          || needs.test-gate.outputs.passed
-        }}
+      upstream-result: ${{ needs.test-gate.outputs.result }}
+      passed-output: ${{ needs.test-gate.outputs.passed }}
       egress-policy: block
       egress-preset: github-tooling
 
