@@ -1,17 +1,33 @@
-"""Integration tests for parallel tool execution."""
+"""Integration tests for parallel tool execution.
+
+This module has two parts:
+
+* Single-tool smoke tests exercise ``run_lint_tools_simple`` end to end but
+  intentionally stay on the sequential code path (one tool per invocation).
+  They are named ``*_smoke`` so their limited scope is honest.
+* Multi-tool parallel tests drive the production gate
+  (``use_parallel`` in :mod:`lintro.utils.tool_executor`) and the real
+  parallel executor over mixed-language samples.
+"""
 
 from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import tempfile
 from collections.abc import Iterator
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
 from lintro.plugins import ToolRegistry
+from lintro.utils import tool_executor as tool_executor_mod
+from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.tool_executor import run_lint_tools_simple
+from lintro.utils.unified_config import UnifiedConfigManager
 
 
 @pytest.fixture(autouse=True)
@@ -69,8 +85,44 @@ def temp_python_files() -> Iterator[list[str]]:
         os.rmdir(temp_dir)
 
 
-def test_check_multiple_files(temp_python_files: list[str]) -> None:
-    """Test running check on multiple files.
+@pytest.fixture
+def mixed_language_sample() -> Iterator[list[str]]:
+    """Create a mixed-language sample with one violation per tool.
+
+    The Python file has an unused import (ruff ``F401``) and the YAML file has
+    inconsistent mapping-value spacing (yamllint), so ruff and yamllint each
+    own exactly one file and each report at least one issue. This lets
+    multi-tool tests assert real cross-tool aggregation.
+
+    Yields:
+        list[str]: Paths ``[python_file, yaml_file]``.
+    """
+    temp_dir = tempfile.mkdtemp()
+    py_path = os.path.join(temp_dir, "bad.py")
+    yaml_path = os.path.join(temp_dir, "bad.yaml")
+
+    with open(py_path, "w") as f:
+        f.write("import os\n\n\ndef add(a, b):\n    return a + b\n")
+    with open(yaml_path, "w") as f:
+        f.write("a: 1\nb: 2\nc:  3\n")
+
+    paths = [py_path, yaml_path]
+    yield paths
+
+    for file_path in paths:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(file_path)
+    with contextlib.suppress(OSError):
+        os.rmdir(temp_dir)
+
+
+# ---------------------------------------------------------------------------
+# Single-tool smoke tests (sequential path — one tool per invocation)
+# ---------------------------------------------------------------------------
+
+
+def test_check_multiple_files_smoke(temp_python_files: list[str]) -> None:
+    """Smoke check on multiple files with a single tool.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -92,8 +144,8 @@ def test_check_multiple_files(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_consistent_results_across_runs(temp_python_files: list[str]) -> None:
-    """Test that multiple runs produce consistent results.
+def test_consistent_results_across_runs_smoke(temp_python_files: list[str]) -> None:
+    """Smoke test that repeated single-tool runs are consistent.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -127,8 +179,8 @@ def test_consistent_results_across_runs(temp_python_files: list[str]) -> None:
     assert_that(exit_code_1).is_equal_to(exit_code_2)
 
 
-def test_check_with_single_file(temp_python_files: list[str]) -> None:
-    """Test check with single file.
+def test_check_with_single_file_smoke(temp_python_files: list[str]) -> None:
+    """Smoke check with a single file and single tool.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -148,8 +200,8 @@ def test_check_with_single_file(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_format_action(temp_python_files: list[str]) -> None:
-    """Test format action.
+def test_format_action_smoke(temp_python_files: list[str]) -> None:
+    """Smoke test of the format action with a single tool.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -169,8 +221,8 @@ def test_format_action(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_different_output_formats(temp_python_files: list[str]) -> None:
-    """Test different output formats.
+def test_different_output_formats_smoke(temp_python_files: list[str]) -> None:
+    """Smoke test of different output formats with a single tool.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -199,8 +251,8 @@ def test_tool_definition_exists() -> None:
     assert_that(ruff_tool.definition.name).is_equal_to("ruff")
 
 
-def test_tool_respects_execution_order(temp_python_files: list[str]) -> None:
-    """Test that tool execution order is predictable.
+def test_tool_respects_execution_order_smoke(temp_python_files: list[str]) -> None:
+    """Smoke test that single-tool exit codes are stable across runs.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -223,3 +275,93 @@ def test_tool_respects_execution_order(temp_python_files: list[str]) -> None:
 
     # All runs should produce same exit code
     assert_that(len(set(results))).is_equal_to(1)
+
+
+# ---------------------------------------------------------------------------
+# Multi-tool parallel tests (real parallel executor)
+# ---------------------------------------------------------------------------
+
+
+def _require_tools(*names: str) -> None:
+    """Skip the current test if any required tool is missing from PATH.
+
+    Args:
+        *names: Executable names that must resolve on PATH.
+    """
+    for name in names:
+        if not shutil.which(name):
+            pytest.skip(f"Tool '{name}' not available in PATH")
+
+
+def test_parallel_runs_multiple_tools_over_mixed_samples(
+    mixed_language_sample: list[str],
+) -> None:
+    """Two tools run concurrently and both report their own issues.
+
+    Drives the real parallel executor with ruff + yamllint over a mixed sample
+    where each tool owns exactly one file, and asserts that results for both
+    tools are aggregated and that each surfaces its violation.
+
+    Args:
+        mixed_language_sample: Paths ``[python_file, yaml_file]``.
+    """
+    _require_tools("ruff", "yamllint")
+
+    results = run_tools_parallel(
+        tools_to_run=["ruff", "yamllint"],
+        paths=mixed_language_sample,
+        action=Action.CHECK,
+        config_manager=UnifiedConfigManager(),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        post_tools=set(),
+        max_workers=4,
+    )
+
+    names = {result.name for result in results}
+    assert_that(names).is_equal_to({"ruff", "yamllint"})
+
+    by_name = {result.name: result for result in results}
+    # Aggregation: each tool contributes its own findings independently.
+    assert_that(by_name["ruff"].issues_count).is_greater_than_or_equal_to(1)
+    assert_that(by_name["yamllint"].issues_count).is_greater_than_or_equal_to(1)
+    assert_that(by_name["ruff"].success).is_false()
+    assert_that(by_name["yamllint"].success).is_false()
+
+
+def test_simple_runner_uses_parallel_for_multiple_tools(
+    mixed_language_sample: list[str],
+) -> None:
+    """The production simple runner takes the parallel path for two tools.
+
+    ``run_lint_tools_simple`` is the CLI entry used by ``lintro check``. Passing
+    two tools must call ``_execute_tools_parallel`` so a regression that forces
+    sequential execution is visible here.
+
+    Args:
+        mixed_language_sample: Paths ``[python_file, yaml_file]``.
+    """
+    _require_tools("ruff", "yamllint")
+
+    with patch.object(
+        target=tool_executor_mod,
+        attribute="_execute_tools_parallel",
+        wraps=tool_executor_mod._execute_tools_parallel,
+    ) as execute_parallel:
+        exit_code = run_lint_tools_simple(
+            action="check",
+            paths=mixed_language_sample,
+            tools="ruff,yamllint",
+            tool_options=None,
+            exclude=None,
+            include_venv=False,
+            group_by="file",
+            output_format="grid",
+            verbose=False,
+            yes=True,
+        )
+
+    assert_that(execute_parallel.call_count).is_equal_to(1)
+    assert_that(exit_code).is_instance_of(int)
+    assert_that(exit_code).is_not_equal_to(0)
