@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.121.0] - 2026-08-18
+
+### Added
+
+- **cli**: add lintro badge command for shields.io score (9a62d3e)
+
+### Changed
+
+- **deps**: update dependency vue-tsc to 3.3.10 (patch) (28e3b88)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 16e8f94
+  (56fbf17)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 7f94fd0
+  (8f488c3)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.120.0 (minor) (#2115)
+  (3246821)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to b94e655
+  (a2936a6)
+
 ## [0.120.0] - 2026-08-18
 
 ### Added
