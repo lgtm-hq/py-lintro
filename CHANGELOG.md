@@ -21,6 +21,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.118.5] - 2026-08-18
+
+### Changed
+
+- **deps**: update dependency setuptools to 84.0.0 (patch) (#2091) (57d3ed7)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to fde87fd (#2093)
+  (6637deb)
+- **deps**: update dependency google/osv-scanner to 2.5.1 (patch) (#2087) (0f0c1eb)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 96992b5 (#2086)
+  (2b70e73)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to b014a5d
+  (#2085) (4790b98)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.63.6 (#2088) (bbc1dda)
+- **deps**: update lockfile (#2083) (16d01e9)
+
+### Fixed
+
+- **ci**: drop unused PyPI publish endpoints from test-job egress allowlist (#1466)
+  (6d7c63b)
+
 ## [0.118.4] - 2026-08-17
 
 ### Changed
