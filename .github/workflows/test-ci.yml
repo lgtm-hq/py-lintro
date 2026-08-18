@@ -59,7 +59,11 @@ jobs:
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the pypi preset baseline.
+      # non-empty value must include the pypi preset baseline. Test jobs only
+      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
+      # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
+      # replace-mode so egress-preset: pypi cannot reintroduce them or
+      # upload.test.pypi.org (#1351).
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -70,8 +74,6 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
-        test.pypi.org:443
-        upload.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
     permissions:
@@ -101,7 +103,11 @@ jobs:
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the pypi preset baseline.
+      # non-empty value must include the pypi preset baseline. Test jobs only
+      # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
+      # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
+      # replace-mode so egress-preset: pypi cannot reintroduce them or
+      # upload.test.pypi.org (#1351).
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -112,8 +118,6 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
-        test.pypi.org:443
-        upload.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
     permissions:
