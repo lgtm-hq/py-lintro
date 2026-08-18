@@ -6,6 +6,7 @@ import json
 import shutil
 import stat
 import subprocess  # nosec B404 - drives install.sh with a fixed argv and shell=False
+import tomllib
 from pathlib import Path
 
 from assertpy import assert_that
@@ -42,6 +43,7 @@ def _isolated_bin(*, tmp_path: Path) -> Path:
     for name in _SYSTEM_COMMANDS:
         source = shutil.which(name)
         assert_that(source).is_not_none()
+        assert source is not None
         shutil.copy2(source, fake_bin / name)
     return fake_bin
 
@@ -68,8 +70,11 @@ def _assert_uv_absent(*, env: dict[str, str]) -> None:
     Args:
         env: Child environment, including the isolated PATH.
     """
+    sh_path = shutil.which("sh")
+    assert_that(sh_path).is_not_none()
+    assert sh_path is not None
     probe = subprocess.run(  # nosec B603 - fixed argv, no shell
-        ["sh", "-c", "command -v uv"],
+        [sh_path, "-c", "command -v uv"],
         capture_output=True,
         text=True,
         env=env,
@@ -134,11 +139,25 @@ def test_environment_json_is_valid_and_points_at_install_script() -> None:
     assert_that(_INSTALL_SH.exists()).is_true()
 
 
+def test_install_script_syncs_an_existing_pyproject_extra() -> None:
+    """``uv sync --extra full`` must name a real optional dependency extra."""
+    pyproject = tomllib.loads(
+        (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    extras = pyproject["project"]["optional-dependencies"]
+
+    assert_that(extras).contains_key("full")
+    assert_that(extras["full"]).is_not_empty()
+
+
 def test_install_script_is_strict_bash() -> None:
     """The install script must parse as bash and be executable."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
+    bash_path = shutil.which("bash")
+    assert_that(bash_path).is_not_none()
+    assert bash_path is not None
     syntax = subprocess.run(  # nosec B603 - fixed argv, no shell
-        ["bash", "-n", str(_INSTALL_SH)],
+        [bash_path, "-n", str(_INSTALL_SH)],
         capture_output=True,
         text=True,
         check=False,
