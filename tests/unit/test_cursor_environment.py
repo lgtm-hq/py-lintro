@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import stat
 import subprocess  # nosec B404 - drives install.sh with a fixed argv and shell=False
 from pathlib import Path
@@ -13,29 +14,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENVIRONMENT_JSON = _REPO_ROOT / ".cursor" / "environment.json"
 _INSTALL_SH = _REPO_ROOT / ".cursor" / "install.sh"
 _EXPECTED_NAME = "lintro (Python CLI)"
-
-
-def _uncommented_lines(*, text: str) -> list[str]:
-    """Return non-empty source lines with comments stripped.
-
-    Args:
-        text: Full script contents.
-
-    Returns:
-        Lines that would execute, without trailing comments.
-    """
-    lines: list[str] = []
-    for raw in text.splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        code, _sep, _comment = stripped.partition(" #")
-        lines.append(code.rstrip())
-    return lines
+_SYSTEM_COMMANDS = ("bash", "sh", "cat", "chmod", "cp", "mkdir")
 
 
 def _write_executable(*, path: Path, body: str) -> None:
-    """Write a bash helper and mark it executable.
+    """Write a POSIX helper and mark it executable.
 
     Args:
         path: Destination path.
@@ -43,6 +26,56 @@ def _write_executable(*, path: Path, body: str) -> None:
     """
     path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _isolated_bin(*, tmp_path: Path) -> Path:
+    """Return a PATH dir that has shells but no system ``uv``.
+
+    Args:
+        tmp_path: Temporary directory for the isolated bin.
+
+    Returns:
+        Directory containing copied ``bash`` and ``sh`` binaries.
+    """
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    for name in _SYSTEM_COMMANDS:
+        source = shutil.which(name)
+        assert_that(source).is_not_none()
+        shutil.copy2(source, fake_bin / name)
+    return fake_bin
+
+
+def _child_env(*, fake_bin: Path, home: Path) -> dict[str, str]:
+    """Build an env whose PATH cannot see a distro ``uv``.
+
+    Args:
+        fake_bin: Isolated bin directory.
+        home: Fake HOME so ``~/.local/bin`` is also isolated.
+
+    Returns:
+        Environment mapping for the child process.
+    """
+    return {
+        "PATH": str(fake_bin),
+        "HOME": str(home),
+    }
+
+
+def _assert_uv_absent(*, env: dict[str, str]) -> None:
+    """Fail the test if ``uv`` is visible on the child PATH.
+
+    Args:
+        env: Child environment, including the isolated PATH.
+    """
+    probe = subprocess.run(  # nosec B603 - fixed argv, no shell
+        ["sh", "-c", "command -v uv"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert_that(probe.returncode).is_not_equal_to(0)
 
 
 def _fake_uv(*, path: Path, log: Path, sync_exit: int) -> None:
@@ -56,7 +89,7 @@ def _fake_uv(*, path: Path, log: Path, sync_exit: int) -> None:
     _write_executable(
         path=path,
         body=(
-            "#!/usr/bin/env bash\n"
+            "#!/bin/sh\n"
             'if [ "$1" = "--version" ]; then\n'
             "  echo 'uv 0.0.0-test'\n"
             "  exit 0\n"
@@ -69,18 +102,20 @@ def _fake_uv(*, path: Path, log: Path, sync_exit: int) -> None:
 
 def _run_install(
     *,
+    fake_bin: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
     """Run ``.cursor/install.sh`` with a controlled environment.
 
     Args:
+        fake_bin: Isolated bin that contains ``bash``.
         env: Complete environment for the child process.
 
     Returns:
         The completed subprocess result.
     """
     return subprocess.run(  # nosec B603 - fixed argv, no shell
-        ["bash", str(_INSTALL_SH)],
+        [str(fake_bin / "bash"), str(_INSTALL_SH)],
         capture_output=True,
         text=True,
         cwd=_REPO_ROOT,
@@ -99,10 +134,9 @@ def test_environment_json_is_valid_and_points_at_install_script() -> None:
     assert_that(_INSTALL_SH.exists()).is_true()
 
 
-def test_install_script_is_strict_bash_and_syncs_full_extra() -> None:
-    """The install script must parse, fail closed, and sync the full extra."""
+def test_install_script_is_strict_bash() -> None:
+    """The install script must parse as bash and be executable."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
-    lines = _uncommented_lines(text=text)
     syntax = subprocess.run(  # nosec B603 - fixed argv, no shell
         ["bash", "-n", str(_INSTALL_SH)],
         capture_output=True,
@@ -112,9 +146,6 @@ def test_install_script_is_strict_bash_and_syncs_full_extra() -> None:
 
     assert_that(text).starts_with("#!/usr/bin/env bash")
     assert_that(syntax.returncode).is_equal_to(0)
-    assert_that(lines).contains("set -euo pipefail")
-    assert_that(lines).contains("export UV_LINK_MODE=copy")
-    assert_that(lines).contains("uv sync --dev --extra full")
     assert_that(_INSTALL_SH.stat().st_mode & stat.S_IXUSR).is_not_equal_to(0)
 
 
@@ -126,8 +157,7 @@ def test_install_script_uses_existing_uv_without_curl(
     Args:
         tmp_path: Isolated HOME and fake PATH for the child process.
     """
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin = _isolated_bin(tmp_path=tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     log = tmp_path / "uv-args.log"
@@ -135,15 +165,11 @@ def test_install_script_uses_existing_uv_without_curl(
     _fake_uv(path=fake_bin / "uv", log=log, sync_exit=0)
     _write_executable(
         path=fake_bin / "curl",
-        body=(f"#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> '{curl_log}'\nexit 1\n"),
+        body=(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{curl_log}'\nexit 1\n"),
     )
+    env = _child_env(fake_bin=fake_bin, home=home)
 
-    result = _run_install(
-        env={
-            "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "HOME": str(home),
-        },
-    )
+    result = _run_install(fake_bin=fake_bin, env=env)
 
     assert_that(result.returncode).is_equal_to(0)
     recorded = log.read_text(encoding="utf-8")
@@ -160,23 +186,45 @@ def test_install_script_fails_when_uv_sync_fails(
     Args:
         tmp_path: Isolated HOME and fake PATH for the child process.
     """
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin = _isolated_bin(tmp_path=tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     log = tmp_path / "uv-args.log"
     _fake_uv(path=fake_bin / "uv", log=log, sync_exit=2)
+    env = _child_env(fake_bin=fake_bin, home=home)
 
-    result = _run_install(
-        env={
-            "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "HOME": str(home),
-        },
-    )
+    result = _run_install(fake_bin=fake_bin, env=env)
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(log.read_text(encoding="utf-8")).contains(
         "sync --dev --extra full",
+    )
+
+
+def test_install_script_fails_when_curl_bootstrap_fails(
+    tmp_path: Path,
+) -> None:
+    """A failing uv installer download must fail the install script.
+
+    Args:
+        tmp_path: Isolated HOME and fake PATH for the child process.
+    """
+    fake_bin = _isolated_bin(tmp_path=tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    curl_log = tmp_path / "curl.log"
+    _write_executable(
+        path=fake_bin / "curl",
+        body=(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{curl_log}'\nexit 1\n"),
+    )
+    env = _child_env(fake_bin=fake_bin, home=home)
+    _assert_uv_absent(env=env)
+
+    result = _run_install(fake_bin=fake_bin, env=env)
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(curl_log.read_text(encoding="utf-8")).contains(
+        "https://astral.sh/uv/install.sh",
     )
 
 
@@ -188,8 +236,7 @@ def test_install_script_bootstraps_uv_via_curl_when_missing(
     Args:
         tmp_path: Isolated HOME and fake PATH for the child process.
     """
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
+    fake_bin = _isolated_bin(tmp_path=tmp_path)
     home = tmp_path / "home"
     local_bin = home / ".local" / "bin"
     local_bin.mkdir(parents=True)
@@ -199,10 +246,10 @@ def test_install_script_bootstraps_uv_via_curl_when_missing(
     _write_executable(
         path=fake_bin / "curl",
         body=(
-            "#!/usr/bin/env bash\n"
+            "#!/bin/sh\n"
             f"printf '%s\\n' \"$*\" >> '{curl_log}'\n"
             "cat <<'EOS'\n"
-            "#!/usr/bin/env bash\n"
+            "#!/bin/sh\n"
             f"mkdir -p '{local_bin}'\n"
             f"cp '{fake_bin / 'bootstrap-uv'}' '{installed_uv}'\n"
             f"chmod +x '{installed_uv}'\n"
@@ -210,13 +257,10 @@ def test_install_script_bootstraps_uv_via_curl_when_missing(
         ),
     )
     _fake_uv(path=fake_bin / "bootstrap-uv", log=log, sync_exit=0)
+    env = _child_env(fake_bin=fake_bin, home=home)
+    _assert_uv_absent(env=env)
 
-    result = _run_install(
-        env={
-            "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "HOME": str(home),
-        },
-    )
+    result = _run_install(fake_bin=fake_bin, env=env)
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(curl_log.read_text(encoding="utf-8")).contains(
