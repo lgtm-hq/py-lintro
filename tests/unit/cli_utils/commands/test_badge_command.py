@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import click
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.cli_utils.commands.badge import (
-    _parse_score_output,
     badge_command,
     resolve_health_score,
 )
+from lintro.models.core.run_artifact import RunArtifact
+from lintro.utils.health_score import HealthScore, ScoreTier, SeverityCounts
 
 
 def test_badge_markdown_default() -> None:
@@ -81,30 +81,9 @@ def test_badge_registered_on_cli() -> None:
     assert_that(result.output.lower()).contains("shields")
 
 
-def test_parse_score_output_prefers_last_integer_line() -> None:
-    """Score parsing ignores incidental stdout and takes the last integer."""
-    raw = "Processing files\nProcessing files\n99\n"
-
-    assert_that(_parse_score_output(raw)).is_equal_to(99)
-
-
-def test_parse_score_output_raises_when_missing() -> None:
-    """Missing score lines raise a ClickException."""
-    assert_that(_parse_score_output).raises(click.ClickException).when_called_with(
-        "no score here\n",
-    )
-
-
-def test_parse_score_output_rejects_out_of_range() -> None:
-    """Scores outside 0-100 are rejected."""
-    assert_that(_parse_score_output).raises(click.ClickException).when_called_with(
-        "101\n",
-    )
-
-
 def test_resolve_health_score_uses_override() -> None:
     """An explicit override skips the live check API."""
-    with patch("lintro.cli_utils.commands.badge.api.check") as mock_check:
+    with patch("lintro.cli_utils.commands.badge.api.check_run") as mock_check:
         score = resolve_health_score(score_override=77, paths=())
 
     assert_that(score).is_equal_to(77)
@@ -113,20 +92,25 @@ def test_resolve_health_score_uses_override() -> None:
 
 def test_resolve_health_score_runs_check_when_needed() -> None:
     """Without an override, a score-only API check is invoked."""
-
-    def _fake_check(**_kwargs: object) -> MagicMock:
-        print("88")
-        return MagicMock()
+    artifact = RunArtifact(
+        health=HealthScore(
+            score=88,
+            tier=ScoreTier.GREAT,
+            counts=SeverityCounts(),
+            weighted_penalty=0.0,
+        ),
+    )
 
     with patch(
-        "lintro.cli_utils.commands.badge.api.check",
-        side_effect=_fake_check,
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
     ) as mock_check:
         score = resolve_health_score(score_override=None, paths=(".",))
 
     assert_that(score).is_equal_to(88)
     mock_check.assert_called_once()
     assert_that(mock_check.call_args.kwargs["score"]).is_true()
+    assert_that(mock_check.call_args.kwargs["no_log"]).is_true()
 
 
 @pytest.mark.parametrize(

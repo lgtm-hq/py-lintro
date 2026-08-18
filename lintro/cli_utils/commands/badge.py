@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 from contextlib import redirect_stdout
 
 import click
@@ -19,8 +18,6 @@ from lintro.utils.health_score import (
     tier_for_score,
 )
 
-_SCORE_LINE_RE = re.compile(r"^\d{1,3}$")
-
 _SHIELDS_STYLES: tuple[str, ...] = (
     "flat",
     "flat-square",
@@ -28,39 +25,6 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "for-the-badge",
     "social",
 )
-
-
-def _parse_score_output(raw: str) -> int:
-    """Extract the numeric health score from score-only check stdout.
-
-    Prefers the last line that is a bare integer so incidental progress text
-    on stdout does not break parsing.
-
-    Args:
-        raw: Captured stdout from a score-only check run.
-
-    Returns:
-        int: Parsed score in ``[0, 100]``.
-
-    Raises:
-        click.ClickException: If no parseable score line is found or the value
-            is outside the valid range.
-    """
-    candidates = [
-        line.strip()
-        for line in raw.splitlines()
-        if _SCORE_LINE_RE.fullmatch(line.strip())
-    ]
-    if not candidates:
-        raise click.ClickException(
-            "Could not determine health score from check output.",
-        )
-    score = int(candidates[-1])
-    if score < MIN_SCORE or score > MAX_SCORE:
-        raise click.ClickException(
-            f"Health score out of range: {score} (expected {MIN_SCORE}-{MAX_SCORE}).",
-        )
-    return score
 
 
 def resolve_health_score(
@@ -71,8 +35,9 @@ def resolve_health_score(
     """Resolve the project health score for badge generation.
 
     When ``score_override`` is set, that value is returned directly (useful for
-    tests and CI snippets). Otherwise a score-only check is run via the public
-    API and the printed score is parsed.
+    tests and CI snippets). Otherwise a check is run via :func:`api.check_run`
+    and the score is read from the :class:`~lintro.models.core.run_artifact.RunArtifact`
+    (issue #1823) rather than re-parsing stdout.
 
     Args:
         score_override: Explicit score to use instead of running tools.
@@ -86,12 +51,12 @@ def resolve_health_score(
 
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-        api.check(
+        artifact = api.check_run(
             paths=list(paths) if paths else None,
-            score=True,
             no_log=True,
+            score=True,
         )
-    return _parse_score_output(buffer.getvalue())
+    return artifact.health_score
 
 
 @click.command("badge")
@@ -133,6 +98,7 @@ def badge_command(
     Runs a score-only check on the given paths (default ``.``) unless
     ``--score`` supplies an override. Prints a markdown image by default;
     use ``--url`` for the bare URL or ``--json`` for structured output.
+    \u000c
 
     Args:
         paths: File/directory paths to score; empty means the current directory.

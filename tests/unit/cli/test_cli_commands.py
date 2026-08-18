@@ -11,6 +11,7 @@ from click.testing import CliRunner
 from lintro.cli import cli
 
 SUBCOMMANDS: tuple[str, ...] = (
+    "badge",
     "check",
     "completions",
     "config",
@@ -28,6 +29,7 @@ SUBCOMMANDS: tuple[str, ...] = (
 
 # Human-facing summary phrases that must survive Click's \\f truncation.
 SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
+    "badge": "Generate a shields.io markdown badge for the project health score.",
     "check": "Check files for issues using the specified tools.",
     "completions": "Print a shell completion script for bash, zsh, or fish.",
     "config": "Display Lintro configuration status.",
