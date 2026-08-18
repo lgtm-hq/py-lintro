@@ -30,7 +30,7 @@
     "svelte": "5.56.9",
     "svelte-check": "4.7.6",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.9"
+    "vue-tsc": "3.3.10"
   },
   "overrides": {
     "defu": "6.1.7",
