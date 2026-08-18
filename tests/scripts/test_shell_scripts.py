@@ -24,7 +24,7 @@ def _git(repo: Path, *args: str) -> str:
     Returns:
         str: Captured stdout, stripped.
     """
-    result = subprocess.run(  # nosec B603 B607 - fixed git argv in a test-owned temp repo
+    result = subprocess.run(  # nosec B603 B607 - fixed git argv
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,

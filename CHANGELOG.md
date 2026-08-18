@@ -11,11 +11,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **tools**: isolate semgrep into a hash-pinned lockfile venv
-  (`requirements-semgrep.in` / `requirements-semgrep.txt`) so its pins no longer
-  collide with lintro's shared resolver (#2104)
+- **tools**: isolate semgrep into a hash-pinned lockfile venv (`requirements-semgrep.in`
+  / `requirements-semgrep.txt`) so its pins no longer collide with lintro's shared
+  resolver (#2104)
 
 ### Changed
+
+- **docker**: the CI `full` image re-syncs isolated semgrep from
+  `requirements-semgrep.txt` so dogfood does not wait on a tools-image digest bump
+  (#2104)
 
 ### Deprecated
 

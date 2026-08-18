@@ -120,11 +120,36 @@ def test_tools_dockerfile_copies_semgrep_lockfile() -> None:
     assert_that(text).contains("/opt/semgrep-venv")
 
 
+def test_ci_dockerfile_installs_isolated_semgrep() -> None:
+    """The CI image must re-sync isolated semgrep from this build's lockfile.
+
+    The root image is FROM a digest-pinned tools base, so a lockfile bump
+    would otherwise dogfood the previous binary and skip on version lag
+    until the tools digest is republished.
+    """
+    dockerfile = _REPO_ROOT / "Dockerfile"
+    text = dockerfile.read_text(encoding="utf-8")
+    assert_that(text).contains("COPY requirements-semgrep.txt")
+    assert_that(text).contains("COPY scripts/utils/install-semgrep.sh")
+    assert_that(text).contains("install-semgrep.sh --docker")
+    assert_that(text).contains("/opt/semgrep-venv")
+    assert_that(text).contains("semgrep --version")
+
+
 def test_tools_publish_workflow_rebuilds_on_semgrep_isolation_changes() -> None:
     """Lockfile or installer edits must rebuild the tools image."""
     text = _TOOLS_PUBLISH.read_text(encoding="utf-8")
     assert_that(text).contains("scripts/utils/install-semgrep.sh")
     assert_that(text).contains("requirements-semgrep.txt")
+
+
+def test_docker_ci_full_lint_includes_semgrep_lockfile() -> None:
+    """A semgrep lockfile bump must force full-repo dogfood, not changed-files."""
+    docker_ci = (_REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+        encoding="utf-8",
+    )
+    assert_that(docker_ci).contains("requirements-semgrep.in")
+    assert_that(docker_ci).contains("requirements-semgrep.txt")
 
 
 def test_install_semgrep_script_help_and_dry_run() -> None:

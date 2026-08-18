@@ -173,7 +173,9 @@
     {
       "description": "Recompile the isolated semgrep lockfile after its .in pin changes",
       "matchManagers": ["pip_requirements"],
-      "matchFileNames": ["requirements-semgrep.in"],
+      "matchFileNames": [
+        "requirements-semgrep.in"
+      ],
       "postUpgradeTasks": {
         "commands": [
           "scripts/ci/compile-semgrep-lock.sh",
@@ -189,7 +191,9 @@
     },
     {
       "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in",
-      "matchFileNames": ["requirements-semgrep.txt"],
+      "matchFileNames": [
+        "requirements-semgrep.txt"
+      ],
       "enabled": false
     }
   ],
