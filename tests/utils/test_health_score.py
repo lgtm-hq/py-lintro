@@ -284,6 +284,7 @@ def test_build_shields_badge_url_and_markdown() -> None:
     """Badge helpers encode the score and optional style correctly."""
     url = build_shields_badge_url(84)
     markdown = build_shields_badge_markdown(84, style="flat")
+    hyphenated = build_shields_badge_url(84, style="for-the-badge")
 
     assert_that(url).is_equal_to(
         "https://img.shields.io/badge/lintro-84%2F100-brightgreen",
@@ -292,3 +293,5 @@ def test_build_shields_badge_url_and_markdown() -> None:
         "![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen"
         "?style=flat)",
     )
+    assert_that(hyphenated).contains("style=for-the-badge")
+    assert_that(hyphenated).does_not_contain("%2D")

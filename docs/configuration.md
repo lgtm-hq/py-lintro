@@ -171,8 +171,8 @@ lintro badge --url            # bare badge URL
 lintro badge --json           # score, tier, color, url, and markdown as JSON
 ```
 
-`lintro badge` runs a score-only check (or accepts `--score N` to skip the run) and
-prints a shields.io snippet such as
+`--json` and `--url` are mutually exclusive. `lintro badge` runs a score-only check (or
+accepts `--score N` to skip the run) and prints a shields.io snippet such as
 `![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)`. Badge color
 follows the tiers below: bright green (75+), yellow (50–74), red (<50).
 

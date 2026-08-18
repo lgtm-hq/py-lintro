@@ -331,7 +331,7 @@ def build_shields_badge_url(
     color = shields_color_for_tier(tier_for_score(clamped))
     url = f"https://img.shields.io/badge/lintro-{message}-{color}"
     if style:
-        url = f"{url}?style={quote(style, safe='')}"
+        url = f"{url}?style={quote(style, safe='-')}"
     return url
 
 

@@ -9,6 +9,7 @@ from contextlib import redirect_stdout
 import click
 
 from lintro.api import core as api
+from lintro.models.core.run_artifact import RunArtifact
 from lintro.utils.health_score import (
     MAX_SCORE,
     MIN_SCORE,
@@ -25,6 +26,24 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "for-the-badge",
     "social",
 )
+
+
+def _live_score_is_usable(artifact: RunArtifact) -> bool:
+    """Return whether a live check produced a badge-worthy score.
+
+    Args:
+        artifact: Completed check run.
+
+    Returns:
+        bool: ``True`` when at least one tool executed and a health score
+        was computed. Empty, all-skipped, filtered, and early-exit runs are
+        not usable public quality signals.
+    """
+    if artifact.early_exit or artifact.health is None:
+        return False
+    if artifact.main_phase_empty_due_to_filter:
+        return False
+    return any(not result.skipped for result in artifact.tool_results)
 
 
 def resolve_health_score(
@@ -48,7 +67,7 @@ def resolve_health_score(
 
     Raises:
         click.ClickException: If the live check exits before a score is
-            produced (``early_exit`` or missing ``health``).
+            produced, or no tool actually executed (empty / all-skipped).
     """
     if score_override is not None:
         return score_override
@@ -60,9 +79,10 @@ def resolve_health_score(
             no_log=True,
             score=True,
         )
-    if artifact.early_exit or artifact.health is None:
+    if not _live_score_is_usable(artifact):
         raise click.ClickException(
-            "Could not determine health score because the check exited before scoring.",
+            "Could not determine a usable health score because the check "
+            "exited early, was empty, or all tools were skipped.",
         )
     return artifact.health_score
 
@@ -114,7 +134,13 @@ def badge_command(
         url_only: Emit only the badge URL.
         json_output: Emit JSON with score, tier, color, url, and markdown.
         score_override: Explicit score that skips running tools.
+
+    Raises:
+        click.UsageError: If ``--json`` and ``--url`` are passed together.
     """
+    if json_output and url_only:
+        raise click.UsageError("Use --json or --url, not both.")
+
     score = resolve_health_score(score_override=score_override, paths=paths)
     tier = tier_for_score(score)
     color = shields_color_for_tier(tier)

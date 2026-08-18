@@ -12,10 +12,12 @@ from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.cli_utils.commands.badge import (
+    _SHIELDS_STYLES,
     badge_command,
     resolve_health_score,
 )
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.health_score import HealthScore, ScoreTier, SeverityCounts
 
 
@@ -107,6 +109,9 @@ def _scored_artifact(*, score: int = 88) -> RunArtifact:
             counts=SeverityCounts(),
             weighted_penalty=0.0,
         ),
+        tool_results=[
+            ToolResult(name="ruff", success=True, skipped=False),
+        ],
     )
 
 
@@ -183,6 +188,120 @@ def test_badge_rejects_score_out_of_range() -> None:
     result = runner.invoke(badge_command, ["--score", "101"])
 
     assert_that(result.exit_code).is_not_equal_to(0)
+
+
+def test_badge_rejects_json_and_url_together() -> None:
+    """``--json`` and ``--url`` are mutually exclusive."""
+    runner = CliRunner()
+
+    result = runner.invoke(badge_command, ["--score", "84", "--json", "--url"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output.lower()).contains("not both")
+
+
+def test_resolve_health_score_rejects_all_skipped_run() -> None:
+    """An all-skipped run must not publish a perfect 100 badge."""
+    artifact = RunArtifact(
+        health=HealthScore(
+            score=100,
+            tier=ScoreTier.GREAT,
+            counts=SeverityCounts(),
+            weighted_penalty=0.0,
+        ),
+        tool_results=[
+            ToolResult(
+                name="ruff",
+                success=True,
+                skipped=True,
+                skip_reason="no files matched",
+            ),
+        ],
+    )
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        with pytest.raises(click.ClickException):
+            resolve_health_score(score_override=None, paths=())
+
+
+def test_resolve_health_score_rejects_filter_empty_run() -> None:
+    """A filter-empty run must not publish a perfect 100 badge."""
+    artifact = _scored_artifact(score=100)
+    artifact.main_phase_empty_due_to_filter = True
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        with pytest.raises(click.ClickException):
+            resolve_health_score(score_override=None, paths=())
+
+
+def test_badge_live_all_skipped_prints_no_badge() -> None:
+    """Skipped-only live checks exit non-zero and print no shields snippet."""
+    runner = CliRunner()
+    artifact = RunArtifact(
+        health=HealthScore(
+            score=100,
+            tier=ScoreTier.GREAT,
+            counts=SeverityCounts(),
+            weighted_penalty=0.0,
+        ),
+        tool_results=[
+            ToolResult(
+                name="ruff",
+                success=True,
+                skipped=True,
+                skip_reason="no files matched",
+            ),
+        ],
+    )
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        result = runner.invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).does_not_contain("img.shields.io")
+
+
+@pytest.mark.parametrize("style", list(_SHIELDS_STYLES))
+def test_badge_style_query_keeps_hyphens(style: str) -> None:
+    """Every supported shields style is appended without encoding hyphens.
+
+    Args:
+        style: shields.io style token from the CLI choice list.
+    """
+    runner = CliRunner()
+
+    result = runner.invoke(
+        badge_command,
+        ["--score", "84", "--style", style, "--url"],
+    )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).ends_with(f"?style={style}")
+    assert_that(result.output).does_not_contain("%2D")
+
+
+def test_badge_style_flat_square_keeps_hyphen() -> None:
+    """Hyphenated shields styles are not percent-encoded."""
+    runner = CliRunner()
+
+    result = runner.invoke(
+        badge_command,
+        ["--score", "84", "--style", "flat-square", "--url"],
+    )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).is_equal_to(
+        "https://img.shields.io/badge/lintro-84%2F100-brightgreen?style=flat-square",
+    )
 
 
 @pytest.mark.parametrize(
