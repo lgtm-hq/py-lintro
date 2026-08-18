@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lintro.enums.install_context import InstallContext, PackageManager
+from lintro.tools.core.install_hints import SEMGREP_ISOLATED_INSTALL_HINT
 from lintro.tools.core.install_strategies.base import InstallStrategy
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.package_names import (
@@ -128,11 +129,7 @@ def _semgrep_isolated_hint() -> str:
     Returns:
         Manual install guidance that does not target the project venv.
     """
-    return (
-        "Install via: ./scripts/utils/install-semgrep.sh "
-        "(pinned lockfile), uv tool install semgrep, "
-        "or brew install semgrep"
-    )
+    return SEMGREP_ISOLATED_INSTALL_HINT
 
 
 def _pip_cmd(env: InstallEnvironment) -> str:

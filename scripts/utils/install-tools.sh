@@ -1367,9 +1367,6 @@ main() {
 		# Isolated lockfile install (#2104): never share lintro's resolver.
 		echo -e "${BLUE}Installing semgrep (isolated venv)...${NC}"
 		SEMGREP_INSTALL_ARGS=()
-		if [ $DRY_RUN -eq 1 ]; then
-			SEMGREP_INSTALL_ARGS+=(--dry-run)
-		fi
 		if [ "$VERBOSE" -eq 1 ]; then
 			SEMGREP_INSTALL_ARGS+=(--verbose)
 		fi

@@ -259,6 +259,30 @@ def test_read_requirements_pin_normalizes_package_name(
     assert_that(version).is_equal_to("0.0.30")
 
 
+def test_read_requirements_pin_ignores_hash_continuations(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Hash-pinned compile output still yields the package version.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements-semgrep.txt"
+    req.write_text(
+        "semgrep==9.9.9 \\\n"
+        "    --hash=sha256:"
+        + ("a" * 64)
+        + " \\\n"
+        + "    --hash=sha256:"
+        + ("b" * 64)
+        + "\n",
+    )
+    version = gen.read_requirements_pin(req, "semgrep")
+    assert_that(version).is_equal_to("9.9.9")
+
+
 def test_collect_dep_strings_skips_non_dep_tables(gen: ModuleType) -> None:
     """Strings outside known dep tables are ignored.
 

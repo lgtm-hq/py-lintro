@@ -16,6 +16,14 @@ from lintro.tools.core.manifest_models import ManifestTool
 #: Marker the planner uses for script-backed binary installs.
 SCRIPT_HINT_PREFIX = "via install-tools.sh"
 
+#: Semgrep lives in an isolated lockfile venv (#2104); never pip into the
+#: project environment.
+SEMGREP_ISOLATED_INSTALL_HINT = (
+    "Install via: ./scripts/utils/install-semgrep.sh "
+    "(pinned lockfile), uv tool install semgrep, "
+    "or brew install semgrep"
+)
+
 _MANUAL_HINT_PREFIXES = ("See ", "Install ", "Upgrade ")
 
 

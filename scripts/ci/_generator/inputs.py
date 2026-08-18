@@ -170,11 +170,8 @@ def read_requirements_pin(
 
     needle = _normalize_package_name(package)
     found: list[str] = []
-    for raw_line in path.read_text().splitlines():
-        line = raw_line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        match = _SPEC_RE.match(line)
+    for spec in _requirement_specs(path.read_text()):
+        match = _SPEC_RE.match(spec)
         if match is None:
             continue
         if _normalize_package_name(match.group("name")) != needle:
@@ -184,7 +181,7 @@ def read_requirements_pin(
         if op != "==" or not version:
             raise GenerationError(
                 f"package '{package}' in {_display_path(path, repo_root)} "
-                f"must be pinned with == (got {line!r})",
+                f"must be pinned with == (got {spec!r})",
             )
         found.append(version)
 
@@ -199,6 +196,51 @@ def read_requirements_pin(
             f"{_display_path(path, repo_root)}: {found}",
         )
     return found[0]
+
+
+def _requirement_specs(text: str) -> list[str]:
+    """Yield ``name==version`` specs, dropping comments, hashes, and wraps.
+
+    ``uv pip compile --generate-hashes`` emits backslash-continued lines
+    and ``--hash=`` flags. Those must not hide the package pin.
+
+    Args:
+        text: Raw requirements file contents.
+
+    Returns:
+        PEP 508 requirement strings with pip CLI flags removed.
+    """
+    specs: list[str] = []
+    buf = ""
+    for raw_line in text.splitlines():
+        without_comment = raw_line.split("#", 1)[0].rstrip()
+        if without_comment.endswith("\\"):
+            buf += without_comment[:-1] + " "
+            continue
+        line = f"{buf}{without_comment}".strip()
+        buf = ""
+        spec = _strip_pip_flags(line)
+        if spec:
+            specs.append(spec)
+    trailing = _strip_pip_flags(buf.strip())
+    if trailing:
+        specs.append(trailing)
+    return specs
+
+
+def _strip_pip_flags(line: str) -> str:
+    """Remove ``--hash`` / other pip CLI flags from a requirement line.
+
+    Args:
+        line: A (possibly joined) requirement line.
+
+    Returns:
+        The requirement specifier, or empty if the line was flags-only.
+    """
+    if not line:
+        return ""
+    tokens = [token for token in line.split() if not token.startswith("--")]
+    return " ".join(tokens)
 
 
 def _normalize_package_name(name: str) -> str:

@@ -38,7 +38,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CARGO_HOME="/opt/cargo" \
     RUSTUP_HOME="/opt/rustup" \
     GOTOOLCHAIN=local \
-    PATH="/usr/local/go/bin:/usr/local/bin:/opt/semgrep-venv/bin:/opt/cargo/bin:/opt/bun/bin:${PATH}"
+    PATH="/usr/local/go/bin:/usr/local/bin:/opt/cargo/bin:/opt/bun/bin:${PATH}"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

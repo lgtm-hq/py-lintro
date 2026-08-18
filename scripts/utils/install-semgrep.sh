@@ -128,6 +128,7 @@ log_verbose "requirements=$REQUIREMENTS_FILE"
 if [ "$DRY_RUN" -eq 1 ]; then
 	echo "[DRY-RUN] Would create venv at $VENV_DIR"
 	echo "[DRY-RUN] Would uv pip sync $REQUIREMENTS_FILE into that venv"
+	echo "[DRY-RUN] Would uv pip check --python $VENV_DIR/bin/python"
 	echo "[DRY-RUN] Would symlink $VENV_DIR/bin/semgrep -> $BIN_DIR/semgrep"
 	exit 0
 fi
@@ -144,6 +145,7 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 
 uv pip sync --python "$VENV_DIR/bin/python" "$REQUIREMENTS_FILE"
+uv pip check --python "$VENV_DIR/bin/python"
 
 if [ ! -x "$VENV_DIR/bin/semgrep" ]; then
 	echo "Error: semgrep binary missing after pip sync: $VENV_DIR/bin/semgrep" >&2
@@ -151,7 +153,6 @@ if [ ! -x "$VENV_DIR/bin/semgrep" ]; then
 fi
 
 ln -sfn "$VENV_DIR/bin/semgrep" "$BIN_DIR/semgrep"
-chmod +x "$BIN_DIR/semgrep"
 
 echo "Installed isolated semgrep from $REQUIREMENTS_FILE"
 echo "  venv: $VENV_DIR"

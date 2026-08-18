@@ -24,21 +24,19 @@ def _git(repo: Path, *args: str) -> str:
     Returns:
         str: Captured stdout, stripped.
     """
-    result = (
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a test-owned temp repo
-            ["git", "-C", str(repo), *args],
-            capture_output=True,
-            text=True,
-            check=True,
-            env={
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
-                "GIT_AUTHOR_NAME": "t",
-                "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                "GIT_COMMITTER_NAME": "t",
-                "GIT_COMMITTER_EMAIL": "t@example.invalid",
-                "HOME": str(repo),
-            },
-        )
+    result = subprocess.run(  # nosec B603 B607 - fixed git argv in a test-owned temp repo
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+            "HOME": str(repo),
+        },
     )
     return result.stdout.strip()
 
@@ -520,13 +518,22 @@ def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
         "package.json",
         "pyproject.toml",
         "lintro/_tool_versions.py",
-        "requirements-semgrep.txt",
+        "requirements-semgrep.in",
     )
     file_filters: set[str] = set()
     for rule in regen_rules:
         file_filters.update(rule["postUpgradeTasks"].get("fileFilters", []))
     assert_that(file_filters).contains("requirements-semgrep.txt")
     assert_that(commands).contains("python3 scripts/ci/generate-tool-versions.py")
+    assert_that(commands).contains("scripts/ci/compile-semgrep-lock.sh")
     assert_that(config.get("allowedCommands")).contains(
         "python3 scripts/ci/generate-tool-versions.py",
+        "scripts/ci/compile-semgrep-lock.sh",
     )
+    disabled = [
+        rule
+        for rule in config.get("packageRules", [])
+        if rule.get("enabled") is False
+        and "requirements-semgrep.txt" in rule.get("matchFileNames", [])
+    ]
+    assert_that(disabled).is_not_empty()

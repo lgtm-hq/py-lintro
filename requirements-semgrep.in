@@ -1,0 +1,4 @@
+# Isolated semgrep pin (#2104). Transitives live in requirements-semgrep.txt.
+# Recompile (hash-pinned, Python 3.11 floor matching requires-python):
+#   ./scripts/ci/compile-semgrep-lock.sh
+semgrep==1.173.0

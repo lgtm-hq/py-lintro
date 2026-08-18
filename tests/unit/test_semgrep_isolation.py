@@ -18,8 +18,11 @@ _MANIFEST = _REPO_ROOT / "lintro" / "tools" / "manifest.json"
 _GENERATED = _REPO_ROOT / "lintro" / "_generated_versions.py"
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts" / "utils" / "install-semgrep.sh"
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_COMPILE_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "compile-semgrep-lock.sh"
+_IN_FILE = _REPO_ROOT / "requirements-semgrep.in"
 _TOOLS_PUBLISH = _REPO_ROOT / ".github" / "workflows" / "docker-tools-publish.yml"
-_PIN_RE = re.compile(r"^semgrep==([0-9][^\s]+)\s*$", re.MULTILINE)
+_PIN_RE = re.compile(r"^semgrep==([0-9][^\s\\]+)", re.MULTILINE)
+_IN_PIN_RE = re.compile(r"^semgrep==([0-9][^\s]+)\s*$", re.MULTILINE)
 
 
 def _semgrep_pin() -> str:
@@ -36,14 +39,28 @@ def _semgrep_pin() -> str:
 
 
 def test_semgrep_requirements_file_exists_and_is_fully_pinned() -> None:
-    """The isolated lockfile exists and pins every package with ==."""
+    """The isolated lockfile exists, pins every package, and includes hashes."""
     text = _REQUIREMENTS.read_text(encoding="utf-8")
     assert_that(text).is_not_empty()
+    assert_that(text).contains("--hash=sha256:")
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
+        line = raw.split("#", 1)[0].strip().rstrip("\\").strip()
+        if not line or line.startswith("--"):
             continue
         assert_that(line).contains("==")
+
+
+def test_semgrep_in_pin_matches_compiled_lockfile() -> None:
+    """The committed .in pin and the compiled lockfile agree on semgrep."""
+    in_text = _IN_FILE.read_text(encoding="utf-8")
+    in_match = _IN_PIN_RE.search(in_text)
+    assert_that(in_match).is_not_none()
+    assert in_match is not None
+    assert_that(in_match.group(1)).is_equal_to(_semgrep_pin())
+    compile_script = _COMPILE_SCRIPT.read_text(encoding="utf-8")
+    assert_that(compile_script).contains("--generate-hashes")
+    assert_that(compile_script).contains("requirements-semgrep.in")
+    assert_that(_COMPILE_SCRIPT.stat().st_mode & 0o111).is_not_equal_to(0)
 
 
 def test_semgrep_requirements_pin_matches_manifest() -> None:
@@ -79,6 +96,7 @@ def test_install_semgrep_script_uses_locked_sync() -> None:
     text = _INSTALL_SCRIPT.read_text(encoding="utf-8")
     assert_that(text).contains("uv venv")
     assert_that(text).contains("uv pip sync")
+    assert_that(text).contains("uv pip check")
     assert_that(text).contains("requirements-semgrep.txt")
     executable_lines = [
         line
