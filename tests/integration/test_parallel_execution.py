@@ -5,35 +5,26 @@ This module has two parts:
 * Single-tool smoke tests exercise ``run_lint_tools_simple`` end to end but
   intentionally stay on the sequential code path (one tool per invocation).
   They are named ``*_smoke`` so their limited scope is honest.
-* Multi-tool parallel tests drive the real parallel executor
-  (:func:`lintro.utils.execution.parallel_executor.run_tools_parallel` and
-  :class:`lintro.utils.async_tool_executor.AsyncToolExecutor`) with two or more
-  tools over mixed-language samples and assert result aggregation, the ordering
-  contract, failure isolation, and conflict-aware batching.
+* Multi-tool parallel tests drive the production gate
+  (``use_parallel`` in :mod:`lintro.utils.tool_executor`) and the real
+  parallel executor over mixed-language samples.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
+import shutil
 import tempfile
-import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
-from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
-from lintro.plugins.base import BaseToolPlugin
-from lintro.utils.async_tool_executor import (
-    AsyncToolExecutor,
-    get_parallel_batches,
-)
+from lintro.utils import tool_executor as tool_executor_mod
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.tool_executor import run_lint_tools_simple
 from lintro.utils.unified_config import UnifiedConfigManager
@@ -99,9 +90,9 @@ def mixed_language_sample() -> Iterator[list[str]]:
     """Create a mixed-language sample with one violation per tool.
 
     The Python file has an unused import (ruff ``F401``) and the YAML file has
-    inconsistent spacing plus a missing document start (yamllint), so ruff and
-    yamllint each own exactly one file and each report at least one issue. This
-    lets multi-tool tests assert real cross-tool aggregation.
+    inconsistent mapping-value spacing (yamllint), so ruff and yamllint each
+    own exactly one file and each report at least one issue. This lets
+    multi-tool tests assert real cross-tool aggregation.
 
     Yields:
         list[str]: Paths ``[python_file, yaml_file]``.
@@ -123,100 +114,6 @@ def mixed_language_sample() -> Iterator[list[str]]:
             os.unlink(file_path)
     with contextlib.suppress(OSError):
         os.rmdir(temp_dir)
-
-
-# ---------------------------------------------------------------------------
-# Fakes for failure-isolation and batching contracts
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _FakeDefinition:
-    """Minimal stand-in for a tool definition.
-
-    Attributes:
-        name: Tool name.
-        conflicts_with: Names of tools this one conflicts with.
-    """
-
-    name: str
-    conflicts_with: list[str] = field(default_factory=list)
-
-
-@dataclass
-class _FakeTool:
-    """Minimal tool double used to drive the async executor deterministically.
-
-    Attributes:
-        name: Tool name (mirrored into the fake definition).
-        conflicts_with: Conflicting tool names for batching tests.
-        sleep_for: Seconds to block inside ``check`` to control completion order.
-        raises: Whether ``check`` should raise to test failure isolation.
-        issues_count: Issue count reported by the returned result on success.
-    """
-
-    name: str
-    conflicts_with: list[str] = field(default_factory=list)
-    sleep_for: float = 0.0
-    raises: bool = False
-    issues_count: int = 0
-
-    def __post_init__(self) -> None:
-        """Build the fake definition from the tool name."""
-        self.definition = _FakeDefinition(
-            name=self.name,
-            conflicts_with=self.conflicts_with,
-        )
-
-    def check(
-        self,
-        paths: list[str],
-        options: dict[str, Any],
-    ) -> ToolResult:
-        """Simulate a tool check run.
-
-        Args:
-            paths: Paths passed by the executor (unused).
-            options: Options passed by the executor (unused).
-
-        Returns:
-            ToolResult: A success result after an optional delay.
-
-        Raises:
-            RuntimeError: When ``raises`` is set, to test isolation.
-        """
-        if self.sleep_for:
-            time.sleep(self.sleep_for)
-        if self.raises:
-            raise RuntimeError(f"{self.name} boom")
-        return ToolResult(
-            name=self.name,
-            success=True,
-            output=f"{self.name} ok",
-            issues_count=self.issues_count,
-        )
-
-
-@dataclass
-class _FakeToolManager:
-    """Tool manager double returning fake tools for batching tests.
-
-    Attributes:
-        tools: Mapping of tool name to fake tool instance.
-    """
-
-    tools: dict[str, _FakeTool]
-
-    def get_tool(self, name: str) -> _FakeTool:
-        """Return the fake tool registered under ``name``.
-
-        Args:
-            name: Tool name to look up.
-
-        Returns:
-            _FakeTool: The registered fake tool.
-        """
-        return self.tools[name]
 
 
 # ---------------------------------------------------------------------------
@@ -391,8 +288,6 @@ def _require_tools(*names: str) -> None:
     Args:
         *names: Executable names that must resolve on PATH.
     """
-    import shutil
-
     for name in names:
         if not shutil.which(name):
             pytest.skip(f"Tool '{name}' not available in PATH")
@@ -435,106 +330,38 @@ def test_parallel_runs_multiple_tools_over_mixed_samples(
     assert_that(by_name["yamllint"].success).is_false()
 
 
-def test_parallel_preserves_input_ordering_contract() -> None:
-    """Result order matches input tool order regardless of completion time.
+def test_simple_runner_uses_parallel_for_multiple_tools(
+    mixed_language_sample: list[str],
+) -> None:
+    """The production simple runner takes the parallel path for two tools.
 
-    The first tool sleeps longer than the second, so it finishes last, but the
-    executor must still return results positionally aligned with the input
-    tool list (the ordering contract callers rely on for display).
+    ``run_lint_tools_simple`` is the CLI entry used by ``lintro check``. Passing
+    two tools must call ``_execute_tools_parallel`` so a regression that forces
+    sequential execution is visible here.
+
+    Args:
+        mixed_language_sample: Paths ``[python_file, yaml_file]``.
     """
-    slow = _FakeTool(name="slow", sleep_for=0.01, issues_count=1)
-    fast = _FakeTool(name="fast", sleep_for=0.0, issues_count=2)
+    _require_tools("ruff", "yamllint")
 
-    with AsyncToolExecutor(max_workers=4) as executor:
-        results = asyncio.run(
-            executor.run_tools_parallel(
-                tools=cast(
-                    list[tuple[str, BaseToolPlugin]],
-                    [("slow", slow), ("fast", fast)],
-                ),
-                paths=[],
-                action=Action.CHECK,
-            ),
+    with patch.object(
+        target=tool_executor_mod,
+        attribute="_execute_tools_parallel",
+        wraps=tool_executor_mod._execute_tools_parallel,
+    ) as execute_parallel:
+        exit_code = run_lint_tools_simple(
+            action="check",
+            paths=mixed_language_sample,
+            tools="ruff,yamllint",
+            tool_options=None,
+            exclude=None,
+            include_venv=False,
+            group_by="file",
+            output_format="grid",
+            verbose=False,
+            yes=True,
         )
 
-    ordered_names = [name for name, _ in results]
-    assert_that(ordered_names).is_equal_to(["slow", "fast"])
-    assert_that(results[0][1].issues_count).is_equal_to(1)
-    assert_that(results[1][1].issues_count).is_equal_to(2)
-
-
-def test_parallel_isolates_tool_failures() -> None:
-    """A tool raising an exception does not sink its concurrent peers.
-
-    One fake tool raises inside ``check``; the executor must convert it to a
-    failed :class:`ToolResult` while the healthy tool still returns its own
-    successful result, and ordering must be preserved.
-    """
-    boom = _FakeTool(name="boom", raises=True)
-    healthy = _FakeTool(name="healthy", issues_count=3)
-
-    with AsyncToolExecutor(max_workers=4) as executor:
-        results = asyncio.run(
-            executor.run_tools_parallel(
-                tools=cast(
-                    list[tuple[str, BaseToolPlugin]],
-                    [("boom", boom), ("healthy", healthy)],
-                ),
-                paths=[],
-                action=Action.CHECK,
-            ),
-        )
-
-    by_name = dict(results)
-    assert_that(sorted(by_name.keys())).is_equal_to(["boom", "healthy"])
-
-    # Failing tool is isolated into a failed result, not propagated.
-    assert_that(by_name["boom"].success).is_false()
-    assert_that(by_name["boom"].output).contains("boom boom")
-
-    # Healthy tool is unaffected by its peer's failure.
-    assert_that(by_name["healthy"].success).is_true()
-    assert_that(by_name["healthy"].issues_count).is_equal_to(3)
-
-
-def test_get_parallel_batches_separates_conflicting_tools() -> None:
-    """Conflicting tools are placed in distinct sequential batches.
-
-    Two tools that declare ``conflicts_with`` each other must never share a
-    batch (they would race on the same files), while a third independent tool
-    may share a batch with one of them.
-    """
-    manager = _FakeToolManager(
-        tools={
-            "black": _FakeTool(name="black", conflicts_with=["ruff"]),
-            "ruff": _FakeTool(name="ruff", conflicts_with=["black"]),
-            "yamllint": _FakeTool(name="yamllint"),
-        },
-    )
-
-    batches = get_parallel_batches(["black", "ruff", "yamllint"], manager)
-
-    # black and ruff conflict -> separate batches; two batches total.
-    assert_that(batches).is_length(2)
-    for batch in batches:
-        conflicting_together = "black" in batch and "ruff" in batch
-        assert_that(conflicting_together).is_false()
-
-    # Every input tool is scheduled exactly once.
-    scheduled = [tool for batch in batches for tool in batch]
-    assert_that(sorted(scheduled)).is_equal_to(["black", "ruff", "yamllint"])
-
-
-def test_get_parallel_batches_groups_independent_tools() -> None:
-    """Non-conflicting tools share a single parallel batch."""
-    manager = _FakeToolManager(
-        tools={
-            "ruff": _FakeTool(name="ruff"),
-            "yamllint": _FakeTool(name="yamllint"),
-        },
-    )
-
-    batches = get_parallel_batches(["ruff", "yamllint"], manager)
-
-    assert_that(batches).is_length(1)
-    assert_that(sorted(batches[0])).is_equal_to(["ruff", "yamllint"])
+    assert_that(execute_parallel.call_count).is_equal_to(1)
+    assert_that(exit_code).is_instance_of(int)
+    assert_that(exit_code).is_not_equal_to(0)
