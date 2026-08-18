@@ -20,6 +20,19 @@ def test_payload_from_result_prefers_structured_content() -> None:
     assert payload_from_result(result) == {"status": "ok"}
 
 
+def test_payload_from_result_keeps_empty_structured_content() -> None:
+    """An explicit empty object is a payload, not a missing structured body."""
+    result = CallToolResult(
+        is_error=False,
+        structured_content={},
+        content=[
+            TextContent(type="text", text='{"echo": "conflict"}'),
+        ],
+    )
+
+    assert payload_from_result(result) == {}
+
+
 def test_payload_from_result_falls_back_to_json_text() -> None:
     """A text-only result still decodes as the tool payload."""
     result = CallToolResult(

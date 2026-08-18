@@ -64,7 +64,7 @@ def payload_from_result(result: CallToolResult) -> dict[str, Any]:
     Returns:
         The payload the server sent.
     """
-    if result.structured_content:
+    if result.structured_content is not None:
         return dict(result.structured_content)
     block = result.content[0]
     assert isinstance(block, TextContent)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import tomllib
 from pathlib import Path
@@ -13,10 +14,36 @@ _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _UV_LOCK = _REPO_ROOT / "uv.lock"
 _MCP_FLOOR = "mcp>=2,<3"
 _SOURCE_ROOTS = (_REPO_ROOT / "lintro", _REPO_ROOT / "tests")
-_FORBIDDEN_IMPORT = re.compile(
-    r"^\s*(?:from\s+mcp\.shared\.memory\s+import|import\s+mcp\.shared\.memory)\b",
-    re.MULTILINE,
-)
+
+
+def _mcp_shared_memory_imports(source: str) -> list[str]:
+    """Return ``mcp.shared.memory`` import forms found in ``source``.
+
+    Args:
+        source: Python source to scan.
+
+    Returns:
+        Human-readable import forms, empty when none are present.
+    """
+    tree = ast.parse(source)
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "mcp.shared.memory" or alias.name.startswith(
+                    "mcp.shared.memory.",
+                ):
+                    found.append(f"import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module == "mcp.shared.memory" or module.startswith("mcp.shared.memory."):
+                names = ", ".join(alias.name for alias in node.names)
+                found.append(f"from {module} import {names}")
+            elif module == "mcp.shared" and any(
+                alias.name == "memory" for alias in node.names
+            ):
+                found.append("from mcp.shared import memory")
+    return found
 
 
 def test_mcp_extra_and_dev_group_require_sdk_2() -> None:
@@ -41,13 +68,34 @@ def test_uv_lock_resolves_a_single_mcp_2_x() -> None:
     assert_that(re.findall(r'(?m)^name = "mcp"$', text)).is_length(1)
 
 
+def test_forbidden_import_detector_covers_aliased_and_from_forms() -> None:
+    """``from mcp.shared import memory`` is a 1.x import, not only the dotted form."""
+    assert_that(
+        _mcp_shared_memory_imports("from mcp.shared.memory import create_session"),
+    ).is_not_empty()
+    assert_that(
+        _mcp_shared_memory_imports("import mcp.shared.memory as memory"),
+    ).is_not_empty()
+    assert_that(
+        _mcp_shared_memory_imports("from mcp.shared import memory"),
+    ).is_not_empty()
+    assert_that(
+        _mcp_shared_memory_imports("from mcp.shared import memory as memory"),
+    ).is_not_empty()
+    assert_that(_mcp_shared_memory_imports("from mcp.client import Client")).is_empty()
+
+
 def test_no_sdk_1x_memory_helper_imports_remain() -> None:
     """``mcp.shared.memory`` was removed in 2.0; tests must not import it."""
     offenders: list[str] = []
     for root in _SOURCE_ROOTS:
         for path in root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
-            if _FORBIDDEN_IMPORT.search(text):
+            try:
+                hits = _mcp_shared_memory_imports(text)
+            except SyntaxError:
+                continue
+            if hits:
                 offenders.append(str(path.relative_to(_REPO_ROOT)))
     assert_that(offenders).is_empty()
 
