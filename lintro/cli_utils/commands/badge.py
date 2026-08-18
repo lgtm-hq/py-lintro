@@ -45,6 +45,10 @@ def resolve_health_score(
 
     Returns:
         int: Health score in ``[0, 100]``.
+
+    Raises:
+        click.ClickException: If the live check exits before a score is
+            produced (``early_exit`` or missing ``health``).
     """
     if score_override is not None:
         return score_override
@@ -55,6 +59,10 @@ def resolve_health_score(
             paths=list(paths) if paths else None,
             no_log=True,
             score=True,
+        )
+    if artifact.early_exit or artifact.health is None:
+        raise click.ClickException(
+            "Could not determine health score because the check exited before scoring.",
         )
     return artifact.health_score
 

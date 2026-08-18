@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import click
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
@@ -90,16 +91,28 @@ def test_resolve_health_score_uses_override() -> None:
     mock_check.assert_not_called()
 
 
-def test_resolve_health_score_runs_check_when_needed() -> None:
-    """Without an override, a score-only API check is invoked."""
-    artifact = RunArtifact(
+def _scored_artifact(*, score: int = 88) -> RunArtifact:
+    """Build a scored run artifact for badge tests.
+
+    Args:
+        score: Health score to embed on the artifact.
+
+    Returns:
+        RunArtifact: Artifact with a real health score.
+    """
+    return RunArtifact(
         health=HealthScore(
-            score=88,
+            score=score,
             tier=ScoreTier.GREAT,
             counts=SeverityCounts(),
             weighted_penalty=0.0,
         ),
     )
+
+
+def test_resolve_health_score_runs_check_when_needed() -> None:
+    """Without an override, a score-only API check is invoked."""
+    artifact = _scored_artifact()
 
     with patch(
         "lintro.cli_utils.commands.badge.api.check_run",
@@ -111,6 +124,65 @@ def test_resolve_health_score_runs_check_when_needed() -> None:
     mock_check.assert_called_once()
     assert_that(mock_check.call_args.kwargs["score"]).is_true()
     assert_that(mock_check.call_args.kwargs["no_log"]).is_true()
+    assert_that(mock_check.call_args.kwargs["paths"]).is_equal_to(["."])
+
+
+def test_resolve_health_score_rejects_early_exit() -> None:
+    """An unscored early-exit run must not become a 0/100 badge."""
+    artifact = RunArtifact(early_exit=True, exit_code=1)
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        with pytest.raises(click.ClickException):
+            resolve_health_score(score_override=None, paths=())
+
+
+def test_badge_live_score_prints_markdown_only() -> None:
+    """Without ``--score``, CLI output is the badge markdown (no leaked score)."""
+    runner = CliRunner()
+    artifact = _scored_artifact(score=88)
+
+    def _fake_check_run(**_kwargs: object) -> RunArtifact:
+        print("88")
+        return artifact
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        side_effect=_fake_check_run,
+    ):
+        result = runner.invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).is_equal_to(
+        "![Lintro Score](https://img.shields.io/badge/lintro-88%2F100-brightgreen)",
+    )
+    assert_that(result.output).does_not_contain("88\n")
+
+
+def test_badge_live_early_exit_prints_no_badge() -> None:
+    """An early-exit live check exits non-zero and prints no shields snippet."""
+    runner = CliRunner()
+    artifact = RunArtifact(early_exit=True, exit_code=2)
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        result = runner.invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).does_not_contain("img.shields.io")
+
+
+def test_badge_rejects_score_out_of_range() -> None:
+    """Click rejects ``--score`` values outside 0-100."""
+    runner = CliRunner()
+
+    result = runner.invoke(badge_command, ["--score", "101"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
 
 
 @pytest.mark.parametrize(
