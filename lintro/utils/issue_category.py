@@ -171,8 +171,6 @@ def category_from_tool_type(tool_type: ToolType) -> IssueCategory:
         return IssueCategory.INFRASTRUCTURE
     if tool_type & ToolType.FORMATTER and not (tool_type & ToolType.LINTER):
         return IssueCategory.STYLE
-    if tool_type & ToolType.FORMATTER:
-        return IssueCategory.STYLE
     if tool_type & ToolType.LINTER:
         return IssueCategory.CORRECTNESS
     return IssueCategory.CORRECTNESS

@@ -65,6 +65,9 @@ def test_category_from_tool_type_fallbacks() -> None:
     assert_that(category_from_tool_type(ToolType.LINTER)).is_equal_to(
         IssueCategory.CORRECTNESS,
     )
+    assert_that(
+        category_from_tool_type(ToolType.LINTER | ToolType.FORMATTER),
+    ).is_equal_to(IssueCategory.CORRECTNESS)
 
 
 def test_resolve_prefers_existing_category() -> None:
@@ -89,6 +92,18 @@ def test_resolve_uses_tool_name_defaults() -> None:
         resolve_issue_category(BaseIssue(message="x"), tool_name="shellcheck"),
     ).is_equal_to(IssueCategory.INFRASTRUCTURE)
     assert_that(issue.code).is_equal_to("E501")
+
+
+def test_ruff_lint_codes_are_correctness() -> None:
+    """Ruff is a linter+formatter; unused-import and line-length are Correctness."""
+    unused = RuffIssue(file="a.py", line=1, code="F401", message="unused")
+    long_line = RuffIssue(file="a.py", line=1, code="E501", message="long")
+    assert_that(resolve_issue_category(unused, tool_name="ruff")).is_equal_to(
+        IssueCategory.CORRECTNESS,
+    )
+    assert_that(resolve_issue_category(long_line, tool_name="ruff")).is_equal_to(
+        IssueCategory.CORRECTNESS,
+    )
 
 
 def test_enrich_issue_category_persists_title_case() -> None:

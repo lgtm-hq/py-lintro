@@ -338,7 +338,7 @@ lintro format --no-art
 # Output options
 lintro check                  # Use grid formatting
 lintro check --output results.txt            # Save output to file
-lintro check --group-by [file|code|none|auto] # Group issues
+lintro check --group-by [file|code|none|auto|category] # Group issues
 
 # Tool selection
 lintro check --tools ruff,prettier           # Run specific tools only
