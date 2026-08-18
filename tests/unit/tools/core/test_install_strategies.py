@@ -118,6 +118,47 @@ def test_pip_install_hint_without_uv() -> None:
     assert_that(result).is_equal_to("pip install 'ruff>=0.14.0'")
 
 
+def test_pip_install_hint_for_semgrep_is_isolated() -> None:
+    """Semgrep must not be installed into the shared project environment."""
+    env = _make_env(managers=frozenset({PM.UV}))
+    strategy = get_strategy("pip")
+    assert_that(strategy).is_not_none()
+    assert strategy is not None
+
+    result = strategy.install_hint(
+        env=env,
+        tool_name="semgrep",
+        tool_version="1.0.0",
+        install_package="semgrep",
+        install_component=None,
+    )
+
+    assert_that(result).contains("install-semgrep.sh")
+    assert_that(result).does_not_contain("uv pip install")
+    assert_that(result).does_not_contain("lintro[tools]")
+    assert_that(result.startswith("Install ")).is_true()
+
+
+def test_pip_upgrade_hint_for_semgrep_is_isolated() -> None:
+    """Semgrep upgrades must not target the shared project environment."""
+    env = _make_env(managers=frozenset({PM.UV}))
+    strategy = get_strategy("pip")
+    assert_that(strategy).is_not_none()
+    assert strategy is not None
+
+    result = strategy.upgrade_hint(
+        env=env,
+        tool_name="semgrep",
+        tool_version="1.0.0",
+        install_package="semgrep",
+        install_component=None,
+    )
+
+    assert_that(result).contains("install-semgrep.sh")
+    assert_that(result).does_not_contain("uv pip install")
+    assert_that(result).does_not_contain("--upgrade")
+
+
 def test_pip_install_hint_homebrew_context() -> None:
     """Use brew install for mapped tools under HOMEBREW_FULL context."""
     env = _make_env(

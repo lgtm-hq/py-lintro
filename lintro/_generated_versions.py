@@ -5,6 +5,7 @@ Run ``python3 scripts/ci/generate-tool-versions.py`` to regenerate.
 Sources:
     - package.json (npm devDependencies)
     - pyproject.toml (pypi dependency tables)
+    - requirements-semgrep.txt (isolated semgrep pin)
     - lintro/_tool_packages.py (seed mapping)
 """
 
@@ -32,7 +33,7 @@ PYPI_VERSIONS: dict[str, str] = {
     "pydoclint": "0.8.3",
     "pytest": "9.0.3",
     "ruff": "0.15.9",
-    "semgrep": "1.151.0",
+    "semgrep": "1.173.0",
     "sqlfluff": "4.0.0",
     "yamllint": "1.37.1",
 }

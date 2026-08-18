@@ -16,6 +16,15 @@ from lintro.plugins import ToolRegistry
 from lintro.tools.core.version_parsing import get_minimum_versions
 
 
+def _semgrep_version_stdout() -> str:
+    """Return a ``semgrep --version`` line that satisfies the current pin.
+
+    Returns:
+        Version stdout matching the generator-owned semgrep pin.
+    """
+    return f"semgrep {get_minimum_versions()['semgrep']}"
+
+
 def test_parse_semgrep_valid_output() -> None:
     """Parse a representative Semgrep JSON result and validate fields."""
     sample_output = {
@@ -244,7 +253,11 @@ def test_semgrep_check_parses_mixed_output_json(
     ) -> SimpleNamespace:
         # Handle version check calls
         if "--version" in cmd:
-            return SimpleNamespace(stdout="semgrep 1.151.0", stderr="", returncode=0)
+            return SimpleNamespace(
+                stdout=_semgrep_version_stdout(),
+                stderr="",
+                returncode=0,
+            )
         # Handle actual check calls
         return SimpleNamespace(
             stdout=mixed_stdout,
@@ -302,7 +315,11 @@ def test_semgrep_check_handles_nonzero_rc_with_errors_array(
     ) -> SimpleNamespace:
         # Handle version check calls
         if "--version" in cmd:
-            return SimpleNamespace(stdout="semgrep 1.151.0", stderr="", returncode=0)
+            return SimpleNamespace(
+                stdout=_semgrep_version_stdout(),
+                stderr="",
+                returncode=0,
+            )
         # Handle actual check calls
         return SimpleNamespace(stdout=json.dumps(sample), stderr="", returncode=1)
 
@@ -336,7 +353,11 @@ def test_semgrep_check_handles_unparseable_output(
     ) -> SimpleNamespace:
         # Handle version check calls
         if "--version" in cmd:
-            return SimpleNamespace(stdout="semgrep 1.151.0", stderr="", returncode=0)
+            return SimpleNamespace(
+                stdout=_semgrep_version_stdout(),
+                stderr="",
+                returncode=0,
+            )
         # Handle actual check calls
         return SimpleNamespace(stdout="nonsense", stderr="also nonsense", returncode=1)
 

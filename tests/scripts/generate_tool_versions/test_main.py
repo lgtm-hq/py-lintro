@@ -28,6 +28,42 @@ def test_main_writes_outputs(retargeted_gen: ModuleType, fake_repo: Path) -> Non
     assert_that(manifest).contains('"version": "0.43.0"')
 
 
+def test_main_reads_semgrep_from_requirements_file(
+    retargeted_gen: ModuleType,
+    fake_repo: Path,
+) -> None:
+    """Semgrep's version comes from requirements-semgrep.txt, not pyproject.
+
+    Args:
+        retargeted_gen: Generator module pointed at the fake repo.
+        fake_repo: Fake repo fixture root.
+    """
+    seed = fake_repo / "lintro" / "_tool_packages.py"
+    seed.write_text(
+        seed.read_text().replace(
+            '"pytest": ToolName.PYTEST,\n',
+            '"pytest": ToolName.PYTEST,\n    "semgrep": ToolName.SEMGREP,\n',
+        ),
+    )
+    (fake_repo / "requirements-semgrep.txt").write_text("semgrep==9.9.9\n")
+    manifest_path = fake_repo / "lintro" / "tools" / "manifest.json"
+    data = json.loads(manifest_path.read_text())
+    data["tools"].append(
+        {
+            "name": "semgrep",
+            "version": "0.0.0",
+            "install": {"type": "pip", "package": "semgrep"},
+        },
+    )
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    rc = retargeted_gen.main([])
+    assert_that(rc).is_equal_to(retargeted_gen.EXIT_OK)
+    generated = (fake_repo / "lintro" / "_generated_versions.py").read_text()
+    assert_that(generated).contains('"semgrep": "9.9.9"')
+    assert_that(manifest_path.read_text()).contains('"version": "9.9.9"')
+
+
 def test_main_check_clean_exits_zero(retargeted_gen: ModuleType) -> None:
     """``--check`` exits 0 on a tree already in sync.
 

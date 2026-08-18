@@ -161,6 +161,104 @@ def test_read_pyproject_versions_missing_raises(
         gen.read_pyproject_versions(pyp, {"pytest"})
 
 
+def test_read_requirements_pin_extracts_exact_version(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Exact ``package==version`` pins are returned.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements-semgrep.txt"
+    req.write_text("# header\nclick==8.4.2\nsemgrep==9.9.9\nmcp==1.29.0\n")
+    version = gen.read_requirements_pin(req, "semgrep")
+    assert_that(version).is_equal_to("9.9.9")
+
+
+def test_read_requirements_pin_missing_file_raises(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A missing requirements file fails generation.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    missing = tmp_path / "requirements-semgrep.txt"
+    with pytest.raises(gen.GenerationError, match="requirements file not found"):
+        gen.read_requirements_pin(missing, "semgrep")
+
+
+def test_read_requirements_pin_missing_package_raises(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A requirements file without the package fails generation.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements-semgrep.txt"
+    req.write_text("click==8.4.2\n")
+    with pytest.raises(gen.GenerationError, match="not found with an == pin"):
+        gen.read_requirements_pin(req, "semgrep")
+
+
+def test_read_requirements_pin_rejects_range(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A non-exact pin is rejected.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements-semgrep.txt"
+    req.write_text("semgrep>=9.9.9\n")
+    with pytest.raises(gen.GenerationError, match="must be pinned with =="):
+        gen.read_requirements_pin(req, "semgrep")
+
+
+def test_read_requirements_pin_rejects_duplicate(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The same package must not appear twice.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements-semgrep.txt"
+    req.write_text("semgrep==9.9.9\nsemgrep==9.9.8\n")
+    with pytest.raises(gen.GenerationError, match="multiple pins"):
+        gen.read_requirements_pin(req, "semgrep")
+
+
+def test_read_requirements_pin_normalizes_package_name(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """PEP 503 name normalization matches dotted vs hyphenated names.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    req = tmp_path / "requirements.txt"
+    req.write_text("Python_Multipart==0.0.30\n")
+    version = gen.read_requirements_pin(
+        req,
+        "python-multipart",
+    )
+    assert_that(version).is_equal_to("0.0.30")
+
+
 def test_collect_dep_strings_skips_non_dep_tables(gen: ModuleType) -> None:
     """Strings outside known dep tables are ignored.
 

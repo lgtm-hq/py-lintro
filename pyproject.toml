@@ -91,7 +91,10 @@ ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 # not guaranteed across a major SDK bump, so 2.x needs a deliberate migration
 # rather than a silent lockfile update.
 mcp = ["mcp>=1.10.0,<2"]
-tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
+# Semgrep is intentionally absent: it ships from the isolated lockfile
+# ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
+# lintro's shared resolver. sqlfluff and pip-audit remain here.
+tools = ["sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -374,10 +377,12 @@ check_untyped_defs = true
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",
-  # High-severity transitive remediation (issue #1118). Every advisory below
-  # flows through semgrep (`tools` extra) / twine (dev group) -> mcp; none are
-  # core runtime deps, but we force the patched versions so no shipped extra
-  # carries a known high-severity vulnerability.
+  # High-severity transitive remediation (issue #1118). These advisories flow
+  # through the `mcp` extra / default dev group (mcp -> pyjwt[crypto],
+  # starlette, python-multipart) and twine (urllib3). None are core runtime
+  # deps, but we force the patched versions so no shipped extra carries a
+  # known high-severity vulnerability. Semgrep is no longer in this graph
+  # (#2104); its tree lives in requirements-semgrep.txt.
   # pyjwt: crit-header handling / RFC 7515 violation
   # (GHSA-xgmm-8j9v-c9wx, supersedes prior >=2.12.1 for GHSA-... alert #26)
   "pyjwt>=2.13.0",
@@ -393,32 +398,6 @@ constraint-dependencies = [
   # urllib3: redirect / pool-manager high-severity advisories
   # (GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j)
   "urllib3>=2.7.0",
-]
-override-dependencies = [
-  # semgrep 1.151.0 pins rich~=13.5.2 but lintro requires rich>=14.2.0.
-  # Safe: lintro invokes semgrep as a subprocess; rich version doesn't affect its behavior.
-  # TODO: Remove once semgrep drops the rich<14 pin (not tracked by Renovate).
-  "rich>=14.2.0",
-  # semgrep 1.168.0 pins mcp==1.23.3 exactly, but mcp 1.23.3 carries high GHSAs
-  # that fail the release SBOM `fail-on-severity: high` gate (#1659). An exact
-  # pin cannot be lifted by constraint-dependencies, so an override is required.
-  # NOTE: unlike a pure subprocess dependency, semgrep *does* import mcp eagerly
-  # (semgrep/mcp/server.py imports mcp.server.fastmcp at `import semgrep.cli`
-  # time), so this override really does change semgrep's runtime dependency.
-  # Validated by CI: the Dockerized dogfooding-lint job builds from this lock and
-  # runs `semgrep (check)` to completion, exercising that import path.
-  # TODO: Remove once semgrep pins an mcp release without these advisories.
-  # (GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58, GHSA-vj7q-gjh5-988w)
-  # Keep the 1.x ceiling so lockfile maintenance cannot jump to mcp 2.x
-  # (that major needs an SDK migration).
-  "mcp>=1.28.1,<2",
-  # click 8.1.8 has PYSEC-2026-2132 / CVE-2026-7246 (High). No semgrep release
-  # accepts click 8.3.x (<=1.170.1 pins <8.2, >=1.171.0 pins ~=8.4.2) and
-  # sqlfluff caps click<8.4.0, so an override is the only way to ship a patched
-  # click alongside both tools. Upper bound keeps sqlfluff natively satisfied;
-  # only semgrep's pin is overridden. Validated: semgrep 1.168.0 and sqlfluff
-  # 4.2.2 both run to completion under click 8.3.3 (dogfooding-lint in CI).
-  "click>=8.3.3,<8.4.0",
 ]
 
 [tool.pydoclint]

@@ -212,7 +212,9 @@ def get_install_hints() -> dict[str, str]:
         "cargo_deny": "Install via: cargo install cargo-deny (v{version}+)",
         "biome": "Install via: bun add -d @biomejs/biome@>={version}",
         "semgrep": (
-            "Install via: pip install semgrep>={version} or brew install semgrep"
+            "Install via: ./scripts/utils/install-semgrep.sh "
+            "(pinned lockfile), uv tool install semgrep, "
+            "or brew install semgrep"
         ),
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"

@@ -4,7 +4,8 @@
 Single writer for all tool-version artifacts derived from ``package.json`` and
 ``pyproject.toml``. The seed mapping at ``lintro/_tool_packages.py`` declares
 which packages are tools (and which `ToolName` they own) and which are
-companions.
+companions. Semgrep is read from ``requirements-semgrep.txt`` instead of
+``pyproject.toml`` so its resolver stays isolated (#2104).
 
 Modes:
     default: write outputs, exit 0.
@@ -36,6 +37,7 @@ from _generator.inputs import (  # noqa: E402
     read_binary_tool_versions,
     read_package_json,
     read_pyproject_versions,
+    read_requirements_pin,
 )
 from _generator.outputs import (  # noqa: E402
     build_target_versions,
@@ -57,6 +59,12 @@ PACKAGE_JSON_PATH = REPO_ROOT / "package.json"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 MANIFEST_PATH = REPO_ROOT / "lintro" / "tools" / "manifest.json"
 GENERATED_PATH = REPO_ROOT / "lintro" / "_generated_versions.py"
+
+# Pypi seed packages whose version is read from a requirements*.txt file
+# rather than pyproject.toml. Values are paths relative to REPO_ROOT.
+REQUIREMENTS_PYPI_SOURCES: dict[str, str] = {
+    "semgrep": "requirements-semgrep.txt",
+}
 
 
 def collect_outputs(seed: Seed) -> tuple[str, str]:
@@ -84,11 +92,27 @@ def collect_outputs(seed: Seed) -> tuple[str, str]:
             )
         npm_versions[pkg] = pkg_versions[pkg]
 
-    pypi_versions = read_pyproject_versions(
-        PYPROJECT_PATH,
-        set(seed.pypi_owners),
-        repo_root=REPO_ROOT,
-    )
+    requirements_packages = {
+        pkg: REPO_ROOT / filename
+        for pkg, filename in REQUIREMENTS_PYPI_SOURCES.items()
+        if pkg in seed.pypi_owners
+    }
+    pyproject_packages = set(seed.pypi_owners) - set(requirements_packages)
+    pypi_versions: dict[str, str] = {}
+    if pyproject_packages:
+        pypi_versions.update(
+            read_pyproject_versions(
+                PYPROJECT_PATH,
+                pyproject_packages,
+                repo_root=REPO_ROOT,
+            ),
+        )
+    for pkg, req_path in requirements_packages.items():
+        pypi_versions[pkg] = read_requirements_pin(
+            req_path,
+            pkg,
+            repo_root=REPO_ROOT,
+        )
 
     binary_versions = read_binary_tool_versions(TOOL_VERSIONS_PATH)
 

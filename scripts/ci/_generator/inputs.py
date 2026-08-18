@@ -141,8 +141,88 @@ def read_pyproject_versions(
     return versions
 
 
+def read_requirements_pin(
+    path: Path,
+    package: str,
+    repo_root: Path | None = None,
+) -> str:
+    """Read an exact ``package==version`` pin from a requirements.txt file.
+
+    Ignores comments, extras, and environment markers. The package must appear
+    exactly once with an ``==`` pin.
+
+    Args:
+        path: Path to the requirements file.
+        package: Package name to extract (case-insensitive PEP 503).
+        repo_root: Used to format error paths relative to the repo, if given.
+
+    Returns:
+        The pinned version string.
+
+    Raises:
+        GenerationError: If the file is missing, the package is absent, the
+            pin is not exact, or the package appears more than once.
+    """
+    if not path.exists():
+        raise GenerationError(
+            f"requirements file not found: {_display_path(path, repo_root)}",
+        )
+
+    needle = _normalize_package_name(package)
+    found: list[str] = []
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        match = _SPEC_RE.match(line)
+        if match is None:
+            continue
+        if _normalize_package_name(match.group("name")) != needle:
+            continue
+        op = match.group("op")
+        version = match.group("version")
+        if op != "==" or not version:
+            raise GenerationError(
+                f"package '{package}' in {_display_path(path, repo_root)} "
+                f"must be pinned with == (got {line!r})",
+            )
+        found.append(version)
+
+    if not found:
+        raise GenerationError(
+            f"package '{package}' not found with an == pin in "
+            f"{_display_path(path, repo_root)}",
+        )
+    if len(found) > 1:
+        raise GenerationError(
+            f"package '{package}' has multiple pins in "
+            f"{_display_path(path, repo_root)}: {found}",
+        )
+    return found[0]
+
+
+def _normalize_package_name(name: str) -> str:
+    """PEP 503 package-name normalization.
+
+    Args:
+        name: Raw package name.
+
+    Returns:
+        Normalized package name.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def _display_path(path: Path, repo_root: Path | None) -> str:
-    """Format a path relative to ``repo_root`` if possible, else absolute."""
+    """Format a path relative to ``repo_root`` if possible, else absolute.
+
+    Args:
+        path: Path to display.
+        repo_root: Optional repository root for relative formatting.
+
+    Returns:
+        Relative path string when possible, otherwise the original path.
+    """
     if repo_root is None:
         return str(path)
     try:

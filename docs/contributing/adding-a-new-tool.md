@@ -257,6 +257,10 @@ Choose the path that matches the tool's distribution mechanism.
    ]
    ```
 
+   Exception: semgrep is **not** in any extra. Pin it in `requirements-semgrep.txt`
+   (isolated lockfile, #2104) and keep the package listed in `REQUIREMENTS_PYPI_SOURCES`
+   in `scripts/ci/generate-tool-versions.py` so the generator still reads the pin.
+
 3. **Run the generator** (see Step 9).
 
 4. **`lintro/tools/manifest.json`** — verify the generated entry has

@@ -4,13 +4,15 @@ Version sources (in priority order):
     1. ``lintro/tools/manifest.json`` — authoritative when present.
     2. ``lintro/_generated_versions.py`` — npm and pypi tool versions,
        written by ``scripts/ci/generate-tool-versions.py`` from the canonical
-       ``package.json`` and ``pyproject.toml`` sources.
+       ``package.json``, ``pyproject.toml``, and ``requirements-semgrep.txt``
+       sources.
     3. ``TOOL_VERSIONS`` below — non-npm/non-pypi tools (binaries, cargo,
        rustup) updated by Renovate via custom regex managers.
 
 Single-source-of-truth structure:
 
-    package.json / pyproject.toml   <- canonical (Renovate writes here)
+    package.json / pyproject.toml / requirements-semgrep.txt
+                                    <- canonical (Renovate writes here)
               |
               v
     scripts/ci/generate-tool-versions.py

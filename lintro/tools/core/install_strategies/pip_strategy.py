@@ -67,6 +67,8 @@ class PipStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
+        if tool_name == "semgrep":
+            return _semgrep_isolated_hint()
         pkg = ecosystem_package_name(tool_name, install_package)
         brew_pkg = BREW_FORMULA_NAMES.get(tool_name)
         if (
@@ -102,6 +104,8 @@ class PipStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
+        if tool_name == "semgrep":
+            return _semgrep_isolated_hint()
         pkg = ecosystem_package_name(tool_name, install_package)
         brew_pkg = BREW_FORMULA_NAMES.get(tool_name)
         if (
@@ -116,6 +120,19 @@ class PipStrategy(InstallStrategy):
         if not (env.has(PackageManager.UV) or env.has(PackageManager.PIP)):
             return f"Upgrade {tool_name} via pip/uv (neither found in PATH)"
         return f"{_pip_cmd(env)} --upgrade '{pkg}>={tool_version}'"
+
+
+def _semgrep_isolated_hint() -> str:
+    """Return the isolated-venv install hint for semgrep (#2104).
+
+    Returns:
+        Manual install guidance that does not target the project venv.
+    """
+    return (
+        "Install via: ./scripts/utils/install-semgrep.sh "
+        "(pinned lockfile), uv tool install semgrep, "
+        "or brew install semgrep"
+    )
 
 
 def _pip_cmd(env: InstallEnvironment) -> str:

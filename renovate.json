@@ -142,6 +142,7 @@
         "custom.regex",
         "npm",
         "pep621",
+        "pip_requirements",
         "uv"
       ],
       "matchFileNames": [
@@ -150,7 +151,8 @@
         "lintro/_tool_versions.py",
         "lintro/tools/manifest.json",
         "package.json",
-        "pyproject.toml"
+        "pyproject.toml",
+        "requirements-semgrep.txt"
       ],
       "postUpgradeTasks": {
         "commands": [
@@ -162,6 +164,7 @@
           "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
+          "requirements-semgrep.txt",
           "Dockerfile",
           "docker/tools.Dockerfile"
         ],

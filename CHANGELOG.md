@@ -11,11 +11,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **tools**: isolate semgrep into a lockfile-pinned venv (`requirements-semgrep.txt`) so
+  its pins no longer collide with lintro's shared resolver (#2104)
+
 ### Changed
 
 ### Deprecated
 
 ### Removed
+
+- **tools**: `lintro[tools]` no longer installs semgrep. Install it with
+  `./scripts/utils/install-semgrep.sh` (pinned lockfile), `uv tool install semgrep`, or
+  `brew install semgrep` (#2104)
 
 ### Fixed
 

@@ -509,12 +509,23 @@ def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
         file_names.update(rule.get("matchFileNames", []))
         commands.update(rule["postUpgradeTasks"].get("commands", []))
 
-    assert_that(managers).contains("custom.regex", "npm", "pep621", "uv")
+    assert_that(managers).contains(
+        "custom.regex",
+        "npm",
+        "pep621",
+        "pip_requirements",
+        "uv",
+    )
     assert_that(file_names).contains(
         "package.json",
         "pyproject.toml",
         "lintro/_tool_versions.py",
+        "requirements-semgrep.txt",
     )
+    file_filters: set[str] = set()
+    for rule in regen_rules:
+        file_filters.update(rule["postUpgradeTasks"].get("fileFilters", []))
+    assert_that(file_filters).contains("requirements-semgrep.txt")
     assert_that(commands).contains("python3 scripts/ci/generate-tool-versions.py")
     assert_that(config.get("allowedCommands")).contains(
         "python3 scripts/ci/generate-tool-versions.py",

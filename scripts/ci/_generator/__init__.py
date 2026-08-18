@@ -16,6 +16,7 @@ from _generator.inputs import (
     read_binary_tool_versions,
     read_package_json,
     read_pyproject_versions,
+    read_requirements_pin,
 )
 from _generator.outputs import (
     build_target_versions,
@@ -33,6 +34,7 @@ __all__ = [
     "read_binary_tool_versions",
     "read_package_json",
     "read_pyproject_versions",
+    "read_requirements_pin",
     "render_generated_module",
     "render_manifest",
     "validate_seed_coverage",

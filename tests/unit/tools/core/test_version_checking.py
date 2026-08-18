@@ -208,3 +208,12 @@ def test_get_install_hints_external_tools() -> None:
     result = get_install_hints()
     assert_that("github" in result.get("hadolint", "").lower()).is_true()
     assert_that("rustup" in result.get("clippy", "")).is_true()
+
+
+def test_get_install_hints_semgrep_is_isolated() -> None:
+    """Doctor must not suggest installing semgrep via pip or lintro extras."""
+    result = get_install_hints()
+    hint = result.get("semgrep", "")
+    assert_that(hint).contains("install-semgrep.sh")
+    assert_that(hint).does_not_contain("pip install")
+    assert_that(hint).does_not_contain("lintro[tools]")

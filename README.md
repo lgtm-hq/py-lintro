@@ -293,7 +293,7 @@ system.
 <td><a href="https://semgrep.dev/"><img src="https://img.shields.io/badge/Semgrep-5b21b6?logo=semgrep&logoColor=white" alt="Semgrep"></a></td>
 <td>🔒 Multi-language</td>
 <td>-</td>
-<td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
+<td><code>./scripts/utils/install-semgrep.sh</code><br><code>uv tool install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/trufflesecurity/trufflehog"><img src="https://img.shields.io/badge/TruffleHog-800000?logo=trufflesecurity&logoColor=white" alt="TruffleHog"></a></td>
