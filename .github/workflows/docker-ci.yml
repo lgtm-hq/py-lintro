@@ -37,7 +37,8 @@ name: CI - Docker
 # "version-bump PR". Only the pull_request run is skipped: the merge push
 # to main still builds and publishes (digest promotion, #1358/#1368), and
 # the release-auto-tag → publish-pypi-on-tag chain is untouched. test-ci.yml
-# skips its matrix on verified bump PRs the same way (#1359 pipeline-skip).
+# still runs the Python matrix on bump PRs so nested required names report
+# (#2108); Docker keeps path-skip because its required checks use static names.
 #
 # Dogfooding lint scope (#1361): the `changes` job also maps the diff to a
 # `full-lint` filter (paths with global lint impact — tool configs, the

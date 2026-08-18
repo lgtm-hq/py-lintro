@@ -827,48 +827,50 @@ def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
     )
 
 
-def test_test_ci_reusables_wire_pipeline_skip() -> None:
-    """Reusable callers fail-open on changes failure and wire pipeline-skip.
+def test_test_ci_reusables_never_path_skip() -> None:
+    """Reusable callers fail-open on changes failure and never path-skip.
 
     ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
-    changes job must still run the matrix (empty pipeline != 'false' →
-    pipeline-skip false) instead of collapsing to skipped → false green.
+    changes job must still run the matrix (empty pipeline != 'false')
+    instead of collapsing to skipped → false green.
+
+    ``pipeline-skip`` stays hard-false (#2108): lgtm-ci's skipped ``test``
+    job publishes as ``test-compat / inputs.job-name`` rather than the
+    org-required ``test-compat / Python Compatibility`` (and the coverage
+    equivalent), which deadlocks version-bump merges. Re-enable only when
+    that reusable interpolates the skipped job name.
     """
+    expected_job_names = {
+        "test-compat": "Python Compatibility",
+        "test-coverage": "Python Coverage",
+    }
     test_ci = _load_workflow(name="test-ci.yml")
-    for job_name in ("test-compat", "test-coverage"):
+    for job_name, published_name in expected_job_names.items():
         job = test_ci["jobs"][job_name]
         assert_that(job["needs"]).contains("changes")
         assert_that(job["if"]).is_equal_to("!cancelled()")
-        assert_that(job["with"]["pipeline-skip"]).is_equal_to(
-            "${{ needs.changes.outputs.pipeline == 'false' }}",
-        )
+        assert_that(job["with"]["pipeline-skip"]).is_false()
+        assert_that(job["with"]["job-name"]).is_equal_to(published_name)
 
 
-def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None:
-    """Required gate greens only on intentional path-skip after changes success.
+def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
+    """Required coverage gate mirrors test-gate with no pipeline=false shortcut.
 
-    A failed changes job must never take the success shortcut — even if
-    pipeline were somehow empty/false — and must mirror test-gate instead.
+    The Python matrix always runs (#2108), so a path-skip success shortcut
+    would false-green this required check while tests actually failed.
     """
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains("changes", "test-gate")
-    upstream = _normalize_github_expr(gate["with"]["upstream-result"])
-    assert_that(upstream).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.changes.result == 'success' && "
-            "needs.changes.outputs.pipeline == 'false' && 'success' "
-            "|| needs.test-gate.outputs.result }}",
-        ),
+    assert_that(gate["needs"]).contains(
+        "changes",
+        "test-gate",
     )
-    passed_output = _normalize_github_expr(gate["with"]["passed-output"])
-    assert_that(passed_output).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.changes.result == 'success' && "
-            "needs.changes.outputs.pipeline == 'false' && 'true' "
-            "|| needs.test-gate.outputs.passed }}",
-        ),
+    assert_that(gate["with"]["upstream-result"]).is_equal_to(
+        "${{ needs.test-gate.outputs.result }}",
+    )
+    assert_that(gate["with"]["passed-output"]).is_equal_to(
+        "${{ needs.test-gate.outputs.passed }}",
     )
 
 
