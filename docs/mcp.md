@@ -4,8 +4,8 @@ Lintro can expose tools to MCP-compatible agents over **stdio**.
 
 ## Install
 
-The MCP server depends on the optional Python `mcp` SDK, kept out of the base install so
-the CLI stays light:
+The MCP server depends on the optional Python `mcp` SDK **2.x** (`mcp>=2,<3`), kept out
+of the base install so the CLI stays light:
 
 ```bash
 uv pip install 'lintro[mcp]'
@@ -381,10 +381,12 @@ Synchronous handlers run in a worker thread, and every call is bounded by the sp
 ## Errors
 
 Every tool-call failure — unknown tool, bad arguments, workspace escape, handler crash
-or timeout — comes back as `isError: true` with the same envelope in both
-`structuredContent` and the JSON text content. The envelope is nested under `error`, the
-same outer key `lintro review --output json` uses for its (differently shaped)
-provider-failure body, so it can never be confused with a tool's own successful payload:
+or timeout — comes back as a tool-level error (`isError: true` on the JSON-RPC wire;
+Python SDK 2.x exposes that as `is_error`) with the same envelope in both
+`structuredContent` (`structured_content` in the SDK) and the JSON text content. The
+envelope is nested under `error`, the same outer key `lintro review --output json` uses
+for its (differently shaped) provider-failure body, so it can never be confused with a
+tool's own successful payload:
 
 ```json
 {

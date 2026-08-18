@@ -10,8 +10,6 @@ functions that need them so importing :mod:`lintro.mcp` — which the ``doctor``
 command and the CLI do — never pulls the optional stack.
 """
 
-# mypy: disable-error-code="untyped-decorator,no-untyped-call"
-
 from __future__ import annotations
 
 import inspect
@@ -19,7 +17,7 @@ import json
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -27,6 +25,9 @@ from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError, McpErrorEnvelope
 from lintro.mcp.registry import McpToolRegistry, McpToolSpec
 from lintro.mcp.validation import resolve_path_arguments, validate_arguments
+
+if TYPE_CHECKING:
+    from mcp.types import CallToolResult
 
 __all__ = [
     "build_default_registry",
@@ -106,22 +107,22 @@ def build_default_registry(*, workspace: Path) -> McpToolRegistry:
     return registry
 
 
-def _error_result(*, envelope: McpErrorEnvelope) -> Any:
-    """Build an MCP ``CallToolResult`` marking a structured error.
+def _tool_result(*, payload: dict[str, Any], is_error: bool) -> CallToolResult:
+    """Build an MCP ``CallToolResult`` from a JSON object payload.
 
     Args:
-        envelope: The structured error to report.
+        payload: Structured content to return to the client.
+        is_error: Whether this is a tool-level error (not a JSON-RPC error).
 
     Returns:
-        A ``mcp.types.CallToolResult`` with ``isError`` set, carrying the
-        envelope as both structured content and JSON text.
+        A ``mcp.types.CallToolResult`` carrying the payload as both
+        structured content and JSON text.
     """
     import mcp.types as types
 
-    payload = envelope.to_payload()
     return types.CallToolResult(
-        isError=True,
-        structuredContent=payload,
+        is_error=is_error,
+        structured_content=payload,
         content=[
             types.TextContent(
                 type="text",
@@ -129,6 +130,19 @@ def _error_result(*, envelope: McpErrorEnvelope) -> Any:
             ),
         ],
     )
+
+
+def _error_result(*, envelope: McpErrorEnvelope) -> CallToolResult:
+    """Build an MCP ``CallToolResult`` marking a structured error.
+
+    Args:
+        envelope: The structured error to report.
+
+    Returns:
+        A ``mcp.types.CallToolResult`` with ``is_error`` set, carrying the
+        envelope as both structured content and JSON text.
+    """
+    return _tool_result(payload=envelope.to_payload(), is_error=True)
 
 
 async def _dispatch(*, spec: McpToolSpec, arguments: dict[str, Any]) -> Any:
@@ -188,10 +202,11 @@ def create_mcp_server(
 
     workspace_root = workspace.resolve()
     tool_registry = registry or build_default_registry(workspace=workspace_root)
-    server = Server("lintro")
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
+    async def list_tools(
+        _ctx: Any,
+        _params: types.PaginatedRequestParams | None,
+    ) -> types.ListToolsResult:
         tools: list[types.Tool] = []
         for spec in tool_registry.list_tools():
             hints = spec.to_annotations()
@@ -199,22 +214,27 @@ def create_mcp_server(
                 types.Tool(
                     name=spec.name,
                     description=spec.description,
-                    inputSchema=spec.input_schema,
+                    input_schema=spec.input_schema,
                     annotations=types.ToolAnnotations(
-                        readOnlyHint=hints["readOnlyHint"],
-                        destructiveHint=hints["destructiveHint"],
-                        idempotentHint=hints["idempotentHint"],
+                        read_only_hint=hints["readOnlyHint"],
+                        destructive_hint=hints["destructiveHint"],
+                        idempotent_hint=hints["idempotentHint"],
                     ),
                 ),
             )
-        return tools
+        return types.ListToolsResult(tools=tools)
 
-    # validate_input=False: the SDK's built-in schema check reports failures as
-    # opaque prose, which would bypass the structured envelope this server
-    # promises. Validation happens below so every failure mode — unknown tool,
-    # bad arguments, workspace escape, handler crash — shares one shape.
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> Any:
+    # SDK 2.x no longer wraps handler exceptions into ``is_error`` results and
+    # has no ``validate_input=False`` decorator knob. We validate via our JSON
+    # Schema layer and return ``CallToolResult(is_error=True, ...)`` ourselves
+    # so every failure mode — unknown tool, bad arguments, workspace escape,
+    # handler crash — shares the documented envelope instead of becoming a
+    # JSON-RPC error the LLM never sees.
+    async def call_tool(
+        _ctx: Any,
+        params: types.CallToolRequestParams,
+    ) -> types.CallToolResult:
+        name = params.name
         spec = tool_registry.get(name=name)
         if spec is None:
             return _error_result(
@@ -226,14 +246,20 @@ def create_mcp_server(
             )
 
         try:
-            raw_arguments = arguments or {}
+            raw_arguments = dict(params.arguments or {})
             validate_arguments(spec=spec, arguments=raw_arguments)
             safe_arguments = resolve_path_arguments(
                 spec=spec,
                 arguments=raw_arguments,
                 workspace=workspace_root,
             )
-            return await _dispatch(spec=spec, arguments=safe_arguments)
+            payload = await _dispatch(spec=spec, arguments=safe_arguments)
+            if not isinstance(payload, dict):
+                raise TypeError(
+                    f"MCP tool {name!r} returned {type(payload).__name__}, "
+                    "expected dict",
+                )
+            return _tool_result(payload=payload, is_error=False)
         except McpError as exc:
             return _error_result(envelope=exc.envelope)
         except TimeoutError:
@@ -263,7 +289,11 @@ def create_mcp_server(
                 ),
             )
 
-    return server
+    return Server(
+        "lintro",
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
 
 
 async def run_stdio_server_async(

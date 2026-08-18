@@ -1,6 +1,6 @@
 """End-to-end tests for the ``lintro_check`` / ``lintro_format`` MCP tools.
 
-Every test drives a real :class:`mcp.ClientSession` over in-memory streams
+Every test drives a real :class:`mcp.client.Client` over in-memory streams
 against the same ``Server`` object the stdio transport serves, and every one
 runs the real ``ruff`` binary against a throwaway workspace. Stubbing the
 runner would leave the interesting part — that a dry run really does leave the
@@ -9,8 +9,6 @@ tree byte-identical — untested.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -18,10 +16,10 @@ from typing import Any, TypeVar
 
 import pytest
 from assertpy import assert_that
-from mcp import ClientSession, types
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
+from mcp.types import CallToolResult, Tool
 
-from lintro.mcp.server import create_mcp_server
+from tests.unit.mcp.session_helpers import payload_from_result, run_in_memory_client
 
 _T = TypeVar("_T")
 
@@ -32,40 +30,30 @@ _UNFIXABLE = "undefined_name_here\n"
 def _run_session(
     *,
     workspace: Path,
-    check: Callable[[ClientSession], Awaitable[_T]],
+    check: Callable[[Client], Awaitable[_T]],
 ) -> _T:
-    """Run ``check`` against a connected in-memory MCP client session.
+    """Run ``check`` against a connected in-memory MCP client.
 
     Args:
         workspace: Workspace root for the server under test.
-        check: Async callback receiving an initialized client session.
+        check: Async callback receiving an initialized client.
 
     Returns:
         Whatever ``check`` returns.
     """
-    server = create_mcp_server(workspace=workspace)
-
-    async def _main() -> _T:
-        async with create_connected_server_and_client_session(server) as session:
-            return await check(session)
-
-    return asyncio.run(_main())
+    return run_in_memory_client(workspace=workspace, check=check)
 
 
-def _payload(result: types.CallToolResult) -> dict[str, Any]:
+def _payload(result: CallToolResult) -> dict[str, Any]:
     """Extract a tool result payload as a dict.
 
     Args:
-        result: The ``CallToolResult`` returned by ``session.call_tool``.
+        result: The ``CallToolResult`` returned by ``client.call_tool``.
 
     Returns:
         The payload the server sent.
     """
-    if result.structuredContent:
-        return dict(result.structuredContent)
-    block = result.content[0]
-    assert isinstance(block, types.TextContent)
-    return dict(json.loads(block.text))
+    return payload_from_result(result)
 
 
 def _call(
@@ -73,7 +61,7 @@ def _call(
     workspace: Path,
     tool: str,
     arguments: dict[str, Any],
-) -> tuple[types.CallToolResult, dict[str, Any]]:
+) -> tuple[CallToolResult, dict[str, Any]]:
     """Call one MCP tool and return its raw result and decoded payload.
 
     Args:
@@ -86,9 +74,9 @@ def _call(
     """
 
     async def _check(
-        session: ClientSession,
-    ) -> tuple[types.CallToolResult, dict[str, Any]]:
-        result = await session.call_tool(tool, arguments)
+        session: Client,
+    ) -> tuple[CallToolResult, dict[str, Any]]:
+        result = await session.call_tool(name=tool, arguments=arguments)
         return result, _payload(result)
 
     return _run_session(workspace=workspace, check=_check)
@@ -111,7 +99,7 @@ def workspace(tmp_path: Path) -> Path:
 def test_lint_tools_are_listed_with_their_annotations(workspace: Path) -> None:
     """Both tools are advertised with the safety hints their contract implies."""
 
-    async def _check(session: ClientSession) -> dict[str, types.Tool]:
+    async def _check(session: Client) -> dict[str, Tool]:
         listed = await session.list_tools()
         return {tool.name: tool for tool in listed.tools}
 
@@ -121,15 +109,15 @@ def test_lint_tools_are_listed_with_their_annotations(workspace: Path) -> None:
 
     check_hints = tools["lintro_check"].annotations
     assert check_hints is not None
-    assert_that(check_hints.readOnlyHint).is_true()
-    assert_that(check_hints.destructiveHint).is_false()
-    assert_that(check_hints.idempotentHint).is_true()
+    assert_that(check_hints.read_only_hint).is_true()
+    assert_that(check_hints.destructive_hint).is_false()
+    assert_that(check_hints.idempotent_hint).is_true()
 
     format_hints = tools["lintro_format"].annotations
     assert format_hints is not None
-    assert_that(format_hints.readOnlyHint).is_false()
-    assert_that(format_hints.destructiveHint).is_true()
-    assert_that(format_hints.idempotentHint).is_false()
+    assert_that(format_hints.read_only_hint).is_false()
+    assert_that(format_hints.destructive_hint).is_true()
+    assert_that(format_hints.idempotent_hint).is_false()
 
 
 def test_check_returns_structured_findings_and_tool_summary(workspace: Path) -> None:
@@ -142,7 +130,7 @@ def test_check_returns_structured_findings_and_tool_summary(workspace: Path) -> 
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_not_empty()
     finding = payload["findings"][0]
     assert_that(finding).contains_key(
@@ -176,7 +164,7 @@ def test_check_on_a_clean_workspace_returns_no_findings(tmp_path: Path) -> None:
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
     assert_that(payload["summary"]["total_findings"]).is_equal_to(0)
     assert_that(payload["tools"][0]["status"]).is_equal_to("passed")
@@ -202,7 +190,7 @@ def test_check_rejects_an_unknown_tool_with_tool_unavailable(workspace: Path) ->
         arguments={"tools": ["not-a-real-linter"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     envelope = payload["error"]
     assert_that(envelope["code"]).is_equal_to("tool_unavailable")
     assert_that(envelope["detail"]["tools"]).is_equal_to(["not-a-real-linter"])
@@ -216,7 +204,7 @@ def test_check_rejects_an_advisory_tool(workspace: Path) -> None:
         arguments={"tools": ["idiom-review"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to("tool_unavailable")
     assert_that(payload["error"]["message"]).contains("advisory")
 
@@ -236,7 +224,7 @@ def test_check_rejects_a_tool_the_workspace_config_disabled(tmp_path: Path) -> N
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     envelope = payload["error"]
     assert_that(envelope["code"]).is_equal_to("tool_unavailable")
     assert_that(envelope["detail"]["skipped"]).contains_key("ruff")
@@ -250,7 +238,7 @@ def test_check_rejects_a_path_outside_the_workspace(workspace: Path) -> None:
         arguments={"paths": ["../elsewhere"], "tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to("workspace_violation")
 
 
@@ -262,7 +250,7 @@ def test_check_rejects_arguments_that_violate_the_schema(workspace: Path) -> Non
         arguments={"nonsense": True},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to("invalid_input")
 
 
@@ -278,7 +266,7 @@ def test_format_dry_run_returns_diffs_and_leaves_the_tree_untouched(
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["dry_run"]).is_true()
     assert_that(payload["changed_files"]).is_equal_to(["bad.py"])
 
@@ -298,7 +286,7 @@ def test_format_apply_writes_the_changes_and_reports_them(workspace: Path) -> No
         arguments={"tools": ["ruff"], "dry_run": False},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["dry_run"]).is_false()
     assert_that(payload["changed_files"]).is_equal_to(["bad.py"])
     assert_that(payload["diffs"][0]["diff"]).contains("-import os")
@@ -336,7 +324,7 @@ def test_format_on_a_clean_workspace_reports_no_changes(tmp_path: Path) -> None:
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["changed_files"]).is_empty()
     assert_that(payload["diffs"]).is_empty()
 
@@ -349,7 +337,7 @@ def test_check_does_not_leave_run_logs_in_the_workspace(workspace: Path) -> None
         arguments={"tools": ["ruff"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that((workspace / ".lintro").exists()).is_false()
 
 
@@ -379,5 +367,5 @@ def test_format_rejects_a_tool_that_cannot_format(workspace: Path) -> None:
         arguments={"tools": ["bandit"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to("tool_unavailable")

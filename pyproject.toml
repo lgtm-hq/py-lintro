@@ -85,12 +85,11 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
-# Floor: 1.10.0 is the first release carrying both
-# `Server.call_tool(validate_input=...)` and `CallToolResult.structuredContent`.
-# Ceiling: the decorator-based low-level `Server` API this module builds on is
-# not guaranteed across a major SDK bump, so 2.x needs a deliberate migration
-# rather than a silent lockfile update.
-mcp = ["mcp>=1.10.0,<2"]
+# Floor: 2.0 is the first release of the constructor-registered low-level
+# `Server` API (`on_list_tools` / `on_call_tool`), explicit `ListToolsResult`,
+# and snake_case type fields (`input_schema`, `is_error`).
+# Ceiling: 3.x is not yet a supported migration.
+mcp = ["mcp>=2,<3"]
 # Semgrep is intentionally absent: it ships from the isolated lockfile
 # ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
 # lintro's shared resolver. sqlfluff and pip-audit remain here.
@@ -129,7 +128,7 @@ dev = [
   # Kept in the default dev group (not just the optional `mcp` extra) so the
   # MCP server tests really execute in CI, which syncs `--extra full` plus the
   # default groups. Without it they would importorskip into a silent pass.
-  "mcp>=1.10.0,<2",
+  "mcp>=2,<3",
   "pytest-asyncio>=1.3.0",
 ]
 build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
