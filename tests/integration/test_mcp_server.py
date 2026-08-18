@@ -62,7 +62,7 @@ def test_mcp_stdio_server_lists_and_calls_ping(tmp_path: Path) -> None:
 
         result = await session.call_tool(name="lintro_ping", arguments={})
         assert_that(result.is_error).is_false()
-        if result.structured_content:
+        if result.structured_content is not None:
             payload: dict[str, object] = dict(result.structured_content)
         else:
             block = result.content[0]

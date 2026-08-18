@@ -208,6 +208,9 @@ def test_session_lists_ping_with_annotation_hints(tmp_path: Path) -> None:
         assert_that(annotations.read_only_hint).is_true()
         assert_that(annotations.destructive_hint).is_false()
         assert_that(annotations.idempotent_hint).is_true()
+        ping_dump = ping.model_dump(by_alias=True)
+        assert_that(ping_dump).contains_key("inputSchema")
+        assert_that(ping_dump["annotations"]["readOnlyHint"]).is_true()
 
     _run_session(workspace=tmp_path, registry=None, check=_check)
 
@@ -221,6 +224,9 @@ def test_session_call_ping_returns_server_info(tmp_path: Path) -> None:
 
         payload = _assert_dual_write(result)
         assert_that(payload["status"]).is_equal_to("ok")
+        result_dump = result.model_dump(by_alias=True)
+        assert_that(result_dump["isError"]).is_false()
+        assert_that(result_dump).contains_key("structuredContent")
         assert_that(payload["lintro_version"]).is_equal_to(__version__)
         assert_that(payload["workspace"]).is_equal_to(str(tmp_path.resolve()))
 

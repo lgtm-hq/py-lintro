@@ -210,6 +210,8 @@ def create_mcp_server(
         tools: list[types.Tool] = []
         for spec in tool_registry.list_tools():
             hints = spec.to_annotations()
+            # MCP hint names stay camelCase on the spec dict; SDK 2.x
+            # ToolAnnotations attributes are snake_case.
             tools.append(
                 types.Tool(
                     name=spec.name,
