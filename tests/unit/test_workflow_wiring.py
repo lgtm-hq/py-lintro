@@ -828,20 +828,24 @@ def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
 
 
 def test_test_ci_reusables_wire_pipeline_skip() -> None:
-    """Reusable callers fail-open on changes failure and wire pipeline-skip.
+    """Reusable callers fail-open on changes failure and never path-skip.
 
     ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
-    changes job must still run the matrix (empty pipeline != 'false' →
-    pipeline-skip false) instead of collapsing to skipped → false green.
+    changes job must still run the matrix (empty pipeline != 'false')
+    instead of collapsing to skipped → false green.
+
+    ``pipeline-skip`` stays hard-false (#2108): lgtm-ci's skipped ``test``
+    job publishes as ``test-compat / inputs.job-name`` rather than the
+    org-required ``test-compat / Python Compatibility`` (and the coverage
+    equivalent), which deadlocks version-bump merges. Re-enable only when
+    that reusable interpolates the skipped job name.
     """
     test_ci = _load_workflow(name="test-ci.yml")
     for job_name in ("test-compat", "test-coverage"):
         job = test_ci["jobs"][job_name]
         assert_that(job["needs"]).contains("changes")
         assert_that(job["if"]).is_equal_to("!cancelled()")
-        assert_that(job["with"]["pipeline-skip"]).is_equal_to(
-            "${{ needs.changes.outputs.pipeline == 'false' }}",
-        )
+        assert_that(job["with"]["pipeline-skip"]).is_false()
 
 
 def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None:
