@@ -840,12 +840,17 @@ def test_test_ci_reusables_wire_pipeline_skip() -> None:
     equivalent), which deadlocks version-bump merges. Re-enable only when
     that reusable interpolates the skipped job name.
     """
+    expected_job_names = {
+        "test-compat": "Python Compatibility",
+        "test-coverage": "Python Coverage",
+    }
     test_ci = _load_workflow(name="test-ci.yml")
-    for job_name in ("test-compat", "test-coverage"):
+    for job_name, published_name in expected_job_names.items():
         job = test_ci["jobs"][job_name]
         assert_that(job["needs"]).contains("changes")
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
+        assert_that(job["with"]["job-name"]).is_equal_to(published_name)
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
