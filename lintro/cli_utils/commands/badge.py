@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from contextlib import redirect_stdout
 
 import click
 
 from lintro.api import core as api
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.health_score import (
     MAX_SCORE,
     MIN_SCORE,
@@ -27,6 +29,28 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "social",
 )
 
+_NO_FILES_CHECKED_RE = re.compile(r"(?i)no .+files found to check")
+
+
+def _result_checked_any_files(result: ToolResult) -> bool:
+    """Return whether a tool result looks like it actually inspected files.
+
+    Tools that run over an empty path still return ``skipped=False`` and
+    ``success=True`` with a ``"No … files found to check"`` message. That is
+    not a public quality signal — it is the same as never running.
+
+    Args:
+        result: One tool's completed result.
+
+    Returns:
+        bool: ``True`` when the tool was not skipped and did not report an
+        empty file set.
+    """
+    if result.skipped:
+        return False
+    text = f"{result.output or ''}\n{result.formatted_output or ''}"
+    return _NO_FILES_CHECKED_RE.search(text) is None
+
 
 def _live_score_is_usable(artifact: RunArtifact) -> bool:
     """Return whether a live check produced a badge-worthy score.
@@ -35,15 +59,15 @@ def _live_score_is_usable(artifact: RunArtifact) -> bool:
         artifact: Completed check run.
 
     Returns:
-        bool: ``True`` when at least one tool executed and a health score
-        was computed. Empty, all-skipped, filtered, and early-exit runs are
-        not usable public quality signals.
+        bool: ``True`` when at least one tool inspected files and a health
+        score was computed. Empty, all-skipped, filtered, and early-exit
+        runs are not usable public quality signals.
     """
     if artifact.early_exit or artifact.health is None:
         return False
     if artifact.main_phase_empty_due_to_filter:
         return False
-    return any(not result.skipped for result in artifact.tool_results)
+    return any(_result_checked_any_files(result) for result in artifact.tool_results)
 
 
 def resolve_health_score(

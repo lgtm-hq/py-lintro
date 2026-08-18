@@ -227,6 +227,55 @@ def test_resolve_health_score_rejects_all_skipped_run() -> None:
             resolve_health_score(score_override=None, paths=())
 
 
+def test_resolve_health_score_rejects_no_files_found_run() -> None:
+    """A run that executed but matched no files must not publish 100."""
+    artifact = _scored_artifact(score=100)
+    artifact.tool_results = [
+        ToolResult(
+            name="ruff",
+            success=True,
+            skipped=False,
+            output="No .py/.pyi files found to check.",
+        ),
+        ToolResult(
+            name="yamllint",
+            success=True,
+            skipped=False,
+            output="No YAML files found to check.",
+        ),
+    ]
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        with pytest.raises(click.ClickException):
+            resolve_health_score(score_override=None, paths=())
+
+
+def test_badge_live_no_files_found_prints_no_badge() -> None:
+    """Empty-path live checks exit non-zero and print no shields snippet."""
+    runner = CliRunner()
+    artifact = _scored_artifact(score=100)
+    artifact.tool_results = [
+        ToolResult(
+            name="ruff",
+            success=True,
+            skipped=False,
+            output="No .py/.pyi files found to check.\nNo issues found.",
+        ),
+    ]
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        result = runner.invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).does_not_contain("img.shields.io")
+
+
 def test_resolve_health_score_rejects_filter_empty_run() -> None:
     """A filter-empty run must not publish a perfect 100 badge."""
     artifact = _scored_artifact(score=100)
