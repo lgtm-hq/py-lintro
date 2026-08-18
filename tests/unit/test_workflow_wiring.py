@@ -801,6 +801,77 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
         assert_that(timeout).is_between(18, 28)
 
 
+def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
+    """test-ci classifies PR diffs before calling the reusable matrix (#1359)."""
+    test_ci = _load_workflow(name="test-ci.yml")
+    changes_job = test_ci["jobs"]["changes"]
+    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
+
+    assert_that(changes_job["outputs"]["pipeline"]).contains(
+        "steps.result.outputs.pipeline",
+    )
+    assert_that(changes_job["outputs"]["skip-reason"]).contains(
+        "steps.result.outputs.skip-reason",
+    )
+
+    bump_step = steps["bump"]
+    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
+    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+
+    resolve_step = steps["result"]
+    assert_that(resolve_step["run"]).is_equal_to(
+        "scripts/ci/resolve-pipeline-relevance.sh",
+    )
+    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
+        "steps.bump.outputs.release-bump",
+    )
+
+
+def test_test_ci_reusables_wire_pipeline_skip() -> None:
+    """Reusable callers fail-open on changes failure and wire pipeline-skip.
+
+    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
+    changes job must still run the matrix (empty pipeline != 'false' →
+    pipeline-skip false) instead of collapsing to skipped → false green.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job = test_ci["jobs"][job_name]
+        assert_that(job["needs"]).contains("changes")
+        assert_that(job["if"]).is_equal_to("!cancelled()")
+        assert_that(job["with"]["pipeline-skip"]).is_equal_to(
+            "${{ needs.changes.outputs.pipeline == 'false' }}",
+        )
+
+
+def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None:
+    """Required gate greens only on intentional path-skip after changes success.
+
+    A failed changes job must never take the success shortcut — even if
+    pipeline were somehow empty/false — and must mirror test-gate instead.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    gate = test_ci["jobs"]["test-suite-coverage"]
+
+    assert_that(gate["needs"]).contains("changes", "test-gate")
+    upstream = _normalize_github_expr(gate["with"]["upstream-result"])
+    assert_that(upstream).is_equal_to(
+        _normalize_github_expr(
+            "${{ needs.changes.result == 'success' && "
+            "needs.changes.outputs.pipeline == 'false' && 'success' "
+            "|| needs.test-gate.outputs.result }}",
+        ),
+    )
+    passed_output = _normalize_github_expr(gate["with"]["passed-output"])
+    assert_that(passed_output).is_equal_to(
+        _normalize_github_expr(
+            "${{ needs.changes.result == 'success' && "
+            "needs.changes.outputs.pipeline == 'false' && 'true' "
+            "|| needs.test-gate.outputs.passed }}",
+        ),
+    )
+
+
 # --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
 #
 # docker-ci pipeline relevance is decided by
