@@ -11,17 +11,42 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.119.0] - 2026-08-18
+
+### Added
+
 - **tools**: isolate semgrep into a hash-pinned lockfile venv (`requirements-semgrep.in`
   / `requirements-semgrep.txt`) so its pins no longer collide with lintro's shared
   resolver (#2104)
 
 ### Changed
 
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.118.5 (patch) (#2103)
+  (f3cd599)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to b296b88
+  (#2095) (981d945)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7e7e900 (#2096)
+  (d0ba017)
+- **ci**: path-filter test-ci with pipeline-skip and always-green gate (#1386) (358e506)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 68e7019
+  (#2089) (3272915)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.63.7 (patch) (#2090) (4af3346)
+- **execution**: exercise real multi-tool parallel execution (#1458) (34e247b)
+- **ci**: update labeler.yml with missing label rules (#1478) (e73f7e9)
+- **env**: add Cloud Agent development environment config (#2049) (692d8dc)
 - **docker**: the CI `full` image re-syncs isolated semgrep from
   `requirements-semgrep.txt` so dogfood does not wait on a tools-image digest bump
   (#2104)
-
-### Deprecated
 
 ### Removed
 
@@ -31,7 +56,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-### Security
+- **ci**: always run Python tests so bump PRs report required checks (#2109) (1cdecfb)
 
 ## [0.118.5] - 2026-08-18
 
