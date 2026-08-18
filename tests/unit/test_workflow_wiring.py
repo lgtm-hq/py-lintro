@@ -827,7 +827,7 @@ def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
     )
 
 
-def test_test_ci_reusables_wire_pipeline_skip() -> None:
+def test_test_ci_reusables_never_path_skip() -> None:
     """Reusable callers fail-open on changes failure and never path-skip.
 
     ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed

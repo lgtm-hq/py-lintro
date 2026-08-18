@@ -13,8 +13,8 @@ name: CI - Tests
 #
 # Instead: a `changes` job classifies the PR diff (same deny-by-default
 # skip-list as docker-ci.yml via resolve-pipeline-relevance.sh) and the reusable
-# callers always run (`if: '!cancelled()'` fail-open on classifier failure —
-# empty pipeline != 'false' → full matrix). merge_group, push, and
+# callers always run (`if: '!cancelled()'` fail-open on classifier failure).
+# merge_group, push, and
 # workflow_dispatch always run the full matrix. The test-suite-coverage gate
 # always mirrors test-gate: the Python matrix no longer path-skips (#2108), so
 # a pipeline=false shortcut would false-green a required check while tests
