@@ -11,6 +11,7 @@ covered on every PR.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any, TypeVar
 
 from assertpy import assert_that
 from mcp.client import Client
+from mcp.types import CallToolResult, TextContent
 
 from lintro import __version__
 from lintro.mcp.errors import McpError, McpErrorCode
@@ -51,7 +53,7 @@ def _run_session(
     )
 
 
-def _payload(result: Any) -> dict[str, Any]:
+def _payload(result: CallToolResult) -> dict[str, Any]:
     """Extract a tool result payload as a dict.
 
     Args:
@@ -159,7 +161,37 @@ def _failing_registry(workspace: Path) -> McpToolRegistry:
             handler=_explicit_error,
         ),
     )
+
+    def _not_a_dict(_arguments: dict[str, Any]) -> list[str]:
+        return ["not", "a", "dict"]
+
+    registry.register(
+        spec=McpToolSpec(
+            name="demo_not_dict",
+            description="returns a list instead of a dict",
+            input_schema={"type": "object", "properties": {}},
+            handler=_not_a_dict,
+        ),
+    )
     return registry
+
+
+def _assert_dual_write(result: CallToolResult) -> dict[str, Any]:
+    """Require structured content and the JSON text block to carry the same object.
+
+    Args:
+        result: Tool result from ``client.call_tool``.
+
+    Returns:
+        The shared payload.
+    """
+    payload = _payload(result)
+    assert result.structured_content is not None
+    assert_that(dict(result.structured_content)).is_equal_to(payload)
+    block = result.content[0]
+    assert isinstance(block, TextContent)
+    assert_that(json.loads(block.text)).is_equal_to(payload)
+    return payload
 
 
 def test_session_lists_ping_with_annotation_hints(tmp_path: Path) -> None:
@@ -187,7 +219,7 @@ def test_session_call_ping_returns_server_info(tmp_path: Path) -> None:
         result = await session.call_tool(name="lintro_ping", arguments={})
         assert_that(result.is_error).is_false()
 
-        payload = _payload(result)
+        payload = _assert_dual_write(result)
         assert_that(payload["status"]).is_equal_to("ok")
         assert_that(payload["lintro_version"]).is_equal_to(__version__)
         assert_that(payload["workspace"]).is_equal_to(str(tmp_path.resolve()))
@@ -201,7 +233,7 @@ def test_session_unknown_tool_returns_tool_unavailable(tmp_path: Path) -> None:
     async def _check(session: Client) -> None:
         result = await session.call_tool(name="lintro_nope", arguments={})
         assert_that(result.is_error).is_true()
-        assert_that(_payload(result)["error"]["code"]).is_equal_to(
+        assert_that(_assert_dual_write(result)["error"]["code"]).is_equal_to(
             "tool_unavailable",
         )
 
@@ -280,6 +312,23 @@ def test_session_handler_exception_returns_execution_error(tmp_path: Path) -> No
         envelope = _payload(result)["error"]
         assert_that(envelope["code"]).is_equal_to("execution_error")
         assert_that(envelope["message"]).contains("handler exploded")
+
+    _run_session(
+        workspace=tmp_path,
+        registry=_failing_registry(tmp_path),
+        check=_check,
+    )
+
+
+def test_session_non_dict_handler_returns_execution_error(tmp_path: Path) -> None:
+    """A handler that returns a non-dict is wrapped, not a JSON-RPC error."""
+
+    async def _check(session: Client) -> None:
+        result = await session.call_tool(name="demo_not_dict", arguments={})
+        assert_that(result.is_error).is_true()
+        envelope = _assert_dual_write(result)["error"]
+        assert_that(envelope["code"]).is_equal_to("execution_error")
+        assert_that(envelope["message"]).contains("list")
 
     _run_session(
         workspace=tmp_path,

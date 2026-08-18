@@ -50,3 +50,33 @@ def test_no_sdk_1x_memory_helper_imports_remain() -> None:
             if _FORBIDDEN_IMPORT.search(text):
                 offenders.append(str(path.relative_to(_REPO_ROOT)))
     assert_that(offenders).is_empty()
+
+
+def test_sdk_types_serialize_camelcase_jsonrpc_aliases() -> None:
+    """Python snake_case fields must still dump as MCP wire camelCase."""
+    from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
+
+    tool = Tool(
+        name="lintro_ping",
+        description="health",
+        input_schema={"type": "object"},
+        annotations=ToolAnnotations(
+            read_only_hint=True,
+            destructive_hint=False,
+            idempotent_hint=True,
+        ),
+    )
+    tool_dump = tool.model_dump(by_alias=True)
+    assert_that(tool_dump).contains_key("inputSchema")
+    assert_that(tool_dump["annotations"]["readOnlyHint"]).is_true()
+    assert_that(tool_dump["annotations"]["destructiveHint"]).is_false()
+    assert_that(tool_dump["annotations"]["idempotentHint"]).is_true()
+
+    result = CallToolResult(
+        is_error=True,
+        structured_content={"error": {"code": "invalid_input"}},
+        content=[TextContent(type="text", text="{}")],
+    )
+    result_dump = result.model_dump(by_alias=True)
+    assert_that(result_dump["isError"]).is_true()
+    assert_that(result_dump).contains_key("structuredContent")

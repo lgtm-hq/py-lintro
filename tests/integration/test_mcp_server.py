@@ -5,7 +5,8 @@ The protocol surface itself is covered on every PR by
 the one thing that cannot be faked in-process: that ``lintro mcp`` really is a
 launchable stdio server for an agent host, and that it does not corrupt the
 JSON-RPC stream with stray stdout. CI runs with ``--ignore=tests/integration``,
-so this is a local/manual gate.
+so this is a local/manual gate. Default ``mcp.client.Client`` mode is enough
+for our low-level ``Server.run`` stdio handshake; do not pin ``mode="legacy"``.
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ async def _with_mcp_session(
         args=["-m", "lintro", "mcp", "--workspace", str(workspace)],
         cwd=str(workspace),
     )
-    async with Client(stdio_client(params), mode="legacy") as client:
+    async with Client(stdio_client(params)) as client:
         return await check(client)
 
 
