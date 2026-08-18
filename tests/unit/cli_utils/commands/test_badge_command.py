@@ -13,7 +13,6 @@ from click.testing import CliRunner
 
 from lintro.cli import cli
 from lintro.cli_utils.commands.badge import (
-    _SHIELDS_STYLES,
     badge_command,
     resolve_health_score,
 )
@@ -130,6 +129,7 @@ def test_resolve_health_score_runs_check_when_needed() -> None:
     mock_check.assert_called_once()
     assert_that(mock_check.call_args.kwargs["score"]).is_true()
     assert_that(mock_check.call_args.kwargs["no_log"]).is_true()
+    assert_that(mock_check.call_args.kwargs["ai_enabled"]).is_false()
     assert_that(mock_check.call_args.kwargs["paths"]).is_equal_to(["."])
 
 
@@ -297,10 +297,32 @@ def test_badge_live_no_files_found_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-def test_resolve_health_score_rejects_filter_empty_run() -> None:
-    """A filter-empty run must not publish a perfect 100 badge."""
-    artifact = _scored_artifact(score=100)
+def test_resolve_health_score_accepts_filter_empty_with_post_checks() -> None:
+    """A filter-empty main phase is usable when a post-check inspected files."""
+    artifact = _scored_artifact(score=88)
     artifact.main_phase_empty_due_to_filter = True
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        score = resolve_health_score(score_override=None, paths=())
+
+    assert_that(score).is_equal_to(88)
+
+
+def test_resolve_health_score_rejects_all_timeout_run() -> None:
+    """An all-timeout run must not publish a perfect 100 badge."""
+    artifact = _scored_artifact(score=100)
+    artifact.tool_results = [
+        ToolResult(
+            name="ruff",
+            success=False,
+            skipped=False,
+            timed_out=True,
+            output="timed out after 30s",
+        ),
+    ]
 
     with patch(
         "lintro.cli_utils.commands.badge.api.check_run",
@@ -340,7 +362,10 @@ def test_badge_live_all_skipped_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-@pytest.mark.parametrize("style", list(_SHIELDS_STYLES))
+@pytest.mark.parametrize(
+    "style",
+    ["flat", "flat-square", "plastic", "for-the-badge", "social"],
+)
 def test_badge_style_query_keeps_hyphens(style: str) -> None:
     """Every supported shields style is appended without encoding hyphens.
 

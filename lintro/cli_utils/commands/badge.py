@@ -48,7 +48,7 @@ def _result_checked_any_files(result: ToolResult) -> bool:
         bool: ``True`` when the tool was not skipped and did not report an
         empty file set.
     """
-    if result.skipped:
+    if result.skipped or result.timed_out:
         return False
     text = f"{result.output or ''}\n{result.formatted_output or ''}"
     return _NO_FILES_CHECKED_RE.search(text) is None
@@ -62,12 +62,11 @@ def _live_score_is_usable(artifact: RunArtifact) -> bool:
 
     Returns:
         bool: ``True`` when at least one tool inspected files and a health
-        score was computed. Empty, all-skipped, filtered, and early-exit
-        runs are not usable public quality signals.
+        score was computed. Empty, all-skipped, timed-out, and early-exit
+        runs are not usable public quality signals. A filter-empty main
+        phase is still usable when post-checks produced a real result.
     """
     if artifact.early_exit or artifact.health is None:
-        return False
-    if artifact.main_phase_empty_due_to_filter:
         return False
     return any(_result_checked_any_files(result) for result in artifact.tool_results)
 
@@ -104,6 +103,7 @@ def resolve_health_score(
             paths=list(paths) if paths else None,
             no_log=True,
             score=True,
+            ai_enabled=False,
         )
     if not _live_score_is_usable(artifact):
         raise click.ClickException(
