@@ -12,7 +12,6 @@ for our low-level ``Server.run`` stdio handshake; do not pin ``mode="legacy"``.
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -22,9 +21,9 @@ import pytest
 from assertpy import assert_that
 from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.types import TextContent
 
 from lintro import __version__
+from tests.unit.mcp.session_helpers import payload_from_result
 
 _T = TypeVar("_T")
 
@@ -62,12 +61,7 @@ def test_mcp_stdio_server_lists_and_calls_ping(tmp_path: Path) -> None:
 
         result = await session.call_tool(name="lintro_ping", arguments={})
         assert_that(result.is_error).is_false()
-        if result.structured_content is not None:
-            payload: dict[str, object] = dict(result.structured_content)
-        else:
-            block = result.content[0]
-            assert isinstance(block, TextContent)
-            payload = dict(json.loads(block.text))
+        payload = payload_from_result(result)
         assert_that(payload["status"]).is_equal_to("ok")
         assert_that(payload["lintro_version"]).is_equal_to(__version__)
         assert_that(payload["workspace"]).is_equal_to(str(tmp_path.resolve()))

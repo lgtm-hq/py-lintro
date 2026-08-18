@@ -11,7 +11,6 @@ covered on every PR.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -19,7 +18,7 @@ from typing import Any, TypeVar
 
 from assertpy import assert_that
 from mcp.client import Client
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult
 
 from lintro import __version__
 from lintro.mcp.errors import McpError, McpErrorCode
@@ -176,24 +175,6 @@ def _failing_registry(workspace: Path) -> McpToolRegistry:
     return registry
 
 
-def _assert_dual_write(result: CallToolResult) -> dict[str, Any]:
-    """Require structured content and the JSON text block to carry the same object.
-
-    Args:
-        result: Tool result from ``client.call_tool``.
-
-    Returns:
-        The shared payload.
-    """
-    payload = _payload(result)
-    assert result.structured_content is not None
-    assert_that(dict(result.structured_content)).is_equal_to(payload)
-    block = result.content[0]
-    assert isinstance(block, TextContent)
-    assert_that(json.loads(block.text)).is_equal_to(payload)
-    return payload
-
-
 def test_session_lists_ping_with_annotation_hints(tmp_path: Path) -> None:
     """tools/list exposes lintro_ping with read-only annotation hints."""
 
@@ -222,7 +203,7 @@ def test_session_call_ping_returns_server_info(tmp_path: Path) -> None:
         result = await session.call_tool(name="lintro_ping", arguments={})
         assert_that(result.is_error).is_false()
 
-        payload = _assert_dual_write(result)
+        payload = _payload(result)
         assert_that(payload["status"]).is_equal_to("ok")
         result_dump = result.model_dump(by_alias=True)
         assert_that(result_dump["isError"]).is_false()
@@ -239,7 +220,7 @@ def test_session_unknown_tool_returns_tool_unavailable(tmp_path: Path) -> None:
     async def _check(session: Client) -> None:
         result = await session.call_tool(name="lintro_nope", arguments={})
         assert_that(result.is_error).is_true()
-        assert_that(_assert_dual_write(result)["error"]["code"]).is_equal_to(
+        assert_that(_payload(result)["error"]["code"]).is_equal_to(
             "tool_unavailable",
         )
 
@@ -332,7 +313,7 @@ def test_session_non_dict_handler_returns_execution_error(tmp_path: Path) -> Non
     async def _check(session: Client) -> None:
         result = await session.call_tool(name="demo_not_dict", arguments={})
         assert_that(result.is_error).is_true()
-        envelope = _assert_dual_write(result)["error"]
+        envelope = _payload(result)["error"]
         assert_that(envelope["code"]).is_equal_to("execution_error")
         assert_that(envelope["message"]).contains("list")
 

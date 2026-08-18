@@ -53,10 +53,10 @@ def run_in_memory_client(
 
 
 def payload_from_result(result: CallToolResult) -> dict[str, Any]:
-    """Extract a tool result payload as a dict.
+    """Extract a tool result payload and require the dual-write contract.
 
-    Prefers ``structured_content`` and falls back to parsing the JSON text
-    block, so the assertions hold regardless of which the SDK populates.
+    Production always sets the same JSON object on ``structured_content`` and
+    the text block. Tests must fail if either side is missing or they drift.
 
     Args:
         result: The ``CallToolResult`` returned by ``client.call_tool``.
@@ -64,8 +64,9 @@ def payload_from_result(result: CallToolResult) -> dict[str, Any]:
     Returns:
         The payload the server sent.
     """
-    if result.structured_content is not None:
-        return dict(result.structured_content)
+    assert result.structured_content is not None
+    payload = dict(result.structured_content)
     block = result.content[0]
     assert isinstance(block, TextContent)
-    return dict(json.loads(block.text))
+    assert dict(json.loads(block.text)) == payload
+    return payload
