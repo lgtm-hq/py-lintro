@@ -22,7 +22,7 @@ NPM_VERSIONS: dict[str, str] = {
     "stylelint": "17.14.1",
     "svelte-check": "4.7.6",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.9",
+    "vue-tsc": "3.3.10",
 }
 
 PYPI_VERSIONS: dict[str, str] = {

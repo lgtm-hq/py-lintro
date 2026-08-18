@@ -518,7 +518,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.3.9",
+      "version": "3.3.10",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
