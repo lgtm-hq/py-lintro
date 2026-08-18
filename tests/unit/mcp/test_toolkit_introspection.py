@@ -1,6 +1,6 @@
 """End-to-end tests for the introspection MCP tools.
 
-Every test drives a real :class:`mcp.ClientSession` over in-memory streams
+Every test drives a real :class:`mcp.client.Client` over in-memory streams
 against the same ``Server`` object the stdio transport serves, so the payloads
 asserted here are the bytes an agent receives.
 
@@ -12,21 +12,18 @@ themselves are covered in ``tests/unit/utils/test_doctor_report.py``.
 
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 import pytest
 from assertpy import assert_that
-from mcp import ClientSession, types
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
+from mcp.types import Tool
 
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.tool_status import ToolStatus
 from lintro.mcp.registry import DEFAULT_TOOL_TIMEOUT_SECONDS
-from lintro.mcp.server import create_mcp_server
 from lintro.mcp.toolkits.introspection import (
     INTROSPECTION_TIMEOUT_SECONDS,
     build_introspection_toolkit,
@@ -35,6 +32,7 @@ from lintro.tools.core.tool_registry import ManifestTool
 from lintro.tools.core.version_parsing import ToolVersionInfo
 from lintro.utils import doctor_report
 from lintro.utils.doctor_report import ToolCheckResult
+from tests.unit.mcp.session_helpers import payload_from_result, run_in_memory_client
 
 _T = TypeVar("_T")
 
@@ -42,40 +40,30 @@ _T = TypeVar("_T")
 def _run_session(
     *,
     workspace: Path,
-    check: Callable[[ClientSession], Awaitable[_T]],
+    check: Callable[[Client], Awaitable[_T]],
 ) -> _T:
-    """Run ``check`` against a connected in-memory MCP client session.
+    """Run ``check`` against a connected in-memory MCP client.
 
     Args:
         workspace: Workspace root for the server under test.
-        check: Async callback receiving an initialized client session.
+        check: Async callback receiving an initialized client.
 
     Returns:
         Whatever ``check`` returns.
     """
-    server = create_mcp_server(workspace=workspace)
-
-    async def _main() -> _T:
-        async with create_connected_server_and_client_session(server) as session:
-            return await check(session)
-
-    return asyncio.run(_main())
+    return run_in_memory_client(workspace=workspace, check=check)
 
 
-def _payload(result: types.CallToolResult) -> dict[str, Any]:
+def _payload(result: Any) -> dict[str, Any]:
     """Extract a tool result payload as a dict.
 
     Args:
-        result: The ``CallToolResult`` returned by ``session.call_tool``.
+        result: The ``CallToolResult`` returned by ``client.call_tool``.
 
     Returns:
         The payload the server sent.
     """
-    if result.structuredContent:
-        return dict(result.structuredContent)
-    block = result.content[0]
-    assert isinstance(block, types.TextContent)
-    return dict(json.loads(block.text))
+    return payload_from_result(result)
 
 
 def _call(*, workspace: Path, tool: str) -> dict[str, Any]:
@@ -89,8 +77,9 @@ def _call(*, workspace: Path, tool: str) -> dict[str, Any]:
         The decoded payload.
     """
 
-    async def _check(session: ClientSession) -> dict[str, Any]:
-        return _payload(await session.call_tool(tool, {}))
+    async def _check(session: Client) -> dict[str, Any]:
+        result = await session.call_tool(name=tool, arguments={})
+        return _payload(result)
 
     return _run_session(workspace=workspace, check=_check)
 
@@ -154,7 +143,7 @@ def test_introspection_tools_are_advertised_as_read_only_and_idempotent(
 ) -> None:
     """The annotations tell a host these three calls are always safe to make."""
 
-    async def _check(session: ClientSession) -> dict[str, types.Tool]:
+    async def _check(session: Client) -> dict[str, Tool]:
         listed = await session.list_tools()
         return {tool.name: tool for tool in listed.tools}
 
@@ -168,9 +157,9 @@ def test_introspection_tools_are_advertised_as_read_only_and_idempotent(
     for name in ("lintro_list_tools", "lintro_versions", "lintro_doctor"):
         annotations = tools[name].annotations
         assert annotations is not None
-        assert_that(annotations.readOnlyHint).is_true()
-        assert_that(annotations.destructiveHint).is_false()
-        assert_that(annotations.idempotentHint).is_true()
+        assert_that(annotations.read_only_hint).is_true()
+        assert_that(annotations.destructive_hint).is_false()
+        assert_that(annotations.idempotent_hint).is_true()
 
 
 def test_introspection_tools_budget_for_probing_every_binary() -> None:

@@ -1,6 +1,6 @@
 """End-to-end tests for the ``lintro_review`` MCP tool.
 
-Every call goes through a real :class:`mcp.ClientSession` over in-memory
+Every call goes through a real :class:`mcp.client.Client` over in-memory
 streams, so the schema validation, the workspace path guard, and the error
 envelope under test are the ones the stdio server actually applies.
 
@@ -13,8 +13,6 @@ exercising context collection, budget resolution, and payload shaping for real.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import subprocess  # nosec B404 - subprocess runs fixed git argv in a temp repo
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -22,20 +20,20 @@ from typing import Any, TypeVar
 
 import pytest
 from assertpy import assert_that
-from mcp import ClientSession, types
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client import Client
+from mcp.types import CallToolResult, Tool
 
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
-from lintro.mcp.server import create_mcp_server
 from lintro.mcp.toolkits.review import (
     REVIEW_TIMEOUT_SECONDS,
     STRICTNESS_VALUES,
     build_review_toolkit,
     resolve_budget_policy,
 )
+from tests.unit.mcp.session_helpers import payload_from_result, run_in_memory_client
 
 _T = TypeVar("_T")
 
@@ -57,47 +55,37 @@ _CONFIG_REVIEW_OFF = """ai:
 def _run_session(
     *,
     workspace: Path,
-    check: Callable[[ClientSession], Awaitable[_T]],
+    check: Callable[[Client], Awaitable[_T]],
 ) -> _T:
-    """Run ``check`` against a connected in-memory MCP client session.
+    """Run ``check`` against a connected in-memory MCP client.
 
     Args:
         workspace: Workspace root for the server under test.
-        check: Async callback receiving an initialized client session.
+        check: Async callback receiving an initialized client.
 
     Returns:
         Whatever ``check`` returns.
     """
-    server = create_mcp_server(workspace=workspace)
-
-    async def _main() -> _T:
-        async with create_connected_server_and_client_session(server) as session:
-            return await check(session)
-
-    return asyncio.run(_main())
+    return run_in_memory_client(workspace=workspace, check=check)
 
 
-def _payload(result: types.CallToolResult) -> dict[str, Any]:
+def _payload(result: CallToolResult) -> dict[str, Any]:
     """Extract a tool result payload as a dict.
 
     Args:
-        result: The ``CallToolResult`` returned by ``session.call_tool``.
+        result: The ``CallToolResult`` returned by ``client.call_tool``.
 
     Returns:
         The payload the server sent.
     """
-    if result.structuredContent:
-        return dict(result.structuredContent)
-    block = result.content[0]
-    assert isinstance(block, types.TextContent)
-    return dict(json.loads(block.text))
+    return payload_from_result(result)
 
 
 def _call(
     *,
     workspace: Path,
     arguments: dict[str, Any],
-) -> tuple[types.CallToolResult, dict[str, Any]]:
+) -> tuple[CallToolResult, dict[str, Any]]:
     """Call ``lintro_review`` and return its raw result and decoded payload.
 
     Args:
@@ -109,9 +97,12 @@ def _call(
     """
 
     async def _check(
-        session: ClientSession,
-    ) -> tuple[types.CallToolResult, dict[str, Any]]:
-        result = await session.call_tool("lintro_review", arguments)
+        session: Client,
+    ) -> tuple[CallToolResult, dict[str, Any]]:
+        result = await session.call_tool(
+            name="lintro_review",
+            arguments=arguments,
+        )
         return result, _payload(result)
 
     return _run_session(workspace=workspace, check=_check)
@@ -296,7 +287,7 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
 def test_review_is_listed_as_read_only_and_not_idempotent(tmp_path: Path) -> None:
     """The tool advertises the hints its cost and side-effect profile implies."""
 
-    async def _check(session: ClientSession) -> dict[str, types.Tool]:
+    async def _check(session: Client) -> dict[str, Tool]:
         listed = await session.list_tools()
         return {tool.name: tool for tool in listed.tools}
 
@@ -305,9 +296,9 @@ def test_review_is_listed_as_read_only_and_not_idempotent(tmp_path: Path) -> Non
     assert_that(tools).contains_key("lintro_review")
     hints = tools["lintro_review"].annotations
     assert hints is not None
-    assert_that(hints.readOnlyHint).is_true()
-    assert_that(hints.destructiveHint).is_false()
-    assert_that(hints.idempotentHint).is_false()
+    assert_that(hints.read_only_hint).is_true()
+    assert_that(hints.destructive_hint).is_false()
+    assert_that(hints.idempotent_hint).is_false()
 
 
 def test_review_spec_allows_more_time_than_the_default_budget(tmp_path: Path) -> None:
@@ -373,7 +364,7 @@ def test_review_rejects_a_base_combined_with_uncommitted(
         arguments={"base": "main", "uncommitted": True},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(McpErrorCode.INVALID_INPUT.value)
     assert_that(payload["error"]["detail"]["context_error"]).is_equal_to(
         "invalid-review-mode",
@@ -412,7 +403,7 @@ def test_review_returns_findings_and_run_metadata(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["summary"]).is_equal_to("One blocking issue.")
     finding = payload["findings"][0]
     assert_that(finding).contains_key(
@@ -458,7 +449,7 @@ def test_review_passes_depth_and_strictness_through(
         arguments={"base": "main", "depth": 3, "strictness": "focused"},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["depth"]).is_equal_to(3)
     assert_that(calls[0]["sensitivity"].strictness.value).is_equal_to("focused")
 
@@ -481,7 +472,7 @@ def test_review_applies_the_resolved_transport_profile(
 
     result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["ai_config"].api_timeout).is_equal_to(555.0)
 
 
@@ -497,7 +488,7 @@ def test_review_clamps_the_requested_budget_to_the_configured_ceiling(
         arguments={"base": "main", "max_cost_usd": 50.0},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["ai_config"].max_cost_usd).is_equal_to(1.0)
     assert_that(payload["budget"]["requested_usd"]).is_equal_to(50.0)
     assert_that(payload["budget"]["configured_usd"]).is_equal_to(1.0)
@@ -517,7 +508,7 @@ def test_review_honors_a_lower_requested_budget(
         arguments={"base": "main", "max_cost_usd": 0.05},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["ai_config"].max_cost_usd).is_equal_to(0.05)
     assert_that(payload["budget"]["clamped"]).is_false()
 
@@ -537,7 +528,7 @@ def test_review_reports_a_partial_run_without_discarding_findings(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_length(1)
     assert_that(payload["run"]["partial"]).is_true()
     assert_that(payload["run"]["stopped_reason"]).contains("cost cap")
@@ -565,7 +556,7 @@ def test_review_reports_budget_exceeded_when_nothing_was_reviewed(
         arguments={"base": "main", "max_cost_usd": 0.01},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(
         McpErrorCode.BUDGET_EXCEEDED.value,
     )
@@ -582,7 +573,7 @@ def test_review_reports_an_empty_diff_as_a_result_not_a_failure(
 
     result, payload = _call(workspace=repo, arguments={"base": "feature"})
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
     assert_that(payload["run"]).contains_key("model", "cost_usd", "chunks")
     assert_that(payload["run"]["cost_usd"]).is_equal_to(0.0)
@@ -600,7 +591,7 @@ def test_review_surfaces_a_provider_failure_with_its_taxonomy(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_in(
         McpErrorCode.EXECUTION_ERROR.value,
         McpErrorCode.TOOL_UNAVAILABLE.value,
@@ -637,7 +628,7 @@ def test_review_maps_a_too_large_diff_to_invalid_input(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(
         McpErrorCode.INVALID_INPUT.value,
     )
@@ -657,7 +648,7 @@ def test_review_is_unavailable_without_the_ai_extra(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
@@ -676,7 +667,7 @@ def test_review_is_unavailable_when_the_workspace_disables_it(
 
     result, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
@@ -687,7 +678,7 @@ def test_review_rejects_a_depth_outside_the_supported_range(repo: Path) -> None:
     """Schema validation refuses depth 4 before any provider call is made."""
     result, payload = _call(workspace=repo, arguments={"base": "main", "depth": 4})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(McpErrorCode.INVALID_INPUT.value)
 
 
@@ -695,7 +686,7 @@ def test_review_rejects_an_unknown_argument(repo: Path) -> None:
     """``--post`` has no MCP equivalent, and no argument is silently ignored."""
     result, payload = _call(workspace=repo, arguments={"post": True})
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(McpErrorCode.INVALID_INPUT.value)
 
 
@@ -706,7 +697,7 @@ def test_review_rejects_a_path_outside_the_workspace(repo: Path) -> None:
         arguments={"base": "main", "paths": ["../secrets"]},
     )
 
-    assert_that(result.isError).is_true()
+    assert_that(result.is_error).is_true()
     assert_that(payload["error"]["code"]).is_equal_to(
         McpErrorCode.WORKSPACE_VIOLATION.value,
     )
@@ -724,7 +715,7 @@ def test_review_filters_the_diff_to_the_requested_paths(
         arguments={"base": "main", "paths": ["app.py"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls).is_length(1)
     reviewed = [file.path for file in calls[0]["context"].changed_files]
     assert_that(reviewed).is_equal_to(["app.py"])
@@ -755,7 +746,7 @@ def test_review_includes_a_lint_digest_when_asked(
         arguments={"base": "main", "with_lint": True},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["lint_results"]).is_equal_to("ruff: 1 issue")
 
 
@@ -768,7 +759,7 @@ def test_review_omits_the_lint_digest_by_default(
 
     result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(calls[0]["lint_results"]).is_none()
 
 
@@ -785,6 +776,6 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
         arguments={"base": "main", "paths": ["other.py"]},
     )
 
-    assert_that(result.isError).is_false()
+    assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
     assert_that(calls).is_empty()
