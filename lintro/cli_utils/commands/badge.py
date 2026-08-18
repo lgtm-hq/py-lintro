@@ -29,7 +29,9 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "social",
 )
 
-_NO_FILES_CHECKED_RE = re.compile(r"(?i)no .+files found to check")
+# Real wrapper messages vary: "No files found to check.", "No Astro files to
+# check.", "No .py/.pyi files found to check.".
+_NO_FILES_CHECKED_RE = re.compile(r"(?i)\bno\b.*\bfiles?\b.*\bto check\b")
 
 
 def _result_checked_any_files(result: ToolResult) -> bool:
