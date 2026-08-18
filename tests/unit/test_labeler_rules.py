@@ -117,6 +117,15 @@ def _labels_for(*, path: str) -> set[str]:
             "lintro/tools/definitions/bandit.py",
             {"enhancement", "security"},
         ),
+        (
+            "lintro/tools/definitions/gitleaks.py",
+            {"enhancement", "security"},
+        ),
+        (
+            "lintro/tools/definitions/semgrep.py",
+            {"enhancement", "security"},
+        ),
+        (".github/workflows/codeql.yml", {"ci", "security"}),
         (".github/PULL_REQUEST_TEMPLATE.md", set()),
     ],
 )
