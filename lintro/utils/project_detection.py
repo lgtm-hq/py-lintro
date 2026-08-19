@@ -12,54 +12,108 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import shutil
-from itertools import chain
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
-# Directories that never carry first-party project markers; excluded from the
-# recursive scans below to avoid false positives from vendored/generated trees.
+# Directories that never carry first-party project markers. Pruned during
+# os.walk so vendored/generated trees are not even entered.
 _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
-    {"node_modules", ".venv", "venv", "vendor", ".git", "__pycache__"},
+    {
+        "node_modules",
+        ".venv",
+        "venv",
+        "vendor",
+        ".git",
+        "__pycache__",
+        "build",
+        "dist",
+        "target",
+        ".tox",
+        "site-packages",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        "htmlcov",
+    },
 )
+
+
+def _iter_project_files(cwd: Path) -> Iterator[Path]:
+    """Yield first-party files under *cwd*, pruning vendored directories.
+
+    Args:
+        cwd: Project root to scan.
+
+    Yields:
+        File paths that are not inside ``_VENDOR_SKIP_DIRS``.
+    """
+    for dirpath, dirnames, filenames in os.walk(cwd, topdown=True):
+        dirnames[:] = [name for name in dirnames if name not in _VENDOR_SKIP_DIRS]
+        for filename in filenames:
+            yield Path(dirpath) / filename
+
+
+def _has_project_file(
+    cwd: Path,
+    *,
+    match: Callable[[Path], bool],
+) -> bool:
+    """Return True if any first-party file satisfies *match*.
+
+    Args:
+        cwd: Project root to scan.
+        match: Predicate applied to each walked file.
+
+    Returns:
+        True when the first matching file is found.
+    """
+    return any(match(path) for path in _iter_project_files(cwd))
 
 
 def _has_source_files(
     cwd: Path,
-    *patterns: str,
+    *suffixes: str,
     exclude_name_suffix: str | None = None,
 ) -> bool:
-    """Return True if any non-vendored file matches one of *patterns*.
+    """Return True if any first-party file uses one of *suffixes*.
 
-    Globs short-circuit on the first match so a large tree is not fully
-    walked. Vendored and generated directories listed in
-    ``_VENDOR_SKIP_DIRS`` are ignored.
+    Walks the tree with vendored directories pruned. Suffixes include the
+    leading dot (e.g. ``.py``).
 
     Args:
         cwd: Project root to scan.
-        *patterns: Glob patterns relative to *cwd*.
+        *suffixes: Filename suffixes to accept (``".py"``, ``".js"``, …).
         exclude_name_suffix: Optional filename suffix to skip (e.g. ``.d.ts``).
 
     Returns:
         True when at least one matching first-party file exists.
     """
-    return (
-        next(
-            (
-                path
-                for path in chain.from_iterable(
-                    cwd.glob(pattern) for pattern in patterns
-                )
-                if path.is_file()
-                and not _VENDOR_SKIP_DIRS.intersection(path.parts)
-                and (
-                    exclude_name_suffix is None
-                    or not path.name.endswith(exclude_name_suffix)
-                )
-            ),
-            None,
+    suffix_set = {suffix.lower() for suffix in suffixes}
+
+    def _match(path: Path) -> bool:
+        if exclude_name_suffix is not None and path.name.endswith(exclude_name_suffix):
+            return False
+        return path.suffix.lower() in suffix_set or any(
+            path.name.lower().endswith(suffix) for suffix in suffix_set
         )
-        is not None
-    )
+
+    return _has_project_file(cwd, match=_match)
+
+
+def _is_requirements_file(path: Path) -> bool:
+    """Return True if *path* looks like a pip requirements file.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``requirements*.txt`` or ``requirements/*.txt``.
+    """
+    if path.suffix != ".txt":
+        return False
+    return path.name.startswith("requirements") or path.parent.name == "requirements"
 
 
 def detect_project_languages() -> list[str]:
@@ -69,7 +123,10 @@ def detect_project_languages() -> list[str]:
     Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
     HTML, CSS, and dotenv files by inspecting manifests, directories, and
     source-file extensions. Language tools still run in source-only trees that
-    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``.
+    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Detection
+    always inspects ``Path.cwd()`` (not the scan paths passed to chk/fmt).
+    Nested YAML/Markdown/shell files count; a single root README.md does not
+    enable Markdown tools.
 
     Returns:
         Sorted list of lowercase language/ecosystem identifiers.
@@ -86,12 +143,8 @@ def detect_project_languages() -> list[str]:
         or (cwd / "setup.py").exists()
         or (cwd / "setup.cfg").exists()
         or (cwd / "Pipfile").exists()
-        or _has_source_files(
-            cwd,
-            "**/requirements*.txt",
-            "**/requirements/*.txt",
-        )
-        or _has_source_files(cwd, "**/*.py", "**/*.pyi")
+        or _has_project_file(cwd, match=_is_requirements_file)
+        or _has_source_files(cwd, ".py", ".pyi")
     ):
         langs.add("python")
 
@@ -118,10 +171,10 @@ def detect_project_languages() -> list[str]:
 
     if has_package_json or _has_source_files(
         cwd,
-        "**/*.js",
-        "**/*.jsx",
-        "**/*.mjs",
-        "**/*.cjs",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
     ):
         langs.add("javascript")
 
@@ -130,10 +183,10 @@ def detect_project_languages() -> list[str]:
         or "typescript" in all_deps
         or _has_source_files(
             cwd,
-            "**/*.ts",
-            "**/*.tsx",
-            "**/*.mts",
-            "**/*.cts",
+            ".ts",
+            ".tsx",
+            ".mts",
+            ".cts",
             exclude_name_suffix=".d.ts",
         )
     ):
@@ -147,22 +200,19 @@ def detect_project_languages() -> list[str]:
         langs.add("vue")
 
     # Rust
-    if (cwd / "Cargo.toml").exists() or _has_source_files(cwd, "**/*.rs"):
+    if (cwd / "Cargo.toml").exists() or _has_source_files(cwd, ".rs"):
         langs.add("rust")
 
     # Go
-    if (cwd / "go.mod").exists() or _has_source_files(cwd, "**/*.go"):
+    if (cwd / "go.mod").exists() or _has_source_files(cwd, ".go"):
         langs.add("go")
 
     # Ruby
-    if (cwd / "Gemfile").exists() or _has_source_files(cwd, "**/*.rb"):
+    if (cwd / "Gemfile").exists() or _has_source_files(cwd, ".rb"):
         langs.add("ruby")
 
-    # Shell scripts (root *.sh or .sh files inside scripts/)
-    scripts_dir = cwd / "scripts"
-    if next(cwd.glob("*.sh"), None) is not None or (
-        scripts_dir.is_dir() and next(scripts_dir.glob("*.sh"), None) is not None
-    ):
+    # Shell scripts anywhere in the tree (not only root / scripts/).
+    if _has_source_files(cwd, ".sh"):
         langs.add("shell")
 
     # Docker (Dockerfile, docker-compose, and standalone compose files)
@@ -182,57 +232,56 @@ def detect_project_languages() -> list[str]:
     if (cwd / ".github" / "workflows").is_dir():
         langs.add("github_actions")
 
-    # SQL — next() short-circuits so only one file is visited.
-    if (
-        next(
-            (
-                p
-                for p in cwd.glob("**/*.sql")
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
-    ):
+    # SQL
+    if _has_source_files(cwd, ".sql"):
         langs.add("sql")
 
-    # YAML (beyond config files — actual YAML content)
-    config_names = {
+    # YAML (beyond compose / lintro config files — including nested trees).
+    yaml_skip_names = {
         ".lintro-config.yaml",
         ".lintro-config.yml",
         "docker-compose.yml",
         "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
     }
-    if any(
-        f.name not in config_names for f in chain(cwd.glob("*.yaml"), cwd.glob("*.yml"))
+    if _has_project_file(
+        cwd,
+        match=lambda path: (
+            path.suffix.lower() in {".yaml", ".yml"}
+            and path.name not in yaml_skip_names
+        ),
     ):
         langs.add("yaml")
 
-    # Markdown (more than just README)
-    for md_count, _ in enumerate(cwd.glob("*.md"), 1):
-        if md_count >= 2:
-            langs.add("markdown")
-            break
+    # Markdown (more than just a lone README; nested docs/ counts).
+    md_count = 0
+    for path in _iter_project_files(cwd):
+        if path.suffix.lower() == ".md":
+            md_count += 1
+            if md_count >= 2:
+                langs.add("markdown")
+                break
 
     # TOML (beyond pyproject.toml / Cargo.toml)
-    toml_files = [
-        f for f in cwd.glob("*.toml") if f.name not in ("pyproject.toml", "Cargo.toml")
-    ]
-    if toml_files:
+    if _has_project_file(
+        cwd,
+        match=lambda path: (
+            path.suffix.lower() == ".toml"
+            and path.name not in ("pyproject.toml", "Cargo.toml")
+        ),
+    ):
         langs.add("toml")
 
     # Markup and stylesheets that language_map already knows about.
-    if _has_source_files(cwd, "**/*.html", "**/*.htm"):
+    if _has_source_files(cwd, ".html", ".htm"):
         langs.add("html")
-    if _has_source_files(
-        cwd,
-        "**/*.css",
-        "**/*.scss",
-        "**/*.sass",
-        "**/*.less",
-    ):
+    if _has_source_files(cwd, ".css", ".scss", ".sass", ".less"):
         langs.add("css")
-    if _has_source_files(cwd, "**/.env*"):
+    if _has_project_file(
+        cwd,
+        match=lambda path: path.name.startswith(".env"),
+    ):
         langs.add("dotenv")
 
     # Prose/documentation formats beyond Markdown (vale targets).

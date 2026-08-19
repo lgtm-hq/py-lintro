@@ -249,6 +249,63 @@ def test_detect_dotenv(
     assert_that(langs).contains("dotenv")
 
 
+def test_detect_nested_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect YAML from a nested file, not only the repo root."""
+    nested = tmp_path / "deploy"
+    nested.mkdir()
+    (nested / "values.yaml").write_text("replicaCount: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("yaml")
+
+
+def test_detect_nested_shell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Shell from a nested ``*.sh`` outside ``scripts/``."""
+    nested = tmp_path / "tools"
+    nested.mkdir()
+    (nested / "release.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("shell")
+
+
+def test_detect_nested_markdown_docs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two nested Markdown files enable Markdown tools; a lone README does not."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    (docs / "changelog.md").write_text("# Changelog\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("markdown")
+
+
+def test_detect_javascript_ignores_dist_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``*.js`` only inside ``dist/`` does not mark JavaScript."""
+    bundled = tmp_path / "dist"
+    bundled.mkdir()
+    (bundled / "app.js").write_text("console.log(1)\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("javascript")
+
+
 # ── detect_package_managers ──────────────────────────────────────────
 
 

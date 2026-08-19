@@ -441,6 +441,12 @@ def get_tools_to_run(
     explicit ``--tools`` list bypasses that allowlist so named tools still
     run; per-tool ``tools.<name>.enabled: false`` continues to apply.
 
+    A no-config default run (``tools`` is None, no config file, no in-memory
+    ``tools:`` section) is additionally scoped to languages detected in the
+    current working directory. Explicit ``--tools all`` and any configured
+    project keep the full registry. Detection uses ``Path.cwd()``, not the
+    scan paths passed to chk/fmt.
+
     Args:
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".

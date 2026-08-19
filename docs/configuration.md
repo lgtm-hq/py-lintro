@@ -49,7 +49,10 @@ The configuration system works in a specific order:
      config, so language scoping still applies. An explicit named `--tools` list on the
      CLI bypasses this allowlist; default runs and `--tools all` remain filtered by it.
      This is a feat/minor default change: kitchen-sink CI that relied on the unscoped
-     no-config toolset should pass `--tools all` or add a config file.
+     no-config toolset should pass `--tools all` or add a config file. Detection uses
+     the current working directory (not the scan paths passed to chk/fmt). Nested
+     YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
+     tools.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
@@ -349,7 +352,7 @@ lintro check --group-by [file|code|none|auto|category] # Group issues
 
 # Tool selection
 lintro check --tools ruff,prettier           # Run specific tools only
-lintro check --all                           # Run all available tools
+lintro check --tools all                     # Run all available tools
 
 # File filtering
 lintro check --exclude "*.pyc,venv"          # Exclude patterns
@@ -2985,7 +2988,7 @@ lintro check --exclude "venv,node_modules,migrations"
 lintro check --tools ruff
 
 # Full analysis for main branch
-lintro check --all --output full-report.txt
+lintro check --tools all --output full-report.txt
 ```
 
 ### Custom Output Formats
@@ -3067,7 +3070,7 @@ check: lint
 
 # Comprehensive quality report
 quality:
-	lintro check --all --output quality-report.txt
+	lintro check --tools all --output quality-report.txt
 	@echo "Full quality report saved to quality-report.txt"
 
 # Tool installation

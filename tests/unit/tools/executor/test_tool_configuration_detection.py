@@ -176,8 +176,9 @@ def test_format_detection_notice_groups_by_language() -> None:
         ({"index.html": "<html></html>\n"}, "html", "html_validate"),
         ({"app.css": "body { color: black; }\n"}, "css", "stylelint"),
         ({".env": "FOO=bar\n"}, "dotenv", "dotenv_linter"),
+        ({"deploy/values.yaml": "replicaCount: 1\n"}, "yaml", "yamllint"),
     ],
-    ids=["svelte", "astro", "vue", "html", "css", "dotenv"],
+    ids=["svelte", "astro", "vue", "html", "css", "dotenv", "nested-yaml"],
 )
 def test_no_config_scopes_hyphenated_and_markup_tools(
     monkeypatch: pytest.MonkeyPatch,
@@ -196,7 +197,9 @@ def test_no_config_scopes_hyphenated_and_markup_tools(
         expected_tool: Registered tool name that must remain in ``to_run``.
     """
     for relative, contents in files.items():
-        (tmp_path / relative).write_text(contents, encoding="utf-8")
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(contents, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
