@@ -7,6 +7,7 @@ tool. Explicit ``--tools`` and configured projects keep the full behavior.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -33,8 +34,12 @@ def _write_python_project(root: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_config_cache() -> None:
-    """Reset the config singleton before and after each test."""
+def _reset_config_cache() -> Iterator[None]:
+    """Reset the config singleton before and after each test.
+
+    Yields:
+        None: Control back to the test after cache reset.
+    """
     clear_config_cache()
     yield
     clear_config_cache()
