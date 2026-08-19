@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.123.0] - 2026-08-19
+
+### Added
+
+- **cli**: scope no-config first run to detected languages (e06974b)
+
+### Changed
+
+- **deps**: update all major dependencies (major) (#2082) (9428d2c)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to cfed414
+  (d469ae2)
+
 ## [0.122.0] - 2026-08-19
 
 ### Added
