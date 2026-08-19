@@ -356,3 +356,152 @@ def test_nonempty_tool_lintro_table_is_not_scoped(
 
     assert_that(result.scoped_by_detection).is_false()
     assert_that(result.to_run).contains("ruff", "clippy")
+
+
+def test_scan_roots_scope_when_cwd_has_no_markers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Language scoping uses *scan_roots*, not only the process cwd.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project and empty cwd directories.
+    """
+    project = tmp_path / "project"
+    empty = tmp_path / "empty"
+    project.mkdir()
+    empty.mkdir()
+    _write_python_project(project)
+    monkeypatch.chdir(empty)
+    clear_config_cache()
+
+    result = get_tools_to_run(
+        tools=None,
+        action="check",
+        scan_roots=[project],
+    )
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.detected_languages).contains("python")
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("clippy")
+
+    duplicate = get_tools_to_run(
+        tools=None,
+        action="check",
+        scan_roots=[project, project],
+    )
+    assert_that(duplicate.detected_languages).is_equal_to(result.detected_languages)
+
+
+def test_scan_roots_union_languages_across_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Multiple scan roots union their detected languages.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python and Rust trees plus an empty cwd.
+    """
+    python_root = tmp_path / "python"
+    rust_root = tmp_path / "rust"
+    empty = tmp_path / "empty"
+    python_root.mkdir()
+    rust_root.mkdir()
+    empty.mkdir()
+    _write_python_project(python_root)
+    (rust_root / "Cargo.toml").write_text(
+        '[package]\nname = "sample"\nversion = "0.0.0"\nedition = "2021"\n',
+        encoding="utf-8",
+    )
+    (rust_root / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    monkeypatch.chdir(empty)
+    clear_config_cache()
+
+    result = get_tools_to_run(
+        tools=None,
+        action="check",
+        scan_roots=[python_root, rust_root],
+    )
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.detected_languages).contains("python", "rust")
+    assert_that(result.to_run).contains("ruff", "clippy")
+
+
+def test_file_scan_root_uses_parent_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A file scan target detects languages from its parent directory.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project and empty cwd directories.
+    """
+    project = tmp_path / "project"
+    empty = tmp_path / "empty"
+    project.mkdir()
+    empty.mkdir()
+    source = project / "main.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(empty)
+    clear_config_cache()
+
+    result = get_tools_to_run(
+        tools=None,
+        action="check",
+        scan_roots=[source],
+    )
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.detected_languages).contains("python")
+    assert_that(result.to_run).contains("ruff")
+
+
+def test_commitlint_included_when_native_config_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unmapped tools with a native config survive language-scoped first runs.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project with a commitlint config.
+    """
+    _write_python_project(tmp_path)
+    (tmp_path / "commitlint.config.js").write_text(
+        "module.exports = { extends: ['@commitlint/config-conventional'] };\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.to_run).contains("commitlint", "ruff")
+    assert_that(result.to_run).does_not_contain("clippy")
+
+
+def test_commitlint_omitted_without_native_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unmapped tools stay dropped when no native config is present.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project without a commitlint config.
+    """
+    _write_python_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("commitlint")

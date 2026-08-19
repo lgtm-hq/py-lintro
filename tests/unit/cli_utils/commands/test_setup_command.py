@@ -357,6 +357,31 @@ def test_detect_github_actions_yaml_is_not_generic_yaml(
     assert_that(langs).does_not_contain("yaml")
 
 
+def test_detect_languages_from_explicit_root_without_chdir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect languages from *root* even when cwd has no markers.
+
+    Args:
+        tmp_path: Temporary directories for the project and empty cwd.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project = tmp_path / "project"
+    empty = tmp_path / "empty"
+    project.mkdir()
+    empty.mkdir()
+    (project / "main.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(empty)
+
+    langs = detect_project_languages(root=project)
+    assert_that(langs).contains("python")
+    assert_that(
+        detect_project_languages(root=project / "main.py"),
+    ).contains("python")
+    assert_that(detect_project_languages()).does_not_contain("python")
+
+
 # ── detect_package_managers ──────────────────────────────────────────
 
 

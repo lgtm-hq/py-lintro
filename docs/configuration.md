@@ -50,7 +50,10 @@ The configuration system works in a specific order:
      CLI bypasses this allowlist; default runs and `--tools all` remain filtered by it.
      This is a feat/minor default change: kitchen-sink CI that relied on the unscoped
      no-config toolset should pass `--tools all` or add a config file. Detection uses
-     the current working directory (not the scan paths passed to chk/fmt). Nested
+     the chk/fmt scan paths (a file uses its parent directory; multiple paths are
+     unioned). When no paths are given the default is `.` (the current working
+     directory). Tools that are not in the language map (for example `commitlint`) are
+     still selected when their native config file is present at a scan root. Nested
      YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
      tools.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)

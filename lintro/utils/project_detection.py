@@ -1,13 +1,15 @@
 """Project language and package manager detection.
 
-Scans the current working directory for language/framework indicators
-and available package managers. Used by the ``setup`` and ``install``
-commands and by no-config first-run tool selection.
+Scans a project tree for language/framework indicators and available
+package managers. Used by the ``setup`` and ``install`` commands and by
+no-config first-run tool selection. Pass ``root=`` to inspect a directory
+other than the current working directory.
 
 Usage:
     from lintro.utils.project_detection import detect_project_languages
 
     langs = detect_project_languages()   # ["docker", "python", "typescript"]
+    langs = detect_project_languages(root=Path("src"))
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ def _iter_project_files(cwd: Path) -> Iterator[Path]:
         cwd: Project root to scan.
 
     Yields:
-        File paths that are not inside ``_VENDOR_SKIP_DIRS``.
+        Path: File paths that are not inside ``_VENDOR_SKIP_DIRS``.
     """
     for dirpath, dirnames, filenames in os.walk(cwd, topdown=True):
         dirnames[:] = [name for name in dirnames if name not in _VENDOR_SKIP_DIRS]
@@ -153,22 +155,27 @@ def _is_yaml_content(path: Path) -> bool:
     return not (".github" in parts and "workflows" in parts)
 
 
-def detect_project_languages() -> list[str]:
-    """Detect all languages and ecosystems in the current project.
+def detect_project_languages(*, root: Path | None = None) -> list[str]:
+    """Detect all languages and ecosystems in a project tree.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
     Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
     HTML, CSS, and dotenv files by inspecting manifests, directories, and
     source-file extensions. Language tools still run in source-only trees that
-    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Detection
-    always inspects ``Path.cwd()`` (not the scan paths passed to chk/fmt).
-    Nested YAML/Markdown/shell files count; a single root README.md does not
-    enable Markdown tools.
+    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Nested
+    YAML/Markdown/shell files count; a single root README.md does not enable
+    Markdown tools.
+
+    Args:
+        root: Directory (or file, whose parent is used) to scan. ``None``
+            inspects ``Path.cwd()``.
 
     Returns:
         Sorted list of lowercase language/ecosystem identifiers.
     """
-    cwd = Path.cwd()
+    cwd = (root or Path.cwd()).resolve()
+    if cwd.is_file():
+        cwd = cwd.parent
     langs: set[str] = set()
 
     # Python — manifests, requirements files, or a first-party ``*.py``.

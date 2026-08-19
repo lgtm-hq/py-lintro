@@ -7,7 +7,9 @@ and determining which tools to run.
 from __future__ import annotations
 
 import difflib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.config.config_loader import get_config
@@ -334,12 +336,112 @@ def get_tool_lookup_keys(tool_name: str) -> set[str]:
     return {tool_name.lower()}
 
 
-def _detection_scoped_tool_names() -> tuple[list[str], set[str]]:
+def _normalize_scan_roots(
+    *,
+    scan_roots: Sequence[str | Path] | None,
+) -> list[Path]:
+    """Resolve chk/fmt scan targets to directories used for language detection.
+
+    Args:
+        scan_roots: Files or directories from chk/fmt. ``None`` or empty
+            falls back to the current working directory. Files use their
+            parent directory.
+
+    Returns:
+        Deduplicated resolved directory paths, preserving first-seen order.
+    """
+    candidates: list[Path] = []
+    if scan_roots:
+        for raw in scan_roots:
+            path = Path(raw).resolve()
+            candidates.append(path.parent if path.is_file() else path)
+    if not candidates:
+        candidates.append(Path.cwd().resolve())
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+    return unique
+
+
+def _mapped_language_tool_names(
+    *,
+    language_map: dict[str, list[str]],
+) -> set[str]:
+    """Collect hyphen/underscore aliases for every language-mapped tool.
+
+    Args:
+        language_map: Manifest ``language_map`` (language → tool names).
+
+    Returns:
+        Lowercase registry keys and aliases covered by the language map.
+    """
+    names: set[str] = set()
+    for tool_list in language_map.values():
+        for name in tool_list:
+            names.update(_tool_name_lookup_candidates(name=name.lower()))
+    return names
+
+
+def _unmapped_native_config_names(
+    *,
+    roots: list[Path],
+    mapped_names: set[str],
+) -> set[str]:
+    """Include unmapped tools when a native config file exists at a scan root.
+
+    Language-mapped tools stay gated on detection. Tools the map does not
+    cover (for example commitlint) still run on a no-config first run when
+    their native config is present, instead of vanishing silently.
+
+    Args:
+        roots: Directories already used for language detection.
+        mapped_names: Tool names (and aliases) present in the language map.
+
+    Returns:
+        Lowercase registry keys and aliases to add to the scoped set.
+    """
+    extra: set[str] = set()
+    for name in tool_manager.get_tool_names():
+        candidates = _tool_name_lookup_candidates(name=name.lower())
+        if name.lower() == ToolName.PYTEST.value.lower():
+            continue
+        if any(candidate in mapped_names for candidate in candidates):
+            continue
+        if _is_advisory_tool(name=name):
+            continue
+        try:
+            tool = tool_manager.get_tool(name)
+        except (KeyError, ValueError):
+            continue
+        native_configs = tool.definition.native_configs
+        if not native_configs:
+            continue
+        if any(
+            any((root / config_name).exists() for config_name in native_configs)
+            for root in roots
+        ):
+            extra.update(candidates)
+    return extra
+
+
+def _detection_scoped_tool_names(
+    *,
+    scan_roots: Sequence[str | Path] | None = None,
+) -> tuple[list[str], set[str]]:
     """Compute the language-scoped toolset for a no-config first run.
 
-    Detects the languages present in the current working directory and
+    Detects the languages present in *scan_roots* (default: cwd) and
     resolves them to the union of recommended tool names via the manifest
-    registry's language map. Security tools are always included.
+    registry's language map. Security tools are always included. Unmapped
+    tools with a native config at a scan root are included as well.
+
+    Args:
+        scan_roots: Files or directories passed to chk/fmt. ``None`` uses
+            the current working directory.
 
     Returns:
         Tuple of ``(detected_languages, scoped_tool_names)`` where
@@ -350,7 +452,11 @@ def _detection_scoped_tool_names() -> tuple[list[str], set[str]]:
     from lintro.tools.core.tool_registry import ManifestRegistry
     from lintro.utils.project_detection import detect_project_languages
 
-    detected_languages = detect_project_languages()
+    roots = _normalize_scan_roots(scan_roots=scan_roots)
+    languages: set[str] = set()
+    for root in roots:
+        languages.update(detect_project_languages(root=root))
+    detected_languages = sorted(languages)
     registry = ManifestRegistry.load()
     scoped_tools = registry.tools_for_languages(detected_languages)
     scoped_names: set[str] = set()
@@ -358,6 +464,14 @@ def _detection_scoped_tool_names() -> tuple[list[str], set[str]]:
         scoped_names.update(
             _tool_name_lookup_candidates(name=tool.name.lower()),
         )
+    scoped_names.update(
+        _unmapped_native_config_names(
+            roots=roots,
+            mapped_names=_mapped_language_tool_names(
+                language_map=registry.language_map,
+            ),
+        ),
+    )
     return detected_languages, scoped_names
 
 
@@ -434,6 +548,7 @@ def get_tools_to_run(
     *,
     ignore_conflicts: bool = False,
     lintro_config: LintroConfig | None = None,
+    scan_roots: Sequence[str | Path] | None = None,
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
@@ -442,16 +557,20 @@ def get_tools_to_run(
     run; per-tool ``tools.<name>.enabled: false`` continues to apply.
 
     A no-config default run (``tools`` is None, no config file, no in-memory
-    ``tools:`` section) is additionally scoped to languages detected in the
-    current working directory. Explicit ``--tools all`` and any configured
-    project keep the full registry. Detection uses ``Path.cwd()``, not the
-    scan paths passed to chk/fmt.
+    ``tools:`` section) is additionally scoped to languages detected in
+    *scan_roots* (default: the current working directory). Files use their
+    parent directory; multiple roots are unioned. Explicit ``--tools all``
+    and any configured project keep the full registry. Tools that are not
+    in the language map (for example commitlint) are still selected when
+    their native config file is present at a scan root.
 
     Args:
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
         ignore_conflicts: If True, skip conflict checking between tools.
         lintro_config: Optional config override; uses global config when omitted.
+        scan_roots: Files or directories to detect languages from. ``None``
+            uses ``Path.cwd()``.
 
     Returns:
         ToolsToRunResult with tools to run and skipped tools with reasons.
@@ -516,7 +635,9 @@ def get_tools_to_run(
         scoped_names: set[str] | None = None
         scoped_by_detection = False
         if tools is None and config.config_path is None and not config.tools:
-            detected_languages, scoped_names = _detection_scoped_tool_names()
+            detected_languages, scoped_names = _detection_scoped_tool_names(
+                scan_roots=scan_roots,
+            )
             scoped_by_detection = True
 
         to_run: list[str] = []

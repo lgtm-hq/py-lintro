@@ -449,6 +449,7 @@ def execute_run(
             tools,
             ctx.selection_action,
             ignore_conflicts=ignore_conflicts,
+            scan_roots=list(paths),
         )
     except ValueError as e:
         logger.console_output(f"Error: {e}")
