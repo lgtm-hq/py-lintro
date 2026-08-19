@@ -220,7 +220,7 @@ def format_issues_by_category(
     """Format issues grouped into concern-category sections.
 
     Thin grouping hook for ``--group-by category``. Issues are enriched with
-    a resolved ``category`` and rendered under titled sections. JSON/GitHub/CSV
+    a resolved ``category`` and rendered under titled sections. JSON/GitHub/CSV/SARIF
     formats stay a single table for machine-readable compatibility.
 
     Args:
@@ -244,6 +244,7 @@ def format_issues_by_category(
         OutputFormat.JSON,
         OutputFormat.GITHUB,
         OutputFormat.CSV,
+        OutputFormat.SARIF,
     }:
         return format_issues(
             issues,

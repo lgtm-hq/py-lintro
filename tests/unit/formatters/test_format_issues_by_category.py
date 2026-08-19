@@ -71,6 +71,21 @@ def test_format_issues_by_category_csv_is_single_table() -> None:
     assert_that(output).contains("S105")
 
 
+def test_format_issues_by_category_sarif_has_no_section_headers() -> None:
+    """SARIF stays a single document so section titles do not break the schema."""
+    issues = [
+        RuffIssue(file="a.py", line=1, code="PERF401", message="slow"),
+        RuffIssue(file="a.py", line=2, code="S105", message="hardcoded"),
+    ]
+    output = format_issues_by_category(
+        issues,
+        output_format="sarif",
+        tool_name="ruff",
+    )
+    assert_that(output).does_not_contain("Performance (")
+    assert_that(output).does_not_contain("Security (")
+
+
 def test_format_tool_output_parses_raw_output_with_category() -> None:
     """Raw parseable output still sections by category when group_by=category."""
     raw_output = """[
