@@ -31,11 +31,6 @@
       "allowedVersions": "<7"
     },
     {
-      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
-      "matchPackageNames": ["js-yaml"],
-      "allowedVersions": "<5"
-    },
-    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
