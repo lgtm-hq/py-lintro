@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.123.1] - 2026-08-19
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.41.17 (patch) (#2124) (b6bcf26)
+
 ## [0.123.0] - 2026-08-19
 
 ### Added
