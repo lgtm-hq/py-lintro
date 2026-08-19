@@ -203,7 +203,7 @@ lintro fmt, chk, tst
 --output-format grid        # Use grid output (recommended)
 --tools ruff,prettier        # Run specific tools only
 --output results.txt         # Save output to file
---group-by [file|code|none|auto|category]  # Group issues by type
+--group-by [file|code|none|auto|category]  # Group issues (category: check/format)
 --exclude "venv,node_modules" # Exclude patterns
 ```
 

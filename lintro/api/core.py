@@ -265,7 +265,7 @@ def test(
         include_venv: Whether to include virtual environment directories.
         output: Path to an output file for results.
         output_format: Format for displaying results (grid, json, etc).
-        group_by: How to group issues in output (file, code, none, auto, category).
+        group_by: How to group issues in output (file, code, none, auto).
         verbose: Whether to show verbose output during execution.
         raw_output: Whether to show raw tool output instead of formatted output.
         tool_options: Tool-specific options in ``option=value`` form.

@@ -269,7 +269,7 @@ def format_issues_by_category(
         )
         sections.append(f"{label} ({len(section_issues)})\n{section_output}")
 
-    return "\n\n".join(sections) if sections else "No issues found."
+    return "\n\n".join(sections)
 
 
 def format_issues_with_sections(
