@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.122.0] - 2026-08-19
+
+### Added
+
+- **cli**: add --group-by category for issue grouping (141b3ab)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to da2ecac
+  (c66de9f)
+
 ## [0.121.0] - 2026-08-18
 
 ### Added
