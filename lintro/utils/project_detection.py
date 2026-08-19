@@ -41,6 +41,52 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
     },
 )
 
+# JS/TS toolchain configs that must not count as application source.
+_JS_TOOLING_CONFIG_STEMS: frozenset[str] = frozenset(
+    {
+        "commitlint.config",
+        "eslint.config",
+        "prettier.config",
+        "babel.config",
+        "webpack.config",
+        "vite.config",
+        "vitest.config",
+        "jest.config",
+        "rollup.config",
+        "tailwind.config",
+        "postcss.config",
+        "svelte.config",
+        "astro.config",
+        "next.config",
+        "nuxt.config",
+        "vue.config",
+        "remix.config",
+    },
+)
+_JS_TOOLING_EXACT_NAMES: frozenset[str] = frozenset(
+    {
+        ".eslintrc.js",
+        ".eslintrc.cjs",
+        ".eslintrc.mjs",
+        ".prettierrc.js",
+        ".prettierrc.cjs",
+        ".prettierrc.mjs",
+        ".commitlintrc.js",
+        ".commitlintrc.cjs",
+        ".commitlintrc.mjs",
+        "karma.conf.js",
+        "karma.conf.cjs",
+    },
+)
+_JS_TOOLING_SUFFIXES: tuple[str, ...] = (
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".mts",
+    ".cts",
+)
+
 
 def _iter_project_files(cwd: Path) -> Iterator[Path]:
     """Yield first-party files under *cwd*, pruning vendored directories.
@@ -119,16 +165,73 @@ def _is_requirements_file(path: Path) -> bool:
 
 
 def _is_dotenv_file(path: Path) -> bool:
-    """Return True if *path* is a dotenv file, not direnv or similar.
+    """Return True if *path* is a dotenv file, not direnv or a template.
 
     Args:
         path: Candidate file.
 
     Returns:
-        True for ``.env`` and ``.env.*`` (e.g. ``.env.local``), not ``.envrc``.
+        True for ``.env`` and ``.env.<environment>`` (e.g. ``.env.local``),
+        not ``.envrc`` or templates such as ``.env.example``.
     """
     name = path.name
-    return name == ".env" or name.startswith(".env.")
+    if name != ".env" and not name.startswith(".env."):
+        return False
+    lowered = name.lower()
+    return not any(
+        lowered.endswith(suffix)
+        for suffix in (".example", ".sample", ".template", ".dist")
+    )
+
+
+def _is_js_tooling_config(*, path: Path) -> bool:
+    """Return True if *path* is a JS/TS toolchain config, not app source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for files such as ``commitlint.config.js`` or ``eslint.config.ts``.
+    """
+    lowered = path.name.lower()
+    if lowered in _JS_TOOLING_EXACT_NAMES:
+        return True
+    for suffix in _JS_TOOLING_SUFFIXES:
+        if lowered.endswith(suffix):
+            stem = lowered[: -len(suffix)]
+            return stem in _JS_TOOLING_CONFIG_STEMS
+    return False
+
+
+def _is_javascript_application_source(path: Path) -> bool:
+    """Return True if *path* is first-party JavaScript application source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.js``/``.jsx``/``.mjs``/``.cjs`` that are not toolchain configs.
+    """
+    if _is_js_tooling_config(path=path):
+        return False
+    return path.suffix.lower() in {".js", ".jsx", ".mjs", ".cjs"}
+
+
+def _is_typescript_application_source(path: Path) -> bool:
+    """Return True if *path* is first-party TypeScript application source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.ts``/``.tsx``/``.mts``/``.cts`` excluding ``*.d.ts`` and
+        toolchain configs such as ``commitlint.config.ts``.
+    """
+    if path.name.endswith(".d.ts"):
+        return False
+    if _is_js_tooling_config(path=path):
+        return False
+    return path.suffix.lower() in {".ts", ".tsx", ".mts", ".cts"}
 
 
 def _is_yaml_content(path: Path) -> bool:
@@ -164,7 +267,9 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
     source-file extensions. Language tools still run in source-only trees that
     have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Nested
     YAML/Markdown/shell files count; a single root README.md does not enable
-    Markdown tools.
+    Markdown tools. JS/TS toolchain configs (``commitlint.config.js``,
+    ``eslint.config.*``, …) are not treated as application source. Dotenv
+    templates such as ``.env.example`` do not enable dotenv tools.
 
     Args:
         root: Directory (or file, whose parent is used) to scan. ``None``
@@ -213,26 +318,16 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
         except (ImportError, OSError, ValueError):
             all_deps = {}
 
-    if has_package_json or _has_source_files(
+    if has_package_json or _has_project_file(
         cwd,
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".cjs",
+        match=_is_javascript_application_source,
     ):
         langs.add("javascript")
 
     if (
         (cwd / "tsconfig.json").exists()
         or "typescript" in all_deps
-        or _has_source_files(
-            cwd,
-            ".ts",
-            ".tsx",
-            ".mts",
-            ".cts",
-            exclude_name_suffix=".d.ts",
-        )
+        or _has_project_file(cwd, match=_is_typescript_application_source)
     ):
         langs.add("typescript")
 

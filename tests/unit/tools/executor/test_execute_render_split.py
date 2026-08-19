@@ -370,6 +370,45 @@ def test_execute_run_hides_detection_notice_on_machine_or_score_output(
     assert_that(_console_texts(fake_logger)).does_not_contain("No config found")
 
 
+def test_execute_run_forwards_paths_as_scan_roots(
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """Default chk/fmt runs pass scan paths into language detection.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        executor_doubles: Neutralized executor collaborators.
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_get_tools(
+        tools: str | None,
+        action: object,
+        **kwargs: object,
+    ) -> ToolsToRunResult:
+        captured["tools"] = tools
+        captured["scan_roots"] = kwargs.get("scan_roots")
+        return ToolsToRunResult(to_run=["ruff"])
+
+    monkeypatch.setattr(te, "get_tools_to_run", fake_get_tools)
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=0),
+    )
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+
+    _run_execute(ctx=ctx, tools=None, paths=["src/app.py"])
+
+    assert_that(captured["tools"]).is_none()
+    assert_that(captured["scan_roots"]).is_equal_to(["src/app.py"])
+
+
 def test_execute_run_marks_an_unknown_tool_selection_as_early_exit(
     monkeypatch: pytest.MonkeyPatch,
     executor_doubles: None,

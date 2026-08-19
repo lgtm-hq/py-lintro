@@ -330,6 +330,46 @@ def test_detect_dotenv_ignores_envrc(
     assert_that(langs).does_not_contain("dotenv")
 
 
+def test_detect_dotenv_ignores_example_template(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Template dotenv files such as ``.env.example`` do not select dotenv tools.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / ".env.example").write_text("FOO=bar\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("dotenv")
+
+
+def test_detect_javascript_ignores_toolchain_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Root toolchain configs such as ``eslint.config.js`` are not JS source.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "eslint.config.js").write_text("export default [];\n", encoding="utf-8")
+    (tmp_path / "commitlint.config.js").write_text(
+        "module.exports = {};\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("python")
+    assert_that(langs).does_not_contain("javascript", "typescript")
+
+
 def test_detect_vue_via_source_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -483,7 +483,7 @@ def test_commitlint_included_when_native_config_present(
 
     assert_that(result.scoped_by_detection).is_true()
     assert_that(result.to_run).contains("commitlint", "ruff")
-    assert_that(result.to_run).does_not_contain("clippy")
+    assert_that(result.to_run).does_not_contain("clippy", "prettier", "oxlint", "tsc")
 
 
 def test_commitlint_omitted_without_native_config(
