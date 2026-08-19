@@ -455,7 +455,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
         ("acme/pr-checkout@1", True),
         ("acme/pr-checkout-action@1", True),
         ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
-        ("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9", False),
+        ("astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d", False),
     ],
     ids=[
         "pinned-actions-checkout",
@@ -716,7 +716,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     [
         "step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c",
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9",
+        "astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
         "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
     ],
