@@ -7,7 +7,7 @@
       "dependencies": {
         "@astrojs/markdown-remark": "^7.2.2",
         "@astrojs/sitemap": "^3.7.3",
-        "@lgtm-hq/turbo-themes": "0.41.14",
+        "@lgtm-hq/turbo-themes": "0.41.17",
         "astro": "7.2.2",
         "rehype-parse": "^9.0.1",
         "sanitize-html": "^2.17.5",
@@ -244,7 +244,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lgtm-hq/turbo-themes": ["@lgtm-hq/turbo-themes@0.41.14", "", {}, "sha512-THkq8XIZjUBD98Ex+8EeVmJ4xw6/IBsd0s1iA4EeSuBtiD7K/eueH3/sWTTaJX+bVPgZfCWjCsqzJ//ibXP1lg=="],
+    "@lgtm-hq/turbo-themes": ["@lgtm-hq/turbo-themes@0.41.17", "", {}, "sha512-VdaiKXb6C2caf9wktflRWRRcyANnVca7q9+gvNqX6vze2/k009D8KEU7hSNbQfw+m1w25D//xHZ7WTNjDS21DQ=="],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.2.3", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || ^2.0.0-alpha.4", "@emnapi/runtime": "^1.7.1 || ^2.0.0-alpha.4" } }, "sha512-UMduMbqO5s5zF2NkNacMT/yK5Y5QiKvWr2+50bzIIxFDwVJ2h49b+oyjaCGPhJxd2/gC2x39EHv/gHVuu36x2Q=="],
 
