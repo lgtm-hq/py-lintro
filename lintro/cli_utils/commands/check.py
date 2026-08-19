@@ -27,7 +27,11 @@ DEFAULT_ACTION: str = "check"
 @click.option(
     "--tools",
     type=str,
-    help='Comma-separated list of tools to run. Use "all" to run all available tools.',
+    help=(
+        "Comma-separated list of tools to run. Omit to use the workspace "
+        "config or, with no config, the language-detected toolset. Use "
+        '"all" to run every available tool.'
+    ),
 )
 @click.option(
     "--tool-options",

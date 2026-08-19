@@ -40,9 +40,22 @@ configure specific commands rather than tool resolution.
 The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
-   - `enabled_tools`: Empty list means all enabled tools run. An explicit named
-     `--tools` list on the CLI bypasses this allowlist; default runs and `--tools all`
-     remain filtered by it.
+   - `enabled_tools`: Empty list means all enabled tools run **when a config file is
+     present** (`.lintro-config.yaml` or a **non-empty** `[tool.lintro]` table in
+     `pyproject.toml`). A no-config first run scopes tools to languages detected from
+     manifests **and** source files (a directory of `*.py` / `*.js` with no
+     `pyproject.toml` / `package.json` still selects ruff/prettier). Use `--tools all`
+     or `lintro init` for the full registry. An empty `[tool.lintro]` table is not a
+     config, so language scoping still applies. An explicit named `--tools` list on the
+     CLI bypasses this allowlist; default runs and `--tools all` remain filtered by it.
+     This is a feat/minor default change: kitchen-sink CI that relied on the unscoped
+     no-config toolset should pass `--tools all` or add a config file. Detection uses
+     the chk/fmt scan paths (a file uses its parent directory; multiple paths are
+     unioned). When no paths are given the default is `.` (the current working
+     directory). Tools that are not in the language map (for example `commitlint`) are
+     still selected when their native config file is present at a scan root. Nested
+     YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
+     tools.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
@@ -99,7 +112,7 @@ Create a `.lintro-config.yaml` in your project root:
 ```yaml
 # Tier 1: EXECUTION - What tools run and how
 execution:
-  enabled_tools: [] # Empty = all enabled tools run
+  enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
   tool_order: priority # priority | alphabetical | [custom list]
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
@@ -342,7 +355,7 @@ lintro check --group-by [file|code|none|auto|category] # Group issues
 
 # Tool selection
 lintro check --tools ruff,prettier           # Run specific tools only
-lintro check --all                           # Run all available tools
+lintro check --tools all                     # Run all available tools
 
 # File filtering
 lintro check --exclude "*.pyc,venv"          # Exclude patterns
@@ -2978,7 +2991,7 @@ lintro check --exclude "venv,node_modules,migrations"
 lintro check --tools ruff
 
 # Full analysis for main branch
-lintro check --all --output full-report.txt
+lintro check --tools all --output full-report.txt
 ```
 
 ### Custom Output Formats
@@ -3060,7 +3073,7 @@ check: lint
 
 # Comprehensive quality report
 quality:
-	lintro check --all --output quality-report.txt
+	lintro check --tools all --output quality-report.txt
 	@echo "Full quality report saved to quality-report.txt"
 
 # Tool installation

@@ -25,8 +25,11 @@ class ExecutionConfig(BaseModel):
     Attributes:
         model_config: Pydantic model configuration.
         enabled_tools: List of tool names to run on default (no ``--tools``)
-            and ``--tools all`` runs. If empty/None, all tools run. An
-            explicit comma-separated ``--tools`` list bypasses this allowlist.
+            and ``--tools all`` runs. If empty/None and a config file is
+            present, all tools run. A no-config first run is instead scoped
+            to detected languages (use ``--tools all`` or ``lintro init``
+            for the full set). An explicit comma-separated ``--tools`` list
+            bypasses this allowlist.
         tool_order: Execution order strategy. One of:
             - "priority": Use default priority (formatters before linters)
             - "alphabetical": Alphabetical order

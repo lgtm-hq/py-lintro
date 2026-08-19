@@ -114,7 +114,12 @@ def workspace_session(*, workspace: Path) -> Iterator[None]:
             clear_config_cache()
 
 
-def resolve_tools_to_run(*, tools: list[str] | None, action: Action) -> list[str]:
+def resolve_tools_to_run(
+    *,
+    tools: list[str] | None,
+    action: Action,
+    scan_roots: list[str] | None = None,
+) -> list[str]:
     """Resolve the tool names a run would execute, validating any subset.
 
     Must be called inside :func:`workspace_session`, because tool selection
@@ -124,6 +129,8 @@ def resolve_tools_to_run(*, tools: list[str] | None, action: Action) -> list[str
         tools: Requested tool names, or ``None``/empty for the default set.
         action: The action the run will perform, which decides whether a tool
             that cannot fix is acceptable.
+        scan_roots: Files or directories used for language-scoped first-run
+            selection. ``None`` detects from the workspace cwd.
 
     Returns:
         list[str]: Tool names the run will execute, in execution order.
@@ -141,7 +148,12 @@ def resolve_tools_to_run(*, tools: list[str] | None, action: Action) -> list[str
 
     requested = ",".join(tools) if tools else None
     try:
-        selection = get_tools_to_run(requested, action, ignore_conflicts=False)
+        selection = get_tools_to_run(
+            tools=requested,
+            action=action,
+            ignore_conflicts=False,
+            scan_roots=scan_roots,
+        )
     except ValueError as exc:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,

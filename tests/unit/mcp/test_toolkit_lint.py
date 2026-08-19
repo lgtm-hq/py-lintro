@@ -19,6 +19,7 @@ from assertpy import assert_that
 from mcp.client import Client
 from mcp.types import CallToolResult, Tool
 
+from lintro.mcp.toolkits.lint import build_lint_toolkit
 from tests.unit.mcp.session_helpers import payload_from_result, run_in_memory_client
 
 _T = TypeVar("_T")
@@ -94,6 +95,21 @@ def workspace(tmp_path: Path) -> Path:
     """
     (tmp_path / "bad.py").write_text(_UNFORMATTED, encoding="utf-8")
     return tmp_path.resolve()
+
+
+def test_lint_tools_schema_describes_language_scoped_default(
+    tmp_path: Path,
+) -> None:
+    """MCP check/format tools advertise the no-config language-detected default.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    specs = {spec.name: spec for spec in build_lint_toolkit(workspace=tmp_path)}
+    for name in ("lintro_check", "lintro_format"):
+        description = specs[name].input_schema["properties"]["tools"]["description"]
+        assert_that(description).contains("language-detected")
+        assert_that(description).contains("['all']")
 
 
 def test_lint_tools_are_listed_with_their_annotations(workspace: Path) -> None:

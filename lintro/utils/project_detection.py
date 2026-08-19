@@ -1,42 +1,289 @@
 """Project language and package manager detection.
 
-Scans the current working directory for language/framework indicators
-and available package managers.  Used by the ``setup`` and ``install``
-commands so that the detection logic lives in a single shared module.
+Scans a project tree for language/framework indicators and available
+package managers. Used by the ``setup`` and ``install`` commands and by
+no-config first-run tool selection. Pass ``root=`` to inspect a directory
+other than the current working directory.
 
 Usage:
     from lintro.utils.project_detection import detect_project_languages
 
     langs = detect_project_languages()   # ["docker", "python", "typescript"]
+    langs = detect_project_languages(root=Path("src"))
 """
 
 from __future__ import annotations
 
+import os
 import shutil
-from itertools import chain
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
-# Directories that never carry first-party project markers; excluded from the
-# recursive scans below to avoid false positives from vendored/generated trees.
+# Directories that never carry first-party project markers. Pruned during
+# os.walk so vendored/generated trees are not even entered.
 _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
-    {"node_modules", ".venv", "venv", "vendor", ".git", "__pycache__"},
+    {
+        "node_modules",
+        ".venv",
+        "venv",
+        "vendor",
+        ".git",
+        "__pycache__",
+        "build",
+        "dist",
+        "target",
+        ".tox",
+        "site-packages",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        "htmlcov",
+    },
+)
+
+# JS/TS toolchain configs that must not count as application source.
+_JS_TOOLING_CONFIG_STEMS: frozenset[str] = frozenset(
+    {
+        "commitlint.config",
+        "eslint.config",
+        "prettier.config",
+        "babel.config",
+        "webpack.config",
+        "vite.config",
+        "vitest.config",
+        "jest.config",
+        "rollup.config",
+        "tailwind.config",
+        "postcss.config",
+        "svelte.config",
+        "astro.config",
+        "next.config",
+        "nuxt.config",
+        "vue.config",
+        "remix.config",
+    },
+)
+_JS_TOOLING_EXACT_NAMES: frozenset[str] = frozenset(
+    {
+        ".eslintrc.js",
+        ".eslintrc.cjs",
+        ".eslintrc.mjs",
+        ".prettierrc.js",
+        ".prettierrc.cjs",
+        ".prettierrc.mjs",
+        ".commitlintrc.js",
+        ".commitlintrc.cjs",
+        ".commitlintrc.mjs",
+        "karma.conf.js",
+        "karma.conf.cjs",
+    },
+)
+_JS_TOOLING_SUFFIXES: tuple[str, ...] = (
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".mts",
+    ".cts",
 )
 
 
-def detect_project_languages() -> list[str]:
-    """Detect all languages and ecosystems in the current project.
+def _iter_project_files(cwd: Path) -> Iterator[Path]:
+    """Yield first-party files under *cwd*, pruning vendored directories.
+
+    Args:
+        cwd: Project root to scan.
+
+    Yields:
+        Path: File paths that are not inside ``_VENDOR_SKIP_DIRS``.
+    """
+    for dirpath, dirnames, filenames in os.walk(cwd, topdown=True):
+        dirnames[:] = [name for name in dirnames if name not in _VENDOR_SKIP_DIRS]
+        for filename in filenames:
+            yield Path(dirpath) / filename
+
+
+def _has_project_file(
+    cwd: Path,
+    *,
+    match: Callable[[Path], bool],
+) -> bool:
+    """Return True if any first-party file satisfies *match*.
+
+    Args:
+        cwd: Project root to scan.
+        match: Predicate applied to each walked file.
+
+    Returns:
+        True when the first matching file is found.
+    """
+    return any(match(path) for path in _iter_project_files(cwd))
+
+
+def _has_source_files(
+    cwd: Path,
+    *suffixes: str,
+    exclude_name_suffix: str | None = None,
+) -> bool:
+    """Return True if any first-party file uses one of *suffixes*.
+
+    Walks the tree with vendored directories pruned. Suffixes include the
+    leading dot (e.g. ``.py``).
+
+    Args:
+        cwd: Project root to scan.
+        *suffixes: Filename suffixes to accept (``".py"``, ``".js"``, …).
+        exclude_name_suffix: Optional filename suffix to skip (e.g. ``.d.ts``).
+
+    Returns:
+        True when at least one matching first-party file exists.
+    """
+    suffix_set = {suffix.lower() for suffix in suffixes}
+
+    def _match(path: Path) -> bool:
+        if exclude_name_suffix is not None and path.name.endswith(exclude_name_suffix):
+            return False
+        return path.suffix.lower() in suffix_set or any(
+            path.name.lower().endswith(suffix) for suffix in suffix_set
+        )
+
+    return _has_project_file(cwd, match=_match)
+
+
+def _is_requirements_file(path: Path) -> bool:
+    """Return True if *path* looks like a pip requirements file.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``requirements*.txt`` or ``requirements/*.txt``.
+    """
+    if path.suffix != ".txt":
+        return False
+    return path.name.startswith("requirements") or path.parent.name == "requirements"
+
+
+def _is_dotenv_file(path: Path) -> bool:
+    """Return True if *path* is a dotenv file, not direnv or a template.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.env`` and ``.env.<environment>`` (e.g. ``.env.local``),
+        not ``.envrc`` or templates such as ``.env.example``.
+    """
+    name = path.name
+    if name != ".env" and not name.startswith(".env."):
+        return False
+    lowered = name.lower()
+    return not any(
+        lowered.endswith(suffix)
+        for suffix in (".example", ".sample", ".template", ".dist")
+    )
+
+
+def _is_js_tooling_config(*, path: Path) -> bool:
+    """Return True if *path* is a JS/TS toolchain config, not app source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for files such as ``commitlint.config.js`` or ``eslint.config.ts``.
+    """
+    lowered = path.name.lower()
+    if lowered in _JS_TOOLING_EXACT_NAMES:
+        return True
+    for suffix in _JS_TOOLING_SUFFIXES:
+        if lowered.endswith(suffix):
+            stem = lowered[: -len(suffix)]
+            return stem in _JS_TOOLING_CONFIG_STEMS
+    return False
+
+
+def _is_javascript_application_source(path: Path) -> bool:
+    """Return True if *path* is first-party JavaScript application source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.js``/``.jsx``/``.mjs``/``.cjs`` that are not toolchain configs.
+    """
+    if _is_js_tooling_config(path=path):
+        return False
+    return path.suffix.lower() in {".js", ".jsx", ".mjs", ".cjs"}
+
+
+def _is_typescript_application_source(path: Path) -> bool:
+    """Return True if *path* is first-party TypeScript application source.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.ts``/``.tsx``/``.mts``/``.cts`` excluding ``*.d.ts`` and
+        toolchain configs such as ``commitlint.config.ts``.
+    """
+    if path.name.endswith(".d.ts"):
+        return False
+    if _is_js_tooling_config(path=path):
+        return False
+    return path.suffix.lower() in {".ts", ".tsx", ".mts", ".cts"}
+
+
+def _is_yaml_content(path: Path) -> bool:
+    """Return True if *path* is generic YAML, not compose or Actions workflow.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for first-party YAML that should select yamllint.
+    """
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        return False
+    if path.name in {
+        ".lintro-config.yaml",
+        ".lintro-config.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    }:
+        return False
+    parts = set(path.parts)
+    return not (".github" in parts and "workflows" in parts)
+
+
+def detect_project_languages(*, root: Path | None = None) -> list[str]:
+    """Detect all languages and ecosystems in a project tree.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
-    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, and
-    TOML by inspecting manifest files, directory structure, and file extensions.
+    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
+    HTML, CSS, and dotenv files by inspecting manifests, directories, and
+    source-file extensions. Language tools still run in source-only trees that
+    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Nested
+    YAML/Markdown/shell files count; a single root README.md does not enable
+    Markdown tools. JS/TS toolchain configs (``commitlint.config.js``,
+    ``eslint.config.*``, …) are not treated as application source. Dotenv
+    templates such as ``.env.example`` do not enable dotenv tools.
+
+    Args:
+        root: Directory (or file, whose parent is used) to scan. ``None``
+            inspects ``Path.cwd()``.
 
     Returns:
         Sorted list of lowercase language/ecosystem identifiers.
     """
-    cwd = Path.cwd()
+    cwd = (root or Path.cwd()).resolve()
+    if cwd.is_file():
+        cwd = cwd.parent
     langs: set[str] = set()
 
-    # Python — include requirements-only projects so pip_audit is selected.
+    # Python — manifests, requirements files, or a first-party ``*.py``.
     # Requirements files are discovered recursively (e.g. ``requirements/base.txt``
     # or ``services/api/requirements.txt``); vendored/generated trees are skipped
     # and next() short-circuits so at most one file is visited.
@@ -45,47 +292,16 @@ def detect_project_languages() -> list[str]:
         or (cwd / "setup.py").exists()
         or (cwd / "setup.cfg").exists()
         or (cwd / "Pipfile").exists()
-        or next(
-            (
-                p
-                for p in chain(
-                    cwd.glob("**/requirements*.txt"),
-                    cwd.glob("**/requirements/*.txt"),
-                )
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
+        or _has_project_file(cwd, match=_is_requirements_file)
+        or _has_source_files(cwd, ".py", ".pyi")
     ):
         langs.add("python")
 
-    # JavaScript / TypeScript
-    if (cwd / "package.json").exists():
-        langs.add("javascript")
-
-        # TypeScript detection — next() short-circuits so at most one file
-        # is visited per glob pattern, avoiding a full tree scan.
-        if (
-            (cwd / "tsconfig.json").exists()
-            or next(
-                (
-                    p
-                    for p in cwd.glob("**/*.ts")
-                    if "node_modules" not in p.parts and not p.name.endswith(".d.ts")
-                ),
-                None,
-            )
-            is not None
-            or next(
-                (p for p in cwd.glob("**/*.tsx") if "node_modules" not in p.parts),
-                None,
-            )
-            is not None
-        ):
-            langs.add("typescript")
-
-        # Framework detection from package.json
+    # JavaScript / TypeScript — package.json *or* source files so a folder of
+    # ``.js`` / ``.ts`` without a manifest still selects prettier/oxlint/tsc.
+    has_package_json = (cwd / "package.json").exists()
+    all_deps: dict[str, object] = {}
+    if has_package_json:
         try:
             import json
 
@@ -99,34 +315,43 @@ def detect_project_languages() -> list[str]:
             if not isinstance(dev_deps, dict):
                 dev_deps = {}
             all_deps = {**deps, **dev_deps}
-            if "typescript" in all_deps:
-                langs.add("typescript")
-            if "astro" in all_deps:
-                langs.add("astro")
-            if "svelte" in all_deps:
-                langs.add("svelte")
-            if "vue" in all_deps:
-                langs.add("vue")
         except (ImportError, OSError, ValueError):
-            pass
+            all_deps = {}
+
+    if has_package_json or _has_project_file(
+        cwd,
+        match=_is_javascript_application_source,
+    ):
+        langs.add("javascript")
+
+    if (
+        (cwd / "tsconfig.json").exists()
+        or "typescript" in all_deps
+        or _has_project_file(cwd, match=_is_typescript_application_source)
+    ):
+        langs.add("typescript")
+
+    if "astro" in all_deps or _has_source_files(cwd, ".astro"):
+        langs.add("astro")
+    if "svelte" in all_deps or _has_source_files(cwd, ".svelte"):
+        langs.add("svelte")
+    if "vue" in all_deps or _has_source_files(cwd, ".vue"):
+        langs.add("vue")
 
     # Rust
-    if (cwd / "Cargo.toml").exists():
+    if (cwd / "Cargo.toml").exists() or _has_source_files(cwd, ".rs"):
         langs.add("rust")
 
     # Go
-    if (cwd / "go.mod").exists():
+    if (cwd / "go.mod").exists() or _has_source_files(cwd, ".go"):
         langs.add("go")
 
     # Ruby
-    if (cwd / "Gemfile").exists():
+    if (cwd / "Gemfile").exists() or _has_source_files(cwd, ".rb"):
         langs.add("ruby")
 
-    # Shell scripts (root *.sh or .sh files inside scripts/)
-    scripts_dir = cwd / "scripts"
-    if next(cwd.glob("*.sh"), None) is not None or (
-        scripts_dir.is_dir() and next(scripts_dir.glob("*.sh"), None) is not None
-    ):
+    # Shell scripts anywhere in the tree (not only root / scripts/).
+    if _has_source_files(cwd, ".sh"):
         langs.add("shell")
 
     # Docker (Dockerfile, docker-compose, and standalone compose files)
@@ -146,44 +371,40 @@ def detect_project_languages() -> list[str]:
     if (cwd / ".github" / "workflows").is_dir():
         langs.add("github_actions")
 
-    # SQL — next() short-circuits so only one file is visited.
-    if (
-        next(
-            (
-                p
-                for p in cwd.glob("**/*.sql")
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
-    ):
+    # SQL
+    if _has_source_files(cwd, ".sql"):
         langs.add("sql")
 
-    # YAML (beyond config files — actual YAML content)
-    config_names = {
-        ".lintro-config.yaml",
-        ".lintro-config.yml",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-    }
-    if any(
-        f.name not in config_names for f in chain(cwd.glob("*.yaml"), cwd.glob("*.yml"))
-    ):
+    # YAML (beyond compose / lintro config / Actions workflows).
+    if _has_project_file(cwd, match=_is_yaml_content):
         langs.add("yaml")
 
-    # Markdown (more than just README)
-    for md_count, _ in enumerate(cwd.glob("*.md"), 1):
-        if md_count >= 2:
-            langs.add("markdown")
-            break
+    # Markdown (more than just a lone README; nested docs/ counts).
+    md_count = 0
+    for path in _iter_project_files(cwd):
+        if path.suffix.lower() == ".md":
+            md_count += 1
+            if md_count >= 2:
+                langs.add("markdown")
+                break
 
     # TOML (beyond pyproject.toml / Cargo.toml)
-    toml_files = [
-        f for f in cwd.glob("*.toml") if f.name not in ("pyproject.toml", "Cargo.toml")
-    ]
-    if toml_files:
+    if _has_project_file(
+        cwd,
+        match=lambda path: (
+            path.suffix.lower() == ".toml"
+            and path.name not in ("pyproject.toml", "Cargo.toml")
+        ),
+    ):
         langs.add("toml")
+
+    # Markup and stylesheets that language_map already knows about.
+    if _has_source_files(cwd, ".html", ".htm"):
+        langs.add("html")
+    if _has_source_files(cwd, ".css", ".scss", ".sass", ".less"):
+        langs.add("css")
+    if _has_project_file(cwd, match=_is_dotenv_file):
+        langs.add("dotenv")
 
     # Prose/documentation formats beyond Markdown (vale targets).
     docs_dir = cwd / "docs"

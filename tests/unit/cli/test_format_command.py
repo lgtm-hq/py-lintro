@@ -26,6 +26,7 @@ def test_format_command_help(cli_runner: CliRunner) -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("Format")
+    assert_that(result.output).contains("language-detected")
 
 
 def test_format_command_default_paths(

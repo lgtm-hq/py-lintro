@@ -48,9 +48,10 @@ _TOOLS_SCHEMA: Final[dict[str, Any]] = {
     "type": "array",
     "items": {"type": "string"},
     "description": (
-        "Subset of lintro tools to run (e.g. ['ruff', 'prettier']). Defaults "
-        "to every tool enabled for this action by the workspace config. "
-        "Advisory AI finders are not selectable here."
+        "Subset of lintro tools to run (e.g. ['ruff', 'prettier']). Omit to "
+        "use the workspace config or, with no config, the language-detected "
+        "toolset. Pass ['all'] for the full registry. Advisory AI finders "
+        "are not selectable here."
     ),
 }
 
@@ -180,7 +181,11 @@ def _check_handler(
             # Selection is resolved up front because ``execute_run`` folds a
             # bad tool name into a console message and an early-exit artifact,
             # which would reach the agent as "a run with no findings".
-            resolve_tools_to_run(tools=tools, action=Action.CHECK)
+            resolve_tools_to_run(
+                tools=tools,
+                action=Action.CHECK,
+                scan_roots=paths,
+            )
             artifact = run_lintro(action=Action.CHECK, paths=paths, tools=tools)
         return _run_payload(
             artifact=artifact,
@@ -210,7 +215,11 @@ def _format_handler(
         dry_run = bool(arguments.get("dry_run", True))
 
         with workspace_session(workspace=workspace):
-            to_run = resolve_tools_to_run(tools=tools, action=Action.FIX)
+            to_run = resolve_tools_to_run(
+                tools=tools,
+                action=Action.FIX,
+                scan_roots=paths,
+            )
             snapshot = snapshot_files(paths=paths, tool_names=to_run)
             try:
                 artifact = run_lintro(action=Action.FIX, paths=paths, tools=tools)

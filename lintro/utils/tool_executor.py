@@ -449,6 +449,7 @@ def execute_run(
             tools,
             ctx.selection_action,
             ignore_conflicts=ignore_conflicts,
+            scan_roots=list(paths),
         )
     except ValueError as e:
         logger.console_output(f"Error: {e}")
@@ -460,6 +461,24 @@ def execute_run(
 
     tools_to_run = tools_result.to_run
     skipped_tools = tools_result.skipped
+
+    # On a no-config first run the toolset is scoped to detected languages;
+    # tell the user what was selected and how to customize. Suppressed for
+    # machine-readable stdout and score-only mode.
+    if (
+        tools_result.scoped_by_detection
+        and not ctx.clean_stdout_output
+        and not ctx.score_only
+    ):
+        from lintro.utils.execution.tool_configuration import format_detection_notice
+
+        logger.console_output(
+            text=format_detection_notice(
+                detected_languages=tools_result.detected_languages,
+                to_run=tools_to_run,
+            ),
+            color="cyan",
+        )
 
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")

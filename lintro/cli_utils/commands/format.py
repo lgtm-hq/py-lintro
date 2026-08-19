@@ -19,7 +19,11 @@ DEFAULT_ACTION: str = "fmt"
 @click.option(
     "--tools",
     default=None,
-    help="Comma-separated list of tools to run (e.g., ruff,black) or 'all'.",
+    help=(
+        "Comma-separated list of tools to run (e.g., ruff,black). Omit to "
+        "use the workspace config or, with no config, the language-detected "
+        "toolset. Use 'all' to run every available tool."
+    ),
 )
 @click.option(
     "--tool-options",
