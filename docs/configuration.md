@@ -41,11 +41,17 @@ The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
    - `enabled_tools`: Empty list means all enabled tools run **when a config
-     file is present**. A no-config first run scopes tools to detected
-     languages (use `--tools all` or `lintro init` for the full set). An
-     explicit named `--tools` list on the CLI bypasses this allowlist; default
-     runs and `--tools all`
-     remain filtered by it.
+     file is present** (`.lintro-config.yaml` or a **non-empty**
+     `[tool.lintro]` table in `pyproject.toml`). A no-config first run
+     scopes tools to languages detected from manifests **and** source files
+     (a directory of `*.py` / `*.js` with no `pyproject.toml` /
+     `package.json` still selects ruff/prettier). Use `--tools all` or
+     `lintro init` for the full registry. An empty `[tool.lintro]` table is
+     not a config, so language scoping still applies. An explicit named
+     `--tools` list on the CLI bypasses this allowlist; default runs and
+     `--tools all` remain filtered by it. This is a feat/minor default
+     change: kitchen-sink CI that relied on the unscoped no-config toolset
+     should pass `--tools all` or add a config file.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
@@ -102,7 +108,7 @@ Create a `.lintro-config.yaml` in your project root:
 ```yaml
 # Tier 1: EXECUTION - What tools run and how
 execution:
-  enabled_tools: [] # Empty = all enabled tools run
+  enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
   tool_order: priority # priority | alphabetical | [custom list]
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)

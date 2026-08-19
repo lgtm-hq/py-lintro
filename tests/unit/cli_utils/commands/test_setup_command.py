@@ -162,6 +162,93 @@ def test_detect_empty_project(
     assert_that(langs).is_empty()
 
 
+def test_detect_python_via_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Python from a lone ``*.py`` with no project manifest."""
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("python")
+
+
+def test_detect_python_ignores_vendored_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``*.py`` only inside a vendored tree does not mark Python."""
+    vendored = tmp_path / ".venv" / "lib"
+    vendored.mkdir(parents=True)
+    (vendored / "sitecustomize.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("python")
+
+
+def test_detect_javascript_via_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect JavaScript from a lone ``*.js`` with no package.json."""
+    (tmp_path / "index.js").write_text("console.log(1)\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("javascript")
+    assert_that(langs).does_not_contain("typescript")
+
+
+def test_detect_typescript_via_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect TypeScript from a lone ``*.ts`` with no package.json."""
+    (tmp_path / "index.ts").write_text("export const x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("typescript")
+
+
+def test_detect_typescript_ignores_declaration_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A vendored-style ``*.d.ts`` alone does not mark TypeScript."""
+    (tmp_path / "index.d.ts").write_text("export {}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("typescript")
+
+
+def test_detect_rust_via_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Rust from a lone ``*.rs`` with no Cargo.toml."""
+    (tmp_path / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("rust")
+
+
+def test_detect_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect dotenv from a ``.env`` file."""
+    (tmp_path / ".env").write_text("FOO=bar\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("dotenv")
+
+
 # ── detect_package_managers ──────────────────────────────────────────
 
 

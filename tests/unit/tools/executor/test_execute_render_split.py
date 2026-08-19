@@ -262,6 +262,114 @@ def test_execute_run_streams_results_through_the_callback(
     assert_that(seen).is_equal_to(["ruff"])
 
 
+def _console_texts(fake_logger: Any) -> str:
+    """Join all console_output text passed to the fake logger.
+
+    Args:
+        fake_logger: FakeLogger instance whose calls were recorded.
+
+    Returns:
+        A single string of all console_output text arguments.
+    """
+    parts: list[str] = []
+    for name, args, kwargs in fake_logger.calls:
+        if name != "console_output":
+            continue
+        if "text" in kwargs:
+            parts.append(str(kwargs["text"]))
+        elif args:
+            parts.append(str(args[0]))
+    return "\n".join(parts)
+
+
+def test_execute_run_prints_detection_notice_on_human_output(
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """A language-scoped run prints the no-config notice on human output.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        executor_doubles: Neutralized executor collaborators.
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(
+            to_run=["ruff"],
+            detected_languages=["python"],
+            scoped_by_detection=True,
+        ),
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=0),
+    )
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+
+    _run_execute(ctx=ctx, tools=None)
+
+    assert_that(_console_texts(fake_logger)).contains("No config found")
+    assert_that(_console_texts(fake_logger)).contains("lintro init")
+
+
+@pytest.mark.parametrize(
+    ("output_format", "score_only"),
+    [
+        ("json", False),
+        ("grid", True),
+    ],
+    ids=["json", "score-only"],
+)
+def test_execute_run_hides_detection_notice_on_machine_or_score_output(
+    monkeypatch: pytest.MonkeyPatch,
+    executor_doubles: None,
+    tmp_path: Path,
+    fake_logger: Any,
+    output_format: str,
+    score_only: bool,
+) -> None:
+    """JSON stdout and ``--score`` suppress the language-scope notice.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        executor_doubles: Neutralized executor collaborators.
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        output_format: Output format the run was asked for.
+        score_only: Whether stdout carries only the numeric score.
+    """
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(
+            to_run=["ruff"],
+            detected_languages=["python"],
+            scoped_by_detection=True,
+        ),
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool",
+        lambda name: _FakeTool(issues_count=0),
+    )
+    ctx = _context(
+        tmp_path=tmp_path,
+        fake_logger=fake_logger,
+        output_format=output_format,
+        score_only=score_only,
+    )
+
+    _run_execute(ctx=ctx, tools=None, output_format=output_format)
+
+    assert_that(_console_texts(fake_logger)).does_not_contain("No config found")
+
+
 def test_execute_run_marks_an_unknown_tool_selection_as_early_exit(
     monkeypatch: pytest.MonkeyPatch,
     executor_doubles: None,

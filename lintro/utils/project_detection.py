@@ -1,8 +1,8 @@
 """Project language and package manager detection.
 
 Scans the current working directory for language/framework indicators
-and available package managers.  Used by the ``setup`` and ``install``
-commands so that the detection logic lives in a single shared module.
+and available package managers. Used by the ``setup`` and ``install``
+commands and by no-config first-run tool selection.
 
 Usage:
     from lintro.utils.project_detection import detect_project_languages
@@ -23,13 +23,53 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
 )
 
 
+def _has_source_files(
+    cwd: Path,
+    *patterns: str,
+    exclude_name_suffix: str | None = None,
+) -> bool:
+    """Return True if any non-vendored file matches one of *patterns*.
+
+    Globs short-circuit on the first match so a large tree is not fully
+    walked. Vendored and generated directories listed in
+    ``_VENDOR_SKIP_DIRS`` are ignored.
+
+    Args:
+        cwd: Project root to scan.
+        *patterns: Glob patterns relative to *cwd*.
+        exclude_name_suffix: Optional filename suffix to skip (e.g. ``.d.ts``).
+
+    Returns:
+        True when at least one matching first-party file exists.
+    """
+    return (
+        next(
+            (
+                path
+                for path in chain.from_iterable(
+                    cwd.glob(pattern) for pattern in patterns
+                )
+                if path.is_file()
+                and not _VENDOR_SKIP_DIRS.intersection(path.parts)
+                and (
+                    exclude_name_suffix is None
+                    or not path.name.endswith(exclude_name_suffix)
+                )
+            ),
+            None,
+        )
+        is not None
+    )
+
+
 def detect_project_languages() -> list[str]:
     """Detect all languages and ecosystems in the current project.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
     Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
     HTML, CSS, and dotenv files by inspecting manifests, directories, and
-    extensions.
+    source-file extensions. Language tools still run in source-only trees that
+    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``.
 
     Returns:
         Sorted list of lowercase language/ecosystem identifiers.
@@ -37,7 +77,7 @@ def detect_project_languages() -> list[str]:
     cwd = Path.cwd()
     langs: set[str] = set()
 
-    # Python — include requirements-only projects so pip_audit is selected.
+    # Python — manifests, requirements files, or a first-party ``*.py``.
     # Requirements files are discovered recursively (e.g. ``requirements/base.txt``
     # or ``services/api/requirements.txt``); vendored/generated trees are skipped
     # and next() short-circuits so at most one file is visited.
@@ -46,47 +86,20 @@ def detect_project_languages() -> list[str]:
         or (cwd / "setup.py").exists()
         or (cwd / "setup.cfg").exists()
         or (cwd / "Pipfile").exists()
-        or next(
-            (
-                p
-                for p in chain(
-                    cwd.glob("**/requirements*.txt"),
-                    cwd.glob("**/requirements/*.txt"),
-                )
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
+        or _has_source_files(
+            cwd,
+            "**/requirements*.txt",
+            "**/requirements/*.txt",
         )
-        is not None
+        or _has_source_files(cwd, "**/*.py", "**/*.pyi")
     ):
         langs.add("python")
 
-    # JavaScript / TypeScript
-    if (cwd / "package.json").exists():
-        langs.add("javascript")
-
-        # TypeScript detection — next() short-circuits so at most one file
-        # is visited per glob pattern, avoiding a full tree scan.
-        if (
-            (cwd / "tsconfig.json").exists()
-            or next(
-                (
-                    p
-                    for p in cwd.glob("**/*.ts")
-                    if "node_modules" not in p.parts and not p.name.endswith(".d.ts")
-                ),
-                None,
-            )
-            is not None
-            or next(
-                (p for p in cwd.glob("**/*.tsx") if "node_modules" not in p.parts),
-                None,
-            )
-            is not None
-        ):
-            langs.add("typescript")
-
-        # Framework detection from package.json
+    # JavaScript / TypeScript — package.json *or* source files so a folder of
+    # ``.js`` / ``.ts`` without a manifest still selects prettier/oxlint/tsc.
+    has_package_json = (cwd / "package.json").exists()
+    all_deps: dict[str, object] = {}
+    if has_package_json:
         try:
             import json
 
@@ -100,27 +113,49 @@ def detect_project_languages() -> list[str]:
             if not isinstance(dev_deps, dict):
                 dev_deps = {}
             all_deps = {**deps, **dev_deps}
-            if "typescript" in all_deps:
-                langs.add("typescript")
-            if "astro" in all_deps:
-                langs.add("astro")
-            if "svelte" in all_deps:
-                langs.add("svelte")
-            if "vue" in all_deps:
-                langs.add("vue")
         except (ImportError, OSError, ValueError):
-            pass
+            all_deps = {}
+
+    if has_package_json or _has_source_files(
+        cwd,
+        "**/*.js",
+        "**/*.jsx",
+        "**/*.mjs",
+        "**/*.cjs",
+    ):
+        langs.add("javascript")
+
+    if (
+        (cwd / "tsconfig.json").exists()
+        or "typescript" in all_deps
+        or _has_source_files(
+            cwd,
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.mts",
+            "**/*.cts",
+            exclude_name_suffix=".d.ts",
+        )
+    ):
+        langs.add("typescript")
+
+    if "astro" in all_deps:
+        langs.add("astro")
+    if "svelte" in all_deps:
+        langs.add("svelte")
+    if "vue" in all_deps:
+        langs.add("vue")
 
     # Rust
-    if (cwd / "Cargo.toml").exists():
+    if (cwd / "Cargo.toml").exists() or _has_source_files(cwd, "**/*.rs"):
         langs.add("rust")
 
     # Go
-    if (cwd / "go.mod").exists():
+    if (cwd / "go.mod").exists() or _has_source_files(cwd, "**/*.go"):
         langs.add("go")
 
     # Ruby
-    if (cwd / "Gemfile").exists():
+    if (cwd / "Gemfile").exists() or _has_source_files(cwd, "**/*.rb"):
         langs.add("ruby")
 
     # Shell scripts (root *.sh or .sh files inside scripts/)
@@ -187,46 +222,17 @@ def detect_project_languages() -> list[str]:
         langs.add("toml")
 
     # Markup and stylesheets that language_map already knows about.
-    if (
-        next(
-            (
-                p
-                for p in chain(cwd.glob("**/*.html"), cwd.glob("**/*.htm"))
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
-    ):
+    if _has_source_files(cwd, "**/*.html", "**/*.htm"):
         langs.add("html")
-    if (
-        next(
-            (
-                p
-                for p in chain(
-                    cwd.glob("**/*.css"),
-                    cwd.glob("**/*.scss"),
-                    cwd.glob("**/*.sass"),
-                    cwd.glob("**/*.less"),
-                )
-                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
+    if _has_source_files(
+        cwd,
+        "**/*.css",
+        "**/*.scss",
+        "**/*.sass",
+        "**/*.less",
     ):
         langs.add("css")
-    if (
-        next(
-            (
-                p
-                for p in cwd.glob("**/.env*")
-                if p.is_file() and not _VENDOR_SKIP_DIRS.intersection(p.parts)
-            ),
-            None,
-        )
-        is not None
-    ):
+    if _has_source_files(cwd, "**/.env*"):
         langs.add("dotenv")
 
     # Prose/documentation formats beyond Markdown (vale targets).

@@ -48,9 +48,9 @@ _TOOLS_SCHEMA: Final[dict[str, Any]] = {
     "type": "array",
     "items": {"type": "string"},
     "description": (
-        "Subset of lintro tools to run (e.g. ['ruff', 'prettier']). Defaults "
-        "to every tool enabled for this action by the workspace config. "
-        "Advisory AI finders are not selectable here."
+        "Subset of lintro tools to run (e.g. ['ruff', 'prettier']). Omit to "
+        "use the workspace config or, with no config, the language-detected "
+        "toolset. Advisory AI finders are not selectable here."
     ),
 }
 
