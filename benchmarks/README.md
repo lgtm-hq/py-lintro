@@ -39,21 +39,27 @@ If `hyperfine` is missing, the script exits with a clear install hint (exit 127)
 
 ### What is measured
 
-| Suite    | Lintro command                       | Direct reference              |
-| -------- | ------------------------------------ | ----------------------------- |
-| `ruff`   | `lintro chk --tools ruff --yes`      | `ruff check`                  |
-| `mypy`   | `lintro chk --tools mypy --yes`      | `mypy`                        |
-| `format` | `lintro fmt --tools ruff --yes`      | `ruff format --check`         |
-| `multi`  | `lintro chk --tools ruff,mypy --yes` | sequential `ruff` then `mypy` |
+| Suite    | Lintro command                                                          | Direct reference              |
+| -------- | ----------------------------------------------------------------------- | ----------------------------- |
+| `ruff`   | `lintro chk --tools ruff --yes --tool-options ruff:format_check=False`  | `ruff check`                  |
+| `mypy`   | `lintro chk --tools mypy --yes`                                         | `mypy`                        |
+| `format` | `lintro fmt --tools ruff --yes --tool-options ruff:lint_fix=False`      | `ruff format`                 |
+| `multi`  | `lintro chk --tools ruff,mypy --yes --tool-options ruff:format_check=False` | sequential `ruff` then `mypy` |
 
 All runs target `benchmarks/fixtures/small-python/` and use:
 
 - `--shell=none` (`-N`) so an intermediate shell is not timed
 - `--yes` so lintro never blocks on confirmation prompts
-- `uv run --project <repo>` with `env -C <fixture>` so the fixture's `pyproject.toml`
-  applies (repo-root `post_checks` / black are disabled there for fair single-tool
-  isolation)
+- the installed `.venv/bin/lintro` binary (not `uv run`) so measured overhead is
+  orchestration rather than uv's resolver
+- `benchmarks/hyperfine/run-in-dir.sh` to set cwd to the fixture on both sides
+  (portable; GNU `env -C` is not available on stock macOS `/usr/bin/env`)
+- `--tool-options ruff:format_check=False` on check and `ruff:lint_fix=False` on
+  fmt so the timed ruff work matches `ruff check` / `ruff format`
 - repo `.venv` binaries for direct `ruff` / `mypy` on `PATH`
+
+`--suite ruff` or `--suite format` does not require mypy. An unknown `--suite`
+name exits 2 and does not rewrite baseline JSON.
 
 ### Results
 

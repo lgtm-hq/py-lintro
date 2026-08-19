@@ -9,7 +9,7 @@ machines.
 | --------------------------- | -------------------------------------------------- |
 | `ruff-check-overhead.json`  | `lintro chk --tools ruff` vs `ruff check`          |
 | `mypy-overhead.json`        | `lintro chk --tools mypy` vs `mypy`                |
-| `ruff-format-overhead.json` | `lintro fmt --tools ruff` vs `ruff format --check` |
+| `ruff-format-overhead.json` | `lintro fmt --tools ruff` vs `ruff format`         |
 | `multi-tool-overhead.json`  | `lintro chk --tools ruff,mypy` vs sequential tools |
 | `baseline-meta.json`        | Host / git / hyperfine metadata for the run        |
 
