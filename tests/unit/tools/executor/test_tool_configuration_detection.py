@@ -153,3 +153,65 @@ def test_format_detection_notice_groups_by_language() -> None:
     assert_that(notice).contains("No config found")
     assert_that(notice).contains("python:")
     assert_that(notice).contains("lintro init")
+
+
+@pytest.mark.parametrize(
+    ("files", "language", "expected_tool"),
+    [
+        (
+            {"package.json": '{"devDependencies":{"svelte":"4.0.0"}}\n'},
+            "svelte",
+            "svelte-check",
+        ),
+        (
+            {"package.json": '{"devDependencies":{"astro":"4.0.0"}}\n'},
+            "astro",
+            "astro-check",
+        ),
+        (
+            {"package.json": '{"devDependencies":{"vue":"3.0.0"}}\n'},
+            "vue",
+            "vue-tsc",
+        ),
+        ({"index.html": "<html></html>\n"}, "html", "html_validate"),
+        ({"app.css": "body { color: black; }\n"}, "css", "stylelint"),
+    ],
+    ids=["svelte", "astro", "vue", "html", "css"],
+)
+def test_no_config_scopes_hyphenated_and_markup_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    files: dict[str, str],
+    language: str,
+    expected_tool: str,
+) -> None:
+    """Hyphenated checkers and HTML/CSS tools survive no-config scoping.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project directory.
+        files: Files to write in the temp project.
+        language: Expected detected language identifier.
+        expected_tool: Registered tool name that must remain in ``to_run``.
+    """
+    for relative, contents in files.items():
+        (tmp_path / relative).write_text(contents, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.detected_languages).contains(language)
+    assert_that(result.to_run).contains(expected_tool)
+
+
+def test_format_detection_notice_aliases_hyphenated_tools() -> None:
+    """Notice grouping matches hyphenated registry names to underscored maps."""
+    notice = format_detection_notice(
+        detected_languages=["svelte"],
+        to_run=["svelte-check", "gitleaks"],
+    )
+
+    assert_that(notice).contains("svelte: svelte-check")
+    assert_that(notice).contains("security: gitleaks")

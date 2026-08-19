@@ -40,8 +40,11 @@ configure specific commands rather than tool resolution.
 The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
-   - `enabled_tools`: Empty list means all enabled tools run. An explicit named
-     `--tools` list on the CLI bypasses this allowlist; default runs and `--tools all`
+   - `enabled_tools`: Empty list means all enabled tools run **when a config
+     file is present**. A no-config first run scopes tools to detected
+     languages (use `--tools all` or `lintro init` for the full set). An
+     explicit named `--tools` list on the CLI bypasses this allowlist; default
+     runs and `--tools all`
      remain filtered by it.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure

@@ -353,7 +353,11 @@ def _detection_scoped_tool_names() -> tuple[list[str], set[str]]:
     detected_languages = detect_project_languages()
     registry = ManifestRegistry.load()
     scoped_tools = registry.tools_for_languages(detected_languages)
-    scoped_names = {t.name.lower() for t in scoped_tools}
+    scoped_names: set[str] = set()
+    for tool in scoped_tools:
+        scoped_names.update(
+            _tool_name_lookup_candidates(name=tool.name.lower()),
+        )
     return detected_languages, scoped_names
 
 
@@ -377,24 +381,45 @@ def format_detection_notice(
 
     registry = ManifestRegistry.load()
     language_map = registry.language_map
-    run_set = {name.lower() for name in to_run}
+    security_names = {
+        candidate
+        for name in language_map.get("security", [])
+        for candidate in _tool_name_lookup_candidates(name=name.lower())
+    }
+    run_aliases: dict[str, str] = {}
+    for name in to_run:
+        for candidate in _tool_name_lookup_candidates(name=name.lower()):
+            run_aliases[candidate] = name
 
     groups: list[str] = []
     seen: set[str] = set()
     for lang in detected_languages:
         mapped = language_map.get(lang.lower(), [])
-        lang_tools = sorted(
-            name for name in mapped if name.lower() in run_set and name not in seen
-        )
-        seen.update(lang_tools)
+        lang_tools: list[str] = []
+        for mapped_name in mapped:
+            for candidate in _tool_name_lookup_candidates(name=mapped_name.lower()):
+                registered = run_aliases.get(candidate)
+                if registered is not None and registered not in seen:
+                    lang_tools.append(registered)
+                    seen.add(registered)
+                    break
+        lang_tools.sort()
         if lang_tools:
             groups.append(f"{lang}: {', '.join(lang_tools)}")
 
-    # Include any remaining tools (e.g. always-on security tools) not tied to a
-    # detected language so the notice matches what actually runs.
     remaining = sorted(name for name in to_run if name not in seen)
     if remaining:
-        groups.append(f"security: {', '.join(remaining)}")
+        if all(
+            any(
+                candidate in security_names
+                for candidate in _tool_name_lookup_candidates(name=name.lower())
+            )
+            for name in remaining
+        ):
+            leftover_label = "security"
+        else:
+            leftover_label = "other"
+        groups.append(f"{leftover_label}: {', '.join(remaining)}")
 
     detail = "; ".join(groups) if groups else "none"
     return (
@@ -477,16 +502,14 @@ def get_tools_to_run(
         else:  # check
             available_tools = tool_manager.get_check_tools()
 
-        # On a no-config default run (``tools`` is None and no config file was
-        # discovered), scope the toolset to the languages actually present in
-        # the project. Tools not applicable to the detected languages are
-        # omitted entirely rather than surfaced as SKIP rows, so a Python-only
-        # project no longer fires (and lists) ~30 irrelevant tools. Explicit
-        # ``--tools all`` and any configured project keep the full behavior.
+        # On a no-config default run (``tools`` is None, no config file, and no
+        # in-memory ``tools:`` section), scope the toolset to languages present
+        # in the project. Explicit ``--tools all`` and any configured project
+        # keep the full behavior.
         detected_languages: list[str] = []
         scoped_names: set[str] | None = None
         scoped_by_detection = False
-        if tools is None and config.config_path is None:
+        if tools is None and config.config_path is None and not config.tools:
             detected_languages, scoped_names = _detection_scoped_tool_names()
             scoped_by_detection = True
 

@@ -27,8 +27,9 @@ def detect_project_languages() -> list[str]:
     """Detect all languages and ecosystems in the current project.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
-    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, and
-    TOML by inspecting manifest files, directory structure, and file extensions.
+    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
+    HTML, CSS, and dotenv files by inspecting manifests, directories, and
+    extensions.
 
     Returns:
         Sorted list of lowercase language/ecosystem identifiers.
@@ -184,6 +185,49 @@ def detect_project_languages() -> list[str]:
     ]
     if toml_files:
         langs.add("toml")
+
+    # Markup and stylesheets that language_map already knows about.
+    if (
+        next(
+            (
+                p
+                for p in chain(cwd.glob("**/*.html"), cwd.glob("**/*.htm"))
+                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
+            ),
+            None,
+        )
+        is not None
+    ):
+        langs.add("html")
+    if (
+        next(
+            (
+                p
+                for p in chain(
+                    cwd.glob("**/*.css"),
+                    cwd.glob("**/*.scss"),
+                    cwd.glob("**/*.sass"),
+                    cwd.glob("**/*.less"),
+                )
+                if not _VENDOR_SKIP_DIRS.intersection(p.parts)
+            ),
+            None,
+        )
+        is not None
+    ):
+        langs.add("css")
+    if (
+        next(
+            (
+                p
+                for p in cwd.glob("**/.env*")
+                if p.is_file() and not _VENDOR_SKIP_DIRS.intersection(p.parts)
+            ),
+            None,
+        )
+        is not None
+    ):
+        langs.add("dotenv")
 
     # Prose/documentation formats beyond Markdown (vale targets).
     docs_dir = cwd / "docs"
