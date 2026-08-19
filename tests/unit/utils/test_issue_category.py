@@ -6,6 +6,7 @@ from assertpy import assert_that
 
 from lintro.enums.issue_category import IssueCategory
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 from lintro.parsers.ruff.ruff_issue import RuffIssue
@@ -13,6 +14,7 @@ from lintro.utils.issue_category import (
     category_from_rule_code,
     category_from_tool_type,
     enrich_issue_category,
+    enrich_tool_results_with_categories,
     resolve_issue_category,
 )
 
@@ -42,6 +44,16 @@ def test_category_from_rule_code_performance() -> None:
         category_from_rule_code("eslint(perf/no-accumulate-spread)"),
     ).is_equal_to(
         IssueCategory.PERFORMANCE,
+    )
+
+
+def test_category_from_rule_code_ruff_security() -> None:
+    """Ruff flake8-bandit S-prefix codes map to Security."""
+    assert_that(category_from_rule_code("S105")).is_equal_to(IssueCategory.SECURITY)
+    assert_that(category_from_rule_code("S101")).is_equal_to(IssueCategory.SECURITY)
+    unused = RuffIssue(file="a.py", line=1, code="S105", message="hardcoded")
+    assert_that(resolve_issue_category(unused, tool_name="ruff")).is_equal_to(
+        IssueCategory.SECURITY,
     )
 
 
@@ -117,3 +129,31 @@ def test_enrich_issue_category_persists_title_case() -> None:
     category = enrich_issue_category(issue, tool_name="oxlint")
     assert_that(category).is_equal_to(IssueCategory.ACCESSIBILITY)
     assert_that(issue.category).is_equal_to("Accessibility")
+
+
+def test_enrich_issue_category_replaces_unrecognized_label() -> None:
+    """Unrecognized parser labels are overwritten with the resolved enum."""
+    issue = BaseIssue(
+        file="a.py",
+        line=1,
+        message="use a safer API",
+        category="best-practice",
+    )
+    category = enrich_issue_category(issue, tool_name="semgrep")
+    assert_that(category).is_equal_to(IssueCategory.SECURITY)
+    assert_that(issue.category).is_equal_to("Security")
+
+
+def test_enrich_tool_results_with_categories_covers_initial_issues() -> None:
+    """Both remaining and pre-fix issues get canonical category labels."""
+    remaining = RuffIssue(file="a.py", line=1, code="S105", message="hardcoded")
+    detected = RuffIssue(file="a.py", line=2, code="PERF401", message="slow")
+    result = ToolResult(
+        name="ruff",
+        success=True,
+        issues=[remaining],
+        initial_issues=[detected],
+    )
+    enrich_tool_results_with_categories([result])
+    assert_that(remaining.category).is_equal_to("Security")
+    assert_that(detected.category).is_equal_to("Performance")

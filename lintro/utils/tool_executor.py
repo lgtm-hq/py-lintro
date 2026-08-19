@@ -109,6 +109,7 @@ def build_run_context(
         debug: Whether to show DEBUG messages on the console.
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
+        group_by: How to group issues in formatted and JSON output.
 
     Returns:
         RunContext: The shared context for this run.

@@ -358,20 +358,7 @@ def _render_stdout_document(
     if fmt == "json":
         import json
 
-        from lintro.enums.group_by import GroupBy, normalize_group_by
-        from lintro.utils.issue_category import enrich_issues_with_categories
         from lintro.utils.json_output import create_json_output
-
-        if normalize_group_by(ctx.group_by) == GroupBy.CATEGORY:
-            for result in all_results:
-                enrich_issues_with_categories(
-                    list(result.issues) if result.issues else None,
-                    tool_name=result.name,
-                )
-                enrich_issues_with_categories(
-                    list(result.initial_issues) if result.initial_issues else None,
-                    tool_name=result.name,
-                )
 
         json_data = create_json_output(
             action=str(artifact.action),
@@ -610,6 +597,12 @@ def render_run(
         if ctx.score_only:
             print(health_score)
         return
+
+    from lintro.enums.group_by import GroupBy, normalize_group_by
+    from lintro.utils.issue_category import enrich_tool_results_with_categories
+
+    if normalize_group_by(ctx.group_by) == GroupBy.CATEGORY:
+        enrich_tool_results_with_categories(artifact.tool_results)
 
     if ctx.score_only:
         # Score-only wins over JSON/SARIF so stdout stays a bare number.

@@ -58,7 +58,7 @@ def _ensure_pytest_prefix(option_fragment: str) -> str:
 )
 @click.option(
     "--group-by",
-    type=click.Choice(["file", "code", "none", "auto", "category"]),
+    type=click.Choice(["file", "code", "none", "auto"]),
     default="file",
     help="How to group issues in the output",
 )

@@ -540,6 +540,12 @@ def format_tool_output(
         return f"Error: {e}\n\nRaw output:\n{output}"
 
     if parsed_issues:
+        if group_by_enum == GroupBy.CATEGORY:
+            return format_issues_by_category(
+                issues=parsed_issues,
+                output_format=output_format,
+                tool_name=tool_name,
+            )
         return format_issues(issues=parsed_issues, output_format=output_format)
 
     # Fallback: return the raw output

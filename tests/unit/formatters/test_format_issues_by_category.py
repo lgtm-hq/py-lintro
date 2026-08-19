@@ -52,3 +52,50 @@ def test_format_tool_output_respects_group_by_category() -> None:
     )
     assert_that(output).contains("Performance (1)")
     assert_that(issues[0].category).is_equal_to("Performance")
+
+
+def test_format_issues_by_category_csv_is_single_table() -> None:
+    """CSV stays a single table so section titles do not break the schema."""
+    issues = [
+        RuffIssue(file="a.py", line=1, code="PERF401", message="slow"),
+        RuffIssue(file="a.py", line=2, code="S105", message="hardcoded"),
+    ]
+    output = format_issues_by_category(
+        issues,
+        output_format="csv",
+        tool_name="ruff",
+    )
+    assert_that(output).does_not_contain("Performance (")
+    assert_that(output).does_not_contain("Security (")
+    assert_that(output).contains("PERF401")
+    assert_that(output).contains("S105")
+
+
+def test_format_tool_output_parses_raw_output_with_category() -> None:
+    """Raw parseable output still sections by category when group_by=category."""
+    raw_output = """[
+        {
+            "code": "PERF401",
+            "message": "slow",
+            "filename": "a.py",
+            "location": {"row": 1, "column": 1},
+            "end_location": {"row": 1, "column": 10},
+            "fix": null
+        },
+        {
+            "code": "S105",
+            "message": "hardcoded",
+            "filename": "a.py",
+            "location": {"row": 2, "column": 1},
+            "end_location": {"row": 2, "column": 10},
+            "fix": null
+        }
+    ]"""
+    output = format_tool_output(
+        tool_name="ruff",
+        output=raw_output,
+        output_format="plain",
+        group_by="category",
+    )
+    assert_that(output).contains("Performance (1)")
+    assert_that(output).contains("Security (1)")

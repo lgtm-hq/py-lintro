@@ -220,7 +220,7 @@ def format_issues_by_category(
     """Format issues grouped into concern-category sections.
 
     Thin grouping hook for ``--group-by category``. Issues are enriched with
-    a resolved ``category`` and rendered under titled sections. JSON/GitHub
+    a resolved ``category`` and rendered under titled sections. JSON/GitHub/CSV
     formats stay a single table for machine-readable compatibility.
 
     Args:
@@ -240,7 +240,11 @@ def format_issues_by_category(
         category = enrich_issue_category(issue, tool_name=tool_name)
         buckets[category.value].append(issue)
 
-    if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
+    if normalized_format in {
+        OutputFormat.JSON,
+        OutputFormat.GITHUB,
+        OutputFormat.CSV,
+    }:
         return format_issues(
             issues,
             output_format=normalized_format,

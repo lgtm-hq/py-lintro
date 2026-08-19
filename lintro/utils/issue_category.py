@@ -11,12 +11,14 @@ Resolution order:
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from lintro.enums.issue_category import IssueCategory
 from lintro.enums.tool_type import ToolType
 
 if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
 
 # Tool-name defaults aligned with the category taxonomy in issue #616.
@@ -82,6 +84,9 @@ _RUFF_PERFORMANCE_PREFIXES: tuple[str, ...] = (
     "PLR091",  # too-many-* complexity rules
 )
 
+# Ruff flake8-bandit security codes (S101, S105, …).
+_RUFF_SECURITY_CODE = re.compile(r"^S\d+")
+
 _A11Y_PATTERN = re.compile(
     r"(?:^|[/(._-])(?:jsx-a11y|a11y|eslint-plugin-jsx-a11y)(?:$|[/)._-])",
     re.IGNORECASE,
@@ -146,7 +151,7 @@ def category_from_rule_code(code: str) -> IssueCategory | None:
     if upper.startswith(_RUFF_PERFORMANCE_PREFIXES) or _PERF_PATTERN.search(normalized):
         return IssueCategory.PERFORMANCE
 
-    if _SECURITY_PATTERN.search(normalized):
+    if _RUFF_SECURITY_CODE.match(upper) or _SECURITY_PATTERN.search(normalized):
         return IssueCategory.SECURITY
 
     return None
@@ -241,7 +246,10 @@ def enrich_issue_category(
     *,
     tool_name: str | None = None,
 ) -> IssueCategory:
-    """Resolve and persist ``issue.category`` when empty.
+    """Resolve and persist the canonical ``issue.category`` label.
+
+    Unrecognized parser labels (for example Semgrep ``best-practice``) are
+    replaced with the resolved enum so console grouping and JSON agree.
 
     Args:
         issue: Issue to enrich.
@@ -251,13 +259,7 @@ def enrich_issue_category(
         Category assigned to the issue.
     """
     category = resolve_issue_category(issue, tool_name=tool_name)
-    current = getattr(issue, "category", "") or ""
-    if not current:
-        issue.category = category.value
-    else:
-        normalized = normalize_issue_category(current)
-        if normalized is not None:
-            issue.category = normalized.value
+    issue.category = category.value
     return category
 
 
@@ -276,3 +278,25 @@ def enrich_issues_with_categories(
         return
     for issue in issues:
         enrich_issue_category(issue, tool_name=tool_name)
+
+
+def enrich_tool_results_with_categories(
+    results: Sequence[ToolResult],
+) -> None:
+    """Enrich every issue on the given tool results with a resolved category.
+
+    Mutates ``issues`` and ``initial_issues`` in place so stdout JSON,
+    ``--output`` files, and side-channel artifacts share the same labels.
+
+    Args:
+        results: Tool results from the completed run.
+    """
+    for result in results:
+        enrich_issues_with_categories(
+            list(result.issues) if result.issues else None,
+            tool_name=result.name,
+        )
+        enrich_issues_with_categories(
+            list(result.initial_issues) if result.initial_issues else None,
+            tool_name=result.name,
+        )

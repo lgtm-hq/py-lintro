@@ -220,6 +220,25 @@ def test_check_command_group_by_option(
     assert_that(call_kwargs["group_by"]).is_equal_to("code")
 
 
+def test_check_command_group_by_category_is_forwarded(
+    cli_runner: CliRunner,
+    mock_run_lint_tools_check: MagicMock,
+) -> None:
+    """Verify --group-by category is passed through to the executor.
+
+    Args:
+        cli_runner: The Click CLI test runner.
+        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+    """
+    with cli_runner.isolated_filesystem():
+        result = cli_runner.invoke(check_command, ["--group-by", "category"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    mock_run_lint_tools_check.assert_called_once()
+    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(call_kwargs["group_by"]).is_equal_to("category")
+
+
 @pytest.mark.parametrize(
     "group_by_option",
     ["file", "code", "none", "auto", "category"],
