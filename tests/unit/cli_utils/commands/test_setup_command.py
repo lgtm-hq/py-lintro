@@ -306,6 +306,57 @@ def test_detect_javascript_ignores_dist_bundle(
     assert_that(langs).does_not_contain("javascript")
 
 
+def test_detect_readme_only_is_not_markdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lone root README.md does not enable Markdown tools."""
+    (tmp_path / "README.md").write_text("# Sample\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("markdown")
+
+
+def test_detect_dotenv_ignores_envrc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direnv ``.envrc`` does not select dotenv tools."""
+    (tmp_path / ".envrc").write_text("export FOO=bar\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("dotenv")
+
+
+def test_detect_vue_via_source_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Vue from a lone ``*.vue`` with no package.json."""
+    (tmp_path / "App.vue").write_text("<template></template>\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("vue")
+
+
+def test_detect_github_actions_yaml_is_not_generic_yaml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Workflow files select GitHub Actions, not generic yamllint YAML."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("github_actions")
+    assert_that(langs).does_not_contain("yaml")
+
+
 # ── detect_package_managers ──────────────────────────────────────────
 
 

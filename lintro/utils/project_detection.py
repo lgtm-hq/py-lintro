@@ -116,6 +116,43 @@ def _is_requirements_file(path: Path) -> bool:
     return path.name.startswith("requirements") or path.parent.name == "requirements"
 
 
+def _is_dotenv_file(path: Path) -> bool:
+    """Return True if *path* is a dotenv file, not direnv or similar.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for ``.env`` and ``.env.*`` (e.g. ``.env.local``), not ``.envrc``.
+    """
+    name = path.name
+    return name == ".env" or name.startswith(".env.")
+
+
+def _is_yaml_content(path: Path) -> bool:
+    """Return True if *path* is generic YAML, not compose or Actions workflow.
+
+    Args:
+        path: Candidate file.
+
+    Returns:
+        True for first-party YAML that should select yamllint.
+    """
+    if path.suffix.lower() not in {".yaml", ".yml"}:
+        return False
+    if path.name in {
+        ".lintro-config.yaml",
+        ".lintro-config.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    }:
+        return False
+    parts = set(path.parts)
+    return not (".github" in parts and "workflows" in parts)
+
+
 def detect_project_languages() -> list[str]:
     """Detect all languages and ecosystems in the current project.
 
@@ -192,11 +229,11 @@ def detect_project_languages() -> list[str]:
     ):
         langs.add("typescript")
 
-    if "astro" in all_deps:
+    if "astro" in all_deps or _has_source_files(cwd, ".astro"):
         langs.add("astro")
-    if "svelte" in all_deps:
+    if "svelte" in all_deps or _has_source_files(cwd, ".svelte"):
         langs.add("svelte")
-    if "vue" in all_deps:
+    if "vue" in all_deps or _has_source_files(cwd, ".vue"):
         langs.add("vue")
 
     # Rust
@@ -236,22 +273,8 @@ def detect_project_languages() -> list[str]:
     if _has_source_files(cwd, ".sql"):
         langs.add("sql")
 
-    # YAML (beyond compose / lintro config files — including nested trees).
-    yaml_skip_names = {
-        ".lintro-config.yaml",
-        ".lintro-config.yml",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-        "compose.yml",
-        "compose.yaml",
-    }
-    if _has_project_file(
-        cwd,
-        match=lambda path: (
-            path.suffix.lower() in {".yaml", ".yml"}
-            and path.name not in yaml_skip_names
-        ),
-    ):
+    # YAML (beyond compose / lintro config / Actions workflows).
+    if _has_project_file(cwd, match=_is_yaml_content):
         langs.add("yaml")
 
     # Markdown (more than just a lone README; nested docs/ counts).
@@ -278,10 +301,7 @@ def detect_project_languages() -> list[str]:
         langs.add("html")
     if _has_source_files(cwd, ".css", ".scss", ".sass", ".less"):
         langs.add("css")
-    if _has_project_file(
-        cwd,
-        match=lambda path: path.name.startswith(".env"),
-    ):
+    if _has_project_file(cwd, match=_is_dotenv_file):
         langs.add("dotenv")
 
     # Prose/documentation formats beyond Markdown (vale targets).

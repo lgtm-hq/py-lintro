@@ -109,6 +109,7 @@ def test_lint_tools_schema_describes_language_scoped_default(
     for name in ("lintro_check", "lintro_format"):
         description = specs[name].input_schema["properties"]["tools"]["description"]
         assert_that(description).contains("language-detected")
+        assert_that(description).contains("['all']")
 
 
 def test_lint_tools_are_listed_with_their_annotations(workspace: Path) -> None:

@@ -50,7 +50,8 @@ _TOOLS_SCHEMA: Final[dict[str, Any]] = {
     "description": (
         "Subset of lintro tools to run (e.g. ['ruff', 'prettier']). Omit to "
         "use the workspace config or, with no config, the language-detected "
-        "toolset. Advisory AI finders are not selectable here."
+        "toolset. Pass ['all'] for the full registry. Advisory AI finders "
+        "are not selectable here."
     ),
 }
 
