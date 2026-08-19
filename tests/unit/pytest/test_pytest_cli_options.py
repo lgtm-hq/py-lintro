@@ -94,6 +94,17 @@ def test_test_command_group_by() -> None:
         assert_that(call_args.kwargs["group_by"]).is_equal_to("code")
 
 
+def test_test_command_rejects_group_by_category() -> None:
+    """``lintro test`` does not advertise category grouping (pytest is raw)."""
+    runner = CliRunner()
+    with patch("lintro.cli_utils.commands.test.run_lint_with_ai") as mock_run:
+        mock_run.return_value = 0
+        result = runner.invoke(pytest_cli_command, ["--group-by", "category"])
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("Invalid value")
+    assert_that(mock_run.called).is_false()
+
+
 def test_test_command_verbose() -> None:
     """Test test command with verbose flag."""
     runner = CliRunner()

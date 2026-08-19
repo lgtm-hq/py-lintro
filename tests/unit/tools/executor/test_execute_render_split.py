@@ -20,6 +20,7 @@ import lintro.utils.tool_executor as te
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_renderer import render_run
@@ -113,6 +114,7 @@ def _context(
     fake_logger: Any,
     output_format: str = "grid",
     score_only: bool = False,
+    group_by: str = "auto",
 ) -> RunContext:
     """Build a run context wired to test doubles.
 
@@ -121,6 +123,7 @@ def _context(
         fake_logger: Console logger double.
         output_format: Output format the run was asked for.
         score_only: Whether stdout carries only the numeric score.
+        group_by: How issues should be grouped in formatted output.
 
     Returns:
         RunContext: A context safe to hand to either phase.
@@ -136,6 +139,7 @@ def _context(
         lintro_config=get_config(),
         clean_stdout_output=output_format in ("json", "sarif", "csv", "markdown"),
         score_only=score_only,
+        group_by=group_by,
     )
 
 
@@ -338,6 +342,47 @@ def test_render_run_emits_json(
     payload = json.loads(capsys.readouterr().out)
     assert_that(payload["summary"]["total_issues"]).is_equal_to(2)
     assert_that(payload["results"][0]["tool"]).is_equal_to("ruff")
+
+
+def test_render_run_enriches_categories_before_json_stdout(
+    tmp_path: Path,
+    fake_logger: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--group-by category`` writes canonical labels onto issues before JSON."""
+    issue = RuffIssue(file="a.py", line=1, code="S105", message="hardcoded")
+    results = [
+        ToolResult(
+            name="ruff",
+            success=False,
+            issues_count=1,
+            issues=[issue],
+        ),
+    ]
+    artifact = RunArtifact(
+        tool_results=results,
+        action=Action.CHECK,
+        workspace_root=Path.cwd(),
+        health=health_score_for_results(results),
+        total_issues=1,
+        total_fixed=0,
+        total_remaining=1,
+        exit_code=1,
+    )
+    ctx = _context(
+        tmp_path=tmp_path,
+        fake_logger=fake_logger,
+        output_format="json",
+        group_by="category",
+    )
+
+    render_run(artifact, ctx=ctx, output_format="json")
+
+    payload = json.loads(capsys.readouterr().out)
+    assert_that(issue.category).is_equal_to("Security")
+    assert_that(payload["results"][0]["issues"][0]["category"]).is_equal_to(
+        "Security",
+    )
 
 
 def test_render_run_emits_sarif(

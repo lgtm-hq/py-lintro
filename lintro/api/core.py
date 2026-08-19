@@ -112,7 +112,7 @@ def check(
         include_venv: Whether to include virtual environment directories.
         output: Path to an output file for results.
         output_format: Format for displaying results (grid, json, etc).
-        group_by: How to group issues in output (file, code, none, auto).
+        group_by: How to group issues in output (file, code, none, auto, category).
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         verbose: Whether to show verbose output during execution.
         no_log: Whether to disable logging to file.
@@ -189,7 +189,7 @@ def format(
         tool_options: Tool-specific configuration options.
         exclude: Comma-separated patterns of files/dirs to exclude.
         include_venv: Whether to include virtual environment directories.
-        group_by: How to group issues in output (file, code, none, auto).
+        group_by: How to group issues in output (file, code, none, auto, category).
         output: Path to an output file for results.
         output_format: Format for displaying results (grid, json, etc).
         verbose: Whether to show verbose output during execution.

@@ -296,7 +296,7 @@ docker compose run --rm lintro check --tools ruff,prettier
 
 - `--tools TEXT` - Comma-separated list of tools (default: all)
 - `--output-format grid` - Format output as a grid table
-- `--group-by [file|code|none|auto]` - How to group issues
+- `--group-by [file|code|none|auto|category]` - How to group issues
 - `--output FILE` - Save output to file
 - `--exclude TEXT` - Patterns to exclude
 - `--include-venv` - Include virtual environment directories

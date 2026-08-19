@@ -18,9 +18,12 @@ class SemgrepIssue(BaseIssue):
         end_line: Ending line number of the issue.
         end_column: Ending column number of the issue.
         severity: Severity level (ERROR, WARNING, INFO).
-        category: Category of the issue (security, correctness, performance, etc.).
         cwe: List of CWE IDs associated with this issue.
         metadata: Additional metadata from the rule.
+
+    Note:
+        ``category`` is inherited from ``BaseIssue`` and populated from Semgrep
+        rule metadata when available.
     """
 
     DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
@@ -33,7 +36,6 @@ class SemgrepIssue(BaseIssue):
     end_line: int = field(default=0)
     end_column: int = field(default=0)
     severity: str = field(default="WARNING")
-    category: str = field(default="")
     cwe: list[str] | None = field(default=None)
     metadata: dict[str, object] | None = field(default=None)
 
