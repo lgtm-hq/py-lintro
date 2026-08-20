@@ -23,11 +23,12 @@ source "$_HELPERS_DIR/../utils.sh"
 # log_verbose is also provided by utils.sh.
 
 # Defaults for globals when a group installer is sourced/run directly.
+# BIN_DIR is resolved lazily in ensure_bin_dir() so docker mode can default
+# to /usr/local/bin when a group script runs standalone.
 DRY_RUN="${DRY_RUN:-0}"
 VERBOSE="${VERBOSE:-0}"
 TOOL_FILTER="${TOOL_FILTER:-}"
 INSTALL_MODE="${INSTALL_MODE:-local}"
-BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
 # Get tool version from lintro/_tool_versions.py
 # This module is the single source of truth for all tool versions
@@ -69,9 +70,9 @@ should_install() {
 	# Check if tool is in the comma-separated list
 	IFS=',' read -ra filter_list <<<"$normalized_filter"
 	for item in "${filter_list[@]}"; do
-		# Trim whitespace
-		item="${item## }"
-		item="${item%% }"
+		# Trim all leading/trailing whitespace
+		item="${item#"${item%%[![:space:]]*}"}"
+		item="${item%"${item##*[![:space:]]}"}"
 		[[ "$item" == "$normalized_name" ]] && return 0
 	done
 	return 1
@@ -248,34 +249,37 @@ install_tool_curl() {
 	fi
 
 	if download_with_retries "$download_url" "$target_path" 3; then
-		chmod +x "$target_path"
-		# Attempt checksum verification when available
+		# Hadolint publishes a sidecar .sha256; verification is mandatory.
 		if [[ "$tool_name" == "hadolint" ]]; then
 			local checksum_url="${download_url}.sha256"
-			if download_with_retries "$checksum_url" "$target_path.sha256" 3; then
-				echo -e "${BLUE}Verifying checksum for $tool_name...${NC}"
-				# Portable verification regardless of filename in .sha256
-				local expected
-				expected=$(awk '{print $1}' "$target_path.sha256" | head -n1)
-				local actual
-				if command -v sha256sum >/dev/null 2>&1; then
-					actual=$(sha256sum "$target_path" | awk '{print $1}')
-				elif command -v shasum >/dev/null 2>&1; then
-					actual=$(shasum -a 256 "$target_path" | awk '{print $1}')
-				else
-					echo -e "${YELLOW}⚠ No checksum tool available; skipping verification${NC}"
-					actual=""
-				fi
-				if [[ -n "$actual" ]]; then
-					if [[ "$expected" != "$actual" ]]; then
-						echo -e "${RED}✗ Checksum mismatch for $tool_name${NC}"
-						exit 1
-					fi
-					echo -e "${GREEN}✓ Checksum verified${NC}"
-				fi
-				rm -f "$target_path.sha256" || true
+			if ! download_with_retries "$checksum_url" "$target_path.sha256" 3; then
+				rm -f "$target_path"
+				echo -e "${RED}✗ Failed to download checksum file for $tool_name${NC}"
+				exit 1
 			fi
+			echo -e "${BLUE}Verifying checksum for $tool_name...${NC}"
+			# Portable verification regardless of filename in .sha256
+			local expected
+			expected=$(awk '{print $1}' "$target_path.sha256" | head -n1)
+			local actual=""
+			if command -v sha256sum >/dev/null 2>&1; then
+				actual=$(sha256sum "$target_path" | awk '{print $1}')
+			elif command -v shasum >/dev/null 2>&1; then
+				actual=$(shasum -a 256 "$target_path" | awk '{print $1}')
+			else
+				rm -f "$target_path" "$target_path.sha256"
+				echo -e "${RED}✗ No checksum tool available; refusing to install $tool_name${NC}"
+				exit 1
+			fi
+			if [[ "$expected" != "$actual" ]]; then
+				rm -f "$target_path" "$target_path.sha256"
+				echo -e "${RED}✗ Checksum mismatch for $tool_name${NC}"
+				exit 1
+			fi
+			echo -e "${GREEN}✓ Checksum verified${NC}"
+			rm -f "$target_path.sha256" || true
 		fi
+		chmod +x "$target_path"
 		echo -e "${GREEN}✓ $tool_name installed successfully${NC}"
 	else
 		echo -e "${YELLOW}Direct download failed, trying alternative methods...${NC}"
@@ -392,4 +396,62 @@ ensure_bin_dir() {
 		mkdir -p "$BIN_DIR"
 	fi
 	export BIN_DIR
+}
+
+# Parse common CLI flags when a group installer is executed directly.
+# Mirrors install-tools.sh flag handling for --dry-run, --verbose, --tools,
+# and --local/--docker. Unknown flags fail fast instead of being ignored.
+parse_group_installer_args() {
+	local positional=()
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--dry-run)
+			DRY_RUN=1
+			shift
+			;;
+		--verbose)
+			VERBOSE=1
+			shift
+			;;
+		--tools)
+			if [[ -z "${2:-}" || "$2" == --* ]]; then
+				echo "Error: --tools requires a non-empty comma-separated list of tool names" >&2
+				exit 1
+			fi
+			TOOL_FILTER="$2"
+			shift 2
+			;;
+		--tools=*)
+			TOOL_FILTER="${1#*=}"
+			if [[ -z "$TOOL_FILTER" ]]; then
+				echo "Error: --tools requires a non-empty comma-separated list of tool names" >&2
+				exit 1
+			fi
+			shift
+			;;
+		--local | local)
+			INSTALL_MODE="local"
+			shift
+			;;
+		--docker | docker)
+			INSTALL_MODE="docker"
+			shift
+			;;
+		--help | -h)
+			return 2
+			;;
+		-*)
+			echo "Error: unknown option: $1" >&2
+			exit 1
+			;;
+		*)
+			positional+=("$1")
+			shift
+			;;
+		esac
+	done
+	if [[ ${#positional[@]} -gt 0 ]]; then
+		INSTALL_MODE="${positional[0]}"
+	fi
+	export DRY_RUN VERBOSE TOOL_FILTER INSTALL_MODE
 }

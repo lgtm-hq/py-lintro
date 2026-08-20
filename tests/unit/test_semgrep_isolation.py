@@ -108,8 +108,12 @@ def test_install_semgrep_script_uses_locked_sync() -> None:
     assert_that("\n".join(executable_lines)).does_not_contain("uv tool install")
     assert_that(_INSTALL_SCRIPT.stat().st_mode & 0o111).is_not_equal_to(0)
     tools_installer = _INSTALL_TOOLS.read_text(encoding="utf-8")
-    assert_that(tools_installer).contains("install-semgrep.sh")
-    assert_that(tools_installer).does_not_contain(
+    python_tools = (
+        _REPO_ROOT / "scripts" / "utils" / "installers" / "python-tools.sh"
+    ).read_text(encoding="utf-8")
+    assert_that(tools_installer).contains("install_python_tools")
+    assert_that(python_tools).contains("install-semgrep.sh")
+    assert_that(python_tools).does_not_contain(
         'install_python_package "semgrep"',
     )
 
