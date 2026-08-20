@@ -66,6 +66,40 @@ def test_check_no_yaml_files(yamllint_plugin: YamllintPlugin, tmp_path: Path) ->
     result = yamllint_plugin.check([str(non_yaml_file)], {})
 
     assert_that(result.success).is_true()
+    assert_that(result.output).is_equal_to("No .yml/.yaml files found to check.")
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_no_yaml_files_after_ignore_filter(
+    yamllint_plugin: YamllintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Ignore-filtered YAML inputs use the YAML-specific skip copy.
+
+    Args:
+        yamllint_plugin: The YamllintPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    yaml_file = tmp_path / "config.yaml"
+    yaml_file.write_text("key: value\n")
+
+    with (
+        patch.object(
+            yamllint_plugin,
+            "_find_yamllint_config",
+            return_value=str(tmp_path / ".yamllint"),
+        ),
+        patch.object(
+            yamllint_plugin,
+            "_load_yamllint_ignore_patterns",
+            return_value=["config.yaml"],
+        ),
+    ):
+        result = yamllint_plugin.check([str(yaml_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.output).is_equal_to("No YAML files found to check.")
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_fix_raises_not_implemented(yamllint_plugin: YamllintPlugin) -> None:
