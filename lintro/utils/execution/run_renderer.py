@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from lintro.models.core.run_artifact import RunArtifact
     from lintro.models.core.tool_result import ToolResult
+    from lintro.profiling.models import ProfileData
     from lintro.utils.execution.run_context import RunContext
 
 __all__ = [
@@ -228,7 +229,7 @@ def _write_artifacts(
     *,
     warn_func: Any = None,
     ai_enrichment: AISarifEnrichment | None = None,
-    profile_data: dict[str, Any] | None = None,
+    profile_data: ProfileData | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 

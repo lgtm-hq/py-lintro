@@ -6,7 +6,7 @@ Renders the per-tool wall-clock timings the executors record on each
 optimize their setup.
 """
 
-from lintro.profiling.models import ToolTiming
+from lintro.profiling.models import ProfileData, ProfileToolEntry, ToolTiming
 from lintro.profiling.report import (
     build_profile_data,
     build_timings,
@@ -15,6 +15,8 @@ from lintro.profiling.report import (
 from lintro.profiling.suggestions import get_suggestions
 
 __all__ = [
+    "ProfileData",
+    "ProfileToolEntry",
     "ToolTiming",
     "build_profile_data",
     "build_timings",
