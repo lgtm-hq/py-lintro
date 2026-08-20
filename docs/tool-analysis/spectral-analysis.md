@@ -23,8 +23,8 @@ parser-choice decision.
 Spectral is distributed as the npm package `@stoplight/spectral-cli`:
 
 ```bash
-bun add -d @stoplight/spectral-cli   # project-local (lintro's convention)
-npm install -g @stoplight/spectral-cli
+bun add -D @stoplight/spectral-cli   # project-local (lintro's convention)
+npm install -D @stoplight/spectral-cli
 ```
 
 The package installs a `spectral` binary. Lintro prefers a `spectral` binary on `PATH`,

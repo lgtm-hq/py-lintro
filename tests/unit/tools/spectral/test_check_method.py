@@ -73,7 +73,8 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     assert_that(result.issues_count).is_equal_to(1)
     issue = cast(SpectralIssue, result.issues[0])  # type: ignore[index]
     assert_that(issue.code).is_equal_to("operation-operationId")
-    assert_that(issue.doc_url).contains("stoplight.io")
+    assert_that(issue.doc_url).contains("meta.stoplight.io")
+    assert_that(issue.doc_url).contains("#operation-operationId")
 
 
 def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:

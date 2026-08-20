@@ -7,10 +7,10 @@ and a ``spectral:oas`` ruleset.
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -65,23 +65,18 @@ paths:
 def spectral_command() -> list[str] | None:
     """Resolve the command the plugin itself would run, if it works.
 
-    Mirrors ``SpectralPlugin._get_spectral_command`` resolution order exactly:
-    probing a different invocation than the plugin uses (e.g. npx when the
-    plugin would pick bunx) can validate a working CLI while the plugin's own
-    invocation is broken, letting the tests run against a failing tool.
+    Uses ``SpectralPlugin._get_spectral_command`` so the probe cannot drift
+    from production resolution (project-local binary, PATH, then bunx/npx).
 
     Returns:
         The plugin's command prefix if it runs, otherwise None.
     """
-    cmd: list[str] | None = None
-    if shutil.which("spectral"):
-        cmd = ["spectral"]
-    elif shutil.which("bunx"):
-        cmd = ["bunx", "@stoplight/spectral-cli"]
-    elif shutil.which("npx"):
-        cmd = ["npx", "--yes", "@stoplight/spectral-cli"]
-    if cmd is None:
-        return None
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        plugin = SpectralPlugin()
+    cmd = plugin._get_spectral_command(cwd=tempfile.gettempdir())
     try:
         # Probe from a neutral cwd: the tests run the plugin against tmp
         # directories, and bunx/npx resolution can differ between the repo

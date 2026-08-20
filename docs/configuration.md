@@ -912,7 +912,7 @@ Rationale:
 **Every Node.js tool resolves the same way.** There is one chain, implemented once in
 `NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
 `astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
-`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
+`prettier`, `spectral`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
 1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
    checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
@@ -1669,10 +1669,16 @@ Lintro detects (and Spectral requires) one of these ruleset files:
 **Installation:**
 
 ```bash
-# npm/bun
-bun add -d @stoplight/spectral-cli
-npm install -g @stoplight/spectral-cli
+# bun (recommended)
+bun add -D @stoplight/spectral-cli
+
+# npm
+npm install -D @stoplight/spectral-cli
 ```
+
+Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.spectral.yaml`
 
