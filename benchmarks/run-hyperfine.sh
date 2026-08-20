@@ -199,8 +199,13 @@ fi
 
 mkdir -p "${RESULTS_DIR}"
 # A reused RESULTS_DIR must not mix this invocation with leftover suite JSON.
-# Docs advertise generate as overwrite; baseline-meta.json only lists this run.
-rm -f "${RESULTS_DIR}"/*-overhead.json
+# Delete only the four names this driver writes — a shared HYPERFINE_RESULTS_DIR
+# can hold other *-overhead.json that we do not own.
+rm -f \
+	"${RESULTS_DIR}/ruff-check-overhead.json" \
+	"${RESULTS_DIR}/mypy-overhead.json" \
+	"${RESULTS_DIR}/ruff-format-overhead.json" \
+	"${RESULTS_DIR}/multi-tool-overhead.json"
 
 # Resolve absolute binaries once so --shell=none never depends on a login shell.
 RUFF_BIN="$(command -v ruff || true)"
@@ -225,11 +230,15 @@ LINTRO_FMT=(
 )
 
 join_cmd() {
-	# Quote argv for hyperfine's shell=none parser.
+	# Quote argv for hyperfine --shell=none, which tokenizes POSIX-style
+	# (quotes and backslashes). bash printf %q emits $'...' ANSI-C quoting
+	# that that splitter does not understand, so an apostrophe in a path
+	# would break the timed command.
 	local parts=()
 	local arg
+	local IFS=' '
 	for arg in "$@"; do
-		parts+=("$(printf '%q' "${arg}")")
+		parts+=("'${arg//\'/\'\"\'\"\'}'")
 	done
 	printf '%s' "${parts[*]}"
 }

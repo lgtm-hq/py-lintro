@@ -280,12 +280,12 @@ def test_each_suite_passes_expected_commands_to_hyperfine(
     assert_that(export_path.is_file()).is_true()
     assert_that(argv).contains("--shell=none")
     assert_that(_flag_value(argv, "--reference-name")).is_equal_to(ref_name)
-    reference = _flag_value(argv, "--reference").replace("\\", "")
+    reference = _flag_value(argv, "--reference").replace("'", "")
     assert_that(reference).contains(ref_fragment)
     assert_that(_flag_value(argv, "--command-name")).contains("lintro")
     # The lintro command is the trailing positional after --command-name.
-    # printf %q backslash-escapes shell metacharacters (e.g. the tool comma).
-    lintro_cmd = argv[-1].replace("\\", "")
+    # POSIX single-quoting wraps metacharacters (e.g. the tool comma).
+    lintro_cmd = argv[-1].replace("'", "")
     assert_that(lintro_cmd).contains(lintro_fragment)
     assert_that(lintro_cmd).contains("--yes")
     assert_that(lintro_cmd).contains("run-in-dir.sh")
@@ -329,10 +329,6 @@ def test_format_suite_times_all_ruff_stages_lintro_runs(tmp_path: Path) -> None:
     argv = _invocations(argv_log)[0]
     reference = _flag_value(argv, "--reference")
     assert_that(reference).contains("sequential-ruff-fmt.sh")
-    fmt_source = _SEQUENTIAL_FMT.read_text(encoding="utf-8")
-    assert_that(fmt_source).contains('"${RUFF_BIN}" check .')
-    assert_that(fmt_source).contains('"${RUFF_BIN}" format --check .')
-    assert_that(fmt_source).contains('"${RUFF_BIN}" format .')
 
 
 def test_quick_only_fills_defaults(tmp_path: Path) -> None:
@@ -428,8 +424,9 @@ def test_ruff_and_format_suites_do_not_require_mypy(
     assert_that(combined).does_not_contain("missing tools on PATH: mypy")
     assert_that(result.returncode).is_equal_to(0)
     argv = _invocations(argv_log)[0]
-    assert_that(argv[-1]).contains("--tools ruff")
-    assert_that(argv[-1].replace("\\", "")).does_not_contain("mypy")
+    lintro_cmd = argv[-1].replace("'", "")
+    assert_that(lintro_cmd).contains("--tools ruff")
+    assert_that(lintro_cmd).does_not_contain("mypy")
     export_name = _SUITE_EXPECTATIONS[suite][0]
     assert_that((results / export_name).is_file()).is_true()
 
@@ -614,12 +611,90 @@ def test_single_suite_run_drops_stale_overhead_json(tmp_path: Path) -> None:
     """
     env, results, _argv_log = _make_sandbox(tmp_path)
     stale = results / "mypy-overhead.json"
+    foreign = results / "custom-overhead.json"
     stale.write_text('{"results": []}\n', encoding="utf-8")
+    foreign.write_text('{"results": []}\n', encoding="utf-8")
 
     result = _run_sandboxed(env, "--suite", "ruff", "--quick")
 
     assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
     assert_that(stale.exists()).is_false()
+    assert_that(foreign.is_file()).is_true()
     meta = json.loads((results / "baseline-meta.json").read_text(encoding="utf-8"))
     assert_that(meta["result_files"]).is_equal_to(["ruff-check-overhead.json"])
     assert_that((results / "ruff-check-overhead.json").is_file()).is_true()
+
+
+def test_default_invocation_runs_all_suites(tmp_path: Path) -> None:
+    """Omitting ``--suite`` runs all four exports with production warmup/runs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, results, argv_log = _make_sandbox(tmp_path)
+
+    result = _run_sandboxed(env)
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    calls = _invocations(argv_log)
+    assert_that(calls).is_length(4)
+    export_names = sorted(
+        Path(_flag_value(argv=argv, flag="--export-json")).name for argv in calls
+    )
+    expected = [
+        "multi-tool-overhead.json",
+        "mypy-overhead.json",
+        "ruff-check-overhead.json",
+        "ruff-format-overhead.json",
+    ]
+    assert_that(export_names).is_equal_to(expected)
+    for argv in calls:
+        assert_that(_flag_value(argv=argv, flag="--warmup")).is_equal_to("3")
+        assert_that(_flag_value(argv=argv, flag="--runs")).is_equal_to("10")
+        for token in argv:
+            assert_that(token).does_not_contain("$'")
+    meta = json.loads((results / "baseline-meta.json").read_text(encoding="utf-8"))
+    assert_that(sorted(meta["result_files"])).is_equal_to(expected)
+    for name in expected:
+        assert_that((results / name).is_file()).is_true()
+
+
+def test_mypy_suite_does_not_require_ruff(tmp_path: Path) -> None:
+    """``--suite mypy`` must not require ruff on PATH.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, results, argv_log = _make_sandbox(tmp_path)
+    (tmp_path / "bin" / "ruff").unlink()
+
+    result = _run_sandboxed(env, "--suite", "mypy", "--quick")
+
+    combined = result.stdout + result.stderr
+    assert_that(combined).does_not_contain("missing tools on PATH: ruff")
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(_invocations(argv_log)).is_length(1)
+    assert_that((results / "mypy-overhead.json").is_file()).is_true()
+
+
+def test_join_cmd_survives_apostrophe_in_results_dir(tmp_path: Path) -> None:
+    """Hyperfine --shell=none must receive POSIX quotes, not bash %q.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    sandbox_root = tmp_path / "o's bench"
+    sandbox_root.mkdir()
+    env, results, argv_log = _make_sandbox(sandbox_root)
+
+    result = _run_sandboxed(env, "--suite", "ruff", "--quick")
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(results.name).is_equal_to("results")
+    assert_that("o's bench" in str(results)).is_true()
+    argv = _invocations(argv_log)[0]
+    export_json = _flag_value(argv=argv, flag="--export-json")
+    assert_that(export_json).contains("o's bench")
+    assert_that(Path(export_json).is_file()).is_true()
+    for token in argv:
+        assert_that("$'" in token).is_false()

@@ -22,8 +22,9 @@ The two `sequential-*.sh` references under `benchmarks/hyperfine/` run their too
 unconditionally and return the worst exit status — they do not short-circuit like `&&`,
 because lintro does not either.
 
-Generate (overwrites leftover `*-overhead.json` in this directory, including
-files from a previous `--suite` that is not part of the current invocation):
+Generate (deletes this suite's four `*-overhead.json` names in the results directory,
+including files from a previous `--suite` that is not part of the current invocation,
+then writes fresh JSON):
 
 ```bash
 make bench
