@@ -118,6 +118,11 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
     if config_path is None:
         return None
 
+    from lintro.config.config_loader import _exclude_global_file_when_tier_disabled
+
+    if _exclude_global_file_when_tier_disabled(candidate=config_path):
+        return None
+
     data = yaml.safe_load(config_path.read_text()) or {}
     section = data.get("licenses")
     return section if isinstance(section, dict) else None

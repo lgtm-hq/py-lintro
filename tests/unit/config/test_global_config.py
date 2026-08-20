@@ -492,6 +492,36 @@ def test_load_config_tool_names_merge_case_insensitively(
     assert_that(config.global_contributed_keys).does_not_contain("tools.Ruff")
 
 
+def test_load_config_defaults_keys_merge_case_insensitively(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed-case ``defaults`` keys across tiers merge into a single entry.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "defaults:\n  Prettier:\n    tabWidth: 4\n    semi: false\n",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "defaults:\n  prettier:\n    singleQuote: true\n",
+    )
+
+    config = load_config(allow_pyproject_fallback=False)
+    prettier = config.get_tool_defaults("prettier")
+
+    assert_that(prettier.get("tabWidth")).is_equal_to(4)
+    assert_that(prettier.get("semi")).is_false()
+    assert_that(prettier.get("singleQuote")).is_true()
+    assert_that(config.global_contributed_keys).contains("defaults.prettier.tabWidth")
+    assert_that(config.global_contributed_keys).does_not_contain("defaults.Prettier")
+
+
 def test_load_config_project_tool_mapping_may_re_enable(
     isolated_home: Path,
     tmp_path: Path,
@@ -879,3 +909,47 @@ def test_config_command_json_no_global(
     payload = json.loads(result.output)
     assert_that(payload["global_config"]["found"]).is_false()
     assert_that(payload["global_config"]["path"]).is_none()
+
+
+def test_disabled_global_tier_hides_home_plugins_section(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_GLOBAL_CONFIG=off`` must not feed plugins: from the home file.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import _load_plugins_config
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - evil-plugin\n",
+    )
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+
+    assert_that(_load_plugins_config()).is_equal_to({})
+
+
+def test_disabled_global_tier_hides_home_licenses_section(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_GLOBAL_CONFIG=off`` must not feed licenses: from the home file.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.config.licenses_config import load_licenses_config
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "licenses:\n  policy: strict\n",
+    )
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+
+    config = load_licenses_config()
+
+    assert_that(config.policy).is_equal_to("permissive")

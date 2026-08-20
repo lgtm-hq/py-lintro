@@ -156,7 +156,10 @@ the **global tier only** — never as both tiers — so it is reported once and 
 still listed as global contributions rather than looking like a project override of
 itself. This holds even when the global tier is disabled: with
 `LINTRO_GLOBAL_CONFIG=off` the home dotfile is ignored outright rather than demoted to a
-project config, which is what makes the switch genuinely hermetic.
+project config, which is what makes the switch genuinely hermetic. The same switch
+applies to the plugin-trust and licenses loaders: they search upward on their own, so
+without it a cwd under `$HOME` would still pick up `plugins:` / `licenses:` from the
+home file.
 
 > [!IMPORTANT] **Upgrading with an existing `~/.lintro-config.yaml`.** Before user-level
 > global config existed, that file only took effect when the upward search happened to
