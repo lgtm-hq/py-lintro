@@ -123,6 +123,11 @@ order and for what changed.
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
+  `cargo install typos-cli`). A no-config default `lintro check` only selects it when a
+  `typos.toml`, `.typos.toml` or `_typos.toml` exists at a scan root. `--tools typos`
+  and an unscoped Lintro config still run it; after `lintro init`, add it to
+  `execution.enabled_tools` (the recommended profile's language allowlist omits it)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)

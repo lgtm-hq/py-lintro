@@ -1,0 +1,2 @@
+This is a smaple fixture with intentional typos.
+We seperate teh words to trigger the spell cheker.

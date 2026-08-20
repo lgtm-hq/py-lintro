@@ -2166,6 +2166,101 @@ lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
 lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
 ```
 
+#### Typos Configuration
+
+[typos](https://github.com/crate-ci/typos) is a fast, low-false-positive spell checker
+for source code and documentation. It checks all text files and can auto-correct
+misspellings.
+
+> **When typos runs.** typos is language-agnostic, so it has no entry in the manifest's
+> `language_map`. That makes selection depend on which path a project takes:
+>
+> - **No Lintro config (first run).** Tool selection comes from language detection,
+>   which does not pull typos in on its own. It joins through the "unmapped tool with a
+>   native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or `_typos.toml`
+>   exists at a scan root. crate-ci/typos also reads `[tool.typos]` in `pyproject.toml`
+>   and `[package.metadata.typos]` / `[workspace.metadata.typos]` in `Cargo.toml`; those
+>   files are **not** in Lintro's `native_configs`, so a typical Python or Rust tree
+>   does not auto-select the plugin. The binary still honors those tables once typos is
+>   selected. An empty `[tool.lintro]` table is not a config, so this path still
+>   applies.
+> - **With a resolved Lintro config, or `--tools all`.** Language scoping is bypassed. A
+>   resolved config is `.lintro-config.yaml` (or `.yml`), a **non-empty**
+>   `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section. Typos
+>   then runs when the binary is on `PATH` **and** it is not filtered out by
+>   `execution.enabled_tools` or `tools.typos.enabled: false`. `lintro init`'s
+>   recommended profile writes a language-based `enabled_tools` allowlist that does
+>   **not** include typos, so those projects do not start spell-checking on upgrade. An
+>   existing **unscoped** `lintro check` (`enabled_tools: []` or omitted) will.
+>
+> `lintro check --tools typos` selects it explicitly in either case.
+>
+> Two things are worth knowing before that first run:
+>
+> - **Turning it off.** Do not create a Lintro config solely to disable typos on a
+>   no-config first run: that file is a resolved config, so language scoping is skipped
+>   and an empty `enabled_tools` allowlist runs the full unscoped registry, including
+>   typos. On a first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On
+>   a project that already has a Lintro config, disable the tool:
+>
+>   ```yaml
+>   tools:
+>     typos:
+>       enabled: false
+>   ```
+>
+>   Or leave it out of `execution.enabled_tools` if you use an allowlist
+>   (`lintro init --profile recommended` already does).
+>
+>   `--tools` is an allowlist rather than an opt-out: `lintro check --tools ruff` runs
+>   ruff _only_, dropping every other tool as well, so reach for it to narrow a single
+>   run, not to exclude one tool.
+>
+> - **Project vocabulary.** The first run usually reports a handful of deliberate
+>   spellings — product names, abbreviations, deliberate misspellings inside test
+>   fixtures. Add them to `.typos.toml` rather than suppressing the tool: real words go
+>   in `[default.extend-words]`, and anything that is only correct in one context is
+>   better handled by a context-anchored `[default] extend-ignore-re` pattern so the
+>   same word is still caught elsewhere. `lintro format --tools typos` applies the
+>   corrections typos is confident about, which clears most of the rest.
+
+**File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
+
+```toml
+# Accept project-specific vocabulary that the default dictionary flags
+[default.extend-words]
+unparseable = "unparseable"
+
+# Skip files/directories that deliberately contain non-English or fixture text
+[files]
+extend-exclude = ["tests/fixtures/"]
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `timeout` | integer | Per-invocation timeout in seconds (default: 30) |
+
+typos' word list and file scope are configured through its native `typos.toml` file
+rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
+`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
+also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
+keeps `lintro format` away from the common binary formats (images, archives, compiled
+objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
+header can still reach `--write-changes` — so add the extensions you care about to
+`[files] extend-exclude` when a project stores unusual binary assets.
+
+**Usage Examples:**
+
+```bash
+# Check spelling across the project
+lintro check --tools typos
+
+# Auto-correct misspellings in place
+lintro format --tools typos
+```
+
 ### Rust Tools
 
 #### Clippy Configuration

@@ -1,0 +1,78 @@
+# typos configuration for py-lintro
+# https://github.com/crate-ci/typos
+#
+# This is the project's spell-checker dictionary and file scope — analogous to
+# the repo's other native tool configs (.hadolint.yaml, .yamllint,
+# .prettierignore). It is NOT a generated suppression baseline: every entry
+# below is a deliberate, documented decision, and the list is kept tight so
+# real typos still fail the check.
+#
+# typos has no file-scoped dictionary, so a `[default.extend-words]` entry is
+# repository-wide. Anything that is a *deliberate misspelling in one fixture*
+# therefore goes through `extend-ignore-re` with the surrounding context baked
+# into the pattern, which keeps the same word flagged everywhere else.
+
+[default]
+extend-ignore-re = [
+  # An acronym followed by the English "-ed" suffix (``PATCHed``, ``ANDed``):
+  # typos reads the tail of the acronym plus "ed" as its own word.
+  "\\b[A-Z]{2,}ed\\b",
+  # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
+  "ded5c06cf2?",
+  # Deliberate misspellings that exist *because* they are wrong: they drive
+  # unknown-key / unknown-tool error paths and a misspell-linter parser
+  # fixture. The surrounding context is part of each pattern so the same word
+  # is still reported if it ever appears anywhere else.
+  "\"provdier\"",                              # unknown AI config key fixture
+  "ignored: provdier",                         # ...and the message that key produces
+  "html-valdate",                              # unknown-tool fixture
+  "`langauge` is a misspelling of `language`", # golangci-lint parser fixture
+]
+
+[default.extend-words]
+# Intentional project vocabulary. These are repository-wide on purpose.
+#
+# "unparseable" is an intentional, pervasive spelling in this codebase (parser
+# error taxonomy, tests); the project accepts this variant rather than
+# mass-rewriting it.
+unparseable = "unparseable"
+# "invokable" is used deliberately in prose about runnable scripts.
+invokable = "invokable"
+# "mis-" is a valid English prefix used in prose ("mis-quoting", "mis-detect",
+# "mis-flagged"); typos sees the hyphenated stem as its own word.
+mis = "mis"
+# "ands" is the plural of the boolean operator, used in a test name
+# (``test_master_switch_ands_with_sub_toggles``).
+ands = "ands"
+# "edn" is the Clojure EDN file extension, listed in the review corpus schema.
+edn = "edn"
+
+[files]
+extend-exclude = [
+  # Generated release notes: every entry carries an abbreviated commit SHA
+  # (7b0afe0, faf3daa, ...) that typos reads as a misspelled word.
+  "CHANGELOG.md",
+  # Individual fixture files that deliberately embed non-English or scrambled
+  # text to exercise parser and severity handling. Listed file by file rather
+  # than by directory so new tests in the same package are still checked.
+  "tests/unit/parsers/test_taplo_parser.py",
+  "tests/unit/enums/test_severity_level.py",
+  "tests/unit/parsers/typos_parser/conftest.py",
+  "tests/unit/parsers/typos_parser/test_edge_cases.py",
+  "tests/unit/parsers/typos_parser/test_field_extraction.py",
+  "tests/unit/parsers/typos_parser/test_invalid_input.py",
+  "tests/unit/parsers/typos_parser/test_issue_model.py",
+  "tests/unit/tools/typos/test_execution.py",
+  "tests/integration/tools/typos/test_check.py",
+  "tests/integration/tools/typos/test_fix.py",
+  "test_samples/tools/spelling/typos/typos_violations.txt",
+  # Binary assets — typos reads command-line arguments as text regardless of
+  # content, so exclude the formats that would otherwise emit pure noise.
+  "*.png",
+  "*.jpg",
+  "*.jpeg",
+  "*.gif",
+  "*.webp",
+  "*.ico",
+  "apps/site/public/assets/",
+]
