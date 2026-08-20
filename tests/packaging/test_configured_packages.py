@@ -42,6 +42,11 @@ def test_configured_packages_includes_lintro_and_excludes_tests() -> None:
     assert_that(packages).contains("lintro.parsers")
     assert_that(packages).contains("lintro.tools.definitions")
     assert_that([name for name in packages if name.startswith("tests")]).is_empty()
+    assert_that(packages).does_not_contain("lintro.ascii-art")
+    for name in packages:
+        assert_that(
+            all(part.isidentifier() for part in name.split(".")),
+        ).described_as(f"{name} is not a valid import name").is_true()
 
 
 def test_configured_packages_main_prints_one_name_per_line(

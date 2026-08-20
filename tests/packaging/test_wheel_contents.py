@@ -204,6 +204,8 @@ def test_declared_package_data_exists_on_disk() -> None:
     paths = _declared_package_data_paths()
     assert_that(paths).contains("lintro/py.typed")
     assert_that(paths).contains("lintro/tools/manifest.json")
+    assert_that(paths).contains("lintro/ascii-art/success.txt")
+    assert_that(paths).contains("lintro/ascii-art/fail.txt")
     assert_that(_package_data_globs()).is_not_empty()
 
 

@@ -141,10 +141,17 @@ build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lintro*"]
-exclude = ["tests*", "test_samples*", "scripts*", "docs*"]
+exclude = [
+  "tests*",
+  "test_samples*",
+  "scripts*",
+  "docs*",
+  # Data directory, not an importable package (hyphen is not a valid module name).
+  "lintro.ascii-art",
+]
 
 [tool.setuptools.package-data]
-lintro = ["tools/*.json", "py.typed"]
+lintro = ["tools/*.json", "py.typed", "ascii-art/*.txt"]
 "lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 [tool.ruff]
