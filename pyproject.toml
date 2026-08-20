@@ -74,6 +74,8 @@ test = [
   "pytest-mock>=3.15.1",
   "pytest-xdist>=3.8.0",
   "assertpy>=1.1",
+  # Same pin as [build-system] so packaging discovery can call find_packages.
+  "setuptools==84.0.0",
 ]
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 full = [

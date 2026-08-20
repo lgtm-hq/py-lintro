@@ -119,3 +119,51 @@ def test_package_discovery_runs_without_project_venv() -> None:
     assert_that(names).contains("lintro")
     assert_that(names).contains("lintro.parsers")
     assert_that([name for name in names if name.startswith("tests")]).is_empty()
+
+
+def test_configured_packages_module_does_not_import_setuptools() -> None:
+    """Importing the helper must not require setuptools at collection time."""
+    import ast
+
+    source = (
+        PROJECT_ROOT / "tests" / "packaging" / "configured_packages.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names = [alias.name.split(".", 1)[0] for alias in node.names]
+            assert_that(names).does_not_contain("setuptools")
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert_that(node.module.split(".", 1)[0]).is_not_equal_to("setuptools")
+
+
+def test_test_extra_and_tox_pin_setuptools() -> None:
+    """The test extra and tox env must ship the build-system setuptools pin."""
+    pin = _build_system_setuptools_pin()
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        extras = tomllib.load(handle)["project"]["optional-dependencies"]["test"]
+    assert_that(extras).contains(pin)
+    tox = (PROJECT_ROOT / "tox.ini").read_text(encoding="utf-8")
+    assert_that(tox).contains(pin)
+
+
+def test_configured_packages_raises_when_setuptools_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery must fail loudly instead of crashing pytest collection.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _hide_setuptools(name: str, *args: object, **kwargs: object) -> object:
+        if name == "setuptools" or name.startswith("setuptools."):
+            raise ImportError("setuptools hidden for test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _hide_setuptools)
+    with pytest.raises(ModuleNotFoundError, match="setuptools"):
+        configured_packages(project_root=PROJECT_ROOT)

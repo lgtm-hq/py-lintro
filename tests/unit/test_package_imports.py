@@ -50,6 +50,7 @@ def _get_packages_from_pyproject() -> set[str]:
 
 def _get_configured_packages() -> list[str]:
     """Get packages from pyproject.toml for parametrized tests."""
+    pytest.importorskip("setuptools")
     return sorted(_get_packages_from_pyproject())
 
 

@@ -11,8 +11,6 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from setuptools.config.expand import find_packages
-
 
 def configured_packages(project_root: Path) -> set[str]:
     """Return package names setuptools would ship for this repository.
@@ -22,7 +20,19 @@ def configured_packages(project_root: Path) -> set[str]:
 
     Returns:
         Package names selected by ``[tool.setuptools.packages.find]``.
+
+    Raises:
+        ModuleNotFoundError: If setuptools is not installed in this
+            interpreter. The CI importer supplies it with
+            ``uv run --no-project --with setuptools==…``.
     """
+    try:
+        from setuptools.config.expand import find_packages
+    except ImportError as exc:
+        raise ModuleNotFoundError(
+            "Package discovery requires setuptools "
+            "(same pin as [build-system] requires).",
+        ) from exc
     with (project_root / "pyproject.toml").open("rb") as handle:
         data = tomllib.load(handle)
     find_config = (
