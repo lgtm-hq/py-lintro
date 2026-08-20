@@ -28,10 +28,11 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.option_validators import filter_none_options, validate_str
+from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for ktlint configuration
 KTLINT_DEFAULT_TIMEOUT: int = 60
-KTLINT_DEFAULT_PRIORITY: int = 50
+KTLINT_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("ktlint", 50)
 KTLINT_FILE_PATTERNS: list[str] = ["*.kt", "*.kts"]
 KTLINT_DEFAULT_REPORTER: str = "json"
 

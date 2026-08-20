@@ -25,6 +25,7 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     "gitleaks": "gitleaks",
     "golangci_lint": "golangci-lint",
     "hadolint": "hadolint",
+    "ktlint": "ktlint",
     "osv_scanner": "osv-scanner",
     "shellcheck": "shellcheck",
     "shfmt": "shfmt",

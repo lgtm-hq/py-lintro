@@ -98,6 +98,7 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.YAMLLINT: 35,
     ToolName.BANDIT: 45,
     ToolName.HADOLINT: 50,
+    ToolName.KTLINT: 50,
     ToolName.OXLINT: 50,
     ToolName.ACTIONLINT: 55,
     ToolName.MYPY: 82,

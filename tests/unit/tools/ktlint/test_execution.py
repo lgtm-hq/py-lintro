@@ -164,7 +164,7 @@ def test_fix_preserves_invariant_full_fix(
     assert_that(
         result.initial_issues_count,
     ).is_equal_to(
-        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
 
 
@@ -212,7 +212,7 @@ def test_fix_preserves_invariant_partial_fix(
     assert_that(
         result.initial_issues_count,
     ).is_equal_to(
-        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
 
 
@@ -318,5 +318,5 @@ def test_fix_new_findings_after_format_keep_counts_consistent(
     assert_that(
         result.initial_issues_count,
     ).is_equal_to(
-        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
