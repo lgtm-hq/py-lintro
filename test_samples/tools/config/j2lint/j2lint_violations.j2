@@ -1,0 +1,6 @@
+{% if enabled == True %}
+{{ hostname }}
+{%- for interface in interfaces %}
+{{interface}}
+{% endfor %}
+{% endif %}

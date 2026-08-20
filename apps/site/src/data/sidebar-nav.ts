@@ -61,6 +61,7 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/svelte-check': 'frameworks',
   'tools/vue-tsc': 'frameworks',
   'tools/html-validate': 'frameworks',
+  'tools/j2lint': 'frameworks',
   'tools/yamllint': 'config',
   'tools/markdownlint': 'config',
   'tools/actionlint': 'ci-ops',
