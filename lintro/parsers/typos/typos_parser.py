@@ -1,10 +1,20 @@
 """Parser for typos JSON output.
 
 typos emits newline-delimited JSON (``--format json``): one JSON object per
-line. Objects have a ``type`` discriminator; only ``type == "typo"`` entries
-describe a spelling finding. Other object types (for example ``error`` or
-``binary_file`` diagnostics) are ignored so the parser only surfaces
-actionable typos.
+line, with a ``type`` discriminator.
+
+The stream mixes two different kinds of record, so this module exposes two
+parsers rather than one:
+
+* :func:`parse_typos_output` returns the ``type == "typo"`` entries — the lint
+  findings.
+* :func:`parse_typos_errors` returns the ``type == "error"`` entries — per-file
+  diagnostics such as ``Permission denied``. These can appear in the *same*
+  run as real findings (one unreadable file among many), so the plugin tracks
+  them separately and fails the run on them instead of inferring failure from
+  an empty findings list.
+
+Remaining record types are informational and are only logged.
 """
 
 from __future__ import annotations
@@ -117,12 +127,13 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             continue
         record_type = record.get("type")
         if record_type != "typo":
-            # typos also emits diagnostic records (``error``, ``binary_file``,
-            # ``file_not_found``, ...). They are not lint findings, so they are
-            # not turned into issues; they are logged instead. A run that only
-            # produced diagnostics also exits non-zero, and the plugin fails
-            # closed on a non-zero exit with no parsed findings, so nothing is
-            # silently lost.
+            # This function returns lint findings only. typos interleaves
+            # diagnostic records on the same stream, and they are NOT handled
+            # here: ``error`` records are picked up by
+            # :func:`parse_typos_errors`, which the plugin treats as a hard
+            # failure even when this function also returned findings for other
+            # files in the same run. Anything else (``binary_file``,
+            # ``file_type``, ...) is informational and only logged.
             logger.debug(f"typos: ignoring non-typo record of type {record_type!r}")
             continue
 

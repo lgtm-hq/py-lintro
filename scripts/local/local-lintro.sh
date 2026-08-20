@@ -46,6 +46,11 @@ add_local_bin_to_path() {
 check_and_install_tools() {
 	echo -e "${BLUE}Checking tool availability...${NC}"
 
+	# Look in the installer's target directory before deciding anything is
+	# missing: a previously installed tool there is invisible to `command -v`
+	# on a shell that never added ~/.local/bin to PATH.
+	add_local_bin_to_path
+
 	# Check for required tools
 	local missing_tools=()
 
@@ -64,6 +69,12 @@ check_and_install_tools() {
 
 	if ! command -v uv &>/dev/null; then
 		missing_tools+=("uv")
+	fi
+
+	# typos runs in the default toolset, so a missing binary degrades every
+	# subsequent `lintro check`/`format` run rather than just one tool.
+	if ! command -v typos &>/dev/null; then
+		missing_tools+=("typos")
 	fi
 
 	# If tools are missing, offer to install them (or auto-install with --yes)
