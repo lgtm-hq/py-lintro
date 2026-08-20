@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from lintro.enums.update_channel import UpdateChannel
-from lintro.tools.core.install_strategies.brew_names import BREW_FORMULA_NAMES
+from lintro.tools.core.install_strategies.package_names import BREW_FORMULA_NAMES
 
 # Per-tool channel overrides when path heuristics are wrong or unavailable.
 # Keys are canonical tool names; values are UpdateChannel members (or their
@@ -101,6 +101,10 @@ def detect_update_channel(
         return UpdateChannel.UV_TOOL
 
     if _is_cargo_path(resolved=resolved, path_lower=path_lower):
+        # rustup installs proxy shims in ``~/.cargo/bin`` (rustc, cargo,
+        # rustfmt, clippy). Those are not cargo-installed crates.
+        if _is_rustup_shim(resolved=resolved, tool_name=tool_name):
+            return UpdateChannel.RUSTUP
         return UpdateChannel.CARGO
 
     if _is_rustup_path(path_lower=path_lower, parts_lower=parts_lower):
@@ -127,6 +131,7 @@ def resolve_update_command(
     tool_name: str,
     install_package: str | None = None,
     latest_known: str | None = None,
+    binary_path: str | Path | None = None,
 ) -> str | None:
     """Map an install channel to an actionable update command.
 
@@ -135,6 +140,8 @@ def resolve_update_command(
         tool_name: Canonical tool name.
         install_package: Package name override from the manifest.
         latest_known: Pinned expected version for channels that pin on upgrade.
+        binary_path: Installed binary path. Project-local ``node_modules``
+            installs must not emit a global ``npm install -g`` / ``bun add -g``.
 
     Returns:
         Shell command string, or None when the channel has no known template.
@@ -145,6 +152,7 @@ def resolve_update_command(
         install_package=install_package,
     )
     version = latest_known or ""
+    project_local_node = _is_project_local_node_path(binary_path)
 
     if channel == UpdateChannel.HOMEBREW:
         return f"brew upgrade {package}"
@@ -155,13 +163,15 @@ def resolve_update_command(
             return f"uv pip install --upgrade '{package}>={version}'"
         return f"uv pip install --upgrade {package}"
     if channel == UpdateChannel.NPM:
-        if version:
-            return f"npm install -g {package}@{version}"
-        return f"npm install -g {package}"
+        spec = f"{package}@{version}" if version else package
+        if project_local_node:
+            return f"npm install -D {spec}"
+        return f"npm install -g {spec}"
     if channel == UpdateChannel.BUN:
-        if version:
-            return f"bun add -g {package}@{version}"
-        return f"bun add -g {package}"
+        spec = f"{package}@{version}" if version else package
+        if project_local_node:
+            return f"bun add -D {spec}"
+        return f"bun add -g {spec}"
     if channel == UpdateChannel.CARGO:
         return f"cargo install --force {package}"
     if channel == UpdateChannel.RUSTUP:
@@ -202,6 +212,7 @@ def build_version_advisory(
         tool_name=tool,
         install_package=install_package,
         latest_known=latest_known,
+        binary_path=binary_path,
     )
     return VersionAdvisory(
         tool=tool,
@@ -316,6 +327,39 @@ def _is_uv_tool_path(*, resolved: Path, path_lower: str) -> bool:
         except (OSError, ValueError, RuntimeError):
             return False
     return False
+
+
+_RUSTUP_SHIM_NAMES: frozenset[str] = frozenset(
+    {
+        "rustc",
+        "cargo",
+        "rustfmt",
+        "clippy",
+        "cargo-clippy",
+    },
+)
+
+
+def _is_rustup_shim(*, resolved: Path, tool_name: str | None) -> bool:
+    """Return True for rustup proxy binaries that live under ``~/.cargo/bin``."""
+    names = {resolved.name.lower().removesuffix(".exe")}
+    if tool_name:
+        lowered = tool_name.lower()
+        names.add(lowered.replace("-", "_"))
+        names.add(lowered.replace("_", "-"))
+        names.add(lowered)
+    return bool(names & _RUSTUP_SHIM_NAMES)
+
+
+def _is_project_local_node_path(binary_path: str | Path | None) -> bool:
+    """Return True when the binary is a project-local ``node_modules`` install."""
+    if binary_path is None:
+        return False
+    try:
+        parts = {part.lower() for part in Path(binary_path).parts}
+    except (OSError, ValueError, RuntimeError):
+        return False
+    return "node_modules" in parts
 
 
 def _is_cargo_path(*, resolved: Path, path_lower: str) -> bool:

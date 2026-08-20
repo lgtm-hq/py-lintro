@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -35,6 +36,8 @@ def _make_tool(
     min_version: str | None = None,
     *,
     install_type: str = "pip",
+    install_package: str | None = None,
+    update_channel: str | None = None,
     tier: str = "tools",
     category: str = "bundled",
     version_command: tuple[str, ...] | None = None,
@@ -45,6 +48,8 @@ def _make_tool(
         version=version,
         min_version=min_version or version,
         install_type=install_type,
+        install_package=install_package,
+        update_channel=update_channel,
         tier=tier,
         category=category,
         version_command=(
@@ -79,8 +84,6 @@ def _make_context(*, has_brew: bool = False) -> RuntimeContext:
     )
 
 
-
-
 # ── check_tool advisories ────────────────────────────────────────────
 
 
@@ -108,6 +111,99 @@ def test_check_tool_outdated_enriches_advisory_from_path() -> None:
     assert result.advisory is not None
     assert_that(result.advisory.channel.value).is_equal_to("uv_tool")
     assert_that(result.upgrade_hint).is_equal_to("uv tool upgrade ruff")
+
+
+def test_check_tool_honors_manifest_channel_override() -> None:
+    """Manifest ``update_channel`` wins when path heuristics are UNKNOWN."""
+    tool = _make_tool(
+        name="hadolint",
+        version="2.12.0",
+        min_version="2.10.0",
+        install_type="binary",
+        update_channel="homebrew",
+    )
+    ctx = _make_context(has_brew=True)
+
+    with (
+        patch("shutil.which", return_value="/opt/mystery/bin/hadolint"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="Haskell Dockerfile Linter 2.10.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("homebrew")
+    assert_that(result.upgrade_hint).is_equal_to("brew upgrade hadolint")
+
+
+def test_check_tool_rustc_cargo_bin_stays_rustup() -> None:
+    """Rustc under ``~/.cargo/bin`` is upgraded with rustup, not cargo install."""
+    tool = _make_tool(
+        name="rustc",
+        version="1.97.1",
+        min_version="1.80.0",
+        install_type="rustup",
+    )
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/Users/me/.cargo/bin/rustc"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="rustc 1.80.0 (abc 2024-01-01)",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("rustup")
+    assert_that(result.upgrade_hint).is_equal_to("rustup update stable")
+
+
+def test_check_tool_node_modules_does_not_use_global_npm(
+    tmp_path: Path,
+) -> None:
+    """A project-local prettier must not get ``npm install -g``.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    prettier = tmp_path / "node_modules" / ".bin" / "prettier"
+    prettier.parent.mkdir(parents=True)
+    prettier.write_text("#!/bin/sh\n")
+    tool = _make_tool(
+        name="prettier",
+        version="3.9.5",
+        min_version="3.0.0",
+        install_type="npm",
+        install_package="prettier",
+    )
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value=str(prettier)),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="3.0.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("npm")
+    assert_that(result.upgrade_hint).is_equal_to("npm install -D prettier@3.9.5")
+    assert_that(result.upgrade_hint).does_not_contain("install -g")
 
 
 # ── _output_json ─────────────────────────────────────────────────────

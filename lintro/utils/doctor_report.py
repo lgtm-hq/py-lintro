@@ -261,6 +261,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 binary_path=tool_path,
                 install_package=tool.install_package,
                 install_type=tool.install_type,
+                channel_override=tool.update_channel,
             )
             if advisory and advisory.update_command:
                 final_upgrade = advisory.update_command

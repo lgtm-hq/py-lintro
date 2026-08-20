@@ -46,6 +46,10 @@ from lintro.tools.core.version_checking import (
             UpdateChannel.CARGO,
         ),
         (
+            "/Users/me/.cargo/bin/rustc",
+            UpdateChannel.RUSTUP,
+        ),
+        (
             "/Users/me/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc",
             UpdateChannel.RUSTUP,
         ),
@@ -84,6 +88,7 @@ from lintro.tools.core.version_checking import (
         "homebrew-npm-formula",
         "uv-tool",
         "cargo",
+        "rustup-shim-in-cargo-bin",
         "rustup",
         "bun",
         "npm-local",
@@ -114,8 +119,10 @@ def test_detect_update_channel_rejects_project_toolchains_path() -> None:
         "/home/user/my-rust-project/toolchains/bin/mytool",
     )
     assert_that(channel).is_not_equal_to(UpdateChannel.RUSTUP)
+
+
+def test_detect_update_channel_homebrew_bin_prefix() -> None:
     """Binaries under the Homebrew bin prefix resolve as homebrew."""
-    # On Homebrew Macs /usr/local/bin often symlinks to /opt/homebrew/bin.
     channel = detect_update_channel("/opt/homebrew/bin/some-tool")
     assert_that(channel).is_equal_to(UpdateChannel.HOMEBREW)
 
@@ -259,6 +266,30 @@ def test_resolve_update_command(
         latest_known=latest,
     )
     assert_that(command).is_equal_to(expected)
+
+
+def test_resolve_update_command_uses_project_local_npm() -> None:
+    """A node_modules binary must not emit a global npm install."""
+    command = resolve_update_command(
+        channel=UpdateChannel.NPM,
+        tool_name="prettier",
+        install_package="prettier",
+        latest_known="3.9.4",
+        binary_path="/proj/node_modules/.bin/prettier",
+    )
+    assert_that(command).is_equal_to("npm install -D prettier@3.9.4")
+
+
+def test_build_version_advisory_rustc_cargo_bin_is_rustup() -> None:
+    """Rustc in ``~/.cargo/bin`` is a rustup shim, not a cargo crate."""
+    advisory = build_version_advisory(
+        tool="rustc",
+        installed="1.80.0",
+        latest_known="1.97.1",
+        binary_path="/Users/me/.cargo/bin/rustc",
+    )
+    assert_that(advisory.channel).is_equal_to(UpdateChannel.RUSTUP)
+    assert_that(advisory.update_command).is_equal_to("rustup update stable")
 
 
 def test_build_version_advisory_includes_command() -> None:

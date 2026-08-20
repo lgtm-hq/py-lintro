@@ -53,7 +53,6 @@ import threading
 from pathlib import Path
 
 from loguru import logger
-from packaging.version import InvalidVersion, Version
 
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
@@ -343,7 +342,7 @@ def build_version_advisory(
         :class:`VersionAdvisory` when ``installed < latest_known``, else None.
     """
     try:
-        if _is_at_least(installed, latest_known):
+        if _is_at_least(installed=installed, latest_known=latest_known):
             return None
     except ValueError:
         return None
@@ -382,8 +381,11 @@ def build_version_advisory(
     return advisory
 
 
-def _is_at_least(installed: str, latest_known: str) -> bool:
+def _is_at_least(*, installed: str, latest_known: str) -> bool:
     """Return True when installed version is >= latest_known.
+
+    Delegates to :func:`lintro.tools.core.version_parsing.compare_versions` so
+    doctor and ``lintro versions`` classify the same strings the same way.
 
     Args:
         installed: Installed version string.
@@ -395,11 +397,6 @@ def _is_at_least(installed: str, latest_known: str) -> bool:
     Raises:
         ValueError: If either version string cannot be parsed.
     """
-    try:
-        left = Version(installed.lstrip("vV").split("-", 1)[0].split("+", 1)[0])
-        right = Version(latest_known.lstrip("vV").split("-", 1)[0].split("+", 1)[0])
-    except InvalidVersion as exc:
-        raise ValueError(
-            f"Unable to compare versions: {installed!r} vs {latest_known!r}",
-        ) from exc
-    return left >= right
+    from lintro.tools.core.version_parsing import compare_versions
+
+    return compare_versions(installed, latest_known) >= 0
