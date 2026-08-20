@@ -94,6 +94,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/ruff": ("ruff", "python"),
     "tools/svelte-check": ("svelte-check", "frameworks"),
     "tools/trufflehog": ("trufflehog", "security"),
+    "tools/terraform": ("terraform", "ci-ops"),
     "tools/tsc": ("tsc", "js-ts"),
     "tools/vue-tsc": ("vue-tsc", "frameworks"),
     "tools/yamllint": ("yamllint", "config"),

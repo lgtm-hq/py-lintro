@@ -45,6 +45,7 @@
     "markdown": ["markdownlint", "vale"],
     "html": ["html_validate"],
     "toml": ["taplo"],
+    "terraform": ["terraform"],
     "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
     "scss": ["stylelint"],
@@ -476,6 +477,18 @@
       "version_command": ["taplo", "--version"],
       "languages": ["toml"],
       "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "terraform",
+      "version": "1.15.8",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["terraform", "version"],
+      "languages": ["terraform"],
+      "tags": ["linter", "formatter", "infrastructure"]
     },
     {
       "name": "trufflehog",

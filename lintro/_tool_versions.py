@@ -75,6 +75,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
+    ToolName.TERRAFORM: "1.15.8",
     ToolName.TRUFFLEHOG: "3.97.0",
     ToolName.VALE: "3.17.1",
 }
