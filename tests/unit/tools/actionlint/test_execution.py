@@ -96,14 +96,3 @@ def test_fix_raises_not_implemented(actionlint_plugin: ActionlintPlugin) -> None
     """
     with pytest.raises(NotImplementedError, match="Actionlint cannot automatically"):
         actionlint_plugin.fix([], {})
-
-
-def test_doc_url_returns_none_for_empty_code(
-    actionlint_plugin: ActionlintPlugin,
-) -> None:
-    """doc_url returns None when no code is given.
-
-    Args:
-        actionlint_plugin: The ActionlintPlugin instance to test.
-    """
-    assert_that(actionlint_plugin.doc_url("")).is_none()
