@@ -97,10 +97,9 @@ def test_project_extend_exclude_is_honored(
     plugin = get_plugin("typos")
     result = plugin.check([str(excluded), str(checked)], {})
 
-    reported = {issue.file for issue in result.issues or []}
+    reported = {Path(issue.file).name for issue in result.issues or []}
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(" ".join(sorted(reported))).contains("checked.txt")
-    assert_that(" ".join(sorted(reported))).does_not_contain("ignored.txt")
+    assert_that(reported).is_equal_to({"checked.txt"})
 
 
 def test_binary_files_are_not_reported(

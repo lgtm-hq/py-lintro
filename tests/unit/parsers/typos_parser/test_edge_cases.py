@@ -53,16 +53,34 @@ def test_non_integer_location_defaults_to_zero() -> None:
     assert_that(issues[0].column).is_equal_to(0)
 
 
-def test_corrections_coerced_to_strings() -> None:
-    """Non-string correction entries are coerced to strings."""
+def test_non_string_corrections_are_dropped() -> None:
+    """Non-string correction entries are discarded, not stringified.
+
+    Stringifying a null or nested value would display nonsense and flip
+    ``fixable`` to True, offering an auto-replace that cannot work.
+    """
     output = (
         '{"type":"typo","path":"x.txt","line_num":1,"byte_offset":0,'
-        '"typo":"teh","corrections":[1,2]}'
+        '"typo":"teh","corrections":[1,null,{"a":1},"the"]}'
     )
 
     issues = parse_typos_output(output)
 
-    assert_that(issues[0].corrections).is_equal_to(["1", "2"])
+    assert_that(issues[0].corrections).is_equal_to(["the"])
+
+
+def test_only_non_string_corrections_is_not_fixable() -> None:
+    """A corrections list with nothing usable leaves the finding unfixable."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":1,"byte_offset":0,'
+        '"typo":"teh","corrections":[null,1]}'
+    )
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues[0].corrections).is_empty()
+    assert_that(issues[0].fixable).is_false()
+    assert_that(issues[0].message).is_equal_to('"teh" is disallowed')
 
 
 def test_missing_corrections_key_defaults_to_empty() -> None:

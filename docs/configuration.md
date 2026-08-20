@@ -2172,6 +2172,28 @@ lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
 for source code and documentation. It checks all text files and can auto-correct
 misspellings.
 
+> **Heads-up:** unlike Vale — which skips itself when no `.vale.ini` is resolvable —
+> typos needs no configuration to run, so it joins the default toolset as soon as the
+> binary is on `PATH`. An existing unscoped `lintro check` will therefore start
+> spell-checking the whole repository. Two things to know before that first run:
+>
+> - **Opting out.** Scope a run with `lintro check --tools ruff,prettier` (typos only
+>   runs when selected), or disable it for the project in `.lintro-config.yaml`:
+>
+>   ```yaml
+>   tools:
+>     typos:
+>       enabled: false
+>   ```
+>
+> - **Project vocabulary.** The first run usually reports a handful of deliberate
+>   spellings — product names, abbreviations, deliberate misspellings inside test
+>   fixtures. Add them to `.typos.toml` rather than suppressing the tool: real words go
+>   in `[default.extend-words]`, and anything that is only correct in one context is
+>   better handled by a context-anchored `[default] extend-ignore-re` pattern so the
+>   same word is still caught elsewhere. `lintro format --tools typos` applies the
+>   corrections typos is confident about, which clears most of the rest.
+
 **Installation:**
 
 ```bash

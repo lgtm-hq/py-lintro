@@ -59,6 +59,19 @@ def _proc(
     )
 
 
+def _one_file_per_batch(paths: list[str], **_kwargs: object) -> list[list[str]]:
+    """Chunk every path into its own batch.
+
+    Args:
+        paths: Paths to chunk.
+        **_kwargs: Ignored budget arguments.
+
+    Returns:
+        One single-element batch per path.
+    """
+    return [[path] for path in paths]
+
+
 def test_check_success_when_clean(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
@@ -410,31 +423,15 @@ def test_large_file_lists_are_split_into_batches(
         commands.append(cmd)
         return _proc()
 
-    # Shrink the argv budget to its floor so each path lands in its own batch.
+    # Force one path per batch so the batching loop is actually exercised.
     with (
-        patch(
-            "lintro.tools.definitions.typos.chunk_paths",
-            side_effect=lambda paths, **_kw: [[p] for p in paths],
-        ),
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record),
     ):
         result = typos_plugin.check(targets, {})
 
     assert_that(commands).is_length(5)
     assert_that(result.success).is_true()
-
-
-def _one_file_per_batch(paths: list[str], **_kwargs: object) -> list[list[str]]:
-    """Chunk every path into its own batch.
-
-    Args:
-        paths: Paths to chunk.
-        **_kwargs: Ignored budget arguments.
-
-    Returns:
-        One single-element batch per path.
-    """
-    return [[path] for path in paths]
 
 
 def test_check_surfaces_a_failed_batch_alongside_findings(

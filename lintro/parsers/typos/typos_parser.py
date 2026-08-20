@@ -97,6 +97,7 @@ def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, s
         try:
             record = json.loads(stripped)
         except (json.JSONDecodeError, ValueError):
+            logger.debug(f"typos: undecodable output line: {stripped}")
             yield None, stripped
             continue
         if not isinstance(record, dict):
@@ -172,9 +173,12 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
         if not isinstance(path, str) or not isinstance(typo, str):
             continue
 
+        # Only real strings are usable corrections. A null or nested value
+        # stringified to "None"/a dict repr would both display nonsense and
+        # flip ``fixable`` to True, offering a bogus auto-replace.
         raw_corrections = record.get("corrections")
         corrections: list[str] = (
-            [str(c) for c in raw_corrections]
+            [c for c in raw_corrections if isinstance(c, str)]
             if isinstance(raw_corrections, list)
             else []
         )
