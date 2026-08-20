@@ -108,6 +108,8 @@ order and for what changed.
 - `semgrep` - Security scanner and code analyzer (`./scripts/utils/install-semgrep.sh`
   from a checkout, `uv tool install semgrep`, or `brew install semgrep`). Not included
   in `lintro[tools]`.
+- `checkov` - Infrastructure-as-Code security scanner for Terraform
+  (`uv tool install checkov`, `pip install checkov`, or `brew install checkov`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
