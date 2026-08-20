@@ -2691,10 +2691,10 @@ RUN apt-get update && apt-get install -y \
 
 #### Checkov Configuration
 
-Checkov scans **Terraform** sources (`*.tf`, `*.tf.json`) for security and
-compliance misconfigurations. Dockerfiles are intentionally left to hadolint to
-avoid double-reporting. Runs are hermetic by default (`--skip-download`, no
-external module download, no platform API key / result upload).
+Checkov scans **Terraform** sources (`*.tf`, `*.tf.json`) for security and compliance
+misconfigurations. Dockerfiles are intentionally left to hadolint to avoid
+double-reporting. Runs are hermetic by default (`--skip-download`, no external module
+download, no platform API key / result upload).
 
 - Discovery: Terraform files (`*.tf`, `*.tf.json`)
 - Native config: `.checkov.yaml` / `.checkov.yml`
@@ -2711,10 +2711,9 @@ lintro check --tools checkov --tool-options "checkov:skip_checks=CKV_AWS_18|CKV_
 lintro check --tools checkov --tool-options "checkov:checks=CKV_AWS_260"
 ```
 
-> Note: Checkov severity and remediation guideline URLs are only populated when
-> Checkov runs with a Prisma Cloud / Bridgecrew platform API key. In the default
-> offline mode, findings normalize to lintro's default severity and link to the
-> Checkov policy index.
+> Note: Checkov severity and remediation guideline URLs are only populated when Checkov
+> runs with a Prisma Cloud / Bridgecrew platform API key. In the default offline mode,
+> findings normalize to lintro's default severity and link to the Checkov policy index.
 
 #### Actionlint Configuration
 
