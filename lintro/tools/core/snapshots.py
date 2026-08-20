@@ -205,8 +205,11 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
 
     Available snapshots with a binary path are keyed on path + mtime.
     In-process tools (available, empty path) stay valid until TTL.
-    Unavailable empty-path snapshots are re-checked with ``shutil.which`` so
-    a binary installed inside the TTL window is not served as missing.
+    Unavailable empty-path snapshots are re-checked with ``shutil.which`` on
+    the resolved executable (``get_executable_command()[0]``) so a binary
+    installed inside the TTL window is not served as missing. Alias-only PATH
+    checks miss tools whose command name differs from the lintro tool name
+    (e.g. ``markdownlint-cli2`` for ``markdownlint``).
     """
     if snap.binary_path:
         if not Path(snap.binary_path).exists():
@@ -217,9 +220,11 @@ def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
         )
     if snap.available:
         return True
-    from lintro.enums.tool_name import tool_name_aliases
+    from lintro.plugins.execution_preparation import get_executable_command
 
-    return all(shutil.which(alias) is None for alias in tool_name_aliases(snap.name))
+    command = get_executable_command(snap.name)
+    main_cmd = command[0] if command else snap.name
+    return shutil.which(main_cmd) is None
 
 
 def set_force_fresh_probes(force: bool) -> None:
