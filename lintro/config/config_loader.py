@@ -774,6 +774,22 @@ def load_config(
     # Try searching for .lintro-config.yaml
     if not project_data:
         found_path = _find_config_file()
+        if (
+            found_path is not None
+            and global_file is not None
+            and found_path.resolve() == global_file.resolve()
+        ):
+            # A project directory nested under the home directory makes the
+            # upward search reach the user-level global file itself. That file
+            # is the global tier, not a project config: adopting it as both
+            # would report it twice and silently empty
+            # ``global_contributed_keys`` (every global leaf would look
+            # "overridden" by itself).
+            logger.debug(
+                "Upward search resolved to the global config file "
+                f"({global_config_path}); treating it as the global tier only.",
+            )
+            found_path = None
         if found_path:
             project_data = _load_yaml_file(found_path)
             resolved_path = str(found_path.resolve())
