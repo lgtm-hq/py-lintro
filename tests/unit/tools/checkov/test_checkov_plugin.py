@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import (  # nosec B404 - only the CompletedProcess dataclass is used
+    CompletedProcess,
+)
 from typing import Any
 from unittest.mock import patch
 
@@ -12,6 +14,8 @@ from assertpy import assert_that
 
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.checkov.checkov_issue import CheckovIssue
 from lintro.tools.definitions.checkov import CheckovPlugin
 
 _VERIFY_VERSION = "lintro.plugins.execution_preparation.verify_tool_version"
@@ -95,7 +99,11 @@ def test_doc_url_returns_policy_index(checkov_plugin: CheckovPlugin) -> None:
     assert_that(checkov_plugin.doc_url("")).is_none()
 
 
-def _run_check(plugin: CheckovPlugin, tf_file: Path, completed: CompletedProcess[str]):
+def _run_check(
+    plugin: CheckovPlugin,
+    tf_file: Path,
+    completed: CompletedProcess[str],
+) -> ToolResult:
     """Run plugin.check with version verification and subprocess mocked.
 
     Args:
@@ -132,7 +140,10 @@ def test_check_reports_failed_checks(
     assert_that(result.name).is_equal_to("checkov")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].check_id).is_equal_to("CKV_AWS_260")
+    checkov_issues = [
+        issue for issue in (result.issues or []) if isinstance(issue, CheckovIssue)
+    ]
+    assert_that(checkov_issues[0].check_id).is_equal_to("CKV_AWS_260")
 
 
 def test_check_clean_run_succeeds(

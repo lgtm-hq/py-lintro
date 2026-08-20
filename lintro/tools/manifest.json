@@ -163,7 +163,7 @@
       "category": "external",
       "version_command": ["checkov", "--version"],
       "languages": ["terraform", "security"],
-      "tags": ["security"]
+      "tags": ["infrastructure", "security"]
     },
     {
       "name": "clippy",
