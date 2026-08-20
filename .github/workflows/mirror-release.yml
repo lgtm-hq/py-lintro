@@ -21,13 +21,14 @@ name: Release - Mirror Version Bump
 permissions: {}
 
 concurrency:
-  group: mirror-release-${{ github.event.release.tag_name || inputs.release_tag }}
+  group: mirror-release
   cancel-in-progress: false
 
 jobs:
   mirror-bump:
     name: Bump lintro-pre-commit mirror
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       # read: checkout py-lintro CI scripts (mirror writes use MIRROR_REPO_TOKEN)
       contents: read
@@ -60,19 +61,19 @@ jobs:
         id: resolve
         run: lintro/scripts/ci/mirror/resolve-version.sh
 
-      - name: Wait for PyPI availability
-        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+      - name: Wait for PyPI wheel
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        env:
+          LINTRO_VERSION: ${{ steps.resolve.outputs.version }}
         # yamllint disable-line rule:line-length
-        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.resolve.outputs.version }}"
-
-      - name: Set up Python
-        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.14'
+        run: lintro/scripts/ci/mirror/wait-for-pypi-wheel.sh lintro "$LINTRO_VERSION"
 
       - name: Checkout lintro-pre-commit mirror
-        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lgtm-hq/lintro-pre-commit
@@ -80,11 +81,14 @@ jobs:
           path: mirror
 
       - name: Publish mirror release
-        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
         env:
           GH_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
           MIRROR_DIR: mirror
           BUMP_SCRIPT: >-
             ${{ github.workspace }}/lintro/scripts/ci/mirror/bump_pin.py
+          LINTRO_VERSION: ${{ steps.resolve.outputs.version }}
         # yamllint disable-line rule:line-length
-        run: lintro/scripts/ci/mirror/publish-mirror-release.sh "${{ steps.resolve.outputs.version }}"
+        run: lintro/scripts/ci/mirror/publish-mirror-release.sh "$LINTRO_VERSION"
