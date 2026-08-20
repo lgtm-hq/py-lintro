@@ -246,6 +246,8 @@ run_hyperfine() {
 
 write_baseline_meta() {
 	local meta_file="${RESULTS_DIR}/baseline-meta.json"
+	# python3, not ``uv run``: this metadata writer is stdlib-only and the whole
+	# suite deliberately avoids uv so no resolver work can perturb a run.
 	python3 -c "
 import json, platform, subprocess
 from datetime import datetime, timezone
