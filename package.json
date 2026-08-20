@@ -20,7 +20,7 @@
     "@commitlint/cli": "21.2.2",
     "@commitlint/config-conventional": "21.2.2",
     "astro": "7.2.2",
-    "html-validate": "11.6.2",
+    "html-validate": "11.8.0",
     "markdownlint-cli2": "0.23.2",
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
