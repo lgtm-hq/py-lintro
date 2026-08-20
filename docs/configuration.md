@@ -141,6 +141,12 @@ projects can still override.
 The home-directory dotfile deliberately takes precedence over the XDG fallback when both
 exist, so `~/.lintro-config.yaml` is always authoritative.
 
+If your project lives inside your home directory, the upward search for a project
+`.lintro-config.yaml` can reach `~/.lintro-config.yaml` itself. That file is counted as
+the **global tier only** — never as both tiers — so it is reported once and its keys are
+still listed as global contributions rather than looking like a project override of
+itself.
+
 Run `lintro config` to see a **Global Config** section reporting whether a global file
 was found, its resolved path, and which effective values it contributed (the keys your
 project config did not override). The same details appear under `global_config` in
