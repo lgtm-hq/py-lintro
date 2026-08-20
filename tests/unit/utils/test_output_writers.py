@@ -594,7 +594,7 @@ def test_write_json_output_includes_profile_when_provided(
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
-        profile_data={"cumulative_tool_duration": 1.23, "tools": []},
+        profile_data={"cumulative_tool_duration": 1.23, "tools": [], "suggestions": []},
     )
 
     content = json.loads(output_path.read_text())
