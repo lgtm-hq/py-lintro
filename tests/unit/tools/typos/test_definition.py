@@ -228,18 +228,24 @@ def test_getting_started_notes_first_run_native_config() -> None:
     """getting-started must mention the unmapped-tool first-run caveat.
 
     typos is listed with other optional installable tools, but unlike
-    language-mapped ones it is only auto-selected on a no-config first run
-    when a native config file exists at a scan root.
+    language-mapped ones a no-config default run only selects it when a
+    native config file exists. Named ``--tools`` and unscoped configs still
+    run it; ``lintro init`` writes an allowlist that omits it.
     """
     getting_started = Path("docs/getting-started.md").read_text(encoding="utf-8")
     start = getting_started.find("`typos`")
     end = getting_started.find("`vale`", start)
-    section = getting_started[start:end]
+    collapsed = " ".join(
+        line.strip() for line in getting_started[start:end].splitlines() if line.strip()
+    )
 
     assert_that(start).is_not_equal_to(-1)
-    assert_that(section).contains("typos.toml")
-    assert_that(section).contains("no-config first run")
-    assert_that(section).contains("skipped otherwise")
+    assert_that(collapsed).contains("typos.toml")
+    assert_that(collapsed).contains("no-config default")
+    assert_that(collapsed).contains("--tools typos")
+    assert_that(collapsed).contains("execution.enabled_tools")
+    assert_that(collapsed).contains("language allowlist omits it")
+    assert_that(collapsed).does_not_contain("skipped otherwise")
 
 
 def test_typos_version_output_parses(typos_plugin: TyposPlugin) -> None:

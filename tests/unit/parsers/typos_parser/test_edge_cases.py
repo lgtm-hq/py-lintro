@@ -188,10 +188,29 @@ def test_unknown_record_types_are_reported_as_diagnostics() -> None:
 
 def test_informational_record_types_are_not_diagnostics() -> None:
     """Known informational record types stay out of the diagnostics list."""
-    output = '{"type":"binary_file","path":"logo.png"}'
+    output = "\n".join(
+        [
+            '{"type":"binary_file","path":"logo.png"}',
+            '{"type":"file_type","path":"notes.txt"}',
+        ],
+    )
 
     assert_that(parse_typos_output(output)).is_empty()
     assert_that(parse_typos_errors(output)).is_empty()
+
+
+def test_type_file_is_not_treated_as_informational() -> None:
+    """A ``type=file`` progress record is not in the 1.49.0 JSON allowlist.
+
+    Unknown types fail closed. If a future typos release emits ``type=file``
+    as JSON, this test fails and the allowlist can be extended.
+    """
+    output = '{"type":"file","path":"notes.txt"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_equal_to(
+        ["notes.txt: typos reported 'file'"],
+    )
 
 
 def test_undecodable_lines_are_reported_as_diagnostics() -> None:
