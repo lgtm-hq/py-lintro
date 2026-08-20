@@ -59,8 +59,12 @@ All runs target `benchmarks/fixtures/small-python/` and use:
 - `--yes` so lintro never blocks on confirmation prompts
 - the installed `.venv/bin/lintro` binary (not `uv run`) so measured overhead is
   orchestration rather than uv's resolver
-- `benchmarks/hyperfine/run-in-dir.sh` to set cwd to the fixture on both sides
-  (portable; GNU `env -C` is not available on stock macOS `/usr/bin/env`)
+- `benchmarks/hyperfine/run-in-dir.sh` to set cwd to the fixture (portable; GNU `env -C`
+  is not available on stock macOS `/usr/bin/env`). The `ruff` and `mypy` suites put it
+  on both sides, so the extra process cancels out. The `format` and `multi` references
+  are the `sequential-*.sh` wrappers, which `cd` themselves: each side is still exactly
+  one bash wrapper around the timed work, but it is a different wrapper, so treat those
+  two suites as wrapper-comparable rather than wrapper-identical
 - `--tool-options ruff:format_check=False` on check so the timed ruff work matches a
   direct `ruff check`
 - `--tool-options ruff:lint_fix=False` on fmt, which drops the `ruff check --fix` stage.
