@@ -51,7 +51,7 @@ parser-selection decision.
   signals feed that: typos' own `{"type": "error", ...}` records on stdout (which can
   appear in the _same_ batch as real findings, e.g. one unreadable file among many), and
   a non-zero exit with nothing parseable at all.
-- **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
+- **Parser**: `lintro/parsers/typos/` (`parse_typos_report`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
   misspelled word, and its suggested corrections. `fixable` is set from whether typos
   offered any correction, and `column` is a 1-based **byte** index (typos reports byte
@@ -78,11 +78,19 @@ parser-selection decision.
 ```
 
 Only `type == "typo"` records become findings. `type == "error"` records are surfaced by
-`parse_typos_errors` and fail the run even when findings were also parsed. Informational
-types (`binary_file`, `file_type`) are debug-logged and dropped. Any other record type
-is treated as a diagnostic so a future typos release cannot vanish. A non-zero exit with
-no parseable findings also fails closed; typos' findings exit code is 2, and any other
-non-zero is a runtime failure even if some JSON typos were emitted.
+`parse_typos_errors` and fail the run even when findings were also parsed. The plugin
+calls `parse_typos_report`, which pairs both parsers on the same stdout so check, fix,
+`--write-changes`, and the post-write re-check cannot consume findings without also
+seeing diagnostics. Informational types (`binary_file`, `file_type`) are debug-logged
+and dropped. Any other record type is treated as a diagnostic so a future typos release
+cannot vanish.
+
+typos 1.49.0's `Message` enum also has `file` and `parse`, but the default spell-check
+walker never emits them (`file` is `--files` listing; `parse` is the identifier/word
+dump), so they stay off the allowlist.
+
+A non-zero exit with no parseable findings also fails closed; typos' findings exit code
+is 2, and any other non-zero is a runtime failure even if some JSON typos were emitted.
 
 ## When typos is selected
 

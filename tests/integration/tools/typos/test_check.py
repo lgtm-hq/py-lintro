@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import shutil
+import subprocess  # nosec B404 - drives the real typos binary under test
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -120,3 +122,40 @@ def test_binary_files_are_not_reported(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_default_json_does_not_emit_file_or_parse_types(tmp_path: Path) -> None:
+    """Default ``typos --format json`` never emits ``type=file`` or ``parse``.
+
+    Those ``Message`` variants exist in typos 1.49.0, but only the ``--files``
+    lister and identifier dump emit them. If a future release starts emitting
+    ``type=file`` per scanned path, this test fails before every clean Lintro
+    run would.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    text = tmp_path / "notes.txt"
+    text.write_text("hello world\n", encoding="utf-8")
+    binary = tmp_path / "blob.bin"
+    binary.write_bytes(b"\x00\x01\x02teh\x00")
+
+    proc = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
+        ["typos", "--format", "json", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    seen: set[str] = set()
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        record = json.loads(stripped)
+        record_type = record.get("type")
+        if isinstance(record_type, str):
+            seen.add(record_type)
+
+    assert_that(seen).is_subset_of({"typo", "error", "binary_file", "file_type"})
+    assert_that(seen).does_not_contain("file")
+    assert_that(seen).does_not_contain("parse")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
@@ -870,3 +871,46 @@ def test_fix_grows_initial_when_recheck_finds_more(
     assert_that(
         (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     ).is_equal_to(result.initial_issues_count)
+
+
+def test_plugin_uses_combined_typos_report_parser() -> None:
+    """check, fix, write, and re-check all parse via ``parse_typos_report``.
+
+    Fail-closed diagnostics live in the combined parser. A findings-only call
+    would treat an error stream as a clean scan, so ``_run_batched`` must not
+    invoke the two parsers independently.
+    """
+    source = inspect.getsource(TyposPlugin._run_batched)
+    assert_that(source).contains("parse_typos_report")
+    assert_that(source).does_not_contain("parse_typos_output")
+    assert_that(source).does_not_contain("parse_typos_errors")
+
+
+def test_fix_recheck_fails_on_error_record(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A diagnostic on the post-write re-check fails the ToolResult.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "fixme.txt"
+    target.write_text("teh cat\n")
+    initial = _typo_line("fixme.txt", "teh", "the")
+    recheck = '{"type":"error","path":"fixme.txt","msg":"Permission denied"}'
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(stdout=initial, returncode=2),
+            _proc(),
+            _proc(stdout=recheck, returncode=1),
+        ],
+    ):
+        result = typos_plugin.fix([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("Permission denied")

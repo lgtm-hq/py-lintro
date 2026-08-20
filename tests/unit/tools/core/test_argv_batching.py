@@ -12,6 +12,7 @@ from lintro.tools.core.argv_batching import (
     ARGV_FALLBACK_LIMIT_BYTES,
     ARGV_POINTER_BYTES,
     ARGV_SAFETY_HEADROOM_BYTES,
+    ARGV_TERMINATOR_SLOTS,
     argv_byte_budget,
     argv_cost,
     chunk_paths,
@@ -81,7 +82,11 @@ def test_argv_byte_budget_reserves_the_flat_headroom_when_arg_max_is_large() -> 
     ):
         budget = argv_byte_budget()
 
-    assert_that(budget).is_equal_to(arg_max - ARGV_SAFETY_HEADROOM_BYTES)
+    assert_that(budget).is_equal_to(
+        arg_max
+        - (ARGV_TERMINATOR_SLOTS * ARGV_POINTER_BYTES)
+        - ARGV_SAFETY_HEADROOM_BYTES,
+    )
 
 
 def test_argv_byte_budget_scales_the_headroom_on_a_small_arg_max() -> None:
@@ -123,6 +128,7 @@ def test_argv_byte_budget_tracks_remaining_capacity_when_headroom_does_not_fit()
     # env_bytes = len("K") + len(value) + 2 + one pointer slot.
     value_len = arg_max - leftover - 1 - 2 - ARGV_POINTER_BYTES
     env = {"K": "x" * value_len}
+    terminator_bytes = ARGV_TERMINATOR_SLOTS * ARGV_POINTER_BYTES
 
     with (
         patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
@@ -130,11 +136,28 @@ def test_argv_byte_budget_tracks_remaining_capacity_when_headroom_does_not_fit()
     ):
         budget = argv_byte_budget()
 
-    # The distinct branch: positive remainder, no headroom subtracted, and
-    # crucially not the exhausted-environment floor of 1.
-    assert_that(budget).is_equal_to(leftover)
+    # The distinct branch: positive remainder after argv/envp NULL pointers,
+    # no headroom subtracted, and not the exhausted-environment floor of 1.
+    assert_that(budget).is_equal_to(leftover - terminator_bytes)
     assert_that(budget).is_greater_than(1)
     assert_that(budget).is_less_than(ARGV_SAFETY_HEADROOM_BYTES)
+
+
+def test_argv_byte_budget_floors_when_remainder_cannot_cover_terminators() -> None:
+    """A remainder smaller than the argv/envp NULL pointers is exhausted."""
+    arg_max = 10**6
+    leftover = ARGV_POINTER_BYTES  # one pointer, not both terminators.
+    value_len = arg_max - leftover - 1 - 2 - ARGV_POINTER_BYTES
+    env = {"K": "x" * value_len}
+
+    with (
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
+        patch.dict("os.environ", env, clear=True),
+    ):
+        budget = argv_byte_budget()
+
+    assert_that(leftover).is_less_than(ARGV_TERMINATOR_SLOTS * ARGV_POINTER_BYTES)
+    assert_that(budget).is_equal_to(1)
 
 
 def test_argv_byte_budget_counts_environment_in_bytes_not_characters() -> None:

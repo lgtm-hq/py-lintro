@@ -8,11 +8,11 @@ as an ``OSError`` that fails the whole run). The helpers here derive a safe byte
 budget and split a path list into batches that fit inside it.
 
 The budget is a best effort, not a proof: it tracks the bytes left after the
-environment block, but :func:`chunk_paths` still emits an individually
-oversized path in a batch of its own rather than dropping it, and the budget
-floors at one byte when the environment has consumed the entire limit. In
-those two cases the OS remains the authority on whether the argv is
-executable.
+environment block and the argv/envp terminating NULL pointers, but
+:func:`chunk_paths` still emits an individually oversized path in a batch of
+its own rather than dropping it, and the budget floors at one byte when the
+environment has consumed the entire limit. In those two cases the OS remains
+the authority on whether the argv is executable.
 """
 
 from __future__ import annotations
@@ -32,6 +32,10 @@ ARGV_FALLBACK_LIMIT_BYTES: int = 4096
 # Linux charges one pointer slot per argv/envp entry on top of the string
 # bytes. Assume 64-bit pointers, which is the conservative choice.
 ARGV_POINTER_BYTES: int = 8
+# ``execve`` also charges a trailing NULL pointer for argv and for envp, even
+# when those arrays otherwise look empty. These slots are not represented in
+# ``os.environ`` or in :func:`argv_cost`, so the budget must reserve them.
+ARGV_TERMINATOR_SLOTS: int = 2
 
 
 def _fsbytes(value: str) -> bytes:
@@ -81,21 +85,28 @@ def _headroom_for(arg_max: int) -> int:
 
 
 def argv_byte_budget() -> int:
-    """Return a safe byte budget for path arguments on one command line.
+    """Return a safe total argv byte budget for one command line.
+
+    The value is the budget for the *entire* argv (command prefix plus path
+    arguments). :func:`chunk_paths` subtracts ``fixed_arg_bytes`` — which
+    callers must set with :func:`argv_cost` of the non-path prefix — before
+    packing paths.
 
     The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
-    current environment block (``execve`` counts it against the same limit) and
-    a safety margin. Falls back to the POSIX minimum when ``ARG_MAX`` cannot be
-    queried.
+    current environment block (``execve`` counts it against the same limit),
+    the argv and envp terminating NULL pointers, and a safety margin. Falls
+    back to the POSIX minimum when ``ARG_MAX`` cannot be queried.
 
-    The result tracks the bytes actually left after the environment block
-    rather than a fixed floor. The one exception is a 1-byte lower bound when
-    nothing is left at all: that is not a claim of capacity, only enough for
-    :func:`chunk_paths` to terminate with one path per batch and let the OS be
-    the authority — the same contract as an individually oversized path.
+    The result tracks the bytes actually left after the environment block and
+    terminator slots rather than a fixed floor. The one exception is a 1-byte
+    lower bound when nothing is left at all: that is not a claim of capacity,
+    only enough for :func:`chunk_paths` to terminate with one path per batch
+    and let the OS be the authority — the same contract as an individually
+    oversized path.
 
     Returns:
-        The maximum number of argument-data bytes to place on one command line.
+        The maximum number of argument-data bytes to place on one command line
+        (prefix plus paths).
     """
     try:
         arg_max = os.sysconf("SC_ARG_MAX")
@@ -111,16 +122,18 @@ def argv_byte_budget() -> int:
         len(_fsbytes(key)) + len(_fsbytes(value)) + 2 + ARGV_POINTER_BYTES
         for key, value in os.environ.items()
     )
-    remaining = arg_max - env_bytes
+    # argv and envp each end with a NULL pointer that ``execve`` still
+    # charges. Those slots are not in ``env_bytes`` or :func:`argv_cost`.
+    remaining = arg_max - env_bytes - (ARGV_TERMINATOR_SLOTS * ARGV_POINTER_BYTES)
     budget = remaining - _headroom_for(arg_max)
     if budget > 0:
         return budget
     if remaining > 0:
-        # Positive but tighter than the safety margin. Deliberately hand back
-        # the true remainder with no slack rather than a comfortable-looking
-        # floor: the margin is insurance against our own accounting drift, and
-        # spending bytes we do not have is exactly the ``E2BIG`` this module
-        # exists to prevent.
+        # Positive but tighter than the safety margin. Hand back the true
+        # remainder (already less the terminator slots) rather than a
+        # comfortable-looking floor: the margin is insurance against our own
+        # accounting drift, and spending bytes we do not have is exactly the
+        # ``E2BIG`` this module exists to prevent.
         return remaining
     # Nothing is left at all. Returning 1 does exceed what remains; it is not a
     # capacity claim, only the smallest value that keeps :func:`chunk_paths`
@@ -148,10 +161,13 @@ def chunk_paths(
 
     Args:
         paths: File paths to pass as arguments, in a stable order.
-        fixed_arg_bytes: Byte length of the non-path portion of the command
-            (executable, subcommand, flags), which counts against the same
-            OS limit.
-        budget: Total argument-byte budget. Defaults to
+        fixed_arg_bytes: Bytes already charged for the non-path prefix
+            (executable, subcommand, flags). Must be ``argv_cost(prefix)``,
+            not ``sum(len(s))``: the helper includes encoded length, the NUL
+            terminator, and one pointer slot per entry. :func:`chunk_paths`
+            subtracts this from the total :func:`argv_byte_budget` before
+            packing paths.
+        budget: Total argv-byte budget for prefix plus paths. Defaults to
             :func:`argv_byte_budget`.
 
     Returns:
@@ -183,6 +199,7 @@ __all__ = [
     "ARGV_FALLBACK_LIMIT_BYTES",
     "ARGV_POINTER_BYTES",
     "ARGV_SAFETY_HEADROOM_BYTES",
+    "ARGV_TERMINATOR_SLOTS",
     "argv_byte_budget",
     "argv_cost",
     "chunk_paths",

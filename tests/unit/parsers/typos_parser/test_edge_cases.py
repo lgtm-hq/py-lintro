@@ -7,6 +7,7 @@ from assertpy import assert_that
 from lintro.parsers.typos.typos_parser import (
     parse_typos_errors,
     parse_typos_output,
+    parse_typos_report,
 )
 
 from .conftest import make_typo_record
@@ -202,8 +203,11 @@ def test_informational_record_types_are_not_diagnostics() -> None:
 def test_type_file_is_not_treated_as_informational() -> None:
     """A ``type=file`` progress record is not in the 1.49.0 JSON allowlist.
 
-    Unknown types fail closed. If a future typos release emits ``type=file``
-    as JSON, this test fails and the allowlist can be extended.
+    typos 1.49.0's ``Message`` enum includes ``file``, but the default
+    spell-check walker never emits it — only the ``--files`` lister
+    (``FoundFiles``) does. Unknown types fail closed. If a future typos
+    release starts emitting ``type=file`` from default ``--format json``,
+    this test fails and the allowlist can be extended.
     """
     output = '{"type":"file","path":"notes.txt"}'
 
@@ -211,6 +215,44 @@ def test_type_file_is_not_treated_as_informational() -> None:
     assert_that(parse_typos_errors(output)).is_equal_to(
         ["notes.txt: typos reported 'file'"],
     )
+
+
+def test_type_parse_is_not_treated_as_informational() -> None:
+    """A ``type=parse`` dump record is not in the informational allowlist.
+
+    ``parse`` is the identifier/word dump mode in typos 1.49.0, not a
+    spell-check finding. Omitting it is fail-closed.
+    """
+    output = '{"type":"parse","kind":"identifier","data":"teh"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_equal_to(
+        ["typos reported 'parse'"],
+    )
+
+
+def test_parse_typos_report_pairs_findings_and_diagnostics() -> None:
+    """The combined parser returns both views of one stdout stream."""
+    output = "\n".join(
+        [
+            make_typo_record(path="good.txt"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+
+    report = parse_typos_report(output=output)
+
+    assert_that(report.issues).is_length(1)
+    assert_that(report.issues[0].file).is_equal_to("good.txt")
+    assert_that(report.diagnostics).is_equal_to(["bad.txt: Permission denied"])
+
+
+def test_parse_typos_report_empty_output_is_clean() -> None:
+    """An empty stream is a clean report, not a diagnostic."""
+    report = parse_typos_report(output=None)
+
+    assert_that(report.issues).is_empty()
+    assert_that(report.diagnostics).is_empty()
 
 
 def test_undecodable_lines_are_reported_as_diagnostics() -> None:

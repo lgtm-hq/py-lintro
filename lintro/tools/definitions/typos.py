@@ -19,10 +19,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
-from lintro.parsers.typos.typos_parser import (
-    parse_typos_errors,
-    parse_typos_output,
-)
+from lintro.parsers.typos.typos_parser import parse_typos_report
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -322,8 +319,10 @@ class TyposPlugin(BaseToolPlugin):
                 break
             # typos writes its JSON report to stdout and diagnostics to stderr;
             # parse stdout only so a stderr warning cannot corrupt the report.
-            batch_issues = parse_typos_output(output=proc.stdout)
-            issues.extend(batch_issues)
+            # parse_typos_report pairs findings with diagnostics so a
+            # findings-only parse cannot treat an error stream as clean.
+            report = parse_typos_report(output=proc.stdout)
+            issues.extend(report.issues)
             if proc.output:
                 outputs.append(proc.output)
             # typos exits 0 when clean and 2 when it reports typos. Failures
@@ -333,9 +332,8 @@ class TyposPlugin(BaseToolPlugin):
             #   1. explicit ``error`` records on stdout (unreadable file, ...);
             #   2. a non-zero exit with nothing parseable at all (bad config,
             #      a usage error typos only wrote to stderr).
-            batch_errors = parse_typos_errors(output=proc.stdout)
-            if batch_errors:
-                fatal_outputs.extend(batch_errors)
+            if report.diagnostics:
+                fatal_outputs.extend(report.diagnostics)
             elif not proc.success:
                 # Exit 2 is "I found typos". Any other non-zero is a runtime
                 # failure (config/IO/usage) even when some JSON findings were
@@ -344,7 +342,7 @@ class TyposPlugin(BaseToolPlugin):
                     fatal_outputs.append(
                         proc.output or f"typos exited {proc.returncode}.",
                     )
-                elif not batch_issues:
+                elif not report.issues:
                     fatal_outputs.append(proc.output or "")
             if fatal_outputs and stop_on_failure:
                 break

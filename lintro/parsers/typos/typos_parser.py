@@ -3,8 +3,9 @@
 typos emits newline-delimited JSON (``--format json``): one JSON object per
 line, with a ``type`` discriminator.
 
-The stream mixes two different kinds of record, so this module exposes two
-parsers rather than one:
+The stream mixes two different kinds of record. Callers that consume a full
+tool run should use :func:`parse_typos_report`, which pairs both views so a
+findings-only caller cannot treat a diagnostic stream as a clean scan:
 
 * :func:`parse_typos_output` returns the ``type == "typo"`` entries — the lint
   findings.
@@ -17,6 +18,12 @@ parsers rather than one:
 Only a small allowlist of record types is treated as informational; anything
 else is reported as a diagnostic, so a type introduced by a future typos
 release fails loudly rather than vanishing.
+
+typos 1.49.0's ``Message`` enum also has ``file`` and ``parse`` variants, but
+the default spell-check walker never emits them: ``type=file`` is produced
+only by the ``--files`` lister (``FoundFiles``) and ``type=parse`` only by
+the identifier/word dump modes. They stay off the informational allowlist so
+those non-default formats fail closed instead of looking like a clean scan.
 """
 
 from __future__ import annotations
@@ -70,6 +77,10 @@ def _build_message(typo: str, corrections: list[str]) -> str:
 # with a file, not a problem the user must act on. Anything else that is not a
 # ``typo`` is treated as a diagnostic, so a record type added by a future typos
 # release fails loudly rather than vanishing.
+#
+# ``file`` and ``parse`` exist on typos 1.49.0's ``Message`` enum but are not
+# allowlisted: the default ``typos --format json`` spell-check walker never
+# emits them. Adding ``file`` here would also hide a ``--files`` listing run.
 _INFORMATIONAL_RECORD_TYPES: frozenset[str] = frozenset({"binary_file", "file_type"})
 
 
@@ -192,8 +203,8 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
 
     Returns:
         List of parsed typo issues. Empty when the input is empty, None, or
-        contains no ``typo`` entries. Malformed lines are skipped rather than
-        raising.
+        contains no ``typo`` entries. Malformed lines are skipped here; they
+        are diagnostics in :func:`parse_typos_errors` / :func:`parse_typos_report`.
     """
     issues: list[TyposIssue] = []
     for record, _raw in _iter_records(output):
@@ -254,3 +265,35 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             ),
         )
     return issues
+
+
+class TyposReport(NamedTuple):
+    """Findings and diagnostics from one typos JSON stdout stream.
+
+    Attributes:
+        issues: ``type == "typo"`` findings from :func:`parse_typos_output`.
+        diagnostics: Fail-closed messages from :func:`parse_typos_errors`.
+    """
+
+    issues: list[TyposIssue]
+    diagnostics: list[str]
+
+
+def parse_typos_report(output: str | None) -> TyposReport:
+    """Parse one typos JSON stdout stream into findings and diagnostics.
+
+    This is the function plugins should call. The two lower-level parsers stay
+    public for unit tests that need to assert one view in isolation; a caller
+    that only uses :func:`parse_typos_output` would treat diagnostics as a
+    clean scan.
+
+    Args:
+        output: Raw stdout from ``typos --format json``, or None.
+
+    Returns:
+        A :class:`TyposReport` pairing both views of the same stream.
+    """
+    return TyposReport(
+        issues=parse_typos_output(output=output),
+        diagnostics=parse_typos_errors(output=output),
+    )
