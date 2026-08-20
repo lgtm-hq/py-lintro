@@ -20,15 +20,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
+import tomllib
 from pathlib import Path
-
-# Match the pinned lintro dependency, e.g. ``"lintro==0.69.0"``. The quote style
-# and surrounding whitespace are preserved by only replacing the version token.
-_PIN_RE = re.compile(
-    r'(?P<prefix>["\']lintro==)(?P<version>[^"\']+)(?P<suffix>["\'])',
-)
 
 
 def _read(*, path: Path) -> str:
@@ -43,6 +37,55 @@ def _read(*, path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _find_lintro_requirement(*, data: dict[str, object]) -> str:
+    """Return the ``lintro==`` requirement from parsed ``pyproject.toml`` data.
+
+    Args:
+        data: Parsed TOML document.
+
+    Returns:
+        The exact requirement string (for example ``lintro==0.69.0``).
+
+    Raises:
+        ValueError: If no ``lintro==`` dependency is present.
+    """
+    project = data.get("project")
+    if not isinstance(project, dict):
+        msg = "No [project] table found in pyproject.toml"
+        raise ValueError(msg)
+
+    matches: list[str] = []
+    dependencies = project.get("dependencies", [])
+    if isinstance(dependencies, list):
+        matches.extend(
+            dep
+            for dep in dependencies
+            if isinstance(dep, str) and dep.startswith("lintro==")
+        )
+
+    optional = project.get("optional-dependencies", {})
+    if isinstance(optional, dict):
+        for group_deps in optional.values():
+            if not isinstance(group_deps, list):
+                continue
+            matches.extend(
+                dep
+                for dep in group_deps
+                if isinstance(dep, str) and dep.startswith("lintro==")
+            )
+
+    if not matches:
+        msg = "No 'lintro==<version>' pin found in pyproject.toml dependencies"
+        raise ValueError(msg)
+    if len(matches) != 1:
+        msg = (
+            "Expected exactly one 'lintro==<version>' pin, "
+            f"found {len(matches)} in dependencies"
+        )
+        raise ValueError(msg)
+    return matches[0]
+
+
 def _current_pin(*, content: str) -> str:
     """Return the currently pinned lintro version.
 
@@ -55,11 +98,9 @@ def _current_pin(*, content: str) -> str:
     Raises:
         ValueError: If no ``lintro==`` pin is present.
     """
-    match = _PIN_RE.search(content)
-    if match is None:
-        msg = "No 'lintro==<version>' pin found in pyproject.toml"
-        raise ValueError(msg)
-    return match.group("version")
+    data = tomllib.loads(content)
+    requirement = _find_lintro_requirement(data=data)
+    return requirement.split("==", 1)[1]
 
 
 def bump(*, path: Path, version: str) -> bool:
@@ -73,14 +114,21 @@ def bump(*, path: Path, version: str) -> bool:
         True if the file was modified, False if it already matched.
     """
     content = _read(path=path)
-    current = _current_pin(content=content)
+    data = tomllib.loads(content)
+    requirement = _find_lintro_requirement(data=data)
+    current = requirement.split("==", 1)[1]
     if current == version:
         return False
-    updated = _PIN_RE.sub(
-        lambda m: f"{m.group('prefix')}{version}{m.group('suffix')}",
-        content,
-        count=1,
-    )
+
+    new_requirement = f"lintro=={version}"
+    if content.count(requirement) != 1:
+        msg = (
+            "Expected exactly one occurrence of the pinned requirement "
+            f"{requirement!r} in pyproject.toml"
+        )
+        raise ValueError(msg)
+
+    updated = content.replace(requirement, new_requirement, 1)
     path.write_text(updated, encoding="utf-8")
     return True
 

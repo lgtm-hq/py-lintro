@@ -34,9 +34,14 @@ TAG="${TAG%"${TAG##*[![:space:]]}"}"
 : "${TAG:?Release tag is required but was empty or whitespace-only}"
 
 VERSION="${TAG#v}"
-IS_PRERELEASE=false
-if [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
-	IS_PRERELEASE=true
+
+# Fail closed: reuse the same anchored classifier as publish-pypi-on-tag.yml.
+CLASSIFY_SCRIPT="$SCRIPT_DIR/../classify-release-tag.py"
+classification="$(python3 "$CLASSIFY_SCRIPT" "$TAG")"
+IS_PRERELEASE="${classification#is_prerelease=}"
+if [[ "$IS_PRERELEASE" != "true" && "$IS_PRERELEASE" != "false" ]]; then
+	log_error "Unexpected classifier output: ${classification}"
+	exit 1
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
