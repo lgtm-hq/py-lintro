@@ -1,13 +1,12 @@
 # Justfile for py-lintro development.
 # Run `just --list` to see all available recipes.
 #
-# Install just:
+# Install just (do not pipe a remote installer into bash):
 #   macOS:  brew install just
 #   Linux:  cargo install just
-#           (or) curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash
 
 set dotenv-load
-set shell := ["bash", "-uc"]
+set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Aliases kept for muscle memory from the previous Makefile targets.
 alias lintro-check := lint
@@ -19,15 +18,15 @@ alias fmt := format
 default:
     @just --list
 
-# Set up the dev environment and run the full test suite
-all: setup test
-
 # Set up development environment with uv
 setup:
     @echo "Setting up development environment with uv..."
     uv sync --dev --extra full
     uv pip install -e .
     @echo "Setup complete! Try 'just test' or 'just lint'"
+
+# Lint then run the test suite (local pre-commit stand-in)
+pre-commit: lint test
 
 # Install the package
 install:

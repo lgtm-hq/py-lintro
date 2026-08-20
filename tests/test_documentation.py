@@ -494,33 +494,35 @@ def test_preview_serve_disables_astro_agent_background() -> None:
     ).contains('ASTRO_PREVIEW_BACKGROUND="${ASTRO_PREVIEW_BACKGROUND:-0}"')
 
 
-def test_justfile_parses() -> None:
-    """Test that the developer justfile exists and parses via `just --list`.
+def test_justfile_contract() -> None:
+    """The justfile must declare recipes and command lines without needing just.
 
-    Skips when the `just` binary is unavailable (e.g. minimal CI images) so the
-    suite stays green while still validating the recipe file wherever `just` is
-    installed.
+    Recipe headers are matched at start-of-line so ``test-unit`` cannot satisfy
+    ``test``. ``just --list`` is an extra parse check only when the binary is
+    present; CI images without just still lock the file contract.
+
     """
-    assert_that(Path("justfile").exists()).is_true()
+    justfile = Path("justfile").read_text(encoding="utf-8")
+    contributing = Path("docs/contributing.md").read_text(encoding="utf-8")
 
-    just_bin = shutil.which("just")
-    if just_bin is None:
-        pytest.skip("`just` binary not installed; skipping justfile parse check")
+    assert_that(justfile).does_not_contain("just.systems/install.sh")
+    assert_that(contributing).does_not_contain("just.systems/install.sh")
+    assert_that(justfile).contains('"bash", "-euo", "pipefail", "-c"')
+    assert_that(justfile).contains("scripts/local/local-test.sh")
+    assert_that(justfile).contains("docker build --target full")
+    assert_that(justfile).contains("./scripts/ci/site/dev.sh")
+    assert_that(justfile).contains("./scripts/ci/site/build.sh")
 
-    try:
-        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary resolved via shutil.which; shell=False, no user input
-            [just_bin, "--list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
+    def has_recipe(name: str) -> bool:
+        return (
+            re.search(rf"^{re.escape(name)}(?:\s|\*|:)", justfile, re.MULTILINE)
+            is not None
         )
-    except subprocess.TimeoutExpired:
-        pytest.fail("`just --list` timed out")
 
-    assert_that(result.returncode).is_equal_to(0)
     for recipe in (
         "setup",
         "install",
+        "pre-commit",
         "lint",
         "format",
         "mypy",
@@ -535,9 +537,37 @@ def test_justfile_parses() -> None:
         "site-test",
         "site-preview",
     ):
-        assert_that(result.stdout).described_as(
-            f"justfile must expose a `{recipe}` recipe",
-        ).contains(recipe)
+        assert_that(has_recipe(recipe)).described_as(
+            f"justfile must declare a `{recipe}` recipe at start of line",
+        ).is_true()
+
+    assert_that(has_recipe("all")).described_as(
+        "the all convenience target must stay removed",
+    ).is_false()
+
+    just_bin = shutil.which("just")
+    if just_bin is None:
+        return
+
+    try:
+        result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            [just_bin, "--list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("`just --list` timed out")
+
+    assert_that(result.returncode).is_equal_to(0)
+    listed = {
+        line.strip().split(" ", 1)[0]
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.strip().startswith("Available")
+    }
+    assert_that(listed).contains("pre-commit", "test-integration", "site-dev")
+    assert_that(listed).does_not_contain("all")
 
 
 def test_makefile_is_retired() -> None:

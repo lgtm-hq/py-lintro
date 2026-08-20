@@ -108,7 +108,6 @@ brew install just
 
 # Linux
 cargo install just
-# or: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash
 ```
 
 Then list and run recipes:
@@ -120,6 +119,7 @@ just lint              # Run lintro check (runs mypy first)
 just format            # Format the codebase with lintro
 just test              # Run the full test suite with coverage
 just test-unit -v      # Run unit tests only, forwarding extra pytest args
+just pre-commit        # Lint, then run the test suite
 just clean             # Remove build/test artifacts
 ```
 
