@@ -34,6 +34,7 @@ from lintro.parsers.buf.buf_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -182,6 +183,43 @@ class BufPlugin(BaseToolPlugin):
             output=timeout_msg,
             issues_count=1,
             issues=[timeout_issue],
+        )
+
+    def _pre_fix_failure(
+        self,
+        result: SubprocessResult,
+        fallback: str,
+        cwd: str | None,
+        issues: list[BufIssue] | None = None,
+    ) -> ToolResult:
+        """Build a failure result for a failed pre-fix probe command.
+
+        A probe (``buf format --diff --exit-code`` or ``buf lint``) that exits
+        non-zero without producing anything parseable is a runtime error, not a
+        clean run. Fixing must abort so a later clean pass cannot report
+        success for a build that never validated.
+
+        Args:
+            result: The failed subprocess result.
+            fallback: Message used when the command produced no output at all.
+            cwd: Working directory the command ran in.
+            issues: Issues parsed before the failure, if any.
+
+        Returns:
+            ToolResult describing the aborted fix run.
+        """
+        collected = issues or []
+        count = len(collected)
+        return ToolResult(
+            name=self.definition.name,
+            success=False,
+            output=(result.stderr.strip() or result.stdout.strip() or fallback),
+            issues_count=count,
+            issues=collected,
+            initial_issues_count=count,
+            fixed_issues_count=0,
+            remaining_issues_count=count,
+            cwd=cwd,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -341,6 +379,18 @@ class BufPlugin(BaseToolPlugin):
 
         initial_issues = parse_buf_format_output(initial_fmt.stdout)
 
+        # buf format --exit-code exits 1 when a diff exists (parsed above); any
+        # other failure with no diff is a runtime error (invalid config,
+        # unreadable module root, permission error). Continuing into
+        # ``--write`` would let a later clean pass report success or "No fixes
+        # applied" even though the pre-fix validation failed.
+        if not initial_fmt.success and not initial_issues:
+            return self._pre_fix_failure(
+                result=initial_fmt,
+                fallback="buf format exited with an error and no diff.",
+                cwd=ctx.cwd,
+            )
+
         try:
             initial_lint = self._run_subprocess_result(
                 cmd=lint_cmd,
@@ -354,7 +404,19 @@ class BufPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        initial_issues.extend(parse_buf_output(initial_lint.stdout))
+        initial_lint_issues = parse_buf_output(initial_lint.stdout)
+
+        # Same guard for the lint probe: a failing exit with nothing parseable
+        # is a runtime error, not "zero issues".
+        if not initial_lint.success and not initial_lint_issues:
+            return self._pre_fix_failure(
+                result=initial_lint,
+                fallback="buf lint exited with an error and no results.",
+                cwd=ctx.cwd,
+                issues=initial_issues,
+            )
+
+        initial_issues.extend(initial_lint_issues)
         initial_count = len(initial_issues)
 
         # Apply formatting in-place.
@@ -407,7 +469,8 @@ class BufPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        remaining_issues = parse_buf_format_output(final_fmt.stdout)
+        final_fmt_issues = parse_buf_format_output(final_fmt.stdout)
+        remaining_issues = list(final_fmt_issues)
 
         try:
             final_lint = self._run_subprocess_result(
@@ -428,19 +491,29 @@ class BufPlugin(BaseToolPlugin):
         # A failed verification pass (format re-check or lint) that produced
         # nothing parseable must not read as "all fixed" — surface the
         # stderr-only failure with the initial issues kept as remaining.
-        verification_failed = (not final_lint.success and not final_lint_issues) or (
-            not final_fmt.success and not parse_buf_format_output(final_fmt.stdout)
-        )
-        if verification_failed:
-            # Always surface stderr-only verification failures, even when the
-            # lint pass still reports remaining issues (mixed failure).
+        fmt_verification_failed = not final_fmt.success and not final_fmt_issues
+        lint_verification_failed = not final_lint.success and not final_lint_issues
+        if fmt_verification_failed or lint_verification_failed:
+            # Report the error(s) from the command(s) that actually failed —
+            # never the stderr of a command that merely emitted warnings
+            # alongside parseable issues. When both verification passes fail,
+            # both errors are surfaced.
             issues = remaining_issues if remaining_issues else initial_issues
             count = len(issues)
-            verification_error = (
-                final_lint.stderr.strip()
-                or final_fmt.stderr.strip()
-                or "buf verification exited with an error after fixing."
-            )
+            errors: list[str] = []
+            if fmt_verification_failed:
+                errors.append(
+                    final_fmt.stderr.strip()
+                    or final_fmt.stdout.strip()
+                    or "buf format verification exited with an error after fixing.",
+                )
+            if lint_verification_failed:
+                errors.append(
+                    final_lint.stderr.strip()
+                    or final_lint.stdout.strip()
+                    or "buf lint verification exited with an error after fixing.",
+                )
+            verification_error = "\n".join(e for e in errors if e)
             detail = ""
             if remaining_issues:
                 detail = f" Found {count} remaining issue(s)."

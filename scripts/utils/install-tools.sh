@@ -1175,7 +1175,6 @@ main() {
 		fi
 	fi # clippy
 
-
 	if should_install "buf"; then
 		# Install buf (Protocol Buffer linter and formatter)
 		echo -e "${BLUE}Installing buf...${NC}"

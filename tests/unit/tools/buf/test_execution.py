@@ -334,3 +334,157 @@ def test_fix_write_failure_surfaces_error(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("permission denied")
     assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def _mixed_result(returncode: int, stdout: str, stderr: str) -> SubprocessResult:
+    """Build a SubprocessResult with both stdout and stderr populated.
+
+    Args:
+        returncode: The simulated process exit code.
+        stdout: The simulated standard output.
+        stderr: The simulated standard error.
+
+    Returns:
+        A SubprocessResult carrying both streams.
+    """
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        output=f"{stdout}{stderr}",
+    )
+
+
+def test_fix_aborts_when_initial_format_probe_fails(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failing initial format probe with no diff aborts before writing.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[_err_result(2, "Failure: invalid buf.yaml")],
+        ) as runner:
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("invalid buf.yaml")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(runner.call_count).is_equal_to(1)
+
+
+def test_fix_aborts_when_initial_lint_probe_fails(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failing initial lint probe with no findings aborts before writing.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax="proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(100, _FORMAT_DIFF),
+                _err_result(2, "Failure: module resolution failed"),
+            ],
+        ) as runner:
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("module resolution failed")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(runner.call_count).is_equal_to(2)
+
+
+def test_fix_reports_format_error_when_lint_has_remaining_issues(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed format re-check is reported even when lint has findings.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax="proto3";\npackage a;\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(100, _FORMAT_DIFF),  # initial format check
+                _result(100, _LINT_ISSUE),  # initial lint check
+                _result(0, ""),  # write
+                _err_result(2, "Failure: format verify blew up"),  # final format
+                _mixed_result(100, _LINT_ISSUE, "warning: noisy"),  # final lint
+            ],
+        ):
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("format verify blew up")
+    assert_that(result.output).does_not_contain("warning: noisy")
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+def test_fix_reports_both_verification_errors(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Both verification failures are surfaced when neither pass parses.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax="proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(100, _FORMAT_DIFF),  # initial format check
+                _result(0, ""),  # initial lint check
+                _result(0, ""),  # write
+                _err_result(2, "Failure: format verify blew up"),  # final format
+                _err_result(2, "Failure: lint verify blew up"),  # final lint
+            ],
+        ):
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("format verify blew up")
+    assert_that(result.output).contains("lint verify blew up")
