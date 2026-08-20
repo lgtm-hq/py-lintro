@@ -18,6 +18,22 @@ from lintro.utils.path_utils import normalize_file_path_for_display
 # can be flaky with concurrent builds/tags on some local setups.
 os.environ.setdefault("DOCKER_BUILDKIT", "0")
 
+# Session-scoped tool discovery runs before function-scoped fixtures, so the
+# developer's real user-level global config must be excluded at import time.
+os.environ.setdefault("LINTRO_GLOBAL_CONFIG", "off")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def disable_global_config() -> None:
+    """Keep the developer's real user-level global config out of tests.
+
+    Session-scoped so :func:`discover_all_tools` (also session-scoped) never
+    reads the real home global file via plugin trust resolution. Tests that
+    exercise the global tier explicitly re-enable it by deleting
+    ``LINTRO_GLOBAL_CONFIG`` and patching ``Path.home`` to a temp directory.
+    """
+    os.environ["LINTRO_GLOBAL_CONFIG"] = "off"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _discover_tools() -> None:
@@ -87,19 +103,6 @@ def skip_config_injection(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     monkeypatch.setenv("LINTRO_SKIP_CONFIG_INJECTION", "1")
     yield
-
-
-@pytest.fixture(autouse=True)
-def disable_global_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the developer's real user-level global config out of tests.
-
-    Tests that exercise the global tier explicitly re-enable it by deleting
-    ``LINTRO_GLOBAL_CONFIG`` and patching ``Path.home`` to a temp directory.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
 
 
 @pytest.fixture(autouse=True)
