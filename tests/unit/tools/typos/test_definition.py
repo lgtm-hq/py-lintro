@@ -224,6 +224,24 @@ def test_selection_docs_name_every_config_source_and_the_allowlist() -> None:
     assert_that(analysis_doc).contains("lintro init --profile recommended")
 
 
+def test_getting_started_notes_first_run_native_config() -> None:
+    """getting-started must mention the unmapped-tool first-run caveat.
+
+    typos is listed with other optional installable tools, but unlike
+    language-mapped ones it is only auto-selected on a no-config first run
+    when a native config file exists at a scan root.
+    """
+    getting_started = Path("docs/getting-started.md").read_text(encoding="utf-8")
+    start = getting_started.find("`typos`")
+    end = getting_started.find("`vale`", start)
+    section = getting_started[start:end]
+
+    assert_that(start).is_not_equal_to(-1)
+    assert_that(section).contains("typos.toml")
+    assert_that(section).contains("no-config first run")
+    assert_that(section).contains("skipped otherwise")
+
+
 def test_typos_version_output_parses(typos_plugin: TyposPlugin) -> None:
     """``typos --version`` prints the crate name first; parsing must cope.
 

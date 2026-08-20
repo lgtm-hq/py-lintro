@@ -124,7 +124,8 @@ order and for what changed.
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
-  `cargo install typos-cli`)
+  `cargo install typos-cli`); on a no-config first run requires a `typos.toml`,
+  `.typos.toml` or `_typos.toml` at a scan root, skipped otherwise
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
