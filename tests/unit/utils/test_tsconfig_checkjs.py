@@ -6,7 +6,7 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-from lintro.utils.tsconfig import enables_check_js
+from lintro.utils.tsconfig import enables_check_js, resolve_extends_chain
 from tests.unit.utils.tsconfig_helpers import write_tsconfig
 
 
@@ -84,3 +84,86 @@ def test_enables_check_js_child_overrides_parent(tmp_path: Path) -> None:
         },
     )
     assert_that(enables_check_js(path)).is_false()
+
+
+def test_enables_check_js_via_array_extends(tmp_path: Path) -> None:
+    """Array extends merges compilerOptions; later parents override earlier.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    write_tsconfig(
+        tmp_path / "base1.json",
+        {"compilerOptions": {"checkJs": False, "strict": True}},
+    )
+    write_tsconfig(
+        tmp_path / "base2.json",
+        {"compilerOptions": {"checkJs": True}},
+    )
+    path = write_tsconfig(
+        tmp_path / "tsconfig.json",
+        {"extends": ["./base1.json", "./base2.json"]},
+    )
+    info = resolve_extends_chain(path)
+    assert_that(enables_check_js(path)).is_true()
+    assert_that(info.compiler_options.get("checkJs")).is_true()
+    assert_that(info.compiler_options.get("strict")).is_true()
+    assert_that(info.unresolved_extends).is_false()
+
+
+def test_enables_check_js_array_extends_later_false_wins(tmp_path: Path) -> None:
+    """A later array-extends parent can disable an earlier checkJs: true.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    write_tsconfig(
+        tmp_path / "base1.json",
+        {"compilerOptions": {"checkJs": True}},
+    )
+    write_tsconfig(
+        tmp_path / "base2.json",
+        {"compilerOptions": {"checkJs": False}},
+    )
+    path = write_tsconfig(
+        tmp_path / "tsconfig.json",
+        {"extends": ["./base1.json", "./base2.json"]},
+    )
+    assert_that(enables_check_js(path)).is_false()
+
+
+def test_unresolved_extends_is_flagged(tmp_path: Path) -> None:
+    """Missing extends targets set unresolved_extends and do not enable checkJs.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    path = write_tsconfig(
+        tmp_path / "tsconfig.json",
+        {"extends": "@tsconfig/strictest/tsconfig.json"},
+    )
+    info = resolve_extends_chain(path)
+    assert_that(info.unresolved_extends).is_true()
+    assert_that(enables_check_js(path)).is_false()
+
+
+def test_unresolved_array_extends_is_flagged(tmp_path: Path) -> None:
+    """A missing entry in array extends still flags the chain unresolved.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    write_tsconfig(
+        tmp_path / "base.json",
+        {"compilerOptions": {"strict": True}},
+    )
+    path = write_tsconfig(
+        tmp_path / "tsconfig.json",
+        {
+            "extends": ["./base.json", "./missing.json"],
+            "compilerOptions": {"checkJs": True},
+        },
+    )
+    info = resolve_extends_chain(path)
+    assert_that(info.unresolved_extends).is_true()
+    assert_that(enables_check_js(path)).is_true()

@@ -88,8 +88,26 @@ def parse_tsconfig(path: Path) -> TsconfigInfo:
         files_list=fields["files"],
         references=[Path(r) for r in fields["references"]],
         is_composite=fields["composite"],
+        compiler_options=_compiler_options_from_raw(content),
         raw_config=content,
     )
+
+
+def _compiler_options_from_raw(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy ``compilerOptions`` from a parsed tsconfig dict.
+
+    Args:
+        raw: Parsed tsconfig content, or ``None``.
+
+    Returns:
+        A shallow copy of ``compilerOptions``, or ``{}`` when absent.
+    """
+    if not raw:
+        return {}
+    opts = raw.get("compilerOptions")
+    if isinstance(opts, dict):
+        return dict(opts)
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +123,13 @@ def resolve_extends_chain(
     """Recursively resolve the ``extends`` chain for a tsconfig.
 
     Walks up the ``extends`` hierarchy to compute the effective
-    ``include``, ``exclude``, and ``files`` fields.  The child's values
-    override the parent's (matching TypeScript semantics).
+    ``include``, ``exclude``, ``files``, and ``compilerOptions`` fields.
+    The child's values override the parent's (matching TypeScript
+    semantics). ``compilerOptions`` is merged per-key; later entries in a
+    TS 5.0+ array ``extends`` list override earlier ones.
 
-    Circular references are detected and short-circuited.
+    Circular references are detected and short-circuited. Unresolvable
+    ``extends`` targets set :attr:`TsconfigInfo.unresolved_extends`.
 
     Args:
         path: Path to the tsconfig.json file.
@@ -146,13 +167,20 @@ def resolve_extends_chain(
     merged_include: list[str] | None = None
     merged_exclude: list[str] | None = None
     merged_files: list[str] | None = None
+    merged_compiler: dict[str, Any] = {}
+    unresolved_extends = False
 
     for ext in extends_list:
-        parent_path = _resolve_extends_path(ext, info.project_dir)
+        parent_path = _resolve_extends_path(
+            extends=ext,
+            base_dir=info.project_dir,
+        )
         if parent_path is None:
+            unresolved_extends = True
             continue
         # Pass a copy so sibling extends branches don't share visited state
         parent_info = resolve_extends_chain(parent_path, _seen=set(_seen))
+        unresolved_extends = unresolved_extends or parent_info.unresolved_extends
         # Parent values become the base (None means parent didn't set it)
         if parent_info.include_patterns is not None:
             merged_include = parent_info.include_patterns
@@ -160,6 +188,7 @@ def resolve_extends_chain(
             merged_exclude = parent_info.exclude_patterns
         if parent_info.files_list is not None:
             merged_files = parent_info.files_list
+        merged_compiler.update(parent_info.compiler_options)
 
     # Child overrides parent if it explicitly set the field ([] clears parent)
     if info.include_patterns is not None:
@@ -168,6 +197,7 @@ def resolve_extends_chain(
         merged_exclude = info.exclude_patterns
     if info.files_list is not None:
         merged_files = info.files_list
+    merged_compiler.update(info.compiler_options)
 
     return TsconfigInfo(
         path=info.path,
@@ -177,6 +207,8 @@ def resolve_extends_chain(
         files_list=merged_files,
         references=info.references,
         is_composite=info.is_composite,
+        compiler_options=merged_compiler,
+        unresolved_extends=unresolved_extends,
         raw_config=info.raw_config,
     )
 
@@ -528,73 +560,26 @@ def partition_files(
 # ---------------------------------------------------------------------------
 
 
-def enables_check_js(
-    path: Path,
-    *,
-    _seen: set[str] | None = None,
-) -> bool:
+def enables_check_js(path: Path) -> bool:
     """Return whether effective ``compilerOptions.checkJs`` is ``true``.
 
-    Walks the ``extends`` chain using TypeScript's per-key override semantics:
-    a child's explicit ``checkJs`` wins; otherwise the nearest parent value is
-    used. Circular ``extends`` graphs are short-circuited.
+    Uses :func:`resolve_extends_chain` so ``checkJs`` follows the same
+    string/array ``extends`` walk, package.json ``tsconfig`` field lookup,
+    and cycle handling as include/exclude/files.
+
+    Unresolved ``extends`` targets do **not** enable ``checkJs``. Callers
+    that skip work based on this result must also inspect
+    :attr:`TsconfigInfo.unresolved_extends` and fail closed (proceed to
+    install / run tsc) when a parent config could not be loaded.
 
     Args:
         path: Path to a tsconfig.json (or extended config) file.
-        _seen: Internal set for cycle detection.
 
     Returns:
         ``True`` when the effective ``checkJs`` option is enabled.
     """
-    return _resolve_check_js_option(path, _seen=_seen) is True
-
-
-def _resolve_check_js_option(
-    path: Path,
-    *,
-    _seen: set[str] | None = None,
-) -> bool | None:
-    """Resolve effective ``checkJs`` from a tsconfig and its extends chain.
-
-    Args:
-        path: Path to a tsconfig file.
-        _seen: Internal set for cycle detection.
-
-    Returns:
-        ``True``/``False`` when ``checkJs`` is set anywhere in the effective
-        chain, or ``None`` when the option is unset.
-    """
-    if _seen is None:
-        _seen = set()
-
-    abs_path = str(path.resolve())
-    if abs_path in _seen:
-        return None
-    _seen.add(abs_path)
-
-    info = parse_tsconfig(path)
-    parent_value: bool | None = None
-    extends_val = info.raw_config.get("extends") if info.raw_config else None
-
-    extends_list: list[str] = []
-    if isinstance(extends_val, str):
-        extends_list = [extends_val]
-    elif isinstance(extends_val, list):
-        extends_list = [v for v in extends_val if isinstance(v, str)]
-
-    for ext in extends_list:
-        parent_path = _resolve_extends_path(ext, info.project_dir)
-        if parent_path is None:
-            continue
-        # Later parents override earlier ones (TS 5.0+ array extends).
-        resolved = _resolve_check_js_option(parent_path, _seen=set(_seen))
-        if resolved is not None:
-            parent_value = resolved
-
-    comp_opts = info.raw_config.get("compilerOptions") if info.raw_config else None
-    if isinstance(comp_opts, dict) and "checkJs" in comp_opts:
-        return bool(comp_opts["checkJs"])
-    return parent_value
+    info = resolve_extends_chain(path)
+    return info.compiler_options.get("checkJs") is True
 
 
 # ---------------------------------------------------------------------------
