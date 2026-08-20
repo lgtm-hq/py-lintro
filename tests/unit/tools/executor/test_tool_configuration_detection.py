@@ -577,3 +577,31 @@ def test_global_tools_section_opts_out_of_detection_scoping(
     result = get_tools_to_run(tools=None, action="check")
 
     assert_that(result.scoped_by_detection).is_false()
+
+
+def test_global_enabled_tools_opts_out_of_detection_scoping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A global ``execution.enabled_tools`` list disables language scoping.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project directory.
+    """
+    home = _isolate_home(tmp_path, monkeypatch)
+    (home / ".lintro-config.yaml").write_text(
+        "execution:\n  enabled_tools:\n    - ruff\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_python_project(project)
+    monkeypatch.chdir(project)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_false()
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("commitlint")

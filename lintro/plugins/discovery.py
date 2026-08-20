@@ -181,9 +181,17 @@ def _load_plugins_config() -> dict[str, Any]:
             parsed. Callers must fail closed and deny external plugins.
     """
     # Imported lazily to avoid pulling config parsing into module import.
-    from lintro.config.config_loader import _find_config_file, _load_yaml_file
+    from lintro.config.config_loader import (
+        _exclude_global_file_when_tier_disabled,
+        _find_config_file,
+        _load_yaml_file,
+    )
 
     found_path = _find_config_file()
+    if found_path is not None and _exclude_global_file_when_tier_disabled(
+        candidate=found_path,
+    ):
+        found_path = None
     if found_path is not None:
         try:
             data = _load_yaml_file(found_path)

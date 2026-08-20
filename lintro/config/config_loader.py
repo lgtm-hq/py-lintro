@@ -157,6 +157,24 @@ def _is_global_tier_only(
     return resolved == home_dotfile
 
 
+def _exclude_global_file_when_tier_disabled(candidate: Path) -> bool:
+    """Return True when ``candidate`` is the home global file and the tier is off.
+
+    Plugin and license loaders search upward independently of
+    :func:`load_config`. Without this gate, ``LINTRO_GLOBAL_CONFIG=off`` still
+    lets those loaders treat ``~/.lintro-config.yaml`` as a project file.
+
+    Args:
+        candidate: Config file found by an upward search.
+
+    Returns:
+        bool: True when the caller must ignore this file.
+    """
+    if _find_global_config_file() is not None:
+        return False
+    return _is_global_tier_only(candidate=candidate, global_file=None)
+
+
 def _deep_merge(
     base: dict[str, Any],
     override: dict[str, Any],
@@ -240,26 +258,36 @@ _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
 
 
 def _with_normalized_tool_keys(data: dict[str, Any]) -> dict[str, Any]:
-    """Lowercase the ``tools`` keys of a raw config mapping.
+    """Lowercase the ``tools`` and ``defaults`` keys of a raw config mapping.
 
-    ``_parse_tools_config`` lowercases tool names, so a global ``tools: {Ruff:
-    false}`` and a project ``tools: {ruff: {...}}`` would otherwise survive the
-    merge as two entries and the project one would silently re-enable the
-    globally disabled tool. Normalizing before the merge (and before
+    ``_parse_tools_config`` and ``_parse_defaults`` lowercase tool names, so a
+    global ``tools: {Ruff: false}`` / ``defaults: {Prettier: {...}}`` and a
+    project ``tools: {ruff: {...}}`` / ``defaults: {prettier: {...}}`` would
+    otherwise survive the merge as two entries. The later parsed alias then
+    overwrites the whole map. Normalizing before the merge (and before
     contribution tracking) makes both tiers agree on one key per tool.
 
     Args:
         data: Raw config mapping for one tier.
 
     Returns:
-        dict[str, Any]: A shallow copy whose ``tools`` keys are lowercased, or
-            the input unchanged when there is no ``tools`` mapping.
+        dict[str, Any]: A shallow copy whose ``tools`` and ``defaults`` keys
+            are lowercased, or the input unchanged when neither mapping is
+            present.
     """
     tools = data.get("tools")
-    if not isinstance(tools, dict):
+    defaults = data.get("defaults")
+    if not isinstance(tools, dict) and not isinstance(defaults, dict):
         return data
     normalized = dict(data)
-    normalized["tools"] = {str(name).lower(): value for name, value in tools.items()}
+    if isinstance(tools, dict):
+        normalized["tools"] = {
+            str(name).lower(): value for name, value in tools.items()
+        }
+    if isinstance(defaults, dict):
+        normalized["defaults"] = {
+            str(name).lower(): value for name, value in defaults.items()
+        }
     return normalized
 
 
