@@ -56,8 +56,11 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].file).ends_with("module.py")
-    assert_that(result.issues[0].message).contains("Would reformat")
+    issues = result.issues
+    assert issues is not None  # narrow type for mypy
+    first_issue = issues[0]
+    assert_that(first_issue.file).ends_with("module.py")
+    assert_that(first_issue.message).contains("Would reformat")
 
 
 def test_fix_reformats_and_rechecks(
