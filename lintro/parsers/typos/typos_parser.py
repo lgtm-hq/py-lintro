@@ -133,7 +133,12 @@ def parse_typos_errors(output: str | None) -> list[str]:
             messages.append(f"unparseable typos output: {raw}")
             continue
         record_type = record.get("type")
-        if record_type == "typo" or record_type in _INFORMATIONAL_RECORD_TYPES:
+        # A JSON object may carry an unhashable ``type`` (a list, an object).
+        # Testing set membership on that would raise, so only string types are
+        # eligible for the allowlist; everything else is a diagnostic.
+        if isinstance(record_type, str) and (
+            record_type == "typo" or record_type in _INFORMATIONAL_RECORD_TYPES
+        ):
             continue
         msg = record.get("msg") or record.get("error")
         path = record.get("path")

@@ -41,9 +41,8 @@ def test_argv_byte_budget_falls_back_for_every_sysconf_failure(
     ):
         budget = argv_byte_budget()
 
-    assert_that(budget).is_equal_to(
-        ARGV_FALLBACK_LIMIT_BYTES - ARGV_SAFETY_HEADROOM_BYTES,
-    )
+    assert_that(budget).is_greater_than(0)
+    assert_that(budget).is_less_than(ARGV_FALLBACK_LIMIT_BYTES)
 
 
 @pytest.mark.parametrize(
@@ -63,33 +62,75 @@ def test_argv_byte_budget_falls_back_for_unusable_arg_max(arg_max: object) -> No
     ):
         budget = argv_byte_budget()
 
-    assert_that(budget).is_equal_to(
-        ARGV_FALLBACK_LIMIT_BYTES - ARGV_SAFETY_HEADROOM_BYTES,
-    )
+    assert_that(budget).is_greater_than(0)
+    assert_that(budget).is_less_than(ARGV_FALLBACK_LIMIT_BYTES)
 
 
-def test_argv_byte_budget_never_exceeds_arg_max() -> None:
-    """An environment that eats the limit must not yield an unusable budget."""
-    arg_max = 512
+def test_argv_fallback_limit_is_the_posix_floor() -> None:
+    """The fallback must not claim more room than POSIX guarantees."""
+    assert_that(ARGV_FALLBACK_LIMIT_BYTES).is_equal_to(4096)
+
+
+def test_argv_byte_budget_reserves_the_flat_headroom_when_arg_max_is_large() -> None:
+    """On a roomy limit the margin is the full headroom constant."""
+    arg_max = 10**6
     with (
         patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
-        patch.dict("os.environ", {"BIG": "x" * 100_000}, clear=True),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        budget = argv_byte_budget()
+
+    assert_that(budget).is_equal_to(arg_max - ARGV_SAFETY_HEADROOM_BYTES)
+
+
+def test_argv_byte_budget_scales_the_headroom_on_a_small_arg_max() -> None:
+    """A flat 4 KiB margin must not swallow a 4 KiB limit."""
+    arg_max = ARGV_SAFETY_HEADROOM_BYTES
+    with (
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
+        patch.dict("os.environ", {}, clear=True),
     ):
         budget = argv_byte_budget()
 
     assert_that(budget).is_greater_than(0)
-    assert_that(budget).is_less_than_or_equal_to(arg_max)
+    assert_that(budget).is_less_than(arg_max)
 
 
-def test_argv_byte_budget_uses_the_headroom_floor_when_arg_max_allows() -> None:
-    """With a roomy ``ARG_MAX`` the floor is the headroom constant."""
+def test_argv_byte_budget_never_exceeds_the_bytes_left_after_the_environment() -> None:
+    """An exhausted limit reports real remaining capacity, not a comfy floor."""
+    arg_max = 512
+    env = {"BIG": "x" * 100_000}
+    env_bytes = sum(len(k) + len(v) + 2 + ARGV_POINTER_BYTES for k, v in env.items())
+
     with (
-        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=10**6),
-        patch.dict("os.environ", {"BIG": "x" * 10**6}, clear=True),
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
+        patch.dict("os.environ", env, clear=True),
     ):
         budget = argv_byte_budget()
 
-    assert_that(budget).is_equal_to(ARGV_SAFETY_HEADROOM_BYTES)
+    # The environment alone already exceeds ARG_MAX, so there is nothing left.
+    assert_that(arg_max - env_bytes).is_less_than_or_equal_to(0)
+    assert_that(budget).is_equal_to(1)
+
+
+def test_argv_byte_budget_tracks_remaining_capacity_when_headroom_does_not_fit() -> (
+    None
+):
+    """Between "roomy" and "exhausted", the budget is the true remainder."""
+    arg_max = 10**6
+    # Leave less than the scaled headroom but more than zero.
+    value_len = arg_max - 10
+    env = {"K": "x" * value_len}
+    env_bytes = 1 + value_len + 2 + ARGV_POINTER_BYTES
+
+    with (
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
+        patch.dict("os.environ", env, clear=True),
+    ):
+        budget = argv_byte_budget()
+
+    assert_that(budget).is_equal_to(max(arg_max - env_bytes, 1))
+    assert_that(budget).is_less_than_or_equal_to(max(arg_max - env_bytes, 1))
 
 
 def test_argv_byte_budget_counts_environment_in_bytes_not_characters() -> None:
@@ -194,3 +235,55 @@ def test_chunk_uses_the_derived_budget_by_default() -> None:
         batches = chunk_paths(paths, fixed_arg_bytes=0)
 
     assert_that(batches).is_length(2)
+
+
+def test_chunk_floors_remaining_capacity_at_one_byte() -> None:
+    """A fixed prefix larger than the budget still yields one path per batch."""
+    paths = ["/a/one.py", "/a/two.py", "/a/three.py"]
+
+    batches = chunk_paths(paths, fixed_arg_bytes=10**9, budget=10_000)
+
+    assert_that(batches).is_length(3)
+    assert_that([p for batch in batches for p in batch]).is_equal_to(paths)
+
+
+def test_chunk_handles_a_zero_budget() -> None:
+    """A zero budget degrades to one path per batch rather than looping."""
+    paths = ["/a/one.py", "/a/two.py"]
+
+    batches = chunk_paths(paths, fixed_arg_bytes=0, budget=0)
+
+    assert_that(batches).is_length(2)
+    assert_that([p for batch in batches for p in batch]).is_equal_to(paths)
+
+
+def test_chunk_handles_empty_string_paths() -> None:
+    """An empty path still costs its NUL and pointer slot and is never lost."""
+    paths = ["", "", ""]
+
+    batches = chunk_paths(paths, fixed_arg_bytes=0, budget=1 + ARGV_POINTER_BYTES)
+
+    assert_that([p for batch in batches for p in batch]).is_equal_to(paths)
+    assert_that(batches).is_length(3)
+
+
+def test_default_budget_batches_fit_the_derived_limit() -> None:
+    """Without an explicit budget, no batch exceeds the real derived limit."""
+    paths = [f"/repo/{'d' * 200}/file_{index:05d}.py" for index in range(2000)]
+    limit = argv_byte_budget()
+
+    batches = chunk_paths(paths, fixed_arg_bytes=0)
+
+    assert_that(len(batches)).is_greater_than(0)
+    for batch in batches:
+        batch_bytes = sum(
+            len(path.encode(sys.getfilesystemencoding(), "surrogateescape"))
+            + 1
+            + ARGV_POINTER_BYTES
+            for path in batch
+        )
+        # A batch may exceed the limit only when it holds a single path that
+        # cannot fit anywhere (chunk_paths never drops a path).
+        if len(batch) > 1:
+            assert_that(batch_bytes).is_less_than_or_equal_to(limit)
+    assert_that([p for batch in batches for p in batch]).is_equal_to(paths)

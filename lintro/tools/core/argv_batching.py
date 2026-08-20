@@ -13,10 +13,14 @@ from __future__ import annotations
 import os
 import sys
 
-# Reserved bytes for argv/environment accounting slack.
+# Reserved bytes for argv/environment accounting slack. Scaled down on hosts
+# with a small ``ARG_MAX`` (see :func:`_headroom_for`) so the margin can never
+# swallow the whole limit.
 ARGV_SAFETY_HEADROOM_BYTES: int = 4096
-# POSIX-guaranteed ARG_MAX minimum, used when the real limit is unavailable.
-ARGV_FALLBACK_LIMIT_BYTES: int = 131072
+# ``_POSIX_ARG_MAX`` — the smallest ``ARG_MAX`` POSIX permits. Used only when
+# ``SC_ARG_MAX`` cannot be queried, where guessing low is the safe direction:
+# too small only costs extra batches, while too large costs an ``E2BIG``.
+ARGV_FALLBACK_LIMIT_BYTES: int = 4096
 # Linux charges one pointer slot per argv/envp entry on top of the string
 # bytes. Assume 64-bit pointers, which is the conservative choice.
 ARGV_POINTER_BYTES: int = 8
@@ -35,14 +39,30 @@ def _fsbytes(value: str) -> bytes:
     return value.encode(sys.getfilesystemencoding(), "surrogateescape")
 
 
+def _headroom_for(arg_max: int) -> int:
+    """Scale the safety margin to the limit it is carved out of.
+
+    A flat 4 KiB margin is sensible against a megabyte-scale ``ARG_MAX`` but
+    consumes the entire limit on a host at the POSIX floor, so cap it at a
+    quarter of what is available.
+
+    Args:
+        arg_max: The OS argument-size limit in bytes.
+
+    Returns:
+        Bytes to hold back from the usable budget.
+    """
+    return min(ARGV_SAFETY_HEADROOM_BYTES, max(arg_max // 4, 1))
+
+
 def argv_byte_budget() -> int:
     """Return a safe byte budget for path arguments on one command line.
 
     The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
     current environment block (``execve`` counts it against the same limit) and
-    a fixed safety margin. Falls back to the POSIX-guaranteed minimum when
-    ``ARG_MAX`` cannot be queried, and is clamped to ``ARG_MAX`` when the
-    environment has consumed the entire limit.
+    a safety margin. Falls back to the POSIX minimum when ``ARG_MAX`` cannot be
+    queried. The result never exceeds the bytes actually left after the
+    environment block, so it cannot promise capacity the kernel does not have.
 
     Returns:
         The maximum number of argument-data bytes to place on one command line.
@@ -61,14 +81,17 @@ def argv_byte_budget() -> int:
         len(_fsbytes(key)) + len(_fsbytes(value)) + 2 + ARGV_POINTER_BYTES
         for key, value in os.environ.items()
     )
-    budget = arg_max - env_bytes - ARGV_SAFETY_HEADROOM_BYTES
+    remaining = arg_max - env_bytes
+    budget = remaining - _headroom_for(arg_max)
     if budget > 0:
         return budget
-    # The environment has eaten the whole limit. Return something usable, but
-    # never more than ``ARG_MAX`` itself: raising the floor above the real
-    # kernel limit would hand back a budget that cannot be executed, which is
-    # exactly the ``E2BIG`` this module exists to prevent.
-    return max(min(ARGV_SAFETY_HEADROOM_BYTES, arg_max), 1)
+    # The environment has consumed the limit. Report what is actually left
+    # rather than a comfortable-looking floor: inventing capacity the kernel
+    # does not have is exactly the ``E2BIG`` this module exists to prevent.
+    # The 1-byte lower bound only keeps :func:`chunk_paths` terminating (one
+    # path per batch); whether that argv is executable is then the OS's call,
+    # which is the same contract as an individually oversized path.
+    return max(remaining, 1)
 
 
 def chunk_paths(

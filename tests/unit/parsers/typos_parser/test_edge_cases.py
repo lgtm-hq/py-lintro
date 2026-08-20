@@ -202,3 +202,18 @@ def test_undecodable_lines_are_reported_as_diagnostics() -> None:
     assert_that(parse_typos_errors(output)).is_equal_to(
         ["unparseable typos output: argument `nosuch.txt` is not found"],
     )
+
+
+def test_unhashable_record_type_is_a_diagnostic_not_a_crash() -> None:
+    """An unhashable ``type`` value must not raise during allowlist lookup."""
+    output = '{"type":[],"path":"x.txt","msg":"weird"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_equal_to(["x.txt: weird"])
+
+
+def test_object_record_type_is_a_diagnostic() -> None:
+    """An object-valued ``type`` is handled the same way as any unknown type."""
+    output = '{"type":{"kind":"odd"},"path":"x.txt"}'
+
+    assert_that(parse_typos_errors(output)).is_length(1)
