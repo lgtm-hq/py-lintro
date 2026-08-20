@@ -166,6 +166,11 @@ project config, which is what makes the switch genuinely hermetic.
 > old behavior, move it into the projects that need it, or set
 > `LINTRO_GLOBAL_CONFIG=off`.
 
+A global file that only sets `ai:` or `enforce:` does not change which tools a default
+run selects — language scoping for an otherwise unconfigured project still applies. A
+global `tools:` section or `execution.enabled_tools` is a deliberate tool selection, so
+it opts the run out of language scoping just as a project config does.
+
 Run `lintro config` to see a **Global Config** section reporting whether a global file
 was found, its resolved path, and which effective values it contributed (the keys your
 project config did not override). The same details appear under `global_config` in
