@@ -92,8 +92,11 @@ def _find_global_config_file() -> Path | None:
 
     Resolution order (first existing file wins):
 
-    1. ``~/.lintro-config.yaml`` (home-directory dotfile, the primary location)
-    2. ``$XDG_CONFIG_HOME/lintro/config.yaml`` (XDG fallback; ``$XDG_CONFIG_HOME``
+    1. ``LINTRO_GLOBAL_CONFIG`` environment variable — an explicit file path,
+       or the value ``off`` (also ``0``/``none``/empty) to disable the global
+       tier entirely (used by hermetic environments such as test suites and CI)
+    2. ``~/.lintro-config.yaml`` (home-directory dotfile, the primary location)
+    3. ``$XDG_CONFIG_HOME/lintro/config.yaml`` (XDG fallback; ``$XDG_CONFIG_HOME``
        defaults to ``~/.config`` when unset)
 
     The home-directory dotfile deliberately takes precedence over the XDG
@@ -101,9 +104,16 @@ def _find_global_config_file() -> Path | None:
     authoritative when it exists.
 
     Returns:
-        Path | None: Path to the global config file, or None if neither
-            location exists.
+        Path | None: Path to the global config file, or None if disabled or
+            no location exists.
     """
+    env_value = os.environ.get("LINTRO_GLOBAL_CONFIG")
+    if env_value is not None:
+        if env_value.strip().lower() in ("", "0", "off", "none"):
+            return None
+        env_path = Path(env_value).expanduser()
+        return env_path if env_path.is_file() else None
+
     home_config = Path.home() / GLOBAL_CONFIG_FILENAME
     if home_config.is_file():
         return home_config

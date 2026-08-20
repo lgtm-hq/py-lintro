@@ -131,8 +131,11 @@ projects can still override.
 
 **Resolution order** (first existing file wins):
 
-1. `~/.lintro-config.yaml` — the primary, authoritative location.
-2. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
+1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `none`, or empty)
+   to disable the global tier entirely. Useful for CI and hermetic test environments
+   that must not inherit a developer's personal defaults.
+2. `~/.lintro-config.yaml` — the primary, authoritative location.
+3. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
    defaults to `~/.config` when unset.
 
 The home-directory dotfile deliberately takes precedence over the XDG fallback when both

@@ -40,6 +40,7 @@ def isolated_home(
     """
     home = tmp_path / "home"
     home.mkdir()
+    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     clear_config_cache()
@@ -257,7 +258,7 @@ def test_load_config_global_only(
     config = load_config(allow_pyproject_fallback=False)
 
     assert_that(config.enforce.line_length).is_equal_to(100)
-    assert_that(config.ai.enabled).is_true()
+    assert_that(config.ai.get("enabled")).is_true()
     assert_that(config.global_config_path).is_not_none()
     assert_that(config.config_path).is_none()
     assert_that(config.global_contributed_keys).contains("enforce.line_length")
@@ -322,10 +323,10 @@ def test_load_config_both_project_wins_and_deep_merges(
 
     # Project wins per key.
     assert_that(config.enforce.line_length).is_equal_to(120)
-    assert_that(config.ai.enabled).is_false()
+    assert_that(config.ai.get("enabled")).is_false()
     # Global fills nested keys the project did not override.
     assert_that(config.enforce.target_python).is_equal_to("py311")
-    assert_that(config.ai.provider).is_equal_to("anthropic")
+    assert_that(config.ai.get("provider")).is_equal_to("anthropic")
     # Both tool entries survive the deep merge.
     assert_that(config.tools).contains_key("ruff")
     assert_that(config.tools).contains_key("black")
