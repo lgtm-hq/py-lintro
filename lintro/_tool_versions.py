@@ -70,6 +70,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.GOLANGCI_LINT: "2.12.2",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
+    ToolName.RUBOCOP: "1.88.1",
     ToolName.RUSTC: "1.97.1",
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
