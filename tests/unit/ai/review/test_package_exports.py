@@ -5,12 +5,53 @@ from __future__ import annotations
 import ast
 import importlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
 import lintro.ai.review as review_pkg
+
+_REVIEW_PACKAGE = "lintro.ai.review"
+
+
+def _review_module_names() -> list[str]:
+    """Return the currently imported ``lintro.ai.review`` module names.
+
+    Returns:
+        The package itself plus every imported submodule.
+    """
+    return [
+        name
+        for name in list(sys.modules)
+        if name == _REVIEW_PACKAGE or name.startswith(f"{_REVIEW_PACKAGE}.")
+    ]
+
+
+@pytest.fixture(autouse=True)
+def restore_review_modules() -> Iterator[None]:
+    """Undo the ``sys.modules`` surgery these tests perform.
+
+    ``test_lazy_exports_match_implementation`` deletes every lazy-export source
+    module and lets the package re-import it. Re-importing a module defines
+    *new* class objects, so a module that already imported, say,
+    ``ReviewContextError`` eagerly keeps the old class and its ``except``
+    clauses silently stop matching for the rest of the session. Restoring the
+    original modules — and the package globals that cache their attributes —
+    keeps that damage inside this file.
+
+    Yields:
+        None: Control returns to the test while the snapshot is held.
+    """
+    tracked = {name: sys.modules[name] for name in _review_module_names()}
+    package_globals = dict(vars(review_pkg))
+    try:
+        yield
+    finally:
+        sys.modules.update(tracked)
+        vars(review_pkg).clear()
+        vars(review_pkg).update(package_globals)
 
 
 @pytest.mark.parametrize("export_name", review_pkg.__all__)
