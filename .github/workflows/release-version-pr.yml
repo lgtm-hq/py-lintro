@@ -29,11 +29,9 @@ jobs:
       auto-merge: true
       max-bump: minor
       # Finalize the generated version PR before it is committed: reflow
-      # CHANGELOG.md to lintro's 88-column markdown budget so release PRs pass
-      # dogfooding-lint without CHANGELOG.md being ignored (#1117), and stamp
-      # every SECURITY.md supported-versions table to the current major.minor
-      # line so minor/major bumps do not go stale and block the unattended
-      # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
+      # CHANGELOG.md (#1117), stamp SECURITY.md support tables (#1372), sync
+      # the docs/pre-commit.md rev pins (#1319), and sync the pinned release
+      # image (#1590). Logic lives in dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       egress-policy: block
