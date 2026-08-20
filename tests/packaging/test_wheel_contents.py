@@ -14,6 +14,7 @@ from __future__ import annotations
 import shutil
 import subprocess  # nosec B404 - subprocess builds the wheel under test with fixed argv, shell=False
 import tempfile
+import tomllib
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -124,6 +125,59 @@ def test_wheel_does_not_leak_non_lintro_top_level_dirs(
 def test_py_typed_marker_included_in_wheel(wheel_namelist: list[str]) -> None:
     """The PEP 561 ``py.typed`` marker must ship inside the wheel."""
     assert_that(wheel_namelist).contains("lintro/py.typed")
+
+
+def _declared_package_data_paths() -> set[str]:
+    """Return on-disk paths selected by ``[tool.setuptools.package-data]``.
+
+    Globs are read from pyproject.toml so a packaging-table change is the
+    single source of truth for both the wheel build and this guard.
+
+    Returns:
+        Repository-relative POSIX paths for declared package data.
+    """
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        package_data = tomllib.load(handle)["tool"]["setuptools"]["package-data"]
+
+    paths: set[str] = set()
+    for package_name, patterns in package_data.items():
+        package_dir = PROJECT_ROOT.joinpath(*package_name.split("."))
+        for pattern in patterns:
+            for path in package_dir.glob(pattern):
+                if path.is_file():
+                    paths.add(
+                        str(path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                    )
+    return paths
+
+
+@pytest.mark.packaging
+def test_declared_package_data_exists_on_disk() -> None:
+    """Package-data globs must match at least one file on disk each."""
+    paths = _declared_package_data_paths()
+    assert_that(paths).contains("lintro/py.typed")
+    assert_that(paths).contains("lintro/tools/manifest.json")
+    assert_that(
+        [path for path in paths if path.startswith("lintro/ai/prompts/templates/")],
+    ).is_not_empty()
+    assert_that(
+        [
+            path
+            for path in paths
+            if path.startswith("lintro/ai/review/checklist/corpus/")
+        ],
+    ).is_not_empty()
+
+
+@pytest.mark.slow
+@pytest.mark.packaging
+def test_wheel_contains_declared_package_data(wheel_namelist: list[str]) -> None:
+    """JSON, prompt templates, and checklist YAML must ship in the wheel."""
+    expected = _declared_package_data_paths()
+    missing = sorted(expected - set(wheel_namelist))
+    assert_that(missing).described_as(
+        f"Package-data files missing from wheel: {missing}",
+    ).is_empty()
 
 
 @pytest.mark.packaging
