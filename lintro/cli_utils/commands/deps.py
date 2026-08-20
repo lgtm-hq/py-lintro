@@ -50,6 +50,15 @@ _SKIP_DIRS: frozenset[str] = frozenset(
     help="Override the configured policy preset.",
 )
 @click.option(
+    "--strict-discovery",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit 1 when auto-discovery finds no manifests. Without this flag an "
+        "empty discovery is reported as a warning and exits 0."
+    ),
+)
+@click.option(
     "--format",
     "output_format",
     type=click.Choice(["grid", "json"]),
@@ -59,6 +68,7 @@ _SKIP_DIRS: frozenset[str] = frozenset(
 def deps_command(
     files: tuple[str, ...],
     policy: str | None,
+    strict_discovery: bool,
     output_format: str,
 ) -> None:
     """Validate dependency version specifications against a policy.
@@ -66,11 +76,17 @@ def deps_command(
     Parses dependency manifests (``pyproject.toml``, ``requirements*.txt``,
     ``package.json``, ``Cargo.toml``), classifies each version specification,
     and reports specs that violate the active policy. Exits non-zero when any
-    violation is found.
+    violation is found, and when any manifest fails to parse.
+
+    Auto-discovery that finds no manifests is a warning and exits 0, so that
+    running ``lintro deps`` in a repository without manifests is not an error.
+    Pass ``--strict-discovery`` (or explicit ``--file`` paths) when using the
+    command as a CI gate, so a wrong working directory fails the job.
 
     Args:
         files: Explicit manifest paths. When empty, manifests are discovered.
         policy: Optional policy preset overriding configuration.
+        strict_discovery: Fail when auto-discovery finds no manifests.
         output_format: Output format (``grid`` or ``json``).
 
     Raises:
@@ -78,6 +94,7 @@ def deps_command(
     """
     try:
         config = _resolve_config(policy)
+        engine = PolicyEngine(config)
     except ValueError as exc:
         message = str(exc)
         if output_format == "json":
@@ -85,8 +102,6 @@ def deps_command(
         else:
             Console().print(f"[red]{message}[/red]")
         raise SystemExit(1) from exc
-
-    engine = PolicyEngine(config)
 
     try:
         targets = _resolve_targets(files)
@@ -100,18 +115,21 @@ def deps_command(
 
     if not targets:
         message = "No dependency manifests found."
+        if strict_discovery:
+            message = f"{message} (--strict-discovery)"
         if output_format == "json":
             click.echo(json_lib.dumps({"error": message}, indent=2))
         else:
-            Console().print(f"[yellow]{message}[/yellow]")
-        raise SystemExit(0)
+            color = "red" if strict_discovery else "yellow"
+            Console().print(f"[{color}]{message}[/{color}]")
+        raise SystemExit(1 if strict_discovery else 0)
 
     result, parse_errors = _run_checks(targets, engine)
 
     if output_format == "json":
         _render_json(result, parse_errors=parse_errors)
     else:
-        _render_grid(result)
+        _render_grid(result, parse_errors=parse_errors)
         for err in parse_errors:
             Console().print(f"[red]Failed to parse {err}[/red]")
 
@@ -223,11 +241,17 @@ def _run_checks(
     )
 
 
-def _render_grid(result: DepsCheckResult) -> None:
+def _render_grid(
+    result: DepsCheckResult,
+    *,
+    parse_errors: list[str] | None = None,
+) -> None:
     """Render results as a grouped Rich table.
 
     Args:
         result: The check result to render.
+        parse_errors: Manifest parse failures that must suppress the green
+            success summary.
     """
     console = Console()
     violations_by_dep: dict[int, VersionViolation] = {
@@ -263,17 +287,32 @@ def _render_grid(result: DepsCheckResult) -> None:
             )
         console.print(table)
 
-    _render_summary(console, result)
+    _render_summary(console, result, parse_errors=parse_errors or [])
 
 
-def _render_summary(console: Console, result: DepsCheckResult) -> None:
+def _render_summary(
+    console: Console,
+    result: DepsCheckResult,
+    *,
+    parse_errors: list[str],
+) -> None:
     """Print a summary line for the check.
 
     Args:
         console: Rich console to write to.
         result: The check result to summarize.
+        parse_errors: Manifest parse failures. When non-empty, the green
+            success line is replaced by a failure line so the summary never
+            contradicts the exit code.
     """
     count = len(result.violations)
+    if count == 0 and parse_errors:
+        console.print(
+            f"\n[red]Summary: {len(parse_errors)} manifest(s) failed to "
+            f"parse; no policy verdict for them.[/red]",
+        )
+        return
+
     if count == 0:
         console.print(
             f"\n[green]✅ All {len(result.dependencies)} dependencies "

@@ -6,6 +6,14 @@ dependency manifests (``pyproject.toml``, ``requirements.txt``,
 the built-in presets (``strict``, ``flexible``, ``loose``) or via a ``custom``
 policy that reads the explicit rule fields on :class:`DepsConfig`.
 
+The explicit rule fields (``require_upper_bound``, ``allowed_types``,
+``disallowed_types``) apply **only** when ``policy: custom``. Under a preset
+they are ignored, because the preset defines the whole rule set — setting
+``policy: flexible`` together with ``require_upper_bound: false`` still
+requires an upper bound. Set ``policy: custom`` to make those fields take
+effect. Per-package :class:`PackageException` entries are the supported way to
+relax a preset for individual packages.
+
 Example ``.lintro-config.yaml``::
 
     deps:
@@ -71,9 +79,14 @@ class DepsConfig(BaseModel):
         model_config: Pydantic model configuration.
         policy: Active policy preset (or ``custom``).
         require_upper_bound: Whether specs must cap the upper version bound.
-        allowed_types: Version-spec types allowed under a ``custom`` policy.
-        disallowed_types: Version-spec types forbidden under a ``custom`` policy.
-        exceptions: Per-package overrides applied before the base policy.
+            Applies only when ``policy`` is ``custom``; presets define their
+            own value.
+        allowed_types: Version-spec types allowed. Applies only when ``policy``
+            is ``custom``. Unknown type names are rejected.
+        disallowed_types: Version-spec types forbidden. Applies only when
+            ``policy`` is ``custom``. Unknown type names are rejected.
+        exceptions: Per-package overrides applied before the base policy. These
+            work under every policy, including the presets.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")

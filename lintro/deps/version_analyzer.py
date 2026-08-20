@@ -4,6 +4,10 @@ The analyzer maps a raw version constraint (as written in a manifest) to a
 :class:`~lintro.deps.models.VersionSpecType` and reports whether the constraint
 caps the maximum installable version. Semantics differ per ecosystem — most
 notably, a bare ``1.2.3`` is an exact pin in npm but a caret range in Cargo.
+
+Alternative clauses (npm ``a || b``) are always evaluated clause by clause: the
+expression is bounded only when *every* alternative is bounded, since npm is
+free to resolve any one of them.
 """
 
 from __future__ import annotations
@@ -19,6 +23,20 @@ _ANY_TOKENS = frozenset({"", "*", "x", "latest", "any"})
 
 # A wildcard component such as ``1.2.*``, ``1.x`` or ``1.2.x``.
 _WILDCARD_RE = re.compile(r"\.\*|(?:^|\.)x(?:\.|$)")
+
+# An npm hyphen range (``1.2.3 - 2.3.4``), which requires surrounding spaces
+# and is therefore distinguishable from a prerelease tag like ``1.2.3-alpha``.
+_HYPHEN_RANGE_RE = re.compile(r"^\S+\s+-\s+\S+$")
+
+# Types that inherently cap the maximum installable version.
+_INHERENTLY_BOUNDED = frozenset(
+    {
+        VersionSpecType.EXACT,
+        VersionSpecType.TILDE,
+        VersionSpecType.CARET,
+        VersionSpecType.WILDCARD,
+    },
+)
 
 
 class VersionAnalyzer:
@@ -39,50 +57,24 @@ class VersionAnalyzer:
             VersionSpecType: The classified spec type.
         """
         spec = version_spec.strip()
-        normalized = spec.lower()
 
-        if normalized in _ANY_TOKENS:
+        if spec.lower() in _ANY_TOKENS:
             return VersionSpecType.ANY
 
-        # Wildcards are checked before operators so ``1.2.*`` wins over range.
-        if self._is_wildcard(spec):
-            return VersionSpecType.WILDCARD
-
-        # Alternative clauses (npm ``||``, Cargo commas already handled below)
-        # are never a single exact pin.
+        # Alternatives are handled before any single-clause heuristic so that a
+        # wildcard or comparator on one side cannot classify the whole spec.
         if "||" in spec:
             if self.has_upper_bound(spec, ecosystem):
                 return VersionSpecType.RANGE
             return VersionSpecType.UNBOUNDED
 
-        if spec.startswith("^"):
-            return VersionSpecType.CARET
-
-        if spec.startswith("~"):
-            # ``~=`` (PEP 440) and ``~`` (npm/cargo) are both tilde ranges.
-            return VersionSpecType.TILDE
-
-        # Exclusion-only specs (``!=1.2.3``) are unbounded, not exact pins.
-        if spec.startswith("!=") or spec.startswith("≠"):
+        spec_type = self._quick_type(spec, ecosystem)
+        if spec_type is VersionSpecType.RANGE and not self.has_upper_bound(
+            spec,
+            ecosystem,
+        ):
             return VersionSpecType.UNBOUNDED
-
-        if spec.startswith("=="):
-            return VersionSpecType.EXACT
-
-        if spec.startswith("="):
-            # Cargo exact pin (``=1.2.3``); npm treats ``=`` as exact too.
-            return VersionSpecType.EXACT
-
-        # Multi-clause or comparator constraints (``>=1,<2``, ``>=1``).
-        if any(op in spec for op in (">", "<", ",", "!=")):
-            if self.has_upper_bound(spec, ecosystem):
-                return VersionSpecType.RANGE
-            return VersionSpecType.UNBOUNDED
-
-        # A bare version number. Cargo treats it as caret; npm/python as exact.
-        if ecosystem is Ecosystem.CARGO:
-            return VersionSpecType.CARET
-        return VersionSpecType.EXACT
+        return spec_type
 
     def has_upper_bound(
         self,
@@ -99,37 +91,41 @@ class VersionAnalyzer:
             bool: ``True`` when the maximum installable version is bounded.
         """
         spec = version_spec.strip()
+
+        # Every alternative must be bounded; one unbounded clause is enough for
+        # the resolver to float to a future major.
+        if "||" in spec:
+            clauses = [part.strip() for part in spec.split("||") if part.strip()]
+            return bool(clauses) and all(
+                self.has_upper_bound(clause, ecosystem) for clause in clauses
+            )
+
         spec_type = self._quick_type(spec, ecosystem)
 
-        # These forms inherently cap the upper bound.
-        if spec_type in {
-            VersionSpecType.EXACT,
-            VersionSpecType.TILDE,
-            VersionSpecType.CARET,
-            VersionSpecType.WILDCARD,
-        }:
+        if spec_type in _INHERENTLY_BOUNDED:
             return True
-        if spec_type is VersionSpecType.ANY:
+        if spec_type in {VersionSpecType.ANY, VersionSpecType.UNBOUNDED}:
             return False
+        if self._is_hyphen_range(spec, ecosystem):
+            return True
 
         # Comparator constraints: an upper bound needs ``<`` or ``<=``, or a
         # ``==``/``=`` exact clause somewhere in the expression.
         if "<" in spec:
             return True
-        clauses = re.split(r"[,\s]+", spec)
-        for clause in clauses:
-            token = clause.strip()
-            if token.startswith("==") or (
-                token.startswith("=") and not token.startswith("==")
-            ):
+        for clause in re.split(r"[,\s]+", spec):
+            if clause.strip().startswith("="):
                 return True
         return False
 
     def _quick_type(self, spec: str, ecosystem: Ecosystem) -> VersionSpecType:
-        """Classify without recursing into :meth:`has_upper_bound`.
+        """Classify a single (alternative-free) clause.
+
+        ``RANGE`` here means "comparator or hyphen expression"; the caller
+        decides whether it is actually bounded via :meth:`has_upper_bound`.
 
         Args:
-            spec: Stripped version constraint.
+            spec: Stripped version constraint without ``||`` alternatives.
             ecosystem: Ecosystem governing the constraint semantics.
 
         Returns:
@@ -138,25 +134,46 @@ class VersionAnalyzer:
         normalized = spec.lower()
         if normalized in _ANY_TOKENS:
             return VersionSpecType.ANY
+        # ``1.2.3 - 2.3.4`` is a bounded range, not a bare exact version.
+        if self._is_hyphen_range(spec, ecosystem):
+            return VersionSpecType.RANGE
         if self._is_wildcard(spec):
             return VersionSpecType.WILDCARD
-        if "||" in spec:
-            return VersionSpecType.RANGE
         if spec.startswith("^"):
             return VersionSpecType.CARET
         if spec.startswith("~"):
+            # ``~=`` (PEP 440) and ``~`` (npm/cargo) are both tilde ranges.
             return VersionSpecType.TILDE
-        if spec.startswith("!="):
+        # Exclusion-only specs (``!=1.2.3``) are unbounded, not exact pins.
+        if spec.startswith("!=") or spec.startswith("≠"):
             return VersionSpecType.UNBOUNDED
         if spec.startswith("=="):
             return VersionSpecType.EXACT
         if spec.startswith("="):
+            # Cargo exact pin (``=1.2.3``); npm treats ``=`` as exact too.
             return VersionSpecType.EXACT
+        # Multi-clause or comparator constraints (``>=1,<2``, ``>=1``).
         if any(op in spec for op in (">", "<", ",", "!=")):
             return VersionSpecType.RANGE
+        # A bare version number. Cargo treats it as caret; npm/python as exact.
         if ecosystem is Ecosystem.CARGO:
             return VersionSpecType.CARET
         return VersionSpecType.EXACT
+
+    @staticmethod
+    def _is_hyphen_range(spec: str, ecosystem: Ecosystem) -> bool:
+        """Return whether the spec is an npm hyphen range.
+
+        Args:
+            spec: Stripped version constraint.
+            ecosystem: Ecosystem governing the constraint semantics.
+
+        Returns:
+            bool: ``True`` for npm specs like ``1.2.3 - 2.3.4``.
+        """
+        if ecosystem is not Ecosystem.NPM:
+            return False
+        return bool(_HYPHEN_RANGE_RE.match(spec))
 
     def _is_wildcard(self, spec: str) -> bool:
         """Return whether the spec uses a wildcard component.

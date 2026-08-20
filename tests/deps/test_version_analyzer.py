@@ -42,6 +42,16 @@ def analyzer() -> VersionAnalyzer:
         ("*", Ecosystem.CARGO, VersionSpecType.ANY),
         ("!=1.2.3", Ecosystem.PYTHON, VersionSpecType.UNBOUNDED),
         ("==1.2.3 || ==2.0.0", Ecosystem.NPM, VersionSpecType.RANGE),
+        # Alternatives: bounded only when every clause is bounded.
+        (">=1.0.0 || >=2.0.0", Ecosystem.NPM, VersionSpecType.UNBOUNDED),
+        (">=1.0.0 || >=2.0.0 <3.0.0", Ecosystem.NPM, VersionSpecType.UNBOUNDED),
+        ("1.2.* || >=3.0.0", Ecosystem.NPM, VersionSpecType.UNBOUNDED),
+        ("^1.0.0 || ^2.0.0", Ecosystem.NPM, VersionSpecType.RANGE),
+        (">=1.0.0 <2.0.0 || >=3.0.0 <4.0.0", Ecosystem.NPM, VersionSpecType.RANGE),
+        # npm hyphen ranges are bounded ranges, not exact pins.
+        ("1.2.3 - 2.3.4", Ecosystem.NPM, VersionSpecType.RANGE),
+        ("1.2.3-alpha", Ecosystem.NPM, VersionSpecType.EXACT),
+        ("1.2.3 - 2.3.4 || 4.0.0", Ecosystem.NPM, VersionSpecType.RANGE),
     ],
 )
 def test_classify(
@@ -74,6 +84,19 @@ def test_classify(
         ("*", Ecosystem.PYTHON, False),
         ("1.2.*", Ecosystem.PYTHON, True),
         ("1.0.100", Ecosystem.CARGO, True),
+        # Every ``||`` clause must be bounded.
+        (">=1.0.0 || >=2.0.0", Ecosystem.NPM, False),
+        (">=1.0.0 || >=2.0.0 <3.0.0", Ecosystem.NPM, False),
+        (">=1.0.0 <2.0.0 || >=3.0.0", Ecosystem.NPM, False),
+        ("1.2.* || >=3.0.0", Ecosystem.NPM, False),
+        ("^1.0.0 || ^2.0.0", Ecosystem.NPM, True),
+        (">=1.0.0 <2.0.0 || >=3.0.0 <4.0.0", Ecosystem.NPM, True),
+        ("||", Ecosystem.NPM, False),
+        # Hyphen ranges cap the maximum; prerelease tags are exact pins.
+        ("1.2.3 - 2.3.4", Ecosystem.NPM, True),
+        ("1.2.3-alpha", Ecosystem.NPM, True),
+        # Hyphen-range syntax is npm-only; Cargo reads it as a caret spec.
+        ("1.2.3 - 2.3.4", Ecosystem.CARGO, True),
     ],
 )
 def test_has_upper_bound(
