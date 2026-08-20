@@ -117,7 +117,9 @@ sections:
    or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
 
 A value set in the global config survives only where the project config does not
-override that exact key path. A missing or empty global file is never an error.
+override that exact key path. An auto-discovered global file that is absent or empty is
+never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
+(see [below](#user-level-global-config)).
 
 In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
 about the tool, so a project scalar replaces the global mapping wholesale. A project

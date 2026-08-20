@@ -465,6 +465,33 @@ def test_load_config_project_tool_mapping_keeps_global_disable(
     assert_that(config.global_contributed_keys).contains("tools.ruff.enabled")
 
 
+def test_load_config_tool_names_merge_case_insensitively(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed-case tool keys across tiers merge into a single entry.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text("tools:\n  Ruff: false\n")
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "tools:\n  ruff:\n    config_source: ruff.toml\n",
+    )
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.tools).contains_key("ruff")
+    assert_that(config.tools["ruff"].enabled).is_false()
+    assert_that(config.tools["ruff"].config_source).is_equal_to("ruff.toml")
+    assert_that(config.global_contributed_keys).contains("tools.ruff.enabled")
+    assert_that(config.global_contributed_keys).does_not_contain("tools.Ruff")
+
+
 def test_load_config_project_tool_mapping_may_re_enable(
     isolated_home: Path,
     tmp_path: Path,
