@@ -32,7 +32,7 @@ SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "badge": "Generate a shields.io markdown badge for the project health score.",
     "check": "Check files for issues using the specified tools.",
     "completions": "Print a shell completion script for bash, zsh, or fish.",
-    "config": "Display Lintro configuration status.",
+    "config": "Inspect and validate Lintro configuration.",
     "doctor": "Check tool installation status and version compatibility.",
     "format": "Format code using configured formatting tools.",
     "init": "Initialize Lintro configuration for your project.",

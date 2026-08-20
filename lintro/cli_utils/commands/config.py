@@ -82,6 +82,8 @@ def config_command(
     - config validate  Validate a config file against the schema.
     - config init      Scaffold a starter .lintro-config.yaml.
 
+
+
     Args:
         ctx: Click context used to detect subcommand dispatch.
         verbose: Show detailed configuration including native tool configs.
