@@ -158,21 +158,26 @@ def _is_global_tier_only(
 
 
 def _exclude_global_file_when_tier_disabled(candidate: Path) -> bool:
-    """Return True when ``candidate`` is the home global file and the tier is off.
+    """Return True when ``candidate`` belongs to the global tier only.
 
     Plugin and license loaders search upward independently of
-    :func:`load_config`. Without this gate, ``LINTRO_GLOBAL_CONFIG=off`` still
-    lets those loaders treat ``~/.lintro-config.yaml`` as a project file.
+    :func:`load_config`. The home dotfile and the active global file (an
+    explicit ``LINTRO_GLOBAL_CONFIG`` path or the XDG fallback) must never
+    be adopted as a project config. That remains true when the global tier
+    is off, so ``LINTRO_GLOBAL_CONFIG=off`` cannot demote
+    ``~/.lintro-config.yaml`` into a project file.
 
     Args:
         candidate: Config file found by an upward search.
 
     Returns:
-        bool: True when the caller must ignore this file.
+        bool: True when the caller must ignore this file as a project
+            config.
     """
-    if _find_global_config_file() is not None:
-        return False
-    return _is_global_tier_only(candidate=candidate, global_file=None)
+    return _is_global_tier_only(
+        candidate=candidate,
+        global_file=_find_global_config_file(),
+    )
 
 
 def _deep_merge(
