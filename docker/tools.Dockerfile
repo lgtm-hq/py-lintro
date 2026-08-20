@@ -157,7 +157,7 @@ RUN echo "=== Verifying all tools ===" && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     dotenv-linter --version && \
     stylelint --version && \
-    taplo --version && tsc --version && astro --version && \
+    taplo --version && trivy --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     vale --version && \
     echo "=== All tools verified! ==="
