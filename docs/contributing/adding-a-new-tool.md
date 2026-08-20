@@ -300,19 +300,15 @@ entries before deciding on a value.
 
 ---
 
-## Step 7 — pyproject.toml: package list
+## Step 7 — pyproject.toml: package discovery
 
-Add the new parser package to the `packages` list in `pyproject.toml` so it is included
-in the wheel:
+Parser packages under `lintro/` are picked up automatically by
+`[tool.setuptools.packages.find]` (`include = ["lintro*"]`). Do **not** add an explicit
+`packages = [...]` list. A new `lintro/parsers/<tool>/` directory with `__init__.py` is
+enough for the wheel.
 
-```toml
-[tool.setuptools]
-packages = [
-  ...
-  "lintro.parsers.<tool>",
-  ...
-]
-```
+Only update `[tool.setuptools.packages.find] exclude` if the new path is data rather
+than an importable package (hyphenated dirs, no `__init__.py`).
 
 ---
 
@@ -571,7 +567,8 @@ Implementation checklist:
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
 - [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
-- [ ] `pyproject.toml` — parser package added to `packages` list
+- [ ] `pyproject.toml` — no manual `packages` list edit; `packages.find` includes
+      `lintro*`
 - [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install
       block, tools_to_verify)
 - [ ] `docker/tools.Dockerfile` — verify step
