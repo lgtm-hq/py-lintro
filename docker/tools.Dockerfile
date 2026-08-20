@@ -54,6 +54,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git \
     libssl-dev \
     pkg-config \
+    php-cli \
     unzip \
     jq && \
     apt-get clean && \
@@ -151,7 +152,8 @@ RUN echo "=== Verifying all tools ===" && \
     golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
-    oxfmt --version && oxlint --version && prettier --version && \
+    oxfmt --version && oxlint --version && php --version && \
+    phpstan --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     pip-audit --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \

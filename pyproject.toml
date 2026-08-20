@@ -193,6 +193,7 @@ packages = [
   "lintro.parsers.pip_audit",
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
+  "lintro.parsers.phpstan",
   "lintro.parsers.prettier",
   "lintro.parsers.sarif",
   "lintro.parsers.shellcheck",
