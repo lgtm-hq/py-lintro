@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import click
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -13,8 +14,15 @@ from lintro.cli_utils.commands.mcp import mcp_command
 
 
 def test_mcp_command_is_registered_on_the_cli() -> None:
-    """``mcp`` is exposed as a top-level lintro command."""
-    assert_that(cli.commands).contains_key("mcp")
+    """``mcp`` is exposed as a top-level lintro command.
+
+    Subcommands load lazily, so ``cli.commands`` is empty until one is
+    resolved; go through the public listing/lookup API instead.
+    """
+    ctx = click.Context(cli)
+
+    assert_that(cli.list_commands(ctx)).contains("mcp")
+    assert_that(cli.get_command(ctx, "mcp")).is_same_as(mcp_command)
 
 
 def test_mcp_command_defaults_workspace_to_cwd(tmp_path: Path) -> None:

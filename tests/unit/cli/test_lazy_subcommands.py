@@ -8,6 +8,7 @@ which these tests keep aligned with each other and with the real commands.
 from __future__ import annotations
 
 import importlib
+from typing import cast
 
 import click
 import pytest
@@ -33,7 +34,10 @@ def _load_command(canonical: str) -> click.Command:
         The imported Click command object.
     """
     module_name, attr_name = _LAZY_SUBCOMMANDS[canonical].rsplit(".", 1)
-    return getattr(importlib.import_module(module_name), attr_name)
+    return cast(
+        click.Command,
+        getattr(importlib.import_module(module_name), attr_name),
+    )
 
 
 def test_lazy_and_canonical_tables_cover_the_same_names() -> None:
