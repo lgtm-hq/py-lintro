@@ -33,7 +33,7 @@ __all__ = [
     "ToolRegistry",
     "ToolType",
     "ToolManager",
-    "tool_manager",  # noqa: F822 - resolved via module __getattr__
+    "tool_manager",
 ]
 
 
@@ -57,3 +57,12 @@ def __getattr__(name: str) -> Any:
     value = getattr(module, attr_name)
     globals()[name] = value
     return value
+
+
+def __dir__() -> list[str]:
+    """Return available attributes including lazy exports.
+
+    Returns:
+        Sorted names from module globals and ``__all__``.
+    """
+    return sorted(set(globals()) | set(__all__))

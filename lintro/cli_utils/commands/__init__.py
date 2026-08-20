@@ -5,16 +5,29 @@ Subcommand modules are imported on demand so ``import lintro.cli`` stays light.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.cli_utils.commands.check import check_command as check_command
+    from lintro.cli_utils.commands.completions import (
+        completions_command as completions_command,
+    )
+    from lintro.cli_utils.commands.format import (
+        format_code as format_code,
+        format_code_legacy as format_code_legacy,
+        format_command as format_command,
+    )
+    from lintro.cli_utils.commands.init import init_command as init_command
+    from lintro.cli_utils.commands.list_tools import list_tools as list_tools
 
 __all__ = [
-    "check_command",  # noqa: F822 - resolved via module __getattr__
-    "completions_command",  # noqa: F822 - resolved via module __getattr__
-    "format_command",  # noqa: F822 - resolved via module __getattr__
-    "format_code",  # noqa: F822 - resolved via module __getattr__
-    "format_code_legacy",  # noqa: F822 - resolved via module __getattr__
-    "init_command",  # noqa: F822 - resolved via module __getattr__
-    "list_tools",  # noqa: F822 - resolved via module __getattr__
+    "check_command",
+    "completions_command",
+    "format_command",
+    "format_code",
+    "format_code_legacy",
+    "init_command",
+    "list_tools",
 ]
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
@@ -51,3 +64,12 @@ def __getattr__(name: str) -> Any:
     value = getattr(module, attr_name)
     globals()[name] = value
     return value
+
+
+def __dir__() -> list[str]:
+    """Return available attributes including lazy exports.
+
+    Returns:
+        Sorted names from module globals and ``__all__``.
+    """
+    return sorted(set(globals()) | set(__all__))

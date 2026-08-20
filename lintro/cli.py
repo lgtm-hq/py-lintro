@@ -6,7 +6,7 @@ import codecs
 import contextlib
 import importlib
 import sys
-from typing import Any, TextIO, cast
+from typing import Any, TextIO
 
 import click
 
@@ -247,9 +247,13 @@ class LintroGroup(click.Group):
                 "a non-command object"
             )
             raise ValueError(msg)
+        # Click auto-names ``format_command`` as ``format-command``; register
+        # the name users type so ``get_command`` and man pages stay aligned.
         canonical = _CANONICAL_NAMES.get(cmd_name, cmd_name)
-        cast(Any, cmd_object)._canonical_name = canonical
+        cmd_object.name = canonical
         self.add_command(cmd_object, name=cmd_name)
+        if cmd_name != canonical:
+            self.add_command(cmd_object, name=canonical)
         return cmd_object
 
     def format_help(

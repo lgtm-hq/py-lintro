@@ -69,3 +69,12 @@ def __getattr__(name: str) -> Any:
     value = getattr(module, attr_name)
     globals()[name] = value
     return value
+
+
+def __dir__() -> list[str]:
+    """Return available attributes including lazy exports.
+
+    Returns:
+        Sorted names from module globals and ``__all__``.
+    """
+    return sorted(set(globals()) | set(__all__))

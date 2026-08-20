@@ -90,6 +90,12 @@ def test_lazy_export_names_match_runtime_map() -> None:
     assert_that(set(review_pkg.__all__)).is_equal_to(set(review_pkg._LAZY_EXPORTS))
 
 
+def test_dir_includes_lazy_export_names() -> None:
+    """``dir()`` lists lazy exports before they have been accessed."""
+    importlib.reload(review_pkg)
+    assert_that(set(review_pkg.__all__).issubset(set(dir(review_pkg)))).is_true()
+
+
 def test_type_checking_lazy_exports_match_runtime_map() -> None:
     """TYPE_CHECKING imports stay aligned with the lazy export map."""
     source = Path(review_pkg.__file__).read_text(encoding="utf-8")

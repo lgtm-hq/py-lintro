@@ -76,6 +76,50 @@ if loaded:
     assert_that(bool(re.search(r"\d+\.\d+\.\d+", result.stdout))).is_true()
 
 
+# ``lintro --help`` may import rich to render the Commands table, but must
+# not pull subcommand or tool-executor modules.
+_FORBIDDEN_AFTER_HELP = (
+    "lintro.ai.review",
+    "lintro.ai.review.checklist",
+    "lintro.utils.tool_executor",
+    "lintro.plugins.base",
+    "lintro.tools.definitions.ruff",
+    "lintro.cli_utils.commands.check",
+    "lintro.cli_utils.commands.format",
+)
+
+
+def test_lintro_help_avoids_heavy_modules() -> None:
+    """``lintro --help`` must not import check/format/tool_executor.
+
+    Uses Click's programmatic invocation so the assertion stays in-process of
+    the subprocess under test without requiring a PATH entry for ``lintro``.
+    Rich is allowed because ``format_help`` renders the static Commands table.
+    """
+    forbidden_repr = ", ".join(repr(name) for name in _FORBIDDEN_AFTER_HELP)
+    script = f"""
+import sys
+from lintro.cli import cli
+cli.main(args=["--help"], standalone_mode=False)
+forbidden = [{forbidden_repr}]
+loaded = [name for name in forbidden if name in sys.modules]
+if loaded:
+    raise SystemExit(
+        "unexpected modules after lintro --help: " + ", ".join(loaded)
+    )
+"""
+    result = subprocess.run(  # nosec B603 - fixed argv: sys.executable -c with literal script; shell=False
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).is_equal_to("")
+    assert_that(result.stdout).contains("check")
+    assert_that(result.stdout).contains("format")
+
+
 def test_import_config_loader_avoids_ai_review() -> None:
     """``import lintro.config.config_loader`` must not import AI review.
 

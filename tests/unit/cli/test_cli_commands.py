@@ -8,42 +8,12 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.cli import cli
+from lintro.cli import _COMMAND_SHORT_HELP, cli
 
-SUBCOMMANDS: tuple[str, ...] = (
-    "badge",
-    "check",
-    "completions",
-    "config",
-    "doctor",
-    "format",
-    "init",
-    "install",
-    "licenses",
-    "list-tools",
-    "review",
-    "setup",
-    "test",
-    "versions",
-)
-
-# Human-facing summary phrases that must survive Click's \\f truncation.
-SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
-    "badge": "Generate a shields.io markdown badge for the project health score.",
-    "check": "Check files for issues using the specified tools.",
-    "completions": "Print a shell completion script for bash, zsh, or fish.",
-    "config": "Display Lintro configuration status.",
-    "doctor": "Check tool installation status and version compatibility.",
-    "format": "Format code using configured formatting tools.",
-    "init": "Initialize Lintro configuration for your project.",
-    "install": "Install or upgrade external tools used by lintro.",
-    "licenses": "Check dependency licenses for policy compliance.",
-    "list-tools": "List all available tools and their configurations.",
-    "review": "Run AI-powered diff-based code review, plus advisory AI finders.",
-    "setup": "Set up lintro for your project.",
-    "test": "Run tests using pytest.",
-    "versions": "Display version information for all supported tools.",
-}
+# Derived from the CLI short-help table so root help and subcommand help
+# cannot drift apart. Includes every canonical command (mcp included).
+SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = dict(_COMMAND_SHORT_HELP)
+SUBCOMMANDS: tuple[str, ...] = tuple(sorted(SUBCOMMAND_SUMMARY_PHRASES))
 
 _DOCSTRING_SECTION_RE = re.compile(
     r"^\s*(Args|Raises|Returns|Note|Notes|Example|Examples|Yields|Attributes"

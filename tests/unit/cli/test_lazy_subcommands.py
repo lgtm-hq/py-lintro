@@ -2,42 +2,26 @@
 
 ``lintro --help`` renders its Commands table from static metadata so it never
 imports a subcommand. That trades an import for three hand-maintained tables,
-which these tests keep aligned with each other and with the real commands.
+which these tests keep aligned with each other, with the real commands, and
+with the user-visible help text.
 """
 
 from __future__ import annotations
 
-import importlib
-from typing import cast
-
 import click
 import pytest
 from assertpy import assert_that
+from click.testing import CliRunner
 
 from lintro.cli import (
     _CANONICAL_NAMES,
     _COMMAND_SHORT_HELP,
     _LAZY_SUBCOMMANDS,
     SHORT_HELP_LIMIT,
+    cli,
 )
 
 _CANONICAL_COMMANDS: tuple[str, ...] = tuple(sorted(set(_CANONICAL_NAMES.values())))
-
-
-def _load_command(canonical: str) -> click.Command:
-    """Import the Click command backing a canonical command name.
-
-    Args:
-        canonical: Canonical command name present in ``_LAZY_SUBCOMMANDS``.
-
-    Returns:
-        The imported Click command object.
-    """
-    module_name, attr_name = _LAZY_SUBCOMMANDS[canonical].rsplit(".", 1)
-    return cast(
-        click.Command,
-        getattr(importlib.import_module(module_name), attr_name),
-    )
 
 
 def test_lazy_and_canonical_tables_cover_the_same_names() -> None:
@@ -64,15 +48,30 @@ def test_aliases_share_the_canonical_import_path() -> None:
 
 
 @pytest.mark.parametrize("canonical", _CANONICAL_COMMANDS)
-def test_lazy_import_path_resolves_to_a_click_command(canonical: str) -> None:
-    """Every import path resolves to a Click command with the expected name.
+def test_get_command_registers_canonical_name(canonical: str) -> None:
+    """``get_command`` resolves the name users type, not Click's auto-name.
 
     Args:
         canonical: Canonical command name under test.
     """
-    command = _load_command(canonical)
+    ctx = click.Context(cli)
+    command = cli.get_command(ctx, canonical)
     assert_that(isinstance(command, click.Command)).is_true()
+    assert command is not None
     assert_that(command.name).is_equal_to(canonical)
+    assert_that(cli.list_commands(ctx)).contains(canonical)
+    assert_that(cli.commands).contains_key(canonical)
+
+
+def test_aliases_resolve_to_the_canonical_command_object() -> None:
+    """Aliases and canonical names resolve to the same loaded command."""
+    ctx = click.Context(cli)
+    for name, canonical in _CANONICAL_NAMES.items():
+        loaded = cli.get_command(ctx, name)
+        canonical_cmd = cli.get_command(ctx, canonical)
+        assert_that(loaded).is_same_as(canonical_cmd)
+        assert loaded is not None
+        assert_that(loaded.name).is_equal_to(canonical)
 
 
 @pytest.mark.parametrize("canonical", _CANONICAL_COMMANDS)
@@ -82,7 +81,9 @@ def test_static_short_help_matches_the_command(canonical: str) -> None:
     Args:
         canonical: Canonical command name under test.
     """
-    command = _load_command(canonical)
+    ctx = click.Context(cli)
+    command = cli.get_command(ctx, canonical)
+    assert command is not None
     assert_that(_COMMAND_SHORT_HELP[canonical]).is_equal_to(
         command.get_short_help_str(limit=SHORT_HELP_LIMIT),
     )
@@ -94,3 +95,14 @@ def test_short_help_entries_fit_the_render_limit() -> None:
         assert_that(len(short_help)).described_as(canonical).is_less_than_or_equal_to(
             SHORT_HELP_LIMIT,
         )
+
+
+def test_root_help_lists_canonical_names_aliases_and_descriptions() -> None:
+    """``lintro --help`` shows each canonical name, alias, and description."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--help"])
+    assert_that(result.exit_code).is_equal_to(0)
+    normalized = " ".join(result.output.split())
+    for name, canonical in _CANONICAL_NAMES.items():
+        assert_that(result.output).contains(name)
+        assert_that(normalized).contains(_COMMAND_SHORT_HELP[canonical])
