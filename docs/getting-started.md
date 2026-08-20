@@ -122,6 +122,9 @@ order and for what changed.
   (e.g. `.stylelintrc.json`) to enable linting
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
+- `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release binary)
+- `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release
+  binary)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
