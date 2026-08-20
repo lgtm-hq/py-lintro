@@ -193,8 +193,10 @@ def load_defaults_context(
         return {}
 
     data = _load_mapping_file(found)
-    if found.name.startswith("cookiecutter") or found.name == "cookiecutter.json":
-        return data
+    if found.name.startswith("cookiecutter"):
+        # Production cookiecutter templates use ``{{ cookiecutter.X }}``.
+        # Keep flat keys too so ``{{ project_slug }}`` still resolves.
+        return {**data, "cookiecutter": data}
     return _extract_copier_defaults(data)
 
 
@@ -321,7 +323,8 @@ def _int_sentinel_var_names(original: str) -> set[str]:
     names: set[str] = set()
     for match in _INT_VAR_RE.finditer(original):
         base = match.group(1).rsplit(".", maxsplit=1)[-1].lower()
-        if base == "id" or any(hint in base for hint in _INT_NAME_HINTS):
+        tokens = base.replace(".", "_").split("_")
+        if base == "id" or any(hint in tokens for hint in _INT_NAME_HINTS):
             names.add(match.group(1))
     return names
 

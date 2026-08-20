@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
-from dataclasses import replace
-from typing import Any, TypeVar, cast
+from dataclasses import fields, is_dataclass, replace
+from typing import TypeVar
 
 from lintro.parsers.base_issue import BaseIssue
 from lintro.template_aware.source_map import SourceMap
@@ -93,20 +93,23 @@ def translate_issue(
         return issue
 
     new_line = source_map.lookup_line(issue.line)
-    updated = replace(
-        issue,
-        file=source_map.original_path,
-        line=new_line,
-    )
-
-    if hasattr(updated, "end_line"):
-        end_line = getattr(updated, "end_line", 0) or 0
-        if isinstance(end_line, int) and end_line > 0:
-            # end_line is optional on BaseIssue subclasses; cast avoids typed
-            # replace() rejecting a field absent from IssueT.
-            cast(Any, updated).end_line = source_map.lookup_line(end_line)
-
-    return updated
+    updates: dict[str, str | int] = {
+        "file": source_map.original_path,
+        "line": new_line,
+    }
+    end_line = getattr(issue, "end_line", None)
+    if isinstance(end_line, int) and end_line > 0:
+        mapped_end = source_map.lookup_line(end_line)
+        field_names = (
+            {item.name for item in fields(issue)} if is_dataclass(issue) else set()
+        )
+        if "end_line" in field_names:
+            updates["end_line"] = mapped_end
+            return replace(issue, **updates)
+        updated = replace(issue, **updates)
+        object.__setattr__(updated, "end_line", mapped_end)
+        return updated
+    return replace(issue, **updates)
 
 
 def translate_issues(

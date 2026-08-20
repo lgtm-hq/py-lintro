@@ -31,6 +31,7 @@ import click
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.execution_preparation import (
     DEFAULT_TIMEOUT,
@@ -141,6 +142,7 @@ class BaseToolPlugin(ABC):
     exclude_patterns: list[str] = field(default_factory=list, init=False)
     include_venv: bool = field(default=False, init=False)
     _template_aware_session: Any = field(default=None, init=False, repr=False)
+    _run_action: Action | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize plugin with defaults from definition."""
@@ -546,6 +548,7 @@ class BaseToolPlugin(ABC):
         options: dict[str, object],
         *,
         no_files_message: str = "No files to check.",
+        action: Action | str | None = None,
     ) -> ExecutionContext:
         """Prepare execution context with common boilerplate steps.
 
@@ -561,6 +564,8 @@ class BaseToolPlugin(ABC):
             paths: Input paths to process.
             options: Runtime options to merge with defaults.
             no_files_message: Message when no files are found.
+            action: Check vs fix/format. Defaults to ``_run_action`` set by
+                the executor, then check.
 
         Returns:
             ExecutionContext with files, cwd, and optional early_result.
@@ -575,6 +580,7 @@ class BaseToolPlugin(ABC):
         """
         logger.debug(f"[{self.name}] Preparing execution for {len(paths)} input paths")
 
+        resolved_action = action if action is not None else self._run_action
         result = prepare_execution(
             paths=paths,
             options=options,
@@ -583,6 +589,7 @@ class BaseToolPlugin(ABC):
             include_venv=self.include_venv,
             current_options=self.options,
             no_files_message=no_files_message,
+            action=resolved_action,
         )
 
         if "early_result" in result:
