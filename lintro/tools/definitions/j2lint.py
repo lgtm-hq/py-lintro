@@ -59,7 +59,9 @@ class J2lintPlugin(BaseToolPlugin):
             file_patterns=J2LINT_FILE_PATTERNS,
             priority=J2LINT_DEFAULT_PRIORITY,
             conflicts_with=[],
-            native_configs=[".j2lint.yaml"],
+            # j2lint has no native config file: every knob (rule ignores,
+            # warn demotions, extensions, rules dir) is a CLI flag only.
+            native_configs=[],
             version_command=["j2lint", "--version"],
             min_version=get_min_version(ToolName.J2LINT),
             default_options={
@@ -160,7 +162,7 @@ class J2lintPlugin(BaseToolPlugin):
 
         cmd = self._build_command(files=ctx.files)
         try:
-            _success, output = self._run_subprocess(cmd=cmd, timeout=ctx.timeout)
+            success, output = self._run_subprocess(cmd=cmd, timeout=ctx.timeout)
         except subprocess.TimeoutExpired:
             timeout_msg = (
                 f"j2lint execution timed out ({ctx.timeout}s limit exceeded). "
@@ -183,6 +185,23 @@ class J2lintPlugin(BaseToolPlugin):
 
         issues = parse_j2lint_output(output)
         error_count = sum(1 for issue in issues if issue.level == "error")
+
+        # Fail closed: j2lint exits non-zero both for lint findings and for
+        # internal errors (bad arguments, tracebacks, unreadable files). When
+        # the exit code is non-zero but nothing parsed out of the combined
+        # stdout/stderr, the run produced no verdict at all and must not be
+        # reported as clean (mirrors vale/stylelint/html-validate).
+        if not issues and not success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    output
+                    or "j2lint exited with an error and produced no parseable output."
+                ),
+                issues_count=0,
+                parse_failures_count=1,
+            )
 
         return ToolResult(
             name=self.definition.name,

@@ -61,8 +61,8 @@ def test_definition_file_patterns(j2lint_plugin: J2lintPlugin) -> None:
 
 
 def test_native_configs(j2lint_plugin: J2lintPlugin) -> None:
-    """The definition declares the native config file."""
-    assert_that(j2lint_plugin.definition.native_configs).contains(".j2lint.yaml")
+    """j2lint reads no config file, so no native config is declared."""
+    assert_that(j2lint_plugin.definition.native_configs).is_empty()
 
 
 def test_set_options_valid(j2lint_plugin: J2lintPlugin) -> None:
@@ -198,6 +198,61 @@ def test_check_warnings_only_succeeds(
     result = _run_check(j2lint_plugin, tmp_path, output)
     assert_that(result.success).is_true()  # type: ignore[attr-defined]
     assert_that(result.issues_count).is_equal_to(1)  # type: ignore[attr-defined]
+
+
+def test_check_unparseable_output_fails_closed(
+    j2lint_plugin: J2lintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no parseable report is reported as a failure."""
+    result = _run_check(j2lint_plugin, tmp_path, "Traceback (most recent call last):")
+    assert_that(result.success).is_false()  # type: ignore[attr-defined]
+    assert_that(result.issues_count).is_equal_to(0)  # type: ignore[attr-defined]
+    assert_that(result.parse_failures_count).is_equal_to(1)  # type: ignore[attr-defined]
+    assert_that(result.output).contains("Traceback")  # type: ignore[attr-defined]
+
+
+def test_check_empty_output_on_failure_reports_message(
+    j2lint_plugin: J2lintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no output at all yields an explanatory message."""
+    result = _run_check(j2lint_plugin, tmp_path, "")
+    assert_that(result.success).is_false()  # type: ignore[attr-defined]
+    assert_that(result.output).contains(  # type: ignore[attr-defined]
+        "produced no parseable output",
+    )
+
+
+def test_check_runs_the_built_command(
+    j2lint_plugin: J2lintPlugin,
+    tmp_path: Path,
+) -> None:
+    """check() dispatches exactly the command produced by ``_build_command``."""
+    template = tmp_path / "template.j2"
+    template.write_text("{{ x }}\n")
+    j2lint_plugin.set_options(ignore=["S1"])
+
+    with (
+        patch.object(j2lint_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            j2lint_plugin,
+            "_run_subprocess",
+            return_value=(True, _report(errors=[], warnings=[])),
+        ) as mock_run,
+    ):
+        mock_ctx = MagicMock()
+        mock_ctx.should_skip = False
+        mock_ctx.early_result = None
+        mock_ctx.timeout = 30
+        mock_ctx.files = [str(template)]
+        mock_prepare.return_value = mock_ctx
+
+        j2lint_plugin.check([str(template)], {})
+
+    expected = j2lint_plugin._build_command(files=[str(template)])
+    assert_that(mock_run.call_args.kwargs["cmd"]).is_equal_to(expected)
+    assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)
 
 
 def test_check_no_files_returns_early(

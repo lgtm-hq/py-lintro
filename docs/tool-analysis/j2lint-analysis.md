@@ -83,7 +83,9 @@ lintro check --tools j2lint --tool-options "j2lint:ignore=S3 j2lint:warn=S6"
 
 ## Configuration Strategy
 
-- **Native config**: `.j2lint.yaml` is declared as a native config file.
+- **Native config**: none. j2lint exposes every knob (rule ignores, warn demotions,
+  extensions, rules directory) as a CLI flag only and reads no config file, so
+  `native_configs` is empty.
 - **Runtime options**: `ignore`, `warn`, and `timeout` are available via
   `--tool-options`.
 

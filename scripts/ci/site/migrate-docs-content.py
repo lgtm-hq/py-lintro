@@ -83,6 +83,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/hadolint": ("hadolint", "ci-ops"),
     "tools/html-validate": ("html-validate", "frameworks"),
     "tools/idiom-review": ("idiom-review", "python"),
+    "tools/j2lint": ("j2lint", "frameworks"),
     "tools/markdownlint": ("markdownlint", "config"),
     "tools/mypy": ("mypy", "python"),
     "tools/osv-scanner": ("osv-scanner", "security"),

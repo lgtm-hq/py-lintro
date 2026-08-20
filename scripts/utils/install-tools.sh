@@ -172,7 +172,6 @@ SUPPORTED_TOOLS=(
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc"
-	"vale" "vue-tsc" "yamllint" 
 	"vale" "vue-tsc" "yamllint"
 )
 

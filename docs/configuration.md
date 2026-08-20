@@ -2719,8 +2719,11 @@ variable naming. It is a lint-only tool and cannot auto-fix.
 - File patterns: `*.j2`, `*.jinja`, `*.jinja2`
 - Bundled as a Python dependency (`pip install j2lint` / `uv add j2lint`); also
   installable via `scripts/utils/install-tools.sh --tools j2lint`.
-- Priority `60` — runs after djlint-style HTML template linters so complementary
-  rulesets both apply to shared `*.jinja` files.
+- Priority `60` — runs after HTML-oriented template linters (priority `50`) so both
+  rulesets can apply to shared `*.jinja` files without either masking the other.
+
+j2lint has no native config file — every knob is a CLI flag — so all tuning goes through
+`--tool-options` or the `[tool.lintro.tools.j2lint]` section.
 
 **Available `--tool-options`:**
 
