@@ -21,6 +21,7 @@ from __future__ import annotations
 BREW_FORMULA_NAMES: dict[str, str] = {
     # Binary tools
     "actionlint": "actionlint",
+    "cppcheck": "cppcheck",
     "dotenv_linter": "dotenv-linter",
     "gitleaks": "gitleaks",
     "golangci_lint": "golangci-lint",

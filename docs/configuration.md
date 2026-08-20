@@ -1141,18 +1141,18 @@ standalone on files without any build/project context.
 - macOS: `brew install cppcheck`
 - Debian/Ubuntu: `apt-get install cppcheck`
 
-Cppcheck is driven entirely by command-line options (no native config file), so
-all configuration is via `--tool-options`.
+Cppcheck is driven entirely by command-line options (no native config file), so all
+configuration is via `--tool-options`.
 
 **Available Options via `--tool-options`:**
 
-| Option         | Type      | Description                                                     |
-| -------------- | --------- | -------------------------------------------------------------- |
-| `enable`       | string    | Comma-separated check categories. Default `warning,style,performance,portability` (`error` checks always run). |
-| `inconclusive` | bool      | Report findings cppcheck cannot fully confirm.                 |
-| `std`          | string    | Language standard (e.g. `c11`, `c++17`).                        |
-| `inline_suppr` | bool      | Honor inline `// cppcheck-suppress` comments.                  |
-| `suppress`     | list      | Suppression specifications (e.g. `missingInclude`).            |
+| Option         | Type   | Description                                                                                                    |
+| -------------- | ------ | -------------------------------------------------------------------------------------------------------------- |
+| `enable`       | string | Comma-separated check categories. Default `warning,style,performance,portability` (`error` checks always run). |
+| `inconclusive` | bool   | Report findings cppcheck cannot fully confirm.                                                                 |
+| `std`          | string | Language standard (e.g. `c11`, `c++17`).                                                                       |
+| `inline_suppr` | bool   | Honor inline `// cppcheck-suppress` comments.                                                                  |
+| `suppress`     | list   | Suppression specifications (e.g. `missingInclude`).                                                            |
 
 **Example Usage:**
 
@@ -1168,11 +1168,10 @@ lintro check src/ --tools cppcheck \
   --tool-options "cppcheck:inconclusive=true|suppress=missingInclude"
 ```
 
-Cppcheck's structured output is parsed from its native XML report (schema
-version 2). SARIF output is available in recent versions but is lossy for
-cppcheck (it collapses `style`/`performance`/`portability` into a single
-`warning` level), so the native XML parser is used. See
-[Cppcheck Analysis](./tool-analysis/cppcheck-analysis.md).
+Cppcheck's structured output is parsed from its native XML report (schema version 2).
+SARIF output is available in recent versions but is lossy for cppcheck (it collapses
+`style`/`performance`/`portability` into a single `warning` level), so the native XML
+parser is used. See [Cppcheck Analysis](./tool-analysis/cppcheck-analysis.md).
 
 #### Gitleaks Configuration
 

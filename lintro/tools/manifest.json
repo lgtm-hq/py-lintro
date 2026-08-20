@@ -167,7 +167,7 @@
       "languages": ["git"],
       "tags": ["linter"]
     },
-        {
+    {
       "name": "cppcheck",
       "version": "2.21.0",
       "min_version": "2.13.0",
@@ -180,7 +180,7 @@
       "languages": ["c", "cpp"],
       "tags": ["linter", "security"]
     },
-{
+    {
       "name": "dotenv_linter",
       "version": "4.0.0",
       "install": {

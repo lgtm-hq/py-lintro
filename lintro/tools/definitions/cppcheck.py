@@ -36,10 +36,13 @@ from lintro.tools.core.option_validators import (
     validate_list,
     validate_option_types,
 )
+from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for Cppcheck configuration
 CPPCHECK_DEFAULT_TIMEOUT: int = 60
-CPPCHECK_DEFAULT_PRIORITY: int = 85  # High priority: catches memory-safety defects
+# High priority: catches memory-safety defects. Sourced from
+# ``DEFAULT_TOOL_PRIORITIES`` so the declared value stays the effective one.
+CPPCHECK_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("cppcheck", 85)
 CPPCHECK_FILE_PATTERNS: list[str] = [
     "*.c",
     "*.cpp",
