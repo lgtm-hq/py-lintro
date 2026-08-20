@@ -89,9 +89,9 @@ renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 
 ### 🪞 Mirror Release Scripts (`ci/mirror/`)
 
-Scripts that sync the `lgtm-hq/lintro-pre-commit` pre-commit mirror on each
-py-lintro release (see [pre-commit integration](../docs/pre-commit.md)). Driven
-by `.github/workflows/mirror-release.yml`.
+Scripts that sync the `lgtm-hq/lintro-pre-commit` pre-commit mirror on each py-lintro
+release (see [pre-commit integration](../docs/pre-commit.md)). Driven by
+`.github/workflows/mirror-release.yml`.
 
 | Script                      | Purpose                                                    | Usage                                                                              |
 | --------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |

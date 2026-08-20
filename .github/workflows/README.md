@@ -70,8 +70,8 @@ comments so Renovate can track digest updates. Policy is enforced by
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
 - **mirror-release.yml** — On `release: published`, bumps the `lintro` pin in the
-  `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the
-  mirror `vX.Y.Z` so pre-commit consumers install the matching wheel (scripts under
+  `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the mirror
+  `vX.Y.Z` so pre-commit consumers install the matching wheel (scripts under
   `scripts/ci/mirror/`; see `docs/pre-commit.md`)
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
