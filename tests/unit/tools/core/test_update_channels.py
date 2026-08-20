@@ -14,6 +14,7 @@ from lintro.tools.core.update_channels import (
     build_version_advisory,
     detect_update_channel,
     format_advisory_line,
+    resolve_channel_binary_path,
     resolve_update_command,
 )
 from lintro.tools.core.version_checking import (
@@ -105,6 +106,47 @@ def test_detect_update_channel(
 ) -> None:
     """Classify install channels from representative binary paths."""
     assert_that(detect_update_channel(path)).is_equal_to(expected)
+
+
+def test_detect_update_channel_cargo_audit_wrapper_is_cargo() -> None:
+    """``cargo audit`` probes resolve ``cargo`` but the crate is not rustup."""
+    channel = detect_update_channel(
+        "/Users/me/.cargo/bin/cargo",
+        tool_name="cargo_audit",
+    )
+    assert_that(channel).is_equal_to(UpdateChannel.CARGO)
+
+
+def test_detect_update_channel_cargo_deny_binary_is_cargo() -> None:
+    """``cargo-deny`` under ``~/.cargo/bin`` is a crate, not a rustup shim."""
+    channel = detect_update_channel(
+        "/Users/me/.cargo/bin/cargo-deny",
+        tool_name="cargo_deny",
+    )
+    assert_that(channel).is_equal_to(UpdateChannel.CARGO)
+
+
+def test_detect_update_channel_rustc_with_tool_name_stays_rustup() -> None:
+    """Rustc still classifies as rustup when the tool name is supplied."""
+    channel = detect_update_channel(
+        "/Users/me/.cargo/bin/rustc",
+        tool_name="rustc",
+    )
+    assert_that(channel).is_equal_to(UpdateChannel.RUSTUP)
+
+
+def test_resolve_channel_binary_path_prefers_install_bin_over_wrapper() -> None:
+    """Wrapper argv[0] must not win over the tool's own binary on PATH."""
+    found = resolve_channel_binary_path(
+        tool_name="vue_tsc",
+        install_bin="vue-tsc",
+        probe_path="/bin/bash",
+        probe_argv0="bash",
+        which=lambda name: (
+            "/proj/node_modules/.bin/vue-tsc" if name == "vue-tsc" else None
+        ),
+    )
+    assert_that(found).is_equal_to("/proj/node_modules/.bin/vue-tsc")
 
 
 def test_detect_update_channel_rejects_unrelated_cellar_path() -> None:
@@ -332,8 +374,8 @@ def test_build_outdated_advisory_falls_back_to_install_type() -> None:
     assert_that(advisory.update_command).contains("uv pip install --upgrade")
 
 
-def test_format_advisory_line_with_command() -> None:
-    """Human-readable line includes channel and update command."""
+def test_format_advisory_line_includes_channel() -> None:
+    """Human-readable line includes the channel, not the strategy command."""
     advisory = VersionAdvisory(
         tool="hadolint",
         installed="2.10",
@@ -345,7 +387,7 @@ def test_format_advisory_line_with_command() -> None:
     assert_that(line).contains("hadolint 2.10 installed")
     assert_that(line).contains("2.12 expected")
     assert_that(line).contains("installed via homebrew")
-    assert_that(line).contains("brew upgrade hadolint")
+    assert_that(line).does_not_contain("brew upgrade hadolint")
 
 
 def test_format_advisory_line_unknown_channel() -> None:

@@ -13,7 +13,10 @@ from lintro.enums.tool_name import ToolName, normalize_tool_name
 
 # Import actual implementations from version_checking with aliases
 # to avoid name conflicts
-from lintro.tools.core.update_channels import VersionAdvisory
+from lintro.tools.core.update_channels import (
+    VersionAdvisory,
+    resolve_channel_binary_path,
+)
 from lintro.tools.core.version_checking import (
     VERSION_CHECK_TIMEOUT,
     build_version_advisory,
@@ -330,6 +333,7 @@ def check_tool_version(
         ):
             install_type = None
             install_package = None
+            install_bin = None
             try:
                 from lintro.tools.core.tool_registry import ManifestRegistry
 
@@ -338,6 +342,7 @@ def check_tool_version(
                     manifest_tool = registry.get(tool_name)
                     install_type = manifest_tool.install_type
                     install_package = manifest_tool.install_package
+                    install_bin = manifest_tool.install_bin
                     channel_override = manifest_tool.update_channel
                 else:
                     channel_override = None
@@ -348,7 +353,13 @@ def check_tool_version(
                 tool=tool_name,
                 installed=info.current_version,
                 latest_known=latest_known,
-                binary_path=info.binary_path,
+                binary_path=resolve_channel_binary_path(
+                    tool_name=tool_name,
+                    install_bin=install_bin,
+                    probe_path=info.binary_path,
+                    probe_argv0=command[0] if command else None,
+                    which=shutil.which,
+                ),
                 install_package=install_package,
                 install_type=install_type,
                 channel_override=channel_override,

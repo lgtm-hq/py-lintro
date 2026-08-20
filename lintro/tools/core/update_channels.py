@@ -9,7 +9,9 @@ manifest / tool-versions data — this module never makes network calls.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -226,6 +228,9 @@ def build_version_advisory(
 def format_advisory_line(advisory: VersionAdvisory) -> str:
     """Render a human-readable advisory line.
 
+    Channel is diagnostic only; the actionable upgrade command lives on
+    the install strategy ``upgrade_hint`` / ``install_hint``.
+
     Args:
         advisory: Structured advisory to format.
 
@@ -237,8 +242,6 @@ def format_advisory_line(advisory: VersionAdvisory) -> str:
         f"{advisory.latest_known} expected"
     )
     channel_label = advisory.channel.value.replace("_", " ")
-    if advisory.update_command:
-        return f"{base} — installed via {channel_label}: {advisory.update_command}"
     if advisory.channel in (UpdateChannel.UNKNOWN, UpdateChannel.STANDALONE):
         return f"{base} — update channel unknown"
     return f"{base} — installed via {channel_label}"
@@ -339,15 +342,74 @@ _RUSTUP_SHIM_NAMES: frozenset[str] = frozenset(
     },
 )
 
+#: Version-probe argv[0] values that are host wrappers, not the tool binary.
+_WRAPPER_PROBE_NAMES: frozenset[str] = frozenset({"sh", "bash", "cargo", "env"})
+
+
+def resolve_channel_binary_path(
+    *,
+    tool_name: str,
+    install_bin: str | None = None,
+    probe_path: str | Path | None = None,
+    probe_argv0: str | None = None,
+    which: Callable[[str], str | None] | None = None,
+) -> str | Path | None:
+    """Return the binary path used for update-channel detection.
+
+    Cargo crates and some Node tools probe version through ``cargo`` or
+    ``bash``. Those argv[0] paths are not the tool and must not classify
+    the install channel.
+
+    Args:
+        tool_name: Canonical tool name.
+        install_bin: Manifest ``install.bin`` when it differs from the name.
+        probe_path: Path resolved from the version-probe argv[0].
+        probe_argv0: Version-probe argv[0] (may be a relative command name).
+        which: PATH lookup, defaulting to :func:`shutil.which`.
+
+    Returns:
+        Path of the tool binary when it can be found, otherwise *probe_path*.
+    """
+    argv0_source = probe_argv0 if probe_argv0 is not None else probe_path
+    argv0 = ""
+    if argv0_source is not None:
+        argv0 = Path(argv0_source).name.lower().removesuffix(".exe")
+    if argv0 not in _WRAPPER_PROBE_NAMES:
+        return probe_path
+
+    finder = which or shutil.which
+    candidates: list[str] = []
+    if install_bin:
+        candidates.append(install_bin)
+    hyphen = tool_name.replace("_", "-")
+    underscore = tool_name.replace("-", "_")
+    for name in (hyphen, underscore, tool_name):
+        if name not in candidates:
+            candidates.append(name)
+    for name in candidates:
+        found = finder(name)
+        if found:
+            return found
+    return probe_path
+
 
 def _is_rustup_shim(*, resolved: Path, tool_name: str | None) -> bool:
-    """Return True for rustup proxy binaries that live under ``~/.cargo/bin``."""
-    names = {resolved.name.lower().removesuffix(".exe")}
+    """Return True for rustup proxy binaries that live under ``~/.cargo/bin``.
+
+    When *tool_name* is set, only that name (and hyphen/underscore aliases)
+    is matched. Wrapper probes such as ``cargo audit`` resolve argv[0] to
+    the ``cargo`` shim; classifying from the basename would label
+    cargo-audit as rustup.
+    """
     if tool_name:
         lowered = tool_name.lower()
-        names.add(lowered.replace("-", "_"))
-        names.add(lowered.replace("_", "-"))
-        names.add(lowered)
+        names = {
+            lowered,
+            lowered.replace("-", "_"),
+            lowered.replace("_", "-"),
+        }
+    else:
+        names = {resolved.name.lower().removesuffix(".exe")}
     return bool(names & _RUSTUP_SHIM_NAMES)
 
 

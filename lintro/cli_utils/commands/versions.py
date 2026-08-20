@@ -90,9 +90,7 @@ def versions_command(verbose: bool, json_output: bool) -> None:
 
         if verbose:
             hint = version_info.install_hint
-            if version_info.advisory and version_info.advisory.update_command:
-                hint = version_info.advisory.update_command
-            elif version_info.error_message:
+            if version_info.error_message:
                 hint = f"{version_info.error_message}. {hint}"
             row.append(hint)
 

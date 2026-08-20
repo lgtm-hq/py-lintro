@@ -39,11 +39,11 @@ from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
 )
+from lintro.tools.core.update_channels import format_advisory_line
 from lintro.tools.definitions.oxlint_doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
 )
-from lintro.tools.core.update_channels import format_advisory_line
 from lintro.utils.doctor_report import (
     ToolCheckResult,
     collect_tool_checks,
@@ -122,7 +122,7 @@ def _render_tool_line(
         console.print(line)
         if r.advisory:
             console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
-        else:
+        if r.upgrade_hint:
             console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.INCOMPATIBLE:
@@ -134,7 +134,7 @@ def _render_tool_line(
         console.print(line)
         if r.advisory:
             console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
-        else:
+        if r.upgrade_hint:
             console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.DISABLED:
@@ -345,8 +345,7 @@ def _generate_markdown_report(
         for check in ai_checks:
             hint = check.hint or "-"
             lines.append(
-                f"| {check.name} | {check.status.upper()} "
-                f"| {check.message} | {hint} |",
+                f"| {check.name} | {check.status.upper()} | {check.message} | {hint} |",
             )
 
     lines.append("")

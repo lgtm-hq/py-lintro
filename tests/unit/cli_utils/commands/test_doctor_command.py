@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -10,21 +11,25 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 from click.testing import CliRunner
 from loguru import logger
+from rich.console import Console
 
 from lintro.ai.config import AIConfig
 from lintro.cli_utils.commands.doctor import (
     _generate_markdown_report,
     _output_json,
+    _render_tool_line,
     doctor_command,
 )
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.enums.install_outcome import InstallOutcome
 from lintro.enums.tool_status import ToolStatus
+from lintro.enums.update_channel import UpdateChannel
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.tool_registry import ManifestTool
+from lintro.tools.core.update_channels import VersionAdvisory
 from lintro.utils.doctor_report import ToolCheckResult, check_tool
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -37,6 +42,7 @@ def _make_tool(
     *,
     install_type: str = "pip",
     install_package: str | None = None,
+    install_bin: str | None = None,
     update_channel: str | None = None,
     tier: str = "tools",
     category: str = "bundled",
@@ -49,6 +55,7 @@ def _make_tool(
         min_version=min_version or version,
         install_type=install_type,
         install_package=install_package,
+        install_bin=install_bin,
         update_channel=update_channel,
         tier=tier,
         category=category,
@@ -110,7 +117,10 @@ def test_check_tool_outdated_enriches_advisory_from_path() -> None:
     assert_that(result.advisory).is_not_none()
     assert result.advisory is not None
     assert_that(result.advisory.channel.value).is_equal_to("uv_tool")
-    assert_that(result.upgrade_hint).is_equal_to("uv tool upgrade ruff")
+    assert_that(result.advisory.update_command).is_equal_to("uv tool upgrade ruff")
+    assert_that(result.upgrade_hint).is_equal_to(
+        "uv pip install --upgrade 'ruff>=1.0.0'",
+    )
 
 
 def test_check_tool_honors_manifest_channel_override() -> None:
@@ -168,10 +178,14 @@ def test_check_tool_rustc_cargo_bin_stays_rustup() -> None:
     assert_that(result.upgrade_hint).is_equal_to("rustup update stable")
 
 
-def test_check_tool_node_modules_does_not_use_global_npm(
+def test_check_tool_node_modules_advisory_stays_local(
     tmp_path: Path,
 ) -> None:
-    """A project-local prettier must not get ``npm install -g``.
+    """A project-local prettier must not get a global npm advisory command.
+
+    ``upgrade_hint`` stays the install-strategy command. Without a Node
+    project on the context, that strategy installs globally; the advisory
+    records the local ``node_modules`` channel separately.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -202,8 +216,192 @@ def test_check_tool_node_modules_does_not_use_global_npm(
     assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
     assert result.advisory is not None
     assert_that(result.advisory.channel.value).is_equal_to("npm")
-    assert_that(result.upgrade_hint).is_equal_to("npm install -D prettier@3.9.5")
-    assert_that(result.upgrade_hint).does_not_contain("install -g")
+    assert_that(result.advisory.update_command).is_equal_to(
+        "npm install -D prettier@3.9.5",
+    )
+    assert_that(result.advisory.update_command).does_not_contain("install -g")
+    assert_that(result.upgrade_hint).is_equal_to("npm install -g prettier@3.9.5")
+
+
+def _which_map(mapping: dict[str, str]) -> Any:
+    """Return a ``shutil.which`` stand-in for a name-to-path table.
+
+    Args:
+        mapping: Command name to absolute path.
+
+    Returns:
+        Lookup callable compatible with ``shutil.which``.
+    """
+
+    def _lookup(name: str) -> str | None:
+        return mapping.get(name)
+
+    return _lookup
+
+
+def test_check_tool_cargo_audit_wrapper_is_cargo_not_rustup() -> None:
+    """``cargo audit --version`` must not advise ``rustup update stable``."""
+    tool = _make_tool(
+        name="cargo_audit",
+        version="0.22.0",
+        min_version="0.20.0",
+        install_type="cargo",
+        install_package="cargo-audit",
+        version_command=("cargo", "audit", "--version"),
+    )
+    ctx = _make_context()
+
+    with (
+        patch(
+            "shutil.which",
+            side_effect=_which_map(
+                {
+                    "cargo": "/Users/me/.cargo/bin/cargo",
+                    "cargo-audit": "/Users/me/.cargo/bin/cargo-audit",
+                },
+            ),
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="cargo-audit 0.20.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("cargo")
+    assert_that(result.advisory.update_command).is_equal_to(
+        "cargo install --force cargo-audit",
+    )
+    assert_that(result.upgrade_hint).is_equal_to("cargo install --force cargo-audit")
+    assert_that(result.upgrade_hint).does_not_contain("rustup")
+
+
+def test_check_tool_vue_tsc_bash_wrapper_uses_vue_tsc_binary() -> None:
+    """``bash`` version probes must classify vue-tsc from its own binary."""
+    tool = _make_tool(
+        name="vue_tsc",
+        version="3.3.10",
+        min_version="3.0.0",
+        install_type="npm",
+        install_package="vue-tsc",
+        install_bin="vue-tsc",
+        version_command=("bash", "scripts/ci/resolve-vue-tsc-version.sh"),
+    )
+    ctx = _make_context()
+
+    with (
+        patch(
+            "shutil.which",
+            side_effect=_which_map(
+                {
+                    "bash": "/bin/bash",
+                    "vue-tsc": "/proj/node_modules/.bin/vue-tsc",
+                },
+            ),
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="3.0.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("npm")
+    assert_that(result.advisory.update_command).is_equal_to(
+        "npm install -D vue-tsc@3.3.10",
+    )
+    assert_that(result.path).is_equal_to("/bin/bash")
+
+
+def test_check_tool_pip_only_host_does_not_emit_uv() -> None:
+    """A host with pip and no uv must not be told to run ``uv pip``."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    ctx = RuntimeContext(
+        install_context=InstallContext.PIP,
+        platform_label="Linux x86_64",
+        environment=InstallEnvironment(
+            install_context=InstallContext.PIP,
+            available_managers=frozenset({PackageManager.PIP}),
+        ),
+        is_ci=False,
+    )
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert_that(result.upgrade_hint).is_equal_to(
+        "pip install --upgrade 'ruff>=1.0.0'",
+    )
+    assert_that(result.upgrade_hint).does_not_contain("uv ")
+    assert result.advisory is not None
+    assert_that(result.advisory.update_command).contains("uv pip install")
+
+
+def test_render_outdated_prints_channel_and_strategy_hint() -> None:
+    """Outdated lines show the channel as diagnostic and the strategy command."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    result = ToolCheckResult(
+        tool=tool,
+        status=ToolStatus.OUTDATED,
+        installed_version="0.5.0",
+        upgrade_hint="uv pip install --upgrade 'ruff>=1.0.0'",
+        advisory=VersionAdvisory(
+            tool="ruff",
+            installed="0.5.0",
+            latest_known="1.0.0",
+            channel=UpdateChannel.UV_TOOL,
+            update_command="uv tool upgrade ruff",
+        ),
+    )
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=120)
+    _render_tool_line(console, result, verbose=False, is_dev=False)
+    text = buf.getvalue()
+    assert_that(text).contains("installed via uv tool")
+    assert_that(text).contains("Upgrade: uv pip install --upgrade 'ruff>=1.0.0'")
+    assert_that(text).does_not_contain("uv tool upgrade ruff")
+
+
+def test_render_incompatible_prints_channel_and_strategy_hint() -> None:
+    """Incompatible lines also keep the strategy upgrade command."""
+    tool = _make_tool(version="1.0.0", min_version="0.9.0")
+    result = ToolCheckResult(
+        tool=tool,
+        status=ToolStatus.INCOMPATIBLE,
+        installed_version="0.1.0",
+        upgrade_hint="pip install --upgrade 'ruff>=1.0.0'",
+        advisory=VersionAdvisory(
+            tool="ruff",
+            installed="0.1.0",
+            latest_known="1.0.0",
+            channel=UpdateChannel.PIP,
+            update_command="uv pip install --upgrade 'ruff>=1.0.0'",
+        ),
+    )
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=False, width=120)
+    _render_tool_line(console, result, verbose=False, is_dev=False)
+    text = buf.getvalue()
+    assert_that(text).contains("installed via pip")
+    assert_that(text).contains("Upgrade: pip install --upgrade 'ruff>=1.0.0'")
+    assert_that(text).does_not_contain("uv pip")
 
 
 # ── _output_json ─────────────────────────────────────────────────────
