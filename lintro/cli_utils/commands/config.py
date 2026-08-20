@@ -257,7 +257,9 @@ def _print_global_config(
         contributed_display = "[dim]None (all overridden by project)[/dim]"
     else:
         contributed_display = "[dim]None[/dim]"
-    global_table.add_row("contributed_values", contributed_display)
+    # Label matches the ``contributed_keys`` field in ``--json`` output, and
+    # names what the row actually lists: dotted key paths, not values.
+    global_table.add_row("contributed_keys", contributed_display)
 
     console.print(global_table)
     console.print()
