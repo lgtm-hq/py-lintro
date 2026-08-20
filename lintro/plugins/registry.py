@@ -224,26 +224,31 @@ class ToolRegistry:
 
         Returns:
             ``"builtin"`` for tools shipped with lintro, or the distribution
-            name for a third-party plugin. Returns ``"unknown"`` if the tool
+            name for a third-party plugin. Hyphen and underscore spellings
+            resolve to the registered key. Returns ``"unknown"`` if the tool
             has no recorded origin (e.g. registered by legacy code paths).
         """
         with cls._lock:
             cls._ensure_discovered()
-            return cls._origins.get(name.lower(), "unknown")
+            resolved = cls._resolve_registered_name(name=name)
+            if resolved is None:
+                return "unknown"
+            return cls._origins.get(resolved, "unknown")
 
     @classmethod
     def is_registered(cls, name: str) -> bool:
         """Check if a tool is registered.
 
         Args:
-            name: Tool name (case-insensitive).
+            name: Tool name (case-insensitive; hyphen and underscore aliases
+                match the registered key).
 
         Returns:
             True if the tool is registered, False otherwise.
         """
         with cls._lock:
             cls._ensure_discovered()
-            return name.lower() in cls._tools
+            return cls._resolve_registered_name(name=name) is not None
 
     @classmethod
     def clear(cls) -> None:

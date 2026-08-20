@@ -511,12 +511,62 @@ def test_unavailable_cache_invalidates_when_binary_appears(tmp_path: Path) -> No
     assert_that(result["ruff"].version).is_equal_to("0.15.0")
 
 
+def test_unavailable_cache_invalidates_on_resolved_executable(
+    tmp_path: Path,
+) -> None:
+    """Freshness uses the resolved command, not hyphen/underscore aliases."""
+    snap = _fake_snapshot(
+        "markdownlint",
+        available=False,
+        version=None,
+        probe_error="markdownlint-cli2 not found in PATH",
+        binary_path="",
+        binary_mtime=0.0,
+    )
+    _write_snapshot_cache(tmp_path, snap)
+    binary = tmp_path / "markdownlint-cli2"
+    binary.write_text("x")
+    which_cmds: list[str] = []
+
+    def fake_which(cmd: str, **_kwargs: object) -> str | None:
+        which_cmds.append(cmd)
+        if cmd == "markdownlint-cli2":
+            return str(binary)
+        return None
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        return _fake_snapshot(
+            name,
+            version="0.21.0",
+            binary_path=str(binary),
+            binary_mtime=binary.stat().st_mtime,
+        )
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            return_value=["markdownlint-cli2"],
+        ),
+        patch("lintro.tools.core.snapshots.shutil.which", side_effect=fake_which),
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["markdownlint"],
+        ),
+    ):
+        result = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(which_cmds).contains("markdownlint-cli2")
+    assert_that(result["markdownlint"].available).is_true()
+
+
 def test_memory_unavailable_invalidates_when_which_hits(tmp_path: Path) -> None:
     """In-process memory hits re-probe when a missing binary appears."""
     call_count = {"n": 0}
     which_path: dict[str, str | None] = {"v": None}
 
-    def fake_which(_cmd: str) -> str | None:
+    def fake_which(_cmd: str, **_kwargs: object) -> str | None:
         return which_path["v"]
 
     def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
