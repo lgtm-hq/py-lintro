@@ -48,6 +48,30 @@ LINTRO_CONFIG_FILENAMES = [
     "lintro-config.yml",
 ]
 
+# Config sections that are valid in both ``.lintro-config.yaml`` and
+# ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` and
+# ``post_checks`` by ``lintro.utils.config``, ``licenses`` by
+# ``lintro.config.licenses_config``, and ``plugins`` by
+# ``lintro.plugins.discovery``. They are part of the schema even though
+# ``LintroConfig`` does not model them, so consumers that build an allowlist
+# of known top-level keys must include them.
+EXTERNALLY_HANDLED_SECTIONS: frozenset[str] = frozenset(
+    {
+        "licenses",
+        "module_size",
+        "plugins",
+    },
+)
+
+# Flat pyproject-only ordering keys read by ``get_tool_order_config``. Unlike
+# the sections above these have no ``.lintro-config.yaml`` equivalent.
+PYPROJECT_ORDERING_KEYS: frozenset[str] = frozenset(
+    {
+        "tool_order_custom",
+        "tool_priorities",
+    },
+)
+
 
 def _find_config_file(start_dir: Path | None = None) -> Path | None:
     """Find .lintro-config.yaml by searching upward from start_dir.
@@ -492,18 +516,11 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     enforce_keys = {"line_length", "target_python"}
 
     # Keys and sections that are valid under [tool.lintro] but are parsed by
-    # other loaders, not by this converter: ``module_size`` and ``post_checks``
-    # by lintro.utils.config, ``licenses`` by lintro.config.licenses_config,
-    # ``plugins`` by lintro.plugins.discovery, and the ordering keys by
-    # ``get_tool_order_config``. Listing them keeps the unknown-key warning
-    # below from crying wolf about legitimate config.
-    externally_handled_sections = {
-        "licenses",
-        "module_size",
-        "plugins",
-        "tool_order_custom",
-        "tool_priorities",
-    }
+    # other loaders, not by this converter. Listing them keeps the unknown-key
+    # warning below from crying wolf about legitimate config.
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
+        PYPROJECT_ORDERING_KEYS,
+    )
 
     # Names this converter interprets as config rather than as a tool section.
     # A plugin must not be able to shadow them by advertising a colliding

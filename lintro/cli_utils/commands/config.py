@@ -72,17 +72,20 @@ def config_command(
     json_output: bool,
     export_path: str | None,
 ) -> None:
-    r"""Inspect and validate Lintro configuration.
+    """Inspect and validate Lintro configuration.
 
     Without a subcommand, displays the effective configuration (same as
     ``config show``). Subcommands provide validation and scaffolding:
 
-    \b
+    \u0008
     - config show      Display the effective configuration.
     - config validate  Validate a config file against the schema.
     - config init      Scaffold a starter .lintro-config.yaml.
 
+    Group-level flags given before a subcommand (e.g.
+    ``lintro config --json validate``) are forwarded to that subcommand.
 
+    \u000c
 
     Args:
         ctx: Click context used to detect subcommand dispatch.
@@ -91,6 +94,12 @@ def config_command(
         export_path: Path to export effective configuration as YAML file.
     """
     if ctx.invoked_subcommand is not None:
+        _forward_group_options(
+            ctx=ctx,
+            verbose=verbose,
+            json_output=json_output,
+            export_path=export_path,
+        )
         return
 
     _run_config_report(
@@ -98,6 +107,51 @@ def config_command(
         json_output=json_output,
         export_path=export_path,
     )
+
+
+def _forward_group_options(
+    ctx: click.Context,
+    verbose: bool,
+    json_output: bool,
+    export_path: str | None,
+) -> None:
+    """Forward group-level flags to the invoked subcommand.
+
+    Click binds ``lintro config --json validate`` to the *group*'s ``--json``,
+    so without this the subcommand would run with its own defaults and quietly
+    ignore the flag. Values are injected via ``ctx.default_map``, which the
+    subcommand's context consults for any parameter not given explicitly, so
+    an explicit flag on the subcommand still wins.
+
+    Args:
+        ctx: The group's Click context.
+        verbose: Whether ``--verbose`` was given on the group.
+        json_output: Whether ``--json`` was given on the group.
+        export_path: Value of ``--export`` given on the group, if any.
+    """
+    provided: dict[str, Any] = {}
+    if verbose:
+        provided["verbose"] = True
+    if json_output:
+        provided["json_output"] = True
+    if export_path is not None:
+        provided["export_path"] = export_path
+    if not provided:
+        return
+
+    group = cast(click.Group, ctx.command)
+    default_map: dict[str, Any] = dict(ctx.default_map or {})
+    for name, command in group.commands.items():
+        param_names = {param.name for param in command.params}
+        overrides = {
+            key: value for key, value in provided.items() if key in param_names
+        }
+        if not overrides:
+            continue
+        merged: dict[str, Any] = dict(default_map.get(name) or {})
+        merged.update(overrides)
+        default_map[name] = merged
+    ctx.default_map = default_map
 
 
 def _run_config_report(
@@ -165,6 +219,8 @@ def config_show_command(
 ) -> None:
     """Display the effective Lintro configuration.
 
+    \u000c
+
     Args:
         verbose: Show detailed configuration including native tool configs.
         json_output: Output configuration as JSON.
@@ -201,6 +257,8 @@ def config_validate_command(
     options, and hard errors such as invalid value types. Exits non-zero when
     the configuration is invalid.
 
+    \u000c
+
     Args:
         config_path: Explicit config file to validate; auto-detected if None.
         json_output: Emit machine-readable JSON instead of Rich output.
@@ -232,6 +290,7 @@ def _output_validation_json(result: ValidationResult) -> None:
         "valid": result.is_valid,
         "errors": [
             {
+                "code": str(msg.code),
                 "message": msg.message,
                 "location": msg.location,
                 "suggestion": msg.suggestion,
@@ -240,6 +299,7 @@ def _output_validation_json(result: ValidationResult) -> None:
         ],
         "warnings": [
             {
+                "code": str(msg.code),
                 "message": msg.message,
                 "location": msg.location,
                 "suggestion": msg.suggestion,
