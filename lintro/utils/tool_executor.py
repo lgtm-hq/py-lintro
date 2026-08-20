@@ -84,6 +84,7 @@ def build_run_context(
     no_art: bool = False,
     dry_run: bool = False,
     group_by: str = "auto",
+    profile: bool = False,
 ) -> RunContext:
     """Create the run-scoped state shared by the execute and render phases.
 
@@ -99,6 +100,7 @@ def build_run_context(
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
         group_by: How to group issues in formatted and JSON output.
+        profile: Whether to collect and emit per-tool performance timings.
 
     Returns:
         RunContext: The shared context for this run.
@@ -157,6 +159,7 @@ def build_run_context(
         clean_stdout_output=clean_stdout_output,
         score_only=score_only,
         group_by=group_by,
+        profile=profile,
     )
 
 
@@ -704,6 +707,7 @@ def run_lint_tools_simple(
     no_art: bool = False,
     on_tool_result: Callable[[ToolResult], None] | None = None,
     render_summary: bool = True,
+    profile: bool = False,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
 
@@ -729,13 +733,29 @@ def run_lint_tools_simple(
         ai_fix: Accepted for signature compatibility; this wrapper runs no AI.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Accepted for signature compatibility; this wrapper runs no AI.
-        dry_run: Preview what ``fmt`` would fix without modifying files.
-        score: Print only the numeric health score for human output.
-        fail_under: Fail when the computed health score is below this value.
-        diff_base: Git base ref used to limit scanned files.
-        no_art: Suppress decorative ASCII art.
+        dry_run: Preview what ``fmt`` would fix without modifying files. When
+            set with a ``fmt`` action, tools run in read-only check mode using
+            the fixable tool set; the reported issues are exactly what a real
+            ``fmt`` run would address. Exit code mirrors check semantics: 0 when
+            nothing would be fixed, 1 when fixes are available.
+        score: When True with human-readable output, print only the 0-100
+            health score line and suppress the normal execution summary.
+        fail_under: When set, exit with code 1 if the computed health score is
+            strictly below this threshold (CI gate).
+        diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
+            files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
+            the repository default base; any other value is used as the base
+            ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
         on_tool_result: Optional custom live renderer for each completed tool.
         render_summary: Whether to render the normal final report and summary.
+        profile: When True, render a per-tool performance profile after the run
+            and include the profile payload in JSON output.
+
+    Programming errors raised while a tool executes (``TypeError``,
+    ``AttributeError``) propagate to the caller.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -748,6 +768,7 @@ def run_lint_tools_simple(
         no_art=no_art,
         dry_run=dry_run,
         group_by=group_by,
+        profile=profile,
     )
     try:
         from lintro.utils.execution.run_renderer import make_result_display

@@ -228,6 +228,7 @@ def _write_artifacts(
     *,
     warn_func: Any = None,
     ai_enrichment: AISarifEnrichment | None = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -300,6 +301,9 @@ def _write_artifacts(
                 total_issues=total_issues,
                 total_fixed=total_fixed,
                 ai_enrichment=enrichment,
+                profile_data=(
+                    profile_data if fmt == OutputFormat.JSON else None
+                ),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -369,6 +373,10 @@ def _render_stdout_document(
             exit_code=artifact.exit_code,
             health_score=artifact.health.to_dict() if artifact.health else None,
         )
+        if ctx.profile:
+            from lintro.profiling.report import build_profile_data
+
+            json_data["profile"] = build_profile_data(all_results)
         print(json.dumps(json_data, indent=2))
         return
 
@@ -419,6 +427,14 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
     """
     logger = ctx.logger
     logger.print_execution_summary(artifact.action, artifact.tool_results)
+
+    if ctx.profile:
+        from lintro.profiling.report import render_profile_report
+
+        profile_report = render_profile_report(artifact.tool_results)
+        if profile_report:
+            logger.console_output(text="")
+            logger.console_output(text=profile_report)
 
     # Dry-run summary: state clearly what a real fmt run would fix.
     if artifact.dry_run_preview:
@@ -531,6 +547,11 @@ def _write_run_files(
                     ai_summary=enrichment.summary,
                 )
             else:
+                file_profile = None
+                if ctx.profile and fmt == OutputFormat.JSON:
+                    from lintro.profiling.report import build_profile_data
+
+                    file_profile = build_profile_data(all_results)
                 write_output_file(
                     output_path=output_file,
                     output_format=fmt,
@@ -538,12 +559,19 @@ def _write_run_files(
                     action=artifact.action,
                     total_issues=artifact.total_issues,
                     total_fixed=artifact.total_fixed,
+                    profile_data=file_profile,
                 )
         except (OSError, ValueError, TypeError) as e:
             warn_func(f"Warning: Failed to write output file: {e}")
 
     # Write side-channel artifact files when configured or when running inside
     # GitHub Actions (SARIF auto-emit for Code Scanning).
+    artifact_profile = None
+    if ctx.profile:
+        from lintro.profiling.report import build_profile_data
+
+        artifact_profile = build_profile_data(all_results)
+
     _write_artifacts(
         all_results,
         ctx.lintro_config,
@@ -553,6 +581,7 @@ def _write_run_files(
         total_fixed=artifact.total_fixed,
         warn_func=warn_func,
         ai_enrichment=ai_enrichment,
+        profile_data=artifact_profile,
     )
 
     # Clean up old run directories to prevent unbounded growth

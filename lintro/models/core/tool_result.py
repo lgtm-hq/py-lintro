@@ -91,6 +91,7 @@ class ToolResult:
     # Wall-clock seconds the tool took, recorded by the executor around the
     # check/fix call. ``None`` when the result was not produced by a run (a
     # synthetic failure result, or a result built directly in a test).
+    # Surfaced in the optional ``--profile`` report.
     duration_seconds: float | None = field(default=None)
 
     def __post_init__(self) -> None:
