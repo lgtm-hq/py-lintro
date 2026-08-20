@@ -839,7 +839,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | yamllint      | 35       | Linter           |
 | pydoclint     | 40       | Linter           |
 | bandit        | 45       | Security         |
-| buf          | 50       | Linter/Formatter |
+| buf           | 50       | Linter/Formatter |
 | hadolint      | 50       | Infrastructure   |
 | vale          | 50       | Linter (docs)    |
 | actionlint    | 55       | Infrastructure   |
