@@ -136,22 +136,29 @@ def test_validate_explicit_path(cli_runner: CliRunner, tmp_path: Path) -> None:
     config = tmp_path / "custom.yaml"
     config.write_text("tools:\n  ruff:\n    enabled: true\n", encoding="utf-8")
 
-    result = cli_runner.invoke(
-        cli,
-        ["config", "validate", "--path", str(config), "--json"],
-    )
+    # Run from an isolated cwd with no config of its own: if --path were
+    # ignored, auto-detect would have nothing to fall back on and the
+    # assertions below could not pass by accident.
+    with cli_runner.isolated_filesystem():
+        result = cli_runner.invoke(
+            cli,
+            ["config", "validate", "--path", str(config), "--json"],
+        )
 
-    assert_that(result.exit_code).is_equal_to(0)
-    data = json.loads(result.output)
-    assert_that(data["config_path"]).is_equal_to(str(config))
-    assert_that(data["valid"]).is_true()
-    assert_that(data["errors"]).is_empty()
+        assert_that(result.exit_code).is_equal_to(0)
+        data = json.loads(result.output)
+        assert_that(data["config_path"]).is_equal_to(str(config))
+        assert_that(data["valid"]).is_true()
+        assert_that(data["errors"]).is_empty()
 
-    rich_result = cli_runner.invoke(cli, ["config", "validate", "--path", str(config)])
+        rich_result = cli_runner.invoke(
+            cli,
+            ["config", "validate", "--path", str(config)],
+        )
 
-    assert_that(rich_result.exit_code).is_equal_to(0)
-    assert_that(rich_result.output).contains("custom.yaml")
-    assert_that(rich_result.output).contains("VALID")
+        assert_that(rich_result.exit_code).is_equal_to(0)
+        assert_that(rich_result.output).contains("custom.yaml")
+        assert_that(rich_result.output).contains("VALID")
 
 
 def test_validate_invalid_json_reports_error_code(cli_runner: CliRunner) -> None:

@@ -201,7 +201,11 @@ def _check_unknown_keys(
             warnings.append(
                 ValidationMessage(
                     code=ValidationCode.DEPRECATED_OPTION,
-                    message="deprecated option",
+                    # The YAML loader reads only the modern snake_case names,
+                    # so a deprecated spelling is not merely dated: its value
+                    # never reaches the config. Say so rather than implying it
+                    # still works.
+                    message="deprecated option, no longer applied",
                     location=location,
                     suggestion=DEPRECATED_KEYS[key],
                 ),

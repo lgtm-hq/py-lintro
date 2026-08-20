@@ -403,6 +403,9 @@ def test_deprecated_keys_warn_with_replacement(
     assert_that(matches).is_length(1)
     assert_that(matches[0].code).is_equal_to(ValidationCode.DEPRECATED_OPTION)
     assert_that(matches[0].suggestion).is_equal_to(suggestion)
+    # The loader reads only the modern names, so the message must not imply
+    # the deprecated spelling still takes effect.
+    assert_that(matches[0].message).contains("no longer applied")
 
 
 @pytest.mark.parametrize("section", ["enforce", "execution", "tools", "defaults"])
