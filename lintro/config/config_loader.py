@@ -437,6 +437,7 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     filtered = {key: value for key, value in data.items() if key in known_fields}
     return ScoreConfig(**filtered)
 
+
 def _parse_deps_config(data: Any) -> DepsConfig:
     """Parse the ``deps`` configuration section.
 
