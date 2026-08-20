@@ -112,7 +112,7 @@ def test_set_options_timeout(
     get_plugin: Callable[[str], BaseToolPlugin],
     swiftlint_violation_file: str,
 ) -> None:
-    """set_options accepts a timeout and the check still runs.
+    """set_options stores timeout=90 and check still reports violations.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -122,4 +122,7 @@ def test_set_options_timeout(
     plugin.set_options(timeout=90)
     result = plugin.check([swiftlint_violation_file], {})
 
+    assert_that(plugin.options["timeout"]).is_equal_to(90)
     assert_that(result.name).is_equal_to("swiftlint")
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_greater_than(0)

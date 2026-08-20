@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - TimeoutExpired is raised by mocked subprocess calls
 from pathlib import Path
 from unittest.mock import patch
 
@@ -179,3 +180,132 @@ def test_fix_nothing_to_fix(
     assert_that(result.initial_issues).is_none()
     assert_that(result.output).contains("No fixes needed")
     assert_that(fix_invoked).is_false()
+
+
+def test_fix_timeout_on_initial_check_sets_timed_out(
+    swiftlint_plugin: SwiftlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """TimeoutExpired on the pre-fix check fails and sets timed_out.
+
+    Args:
+        swiftlint_plugin: The SwiftlintPlugin instance under test.
+        tmp_path: Temporary directory for test files.
+    """
+    test_file = tmp_path / "Slow.swift"
+    test_file.write_text("let x = 1 ;\n")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd=["swiftlint"], timeout=60),
+        ):
+            result = swiftlint_plugin.fix([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_fix_timeout_on_fix_command_sets_timed_out(
+    swiftlint_plugin: SwiftlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """TimeoutExpired on ``--fix`` fails and sets timed_out.
+
+    Args:
+        swiftlint_plugin: The SwiftlintPlugin instance under test.
+        tmp_path: Temporary directory for test files.
+    """
+    test_file = tmp_path / "Sample.swift"
+    test_file.write_text("let x = 1 ;\n")
+
+    def mock_run(cmd: list[str], timeout: int) -> SubprocessResult:
+        """Return check JSON, then time out on --fix.
+
+        Args:
+            cmd: The subprocess command.
+            timeout: Timeout in seconds.
+
+        Returns:
+            SubprocessResult for the initial lint call.
+
+        Raises:
+            subprocess.TimeoutExpired: When the --fix command is invoked.
+        """
+        if "--fix" in cmd:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+        return _sp(False, FIXABLE_JSON)
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=mock_run,
+        ):
+            result = swiftlint_plugin.fix([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_fix_timeout_on_recheck_sets_timed_out(
+    swiftlint_plugin: SwiftlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """TimeoutExpired on the post-fix re-check fails and sets timed_out.
+
+    Args:
+        swiftlint_plugin: The SwiftlintPlugin instance under test.
+        tmp_path: Temporary directory for test files.
+    """
+    test_file = tmp_path / "Sample.swift"
+    test_file.write_text("let x = 1 ;\n")
+
+    calls: list[list[str]] = []
+
+    def mock_run(cmd: list[str], timeout: int) -> SubprocessResult:
+        """Return check JSON, succeed on --fix, then time out on re-check.
+
+        Args:
+            cmd: The subprocess command.
+            timeout: Timeout in seconds.
+
+        Returns:
+            SubprocessResult for lint/fix calls before the re-check.
+
+        Raises:
+            subprocess.TimeoutExpired: On the post-fix lint re-check.
+        """
+        calls.append(cmd)
+        if "--fix" in cmd:
+            return _sp(True, "")
+        lint_calls = [c for c in calls if "lint" in c]
+        if len(lint_calls) == 1:
+            return _sp(False, FIXABLE_JSON)
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=mock_run,
+        ):
+            result = swiftlint_plugin.fix([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(0)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - TimeoutExpired is raised by mocked subprocess calls
 from pathlib import Path
 from unittest.mock import patch
 
@@ -176,3 +177,32 @@ def test_check_nonzero_exit_without_issues_fails(
             result = swiftlint_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
+
+
+def test_check_timeout_sets_timed_out(
+    swiftlint_plugin: SwiftlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """TimeoutExpired on check fails the tool and sets timed_out.
+
+    Args:
+        swiftlint_plugin: The SwiftlintPlugin instance under test.
+        tmp_path: Temporary directory for test files.
+    """
+    test_file = tmp_path / "Slow.swift"
+    test_file.write_text("class Foo {}\n")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd=["swiftlint"], timeout=60),
+        ):
+            result = swiftlint_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)

@@ -182,6 +182,7 @@ class SwiftlintPlugin(BaseToolPlugin):
                 output="",
                 issues=[],
                 skipped=True,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             return FileProcessingResult(
@@ -222,6 +223,7 @@ class SwiftlintPlugin(BaseToolPlugin):
                     output="",
                     issues=[],
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=0,
                 fixed_count=0,
@@ -281,6 +283,7 @@ class SwiftlintPlugin(BaseToolPlugin):
                     output="",
                     issues=initial_issues,
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=len(initial_issues),
                 fixed_count=0,
@@ -319,7 +322,20 @@ class SwiftlintPlugin(BaseToolPlugin):
                     fixed_count=0,
                     initial_issues=initial_issues,
                 )
-        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError):
+        except subprocess.TimeoutExpired:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=initial_issues,
+                    skipped=True,
+                    timed_out=True,
+                ),
+                initial_count=len(initial_issues),
+                fixed_count=0,
+                initial_issues=initial_issues,
+            )
+        except (OSError, ValueError, RuntimeError):
             # If the re-check cannot run, conservatively report all initial
             # issues as remaining to preserve the fix invariant.
             return FileFixResult(
@@ -375,6 +391,7 @@ class SwiftlintPlugin(BaseToolPlugin):
             output=result.build_output(timeout=ctx.timeout),
             issues_count=result.total_issues,
             issues=result.all_issues,
+            timed_out=result.timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -468,4 +485,5 @@ class SwiftlintPlugin(BaseToolPlugin):
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
             initial_issues=all_initial_issues if all_initial_issues else None,
+            timed_out=result.timed_out,
         )
