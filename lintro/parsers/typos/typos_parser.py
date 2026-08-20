@@ -73,11 +73,15 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             else []
         )
 
+        # ``type(...) is int`` rather than ``isinstance``: JSON ``true``
+        # decodes to ``bool``, which is an ``int`` subclass and would otherwise
+        # produce ``line=True``. Out-of-range values fall back to 0 rather than
+        # yielding a zero/negative display column.
         line_num = record.get("line_num")
-        line_no = line_num if isinstance(line_num, int) else 0
+        line_no = line_num if type(line_num) is int and line_num > 0 else 0
 
         byte_offset = record.get("byte_offset")
-        offset = byte_offset if isinstance(byte_offset, int) else 0
+        offset = byte_offset if type(byte_offset) is int and byte_offset >= 0 else 0
 
         issues.append(
             TyposIssue(

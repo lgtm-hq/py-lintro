@@ -36,8 +36,14 @@ parser-selection decision.
 - **Explicit-path safeguards**: Lintro always passes a resolved file list, and typos
   (like ripgrep) skips its ignore rules for paths given as arguments. `--force-exclude`
   restores the project's `[files] extend-exclude`, and the plugin additionally sniffs
-  each file for NUL bytes so `--write-changes` can never rewrite the inside of an image
-  or other binary asset.
+  the first 8 KiB of each file for a NUL byte so `--write-changes` stays away from the
+  common binary formats. The sniff is a heuristic, not a guarantee: a binary format with
+  no NUL byte in its header would still be passed through, so projects with unusual
+  binary assets should list them in `[files] extend-exclude`.
+- **ARG_MAX batching**: with `file_patterns=["*"]` a large tree would otherwise expand
+  into a single argv that exceeds the OS limit and fails with `E2BIG`. Paths are split
+  into budget-sized batches by `lintro/tools/core/argv_batching.py` (shared with
+  TruffleHog) and the per-batch results are merged.
 - **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
   misspelled word, and its suggested corrections. The composed message has the form

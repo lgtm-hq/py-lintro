@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -69,3 +70,54 @@ def test_definition_can_fix(
     plugin = get_plugin("typos")
 
     assert_that(plugin.definition.can_fix).is_true()
+
+
+def test_project_extend_exclude_is_honored(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A project's ``.typos.toml`` excludes apply to Lintro's explicit paths.
+
+    typos skips its ignore rules for paths named on the command line unless
+    ``--force-exclude`` is passed, so this is a regression guard for that flag.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    (tmp_path / ".typos.toml").write_text(
+        '[files]\nextend-exclude = ["ignored.txt"]\n',
+        encoding="utf-8",
+    )
+    excluded = tmp_path / "ignored.txt"
+    excluded.write_text("teh cat\n", encoding="utf-8")
+    checked = tmp_path / "checked.txt"
+    checked.write_text("teh dog\n", encoding="utf-8")
+
+    plugin = get_plugin("typos")
+    result = plugin.check([str(excluded), str(checked)], {})
+
+    reported = {issue.file for issue in result.issues or []}
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(" ".join(sorted(reported))).contains("checked.txt")
+    assert_that(" ".join(sorted(reported))).does_not_contain("ignored.txt")
+
+
+def test_binary_files_are_not_reported(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """A real binary file produces no findings even when named explicitly.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    binary = tmp_path / "blob.bin"
+    binary.write_bytes(b"\x00teh\x00seperate\x00cheker\x00")
+
+    plugin = get_plugin("typos")
+    result = plugin.check([str(binary)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)

@@ -68,3 +68,33 @@ def test_missing_corrections_key_defaults_to_empty() -> None:
     issues = parse_typos_output(output)
 
     assert_that(issues[0].corrections).is_equal_to([])
+
+
+def test_boolean_location_values_do_not_leak_through() -> None:
+    """JSON booleans decode to ``bool`` but must not become line/offset values."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":true,'
+        '"byte_offset":true,"typo":"teh","corrections":["the"]}'
+    )
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].line).is_equal_to(0)
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(1)
+
+
+def test_negative_location_values_fall_back_to_zero() -> None:
+    """Out-of-range line/offset values never produce a non-positive column."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":-3,'
+        '"byte_offset":-5,"typo":"teh","corrections":["the"]}'
+    )
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].line).is_equal_to(0)
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(1)

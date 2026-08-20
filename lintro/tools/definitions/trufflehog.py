@@ -16,7 +16,6 @@ secrets.
 
 from __future__ import annotations
 
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +36,7 @@ from lintro.parsers.trufflehog.trufflehog_parser import parse_trufflehog_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.argv_batching import argv_byte_budget, chunk_paths
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -50,38 +50,11 @@ TRUFFLEHOG_DEFAULT_TIMEOUT: int = 60
 TRUFFLEHOG_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 TRUFFLEHOG_FILE_PATTERNS: list[str] = ["*"]  # Scans all files
 
-# TruffleHog's ``filesystem`` mode takes explicit file paths in argv. A large
-# repository can hold tens of thousands of files, and expanding them all into a
-# single invocation would exceed the OS ``ARG_MAX`` limit, making ``execve``
-# fail with ``E2BIG`` (surfaced as an ``OSError`` that fails the whole scan). We
-# batch the paths under a byte budget derived from ``ARG_MAX`` with headroom for
-# the environment block and the fixed command prefix.
-_ARGV_SAFETY_HEADROOM_BYTES: int = 4096
-_ARGV_FALLBACK_LIMIT_BYTES: int = 131072  # POSIX-guaranteed ARG_MAX minimum.
-
-
-def _argv_byte_budget() -> int:
-    """Return a safe byte budget for path arguments on one command line.
-
-    The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
-    current environment block (``execve`` counts it against the same limit) and
-    a fixed safety margin. Falls back to the POSIX-guaranteed minimum when
-    ``ARG_MAX`` cannot be queried.
-
-    Returns:
-        The maximum number of argument-data bytes to place on one command line.
-    """
-    try:
-        arg_max = os.sysconf("SC_ARG_MAX")
-    except (ValueError, OSError, AttributeError):
-        arg_max = _ARGV_FALLBACK_LIMIT_BYTES
-    if not isinstance(arg_max, int) or arg_max <= 0:
-        arg_max = _ARGV_FALLBACK_LIMIT_BYTES
-
-    env_bytes = sum(len(k) + len(v) + 2 for k, v in os.environ.items())
-    budget = arg_max - env_bytes - _ARGV_SAFETY_HEADROOM_BYTES
-    # Always leave room for at least a moderately long single path per batch.
-    return max(budget, _ARGV_SAFETY_HEADROOM_BYTES)
+# TruffleHog's ``filesystem`` mode takes explicit file paths in argv, so the
+# resolved list must be split into ARG_MAX-safe batches. The budget/chunking
+# logic is shared with other catch-all tools in
+# ``lintro.tools.core.argv_batching``; the thin wrappers below keep this
+# module's long-standing private names as the patch points used by tests.
 
 
 def _existing_option_path(raw_path: str) -> str | None:
@@ -89,7 +62,7 @@ def _existing_option_path(raw_path: str) -> str | None:
 
     Used for optional TruffleHog file flags (currently ``--exclude-paths``) so
     CI-only paths that are absent locally are skipped rather than handed to the
-    binary (which would emit ``lstat …: no such file or directory``).
+    binary (which would emit ``lstat ...: no such file or directory``).
 
     Args:
         raw_path: Configured filesystem path string.
@@ -105,17 +78,21 @@ def _existing_option_path(raw_path: str) -> str | None:
     return None
 
 
+def _argv_byte_budget() -> int:
+    """Return a safe byte budget for path arguments on one command line.
+
+    Returns:
+        The maximum number of argument-data bytes to place on one command line.
+    """
+    return argv_byte_budget()
+
+
 def _chunk_source_paths(
     source_paths: list[str],
     *,
     fixed_arg_bytes: int,
 ) -> list[list[str]]:
     """Split resolved file paths into ARG_MAX-safe batches.
-
-    Batches preserve input order so scan output is deterministic. A single path
-    that alone exceeds the budget is still placed in its own batch (the OS, not
-    lintro, then decides whether it is too long); this keeps the function total
-    and never silently drops a file from the scan.
 
     Args:
         source_paths: Absolute file paths to scan, in a stable order.
@@ -126,23 +103,11 @@ def _chunk_source_paths(
     Returns:
         A list of path batches, each safe to place on one command line.
     """
-    budget = max(_argv_byte_budget() - fixed_arg_bytes, 1)
-
-    batches: list[list[str]] = []
-    current: list[str] = []
-    current_bytes = 0
-    for path in source_paths:
-        # +1 for the argv NUL terminator the kernel accounts per argument.
-        path_bytes = len(path.encode("utf-8", "surrogatepass")) + 1
-        if current and current_bytes + path_bytes > budget:
-            batches.append(current)
-            current = []
-            current_bytes = 0
-        current.append(path)
-        current_bytes += path_bytes
-    if current:
-        batches.append(current)
-    return batches
+    return chunk_paths(
+        source_paths,
+        fixed_arg_bytes=fixed_arg_bytes,
+        budget=_argv_byte_budget(),
+    )
 
 
 @register_tool

@@ -280,8 +280,20 @@ else
 	BIN_DIR="$HOME/.local/bin"
 	mkdir -p "$BIN_DIR"
 	echo -e "${YELLOW}Installing tools locally to $BIN_DIR${NC}"
-	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH${NC}"
+	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH:${NC}"
+	echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
 fi
+
+# Tools installed into $BIN_DIR must be reachable for the rest of this run:
+# later install steps probe with `command -v`, and so does the verification
+# loop. Without this a freshly installed binary would be reported missing (and
+# reinstalled) purely because the caller's shell has not been reloaded. This
+# only affects this process; the reminder above still applies to the user's
+# own shell.
+case ":$PATH:" in
+*":$BIN_DIR:"*) ;;
+*) export PATH="$BIN_DIR:$PATH" ;;
+esac
 
 # Function to detect platform and architecture
 detect_platform() {

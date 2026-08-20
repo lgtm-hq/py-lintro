@@ -20,9 +20,10 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
 from lintro.parsers.typos.typos_parser import parse_typos_output
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.argv_batching import chunk_paths
 from lintro.tools.core.timeout_utils import create_timeout_result
 
 # Constants for typos configuration
@@ -205,6 +206,58 @@ class TyposPlugin(BaseToolPlugin):
             cwd=cwd,
         )
 
+    def _run_batched(
+        self,
+        files: list[str],
+        ctx: ExecutionContext,
+        extra_args: list[str] | None = None,
+    ) -> tuple[list[TyposIssue], bool, str]:
+        """Run typos over ARG_MAX-safe batches of ``files`` and merge results.
+
+        typos is default-on with a catch-all file pattern, so a large tree
+        would otherwise expand into one argv that exceeds the OS ``ARG_MAX``
+        limit and fails with ``E2BIG``.
+
+        A ``subprocess.TimeoutExpired`` from any batch propagates to the
+        caller, which turns it into a timeout ``ToolResult``.
+
+        Args:
+            files: Paths to scan, relative to ``ctx.cwd``.
+            ctx: Prepared execution context (cwd and timeout).
+            extra_args: Extra flags appended to the base command, e.g.
+                ``["--write-changes"]``.
+
+        Returns:
+            Tuple of (merged issues, whether every batch exited 0, combined
+            display output).
+        """
+        base_cmd = self._build_command(cwd=ctx.cwd) + list(extra_args or [])
+        fixed_arg_bytes = sum(
+            len(arg.encode("utf-8", "surrogatepass")) + 1 for arg in base_cmd
+        )
+        batches = chunk_paths(files, fixed_arg_bytes=fixed_arg_bytes)
+        logger.debug(
+            f"[TyposPlugin] Scanning {len(files)} files in {len(batches)} "
+            f"batch(es) (cwd={ctx.cwd})",
+        )
+
+        issues: list[TyposIssue] = []
+        outputs: list[str] = []
+        all_ok = True
+        for batch in batches:
+            proc = self._run_subprocess_result(
+                cmd=base_cmd + batch,
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+            )
+            # typos writes its JSON report to stdout and diagnostics to stderr;
+            # parse stdout only so a stderr warning cannot corrupt the report.
+            issues.extend(parse_typos_output(output=proc.stdout))
+            if proc.output:
+                outputs.append(proc.output)
+            all_ok = all_ok and proc.success
+        return issues, all_ok, "\n".join(outputs)
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files for typos.
 
@@ -225,29 +278,20 @@ class TyposPlugin(BaseToolPlugin):
         if not files:
             return self._no_files_result(cwd=ctx.cwd)
 
-        cmd = self._build_command(cwd=ctx.cwd) + files
-        logger.debug(f"[TyposPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
+        cmd = self._build_command(cwd=ctx.cwd)
         try:
-            proc = self._run_subprocess_result(
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
+            issues, all_ok, output = self._run_batched(files=files, ctx=ctx)
         except subprocess.TimeoutExpired:
             return self._timeout_result(cmd=cmd, timeout=ctx.timeout, cwd=ctx.cwd)
-
-        # typos writes its JSON report to stdout and diagnostics to stderr;
-        # parse stdout only so a stderr warning cannot corrupt the report.
-        issues = parse_typos_output(output=proc.stdout)
 
         # typos exits 0 when clean and 2 when it reports typos. Any other
         # non-zero exit with nothing parseable is a runtime problem (bad
         # config, unreadable path) and must not read as a clean pass.
-        if not issues and not proc.success:
+        if not issues and not all_ok:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(proc.output or "typos exited with an error."),
+                output=(output or "typos exited with an error."),
                 issues_count=0,
                 parse_failures_count=1,
                 cwd=ctx.cwd,
@@ -256,7 +300,7 @@ class TyposPlugin(BaseToolPlugin):
         return ToolResult(
             name=self.definition.name,
             success=not issues,
-            output=proc.output if issues else None,
+            output=output if issues else None,
             issues_count=len(issues),
             issues=issues,
             cwd=ctx.cwd,
@@ -288,12 +332,11 @@ class TyposPlugin(BaseToolPlugin):
             return self._no_files_result(cwd=ctx.cwd)
 
         # Detect issues before fixing.
-        check_cmd = self._build_command(cwd=ctx.cwd) + files
+        check_cmd = self._build_command(cwd=ctx.cwd)
         try:
-            initial_proc = self._run_subprocess_result(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
+            initial_issues, initial_ok, initial_output = self._run_batched(
+                files=files,
+                ctx=ctx,
             )
         except subprocess.TimeoutExpired:
             return self._timeout_result(
@@ -302,23 +345,29 @@ class TyposPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
 
-        initial_issues = parse_typos_output(output=initial_proc.stdout)
+        # Mirror check(): a non-zero exit with nothing parseable means typos
+        # never ran properly (bad config, unreadable path). Stop here rather
+        # than letting a mutating --write-changes pass run after a failed
+        # detection.
+        if not initial_issues and not initial_ok:
+            return self._error_result(
+                message=(initial_output or "typos exited with an error."),
+                initial_issues=[],
+                cwd=ctx.cwd,
+            )
+
         initial_count = len(initial_issues)
 
         # Apply corrections in place. typos exits non-zero when it reports
         # typos (including ones it just fixed), so only a failure with no
         # parseable report signals a real write/tool error. The JSON format is
         # kept for the fix pass so that guard can tell the two apart.
-        fix_cmd = [
-            *self._build_command(cwd=ctx.cwd),
-            "--write-changes",
-            *files,
-        ]
+        fix_cmd = [*check_cmd, "--write-changes"]
         try:
-            fix_proc = self._run_subprocess_result(
-                cmd=fix_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
+            fix_issues, fix_ok, fix_output = self._run_batched(
+                files=files,
+                ctx=ctx,
+                extra_args=["--write-changes"],
             )
         except subprocess.TimeoutExpired:
             return self._timeout_result(
@@ -328,21 +377,18 @@ class TyposPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        if not fix_proc.success and not parse_typos_output(output=fix_proc.stdout):
+        if not fix_ok and not fix_issues:
             return self._error_result(
-                message=(
-                    fix_proc.output or "typos --write-changes exited with an error."
-                ),
+                message=(fix_output or "typos --write-changes exited with an error."),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
             )
 
         # Re-check for anything typos could not auto-correct.
         try:
-            remaining_proc = self._run_subprocess_result(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
+            remaining_issues, remaining_ok, remaining_output = self._run_batched(
+                files=files,
+                ctx=ctx,
             )
         except subprocess.TimeoutExpired:
             return self._timeout_result(
@@ -353,12 +399,9 @@ class TyposPlugin(BaseToolPlugin):
                 after_write=True,
             )
 
-        remaining_issues = parse_typos_output(output=remaining_proc.stdout)
-        if not remaining_issues and not remaining_proc.success:
+        if not remaining_issues and not remaining_ok:
             return self._error_result(
-                message=(
-                    remaining_proc.output or "typos re-check exited with an error."
-                ),
+                message=(remaining_output or "typos re-check exited with an error."),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
             )

@@ -306,3 +306,119 @@ def test_fix_timeout_returns_failure(
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("timed out")
+
+
+def test_fix_does_not_write_when_initial_check_fails(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed detection pass must not be followed by ``--write-changes``.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "fixme.txt"
+    target.write_text("teh cat\n")
+    commands: list[list[str]] = []
+
+    def _record(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        commands.append(cmd)
+        return _proc(returncode=1, stderr="error: invalid config\n")
+
+    with patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record):
+        result = typos_plugin.fix([str(target)], {})
+
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).does_not_contain("--write-changes")
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("invalid config")
+
+
+def test_binary_files_never_reach_the_command_line(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A NUL-containing file is dropped before ``--write-changes`` is built.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    text = tmp_path / "notes.txt"
+    text.write_text("teh cat\n")
+    binary = tmp_path / "logo.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00binary")
+    commands: list[list[str]] = []
+
+    def _record(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        commands.append(cmd)
+        return _proc()
+
+    with patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record):
+        typos_plugin.fix([str(text), str(binary)], {})
+
+    assert_that(commands).is_not_empty()
+    for cmd in commands:
+        assert_that(cmd).does_not_contain("logo.png")
+    write_commands = [c for c in commands if "--write-changes" in c]
+    assert_that(write_commands).is_not_empty()
+    for cmd in write_commands:
+        assert_that(cmd).contains("notes.txt")
+
+
+def test_only_binary_inputs_skip_the_tool_entirely(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """When every candidate is binary, typos is never invoked.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    binary = tmp_path / "logo.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00binary")
+
+    with patch.object(typos_plugin, "_run_subprocess_result") as run:
+        result = typos_plugin.fix([str(binary)], {})
+
+    run.assert_not_called()
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_large_file_lists_are_split_into_batches(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A file list wider than the argv budget is scanned in several batches.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    targets = []
+    for index in range(5):
+        target = tmp_path / f"file_{index}.txt"
+        target.write_text("all good words here\n")
+        targets.append(str(target))
+    commands: list[list[str]] = []
+
+    def _record(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        commands.append(cmd)
+        return _proc()
+
+    # Shrink the argv budget to its floor so each path lands in its own batch.
+    with (
+        patch(
+            "lintro.tools.definitions.typos.chunk_paths",
+            side_effect=lambda paths, **_kw: [[p] for p in paths],
+        ),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record),
+    ):
+        result = typos_plugin.check(targets, {})
+
+    assert_that(commands).is_length(5)
+    assert_that(result.success).is_true()

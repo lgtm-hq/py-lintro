@@ -2691,9 +2691,12 @@ extend-exclude = ["tests/fixtures/"]
 
 typos' word list and file scope are configured through its native `typos.toml` file
 rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
-`[files] extend-exclude` still applies to the explicit file list Lintro passes, and it
-filters out binary files itself so `lintro format` can never rewrite bytes inside an
-image or other binary asset.
+`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
+also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
+keeps `lintro format` away from the common binary formats (images, archives, compiled
+objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
+header can still reach `--write-changes` — so add the extensions you care about to
+`[files] extend-exclude` when a project stores unusual binary assets.
 
 **Usage Examples:**
 
