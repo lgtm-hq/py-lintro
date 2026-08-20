@@ -170,14 +170,17 @@ def test_default_xdg_dir_used_when_env_unset(
     assert_that(config.enforce.line_length).is_equal_to(66)
 
 
+@pytest.mark.parametrize("disable_value", ["off", "0", "none", "", "  OFF  "])
 def test_env_override_disables_global_tier(
+    disable_value: str,
     isolated_home: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``LINTRO_GLOBAL_CONFIG=off`` disables the global tier entirely.
+    """Every documented disable token turns the global tier off entirely.
 
     Args:
+        disable_value: Value assigned to ``LINTRO_GLOBAL_CONFIG``.
         isolated_home: Isolated fake home directory.
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
@@ -186,7 +189,7 @@ def test_env_override_disables_global_tier(
         "enforce:\n  line_length: 100\n",
     )
     _make_project(tmp_path, monkeypatch)
-    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", disable_value)
 
     config = load_config(allow_pyproject_fallback=False)
 
@@ -655,6 +658,9 @@ def test_config_command_shows_global_config_section(
     assert_that(result.output).contains("Global Config")
     assert_that(result.output).contains(".lintro-config.yaml")
     assert_that(result.output).contains("enforce.line_length")
+    # The row label matches the ``contributed_keys`` field in --json output.
+    assert_that(result.output).contains("contributed_keys")
+    assert_that(result.output).does_not_contain("contributed_values")
 
 
 def test_config_command_json_reports_global_config(
