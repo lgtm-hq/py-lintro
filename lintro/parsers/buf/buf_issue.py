@@ -39,3 +39,16 @@ class BufIssue(BaseIssue):
     code: str = field(default="")
     end_line: int = field(default=0)
     end_column: int = field(default=0)
+
+    @property
+    def fixable(self) -> bool:
+        """Report whether ``lintro fmt`` can resolve this finding.
+
+        Only formatting differences are auto-fixable: ``buf format --write``
+        rewrites them, while lint rule violations and compile errors require a
+        human edit.
+
+        Returns:
+            True when the finding is a ``FORMAT`` difference.
+        """
+        return self.code == "FORMAT"

@@ -31,9 +31,10 @@ Lintro's `install-tools.sh` installs the pinned binary from GitHub releases
 
 buf works **with or without** a `buf.yaml`. With no module config present, buf lints
 against its `STANDARD` default rule set and uses the current directory as the module
-root. Because bare `.proto` files lint cleanly against sensible defaults, lintro runs
-buf directly rather than skipping when no `buf.yaml` is found — this mirrors how the
-other config-optional tools (ruff, taplo) behave.
+root. Because buf can lint `.proto` files without a module config — the `STANDARD` rule
+set still applies, so violations may be reported — lintro runs buf directly rather than
+skipping when no `buf.yaml` is found; this mirrors how the other config-optional tools
+(ruff, taplo) behave.
 
 Adding a `buf.yaml` lets you select rule categories or opt into extra ones:
 
@@ -47,8 +48,8 @@ Adding a `buf.yaml` lets you select rule categories or opt into extra ones:
 
 ## Output format and parser choice
 
-`buf lint --error-format json` emits **newline-delimited JSON** (one object per
-violation) on stdout:
+`buf lint --error-format json` emits **newline-delimited JSON** (one JSON object per
+diagnostic — lint rule violations and build/compile errors alike) on stdout:
 
 ```json
 {
@@ -70,8 +71,8 @@ buf **1.71.0 does not emit SARIF**. Its `--error-format` options are
 `text, json, msvs, junit, github-actions, gitlab-code-quality, config-ignore-yaml` — no
 SARIF. Applying the fidelity checklist from the SARIF ingestion evaluation (issue #1066
 / PR #1140) is therefore moot: there is no SARIF stream to ingest, so a **native JSON
-parser** is the only faithful option. The native parser preserves everything buf reports
-— the full start/end position range (`start_line`/`start_column`/
+parser** is the only faithful option. The native parser preserves every field lintro
+renders — the file path, the full start/end position range (`start_line`/`start_column`/
 `end_line`/`end_column`), the rule id (`type`), and the message. A hypothetical SARIF
 bridge would add nothing here and would drop buf's exact end-position range unless every
 field were remapped by hand.
@@ -99,12 +100,16 @@ buf ships a formatter, so lintro implements the fix path:
 
 ## Module roots and directory-based rules
 
-lintro invokes buf from the common parent directory of the `.proto` files it selects,
-passing that directory as the module input (`.`) and restricting the run to the selected
-files via `--path`. buf's directory-based rules — notably `PACKAGE_DIRECTORY_MATCH` —
-resolve package paths relative to that module root. When packages are laid out as nested
-directories (e.g. `foo/v1/foo.proto` with `package foo.v1`), run lintro from the
-repository/module root (or add a `buf.yaml`) so those rules see the expected layout.
+lintro invokes buf from the **project root** of the `.proto` files it selects — the
+nearest ancestor holding a project marker (`.git`, `pyproject.toml`, `package.json`,
+...), as resolved by `get_execution_cwd()` — passing that directory as the module input
+(`.`) and restricting the run to the selected files via `--path`. It is not the files'
+common parent directory, and it does not move with the paths you pass on the command
+line. buf's directory-based rules — notably `PACKAGE_DIRECTORY_MATCH` — resolve package
+paths relative to that module root, and a relative `config` option is resolved from it
+too. When packages are laid out as nested directories under a subdirectory (e.g.
+`proto/foo/v1/foo.proto` with `package foo.v1`), add a `buf.yaml` whose `modules` entry
+sets `path: proto` so those rules see the expected layout.
 
 ## Usage
 
