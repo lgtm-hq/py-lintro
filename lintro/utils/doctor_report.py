@@ -48,6 +48,7 @@ from lintro.tools.core.version_parsing import (
 if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
     from lintro.tools.core.install_context import RuntimeContext
+    from lintro.tools.core.snapshots import ToolSnapshot
 
 __all__ = [
     "DoctorCheck",
@@ -328,6 +329,25 @@ def check_tool(
         )
 
 
+def _snapshot_for_tool(
+    *,
+    snapshots: dict[str, ToolSnapshot],
+    name: str,
+) -> ToolSnapshot | None:
+    """Look up a capability snapshot, accepting hyphen/underscore aliases.
+
+    Args:
+        snapshots: Map returned by ``probe_all_tools``.
+        name: Manifest or registry tool name.
+
+    Returns:
+        Matching snapshot, or None.
+    """
+    from lintro.tools.core.snapshots import lookup_snapshot
+
+    return lookup_snapshot(snapshots=snapshots, name=name)
+
+
 def collect_tool_checks(
     *,
     registry: ManifestRegistry,
@@ -366,7 +386,7 @@ def collect_tool_checks(
             check_tool(
                 tool=tool,
                 context=context,
-                snapshot=snapshots.get(tool.name.lower()),
+                snapshot=_snapshot_for_tool(snapshots=snapshots, name=tool.name),
             )
             for tool in tools
         ]
@@ -378,7 +398,7 @@ def collect_tool_checks(
             check_tool(
                 tool=tool,
                 context=context,
-                snapshot=snapshots.get(tool.name.lower()),
+                snapshot=_snapshot_for_tool(snapshots=snapshots, name=tool.name),
             )
             for tool in all_tools
         ]
@@ -392,7 +412,10 @@ def collect_tool_checks(
                 check_tool(
                     tool=tool,
                     context=context,
-                    snapshot=snapshots.get(tool.name.lower()),
+                    snapshot=_snapshot_for_tool(
+                        snapshots=snapshots,
+                        name=tool.name,
+                    ),
                 ),
             )
         else:
@@ -592,9 +615,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         config = get_config(reload=True)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - any parse failure is a report line, not a crash
+    except Exception as exc:  # noqa: BLE001
+        # Any parse failure is a report line, not a crash.
         return None, [
             DoctorCheck(
                 category=DoctorCheckCategory.CONFIG,
@@ -620,9 +642,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         warnings = validate_config_consistency()
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - a broken native config must not abort the report
+    except Exception as exc:  # noqa: BLE001
+        # A broken native config must not abort the report.
         warnings = [f"consistency check failed: {exc}"]
 
     if warnings:

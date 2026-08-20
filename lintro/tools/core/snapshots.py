@@ -14,6 +14,7 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -174,6 +175,50 @@ class ToolSnapshot:
             True if the cache key components still match.
         """
         return self.binary_path == binary_path and self.binary_mtime == binary_mtime
+
+
+def lookup_snapshot(
+    snapshots: Mapping[str, ToolSnapshot],
+    name: str,
+) -> ToolSnapshot | None:
+    """Return a snapshot for ``name``, trying hyphen and underscore aliases.
+
+    Args:
+        snapshots: Map keyed by tool name.
+        name: Requested tool name (manifest or registry spelling).
+
+    Returns:
+        Matching snapshot, or None when no alias hits.
+    """
+    from lintro.enums.tool_name import tool_name_aliases
+
+    for candidate in tool_name_aliases(name):
+        snap = snapshots.get(candidate)
+        if snap is not None:
+            return snap
+    return None
+
+
+def _is_cached_snapshot_fresh(snap: ToolSnapshot) -> bool:
+    """Return True when a cached snapshot should still be served.
+
+    Available snapshots with a binary path are keyed on path + mtime.
+    In-process tools (available, empty path) stay valid until TTL.
+    Unavailable empty-path snapshots are re-checked with ``shutil.which`` so
+    a binary installed inside the TTL window is not served as missing.
+    """
+    if snap.binary_path:
+        if not Path(snap.binary_path).exists():
+            return False
+        return snap.cache_key_matches(
+            binary_path=snap.binary_path,
+            binary_mtime=_binary_mtime(snap.binary_path),
+        )
+    if snap.available:
+        return True
+    from lintro.enums.tool_name import tool_name_aliases
+
+    return all(shutil.which(alias) is None for alias in tool_name_aliases(snap.name))
 
 
 def set_force_fresh_probes(force: bool) -> None:
@@ -562,26 +607,9 @@ def _load_disk_cache(
             snap = ToolSnapshot.from_dict(entry)
         except (TypeError, ValueError, KeyError):
             continue
-        # Invalidate entries whose binary path/mtime drifted (tool upgrade).
-        if snap.binary_path:
-            if not Path(snap.binary_path).exists():
-                logger.debug(
-                    "Snapshot for {} invalidated; binary missing at {}",
-                    name,
-                    snap.binary_path,
-                )
-                continue
-            current_path = snap.binary_path
-            current_mtime = _binary_mtime(current_path)
-        else:
-            current_path = ""
-            current_mtime = 0.0
-        if not snap.cache_key_matches(
-            binary_path=current_path,
-            binary_mtime=current_mtime,
-        ):
+        if not _is_cached_snapshot_fresh(snap):
             logger.debug(
-                "Snapshot for {} invalidated by binary path/mtime change",
+                "Snapshot for {} invalidated by path/mtime or PATH change",
                 name,
             )
             continue
@@ -657,6 +685,32 @@ def _probe_all_fresh(
     return results
 
 
+def _memory_hits_for(
+    names: list[str],
+    *,
+    cache_file: Path,
+    ttl: int,
+) -> dict[str, ToolSnapshot] | None:
+    """Return memory snapshots when they still cover ``names``.
+
+    Must be called while holding ``_cache_lock``.
+    """
+    if (
+        _memory_cache is None
+        or _memory_cache_path != cache_file
+        or _memory_probed_at is None
+        or time.time() - _memory_probed_at > ttl
+    ):
+        return None
+    hits: dict[str, ToolSnapshot] = {}
+    for name in names:
+        snap = lookup_snapshot(snapshots=_memory_cache, name=name)
+        if snap is None or not _is_cached_snapshot_fresh(snap):
+            return None
+        hits[name] = snap
+    return hits
+
+
 def probe_all_tools(
     *,
     force: bool = False,
@@ -695,15 +749,19 @@ def probe_all_tools(
     force_effective = False
     with _cache_lock:
         force_effective = force or _force_fresh
-        if (
-            not force_effective
-            and _memory_cache is not None
-            and _memory_cache_path == cache_file
-            and _memory_probed_at is not None
-            and time.time() - _memory_probed_at <= ttl
-            and all(n in _memory_cache for n in names)
-        ):
-            return {n: _memory_cache[n] for n in names}
+        if _force_fresh:
+            # Consume the flag at cycle start so a later set during the
+            # probe is not wiped when this cycle used force=True from the
+            # caller.
+            _force_fresh = False
+        if not force_effective:
+            hits = _memory_hits_for(
+                names,
+                cache_file=cache_file,
+                ttl=ttl,
+            )
+            if hits is not None:
+                return hits
 
     # Disk I/O outside the lock so slow mounts do not block other callers.
     disk: dict[str, ToolSnapshot] | None = None
@@ -712,20 +770,28 @@ def probe_all_tools(
 
     with _cache_lock:
         # Re-check memory: another thread may have filled the cache.
-        if (
-            not force_effective
-            and _memory_cache is not None
-            and _memory_cache_path == cache_file
-            and _memory_probed_at is not None
-            and time.time() - _memory_probed_at <= ttl
-            and all(n in _memory_cache for n in names)
-        ):
-            return {n: _memory_cache[n] for n in names}
-        if disk is not None and all(n in disk for n in names):
-            _memory_cache = disk
-            _memory_cache_path = cache_file
-            _memory_probed_at = time.time()
-            return {n: disk[n] for n in names}
+        if not force_effective:
+            hits = _memory_hits_for(
+                names,
+                cache_file=cache_file,
+                ttl=ttl,
+            )
+            if hits is not None:
+                return hits
+        if disk is not None:
+            disk_hits: dict[str, ToolSnapshot] = {}
+            disk_complete = True
+            for name in names:
+                snap = lookup_snapshot(snapshots=disk, name=name)
+                if snap is None:
+                    disk_complete = False
+                    break
+                disk_hits[name] = snap
+            if disk_complete:
+                _memory_cache = disk
+                _memory_cache_path = cache_file
+                _memory_probed_at = time.time()
+                return disk_hits
 
     fresh = _probe_all_fresh(names, search_root=root, max_workers=max_workers)
 
@@ -735,7 +801,6 @@ def probe_all_tools(
         _memory_cache = merged
         _memory_cache_path = cache_file
         _memory_probed_at = time.time()
-        _force_fresh = False
         to_write = dict(merged)
 
     _write_disk_cache(cache_file, to_write, ttl=ttl)

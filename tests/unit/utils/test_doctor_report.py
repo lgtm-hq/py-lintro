@@ -253,7 +253,10 @@ def test_disabled_tools_are_reported_rather_than_dropped(
     monkeypatch.setattr(
         doctor_report,
         "check_tool",
-        lambda *, tool, context: ToolCheckResult(tool=tool, status=ToolStatus.OK),
+        lambda *, tool, context, snapshot=None: ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.OK,
+        ),
     )
 
     results = collect_tool_checks(
@@ -282,7 +285,10 @@ def test_named_tools_are_probed_even_when_disabled(
     monkeypatch.setattr(
         doctor_report,
         "check_tool",
-        lambda *, tool, context: ToolCheckResult(tool=tool, status=ToolStatus.OK),
+        lambda *, tool, context, snapshot=None: ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.OK,
+        ),
     )
 
     results = collect_tool_checks(
@@ -746,6 +752,79 @@ def test_check_tool_does_not_treat_bunx_fallback_as_installed() -> None:
 
     assert_that(result.status).is_equal_to(ToolStatus.MISSING)
     assert_that(result.error).is_equal_to("not_in_path")
+
+
+def test_check_tool_snapshot_unavailable_maps_to_missing() -> None:
+    """An unavailable capability snapshot is reported as MISSING."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    tool = _make_tool(name="rustc", install_type="rustup")
+    snap = ToolSnapshot(
+        name="rustc",
+        available=False,
+        version=None,
+        capabilities=ToolCapabilities(),
+        probe_error="rustc not found in PATH",
+        remediation_hint="rustup toolchain install stable",
+        binary_path="",
+        binary_mtime=0.0,
+        version_check_passed=False,
+        min_version="1.80.0",
+    )
+    result = check_tool(
+        tool=tool,
+        context=_make_context(),
+        snapshot=snap,
+    )
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.details).contains("not found")
+    assert_that(result.install_hint).contains("rustup")
+
+
+def test_collect_tool_checks_resolves_hyphenated_snapshot_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifest underscore names resolve snapshots keyed by registry hyphens."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    registry = ManifestRegistry(
+        tools={"astro_check": _make_tool("astro_check")},
+        language_map={},
+        profiles={},
+    )
+    snap = ToolSnapshot(
+        name="astro-check",
+        available=False,
+        version=None,
+        capabilities=ToolCapabilities(),
+        probe_error="astro not found in PATH",
+        remediation_hint="npm i -D astro",
+        binary_path="",
+        binary_mtime=0.0,
+        version_check_passed=False,
+        min_version="5.0.0",
+    )
+
+    def _fake_probe(
+        *,
+        tool_names: list[str] | None = None,
+        **_kwargs: object,
+    ) -> dict[str, ToolSnapshot]:
+        assert_that(tool_names).contains("astro_check")
+        return {"astro-check": snap}
+
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        _fake_probe,
+    )
+    results = collect_tool_checks(
+        registry=registry,
+        context=_make_context(),
+        tool_names=["astro_check"],
+    )
+    assert_that(results).is_length(1)
+    assert_that(results[0].status).is_equal_to(ToolStatus.MISSING)
+    assert_that(results[0].tool.name).is_equal_to("astro_check")
 
 
 # ── optional MCP extra ───────────────────────────────────────────────

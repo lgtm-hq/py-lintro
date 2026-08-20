@@ -107,7 +107,7 @@ def stub_probes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         doctor_report,
         "check_tool",
-        lambda *, tool, context: ToolCheckResult(
+        lambda *, tool, context, snapshot=None: ToolCheckResult(
             tool=tool,
             status=ToolStatus.OK,
             installed_version=tool.version,

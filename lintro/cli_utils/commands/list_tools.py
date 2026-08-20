@@ -15,6 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from lintro.enums.action import Action
+from lintro.enums.tool_result_status import ToolResultStatus
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
@@ -140,13 +141,18 @@ def list_tools(
 ) -> None:
     """List all available tools.
 
+    Table output includes a Status column (``ok (<version>)``, ``unavailable``,
+    or ``unknown``). JSON objects include ``status`` using
+    :class:`~lintro.enums.tool_result_status.ToolResultStatus` when a
+    capability snapshot is present (``ok`` or ``unavailable``).
+
     Args:
         output: Output file path.
         show_conflicts: Whether to show potential conflicts between tools.
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
     """
-    from lintro.tools.core.snapshots import probe_all_tools
+    from lintro.tools.core.snapshots import lookup_snapshot, probe_all_tools
 
     available_tools = tool_manager.get_all_tools()
     check_tools = tool_manager.get_check_tools()
@@ -164,7 +170,7 @@ def list_tools(
                 fix_tools=fix_tools,
             )
 
-            snap = snapshots.get(tool_name.lower())
+            snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
             tool_info: dict[str, object] = {
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
@@ -178,8 +184,10 @@ def list_tools(
             }
             if snap is not None:
                 tool_info["runtime_capabilities"] = snap.capabilities.to_dict()
-                if not snap.available:
-                    tool_info["status"] = "unavailable"
+                if snap.available:
+                    tool_info["status"] = ToolResultStatus.OK
+                else:
+                    tool_info["status"] = ToolResultStatus.UNAVAILABLE
                     tool_info["remediation_hint"] = snap.remediation_hint
 
             # Only include file_patterns in verbose mode (consistent with table output)
@@ -228,14 +236,14 @@ def list_tools(
     for tool_name, plugin in available_tools.items():
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
-        snap = snapshots.get(tool_name.lower())
+        snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
         if snap is None:
             status_display = "unknown"
         elif snap.available:
             version = snap.version or "?"
             status_display = f"ok ({version})"
         else:
-            status_display = "unavailable"
+            status_display = str(ToolResultStatus.UNAVAILABLE)
 
         # Capabilities
         tool_capabilities = _tool_capabilities(
@@ -339,6 +347,9 @@ def _generate_plain_text_output(
     Returns:
         List of output lines.
     """
+    from lintro.enums.tool_result_status import ToolResultStatus
+    from lintro.tools.core.snapshots import lookup_snapshot
+
     output_lines: list[str] = []
     border = "=" * 70
     snapshots = snapshots or {}
@@ -360,13 +371,13 @@ def _generate_plain_text_output(
         )
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
-        snap = snapshots.get(tool_name.lower())
+        snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
         if snap is None:
             runtime_status = "unknown"
-        elif getattr(snap, "available", False):
-            runtime_status = f"ok ({getattr(snap, 'version', None) or '?'})"
+        elif snap.available:
+            runtime_status = f"ok ({snap.version or '?'})"
         else:
-            runtime_status = "unavailable"
+            runtime_status = str(ToolResultStatus.UNAVAILABLE)
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
         output_lines.append(f"  Status: {runtime_status}")

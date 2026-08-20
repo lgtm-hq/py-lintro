@@ -117,6 +117,14 @@ def test_get_is_case_insensitive(tool_name_variant: str) -> None:
     assert_that(tool.definition.name.lower()).is_equal_to("ruff")
 
 
+def test_get_accepts_underscore_alias_for_hyphenated_tool() -> None:
+    """Manifest underscore names resolve hyphen-registered plugins."""
+    tool = ToolRegistry.get("astro_check")
+
+    assert_that(tool).is_not_none()
+    assert_that(tool.definition.name.lower()).is_equal_to("astro-check")
+
+
 # =============================================================================
 # Tests for ToolRegistry.get_all
 # =============================================================================

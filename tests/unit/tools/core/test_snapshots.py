@@ -411,5 +411,263 @@ def test_serialize_tool_result_emits_unavailable_status() -> None:
         skip_reason="not found",
     )
     data: dict[str, Any] = serialize_tool_result(result, action=Action.CHECK)
-    assert_that(data["status"]).is_equal_to("unavailable")
+    from lintro.enums.tool_result_status import ToolResultStatus
+
+    assert_that(data["status"]).is_equal_to(ToolResultStatus.UNAVAILABLE)
     assert_that(data["unavailable"]).is_true()
+
+
+def _write_snapshot_cache(
+    tmp_path: Path,
+    snap: ToolSnapshot,
+) -> Path:
+    """Write a one-entry on-disk snapshot cache for tests."""
+    from lintro import __version__ as lintro_version
+
+    cache_file = tmp_path / ".lintro-cache" / "tool-snapshots.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps(
+            {
+                "lintro_version": lintro_version,
+                "probed_at": time.time(),
+                "ttl_seconds": DEFAULT_SNAPSHOT_TTL_SECONDS,
+                "snapshots": {snap.name: snap.to_dict()},
+            },
+        ),
+        encoding="utf-8",
+    )
+    return cache_file
+
+
+def test_unavailable_disk_cache_kept_while_binary_missing(tmp_path: Path) -> None:
+    """Still-missing tools stay cached until PATH grows a hit."""
+    snap = _fake_snapshot(
+        "ruff",
+        available=False,
+        version=None,
+        probe_error="ruff not found in PATH",
+        binary_path="",
+        binary_mtime=0.0,
+    )
+    _write_snapshot_cache(tmp_path, snap)
+    call_count = {"n": 0}
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        return snap
+
+    with (
+        patch("lintro.tools.core.snapshots.shutil.which", return_value=None),
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        result = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(call_count["n"]).is_equal_to(0)
+    assert_that(result["ruff"].available).is_false()
+
+
+def test_unavailable_cache_invalidates_when_binary_appears(tmp_path: Path) -> None:
+    """A PATH hit after an unavailable cache write forces a re-probe."""
+    snap = _fake_snapshot(
+        "ruff",
+        available=False,
+        version=None,
+        probe_error="ruff not found in PATH",
+        binary_path="",
+        binary_mtime=0.0,
+    )
+    _write_snapshot_cache(tmp_path, snap)
+    binary = tmp_path / "ruff"
+    binary.write_text("x")
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        return _fake_snapshot(
+            name,
+            version="0.15.0",
+            binary_path=str(binary),
+            binary_mtime=binary.stat().st_mtime,
+        )
+
+    with (
+        patch("lintro.tools.core.snapshots.shutil.which", return_value=str(binary)),
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        result = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(result["ruff"].available).is_true()
+    assert_that(result["ruff"].version).is_equal_to("0.15.0")
+
+
+def test_memory_unavailable_invalidates_when_which_hits(tmp_path: Path) -> None:
+    """In-process memory hits re-probe when a missing binary appears."""
+    call_count = {"n": 0}
+    which_path: dict[str, str | None] = {"v": None}
+
+    def fake_which(_cmd: str) -> str | None:
+        return which_path["v"]
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        if which_path["v"]:
+            binary = tmp_path / f"{name}.bin"
+            binary.write_text("x")
+            return _fake_snapshot(
+                name,
+                binary_path=str(binary),
+                binary_mtime=binary.stat().st_mtime,
+            )
+        return _fake_snapshot(
+            name,
+            available=False,
+            version=None,
+            probe_error="not found",
+            binary_path="",
+            binary_mtime=0.0,
+        )
+
+    with (
+        patch("lintro.tools.core.snapshots.shutil.which", side_effect=fake_which),
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        first = probe_all_tools(cache_root=tmp_path)
+        which_path["v"] = "/usr/bin/ruff"
+        second = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(first["ruff"].available).is_false()
+    assert_that(call_count["n"]).is_equal_to(2)
+    assert_that(second["ruff"].available).is_true()
+
+
+def test_force_fresh_set_during_probe_survives_caller_force(tmp_path: Path) -> None:
+    """A force-fresh flag set during a forced probe is not cleared afterwards."""
+    call_count = {"n": 0}
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        set_force_fresh_probes(True)
+        binary = tmp_path / f"{name}.bin"
+        binary.write_text("x")
+        return _fake_snapshot(
+            name,
+            version=f"0.{call_count['n']}.0",
+            binary_path=str(binary),
+            binary_mtime=binary.stat().st_mtime,
+        )
+
+    with (
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        probe_all_tools(cache_root=tmp_path, force=True)
+        second = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(call_count["n"]).is_equal_to(2)
+    assert_that(second["ruff"].version).is_equal_to("0.2.0")
+
+
+def test_lookup_snapshot_accepts_hyphen_or_underscore() -> None:
+    """Snapshot maps keyed by registry spelling resolve manifest names."""
+    from lintro.tools.core.snapshots import lookup_snapshot
+
+    snap = _fake_snapshot("astro-check")
+    found = lookup_snapshot(
+        snapshots={"astro-check": snap},
+        name="astro_check",
+    )
+    assert_that(found).is_equal_to(snap)
+
+
+def test_lookup_snapshot_returns_none_for_unknown_name() -> None:
+    """Unknown names do not invent a snapshot."""
+    from lintro.tools.core.snapshots import lookup_snapshot
+
+    assert_that(
+        lookup_snapshot(snapshots={}, name="ghost"),
+    ).is_none()
+
+
+def test_in_process_empty_path_snapshot_stays_cached(tmp_path: Path) -> None:
+    """Available tools with no binary (in-process) remain valid until TTL."""
+    snap = ToolSnapshot(
+        name="idiom-review",
+        available=True,
+        version=None,
+        capabilities=ToolCapabilities(),
+        binary_path="",
+        binary_mtime=0.0,
+        version_check_passed=True,
+    )
+    _write_snapshot_cache(tmp_path, snap)
+    call_count = {"n": 0}
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        return snap
+
+    with (
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["idiom-review"],
+        ),
+    ):
+        result = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(call_count["n"]).is_equal_to(0)
+    assert_that(result["idiom-review"].available).is_true()
+
+
+def test_missing_cached_binary_path_invalidates(tmp_path: Path) -> None:
+    """A cached path that disappeared on disk forces a re-probe."""
+    gone = tmp_path / "gone.bin"
+    snap = _fake_snapshot(
+        "ruff",
+        binary_path=str(gone),
+        binary_mtime=1.0,
+    )
+    _write_snapshot_cache(tmp_path, snap)
+    call_count = {"n": 0}
+    binary = tmp_path / "ruff.bin"
+    binary.write_text("x")
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        return _fake_snapshot(
+            name,
+            binary_path=str(binary),
+            binary_mtime=binary.stat().st_mtime,
+        )
+
+    with (
+        patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe),
+        patch("lintro.plugins.discovery.discover_all_tools", return_value=None),
+        patch(
+            "lintro.plugins.registry.ToolRegistry.get_names",
+            return_value=["ruff"],
+        ),
+    ):
+        result = probe_all_tools(cache_root=tmp_path)
+
+    assert_that(call_count["n"]).is_equal_to(1)
+    assert_that(result["ruff"].binary_path).is_equal_to(str(binary))

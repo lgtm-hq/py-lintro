@@ -186,25 +186,15 @@ def verify_tool_version(
             )
         return None
 
-    # Binary exists and responded but version could not be parsed — proceed
-    if (
-        snapshot.version is None
-        and snapshot.probe_error
-        and "Could not parse version" in snapshot.probe_error
-    ):
-        logger.debug(
-            "Could not parse version for {}, proceeding anyway",
-            definition.name,
-        )
-        return None
+    # Unparseable versions are encoded as version_check_passed=True with a
+    # live binary (see probe_tool), so they never reach this branch.
 
     # Digest-pinned image lag after a manifest version bump: binary exists and
     # is merely older than min_version. Allowlisted tools keep running so
     # integration coverage is not silently reduced to a skip.
     if (
-        snapshot.version is not None
-        and snapshot.probe_error
-        and "below minimum requirement" in snapshot.probe_error
+        snapshot.available
+        and snapshot.version is not None
         and _version_lag_allowed(definition.name)
     ):
         logger.warning(
@@ -232,7 +222,6 @@ def verify_tool_version(
         skipped=True,
         skip_reason=error,
     )
-
 
 
 def prepare_execution(
