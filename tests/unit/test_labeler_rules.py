@@ -99,6 +99,8 @@ def _labels_for(*, path: str) -> set[str]:
         ("apps/site/package.json", set()),
         (".node-version", set()),
         ("scripts/ci/finalize-version-pr.py", {"ci", "release"}),
+        ("scripts/release/prepare_version_artifacts.py", {"ci", "release"}),
+        ("scripts/release/generate_spdx_data.py", {"ci", "release"}),
         ("scripts/ci/check-release-version-skew.py", {"ci", "release"}),
         ("scripts/ci/classify-release-tag.py", {"ci", "release"}),
         ("scripts/ci/testing/lintro-report-generate.sh", {"ci", "testing"}),

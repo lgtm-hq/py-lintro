@@ -244,6 +244,11 @@ def test_version_pr_prepares_artifacts_via_dedicated_script() -> None:
     assert_that(
         (_REPO_ROOT / "scripts/ci/update-security-support.py").is_file(),
     ).is_true()
+    hook_source = (_REPO_ROOT / script).read_text(encoding="utf-8")
+    assert_that(hook_source).contains("format-changelog.py")
+    assert_that(hook_source).contains("update-security-support.py")
+    assert_that(hook_source).contains("generate_spdx_data.py")
+    assert_that(hook_source).contains("sync-pinned-release-image.py")
 
     endpoints = version_pr["jobs"]["version-pr"]["with"]["allowed-endpoints"]
     assert_that(endpoints).contains("spdx.org:443")

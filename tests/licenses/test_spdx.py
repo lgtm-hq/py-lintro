@@ -85,10 +85,12 @@ def test_normalize_with_expression_preserves_exception() -> None:
 
 def test_normalize_residual_alias_not_resolved_by_library() -> None:
     """Residual aliases still resolve spellings license-expression misses."""
-    assert_that(normalize_to_spdx("Apache Software License")).is_equal_to(
-        "Apache-2.0",
-    )
-    assert_that(normalize_to_spdx("Expat")).is_equal_to("MIT")
+    from license_expression import ExpressionError, get_spdx_licensing
+
+    licensing = get_spdx_licensing()
+    with pytest.raises(ExpressionError):
+        licensing.parse("asl 2.0", validate=True, strict=True)
+    assert_that(normalize_to_spdx("asl 2.0")).is_equal_to("Apache-2.0")
 
 
 def test_normalize_mixed_or_and_respects_precedence() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.config.licenses_config import LicensesConfig, PackageException
@@ -219,16 +220,31 @@ def test_get_preset_rules_custom_is_empty() -> None:
     assert_that(denied).is_empty()
 
 
-def test_permissive_allows_or_expression_with_permissive_branch() -> None:
-    """OR expressions pass permissive policy when any branch is allowed."""
+@pytest.mark.parametrize(
+    ("license_id", "expected"),
+    [
+        ("GPL-3.0-only OR MIT", LicenseStatus.ALLOWED),
+        ("GPL-3.0-only OR AGPL-3.0-only", LicenseStatus.DENIED),
+    ],
+)
+def test_permissive_or_expression_any_branch(
+    license_id: str,
+    expected: LicenseStatus,
+) -> None:
+    """OR expressions pass when any branch is allowed and fail when all are denied.
+
+    Args:
+        license_id: SPDX OR expression under test.
+        expected: Expected policy status.
+    """
     engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
     package = PackageLicense(
         name="dual",
         version="1",
-        license_id="MIT OR Apache-2.0",
+        license_id=license_id,
     )
     result = engine.check(package)
-    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
+    assert_that(result.status).is_equal_to(expected)
 
 
 def test_permissive_denies_and_expression_with_copyleft_branch() -> None:
@@ -262,7 +278,7 @@ def test_permissive_allows_parenthesized_or_expression() -> None:
     package = PackageLicense(
         name="npm-dual",
         version="1",
-        license_id="(MIT OR Apache-2.0)",
+        license_id="(GPL-3.0-only OR MIT)",
     )
     result = engine.check(package)
     assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
