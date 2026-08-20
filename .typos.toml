@@ -3,34 +3,59 @@
 #
 # This is the project's spell-checker dictionary and file scope — analogous to
 # the repo's other native tool configs (.hadolint.yaml, .yamllint,
-# .prettierignore). It declares intentional project vocabulary and excludes a
-# couple of test fixtures that deliberately embed non-English / malformed text.
-# It is NOT a generated suppression baseline: every entry is a deliberate,
-# documented decision.
+# .prettierignore). It is NOT a generated suppression baseline: every entry
+# below is a deliberate, documented decision, and the list is kept tight so
+# real typos still fail the check.
+
+[default]
+# Narrow regex escapes, preferred over dictionary entries because they cannot
+# mask the same misspelling elsewhere in the repo.
+extend-ignore-re = [
+  # An acronym followed by the English "-ed" suffix (``PATCHed``, ``ANDed``):
+  # typos reads the tail of the acronym plus "ed" as its own word.
+  "\\b[A-Z]{2,}ed\\b",
+  # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
+  "ded5c06cf2?",
+]
 
 [default.extend-words]
+# --- Intentional project vocabulary -------------------------------------
 # "unparseable" is an intentional, pervasive spelling in this codebase (parser
-# error taxonomy, tests). Several occurrences live in modules that are off-limits
-# to edit, so the project accepts this variant rather than mass-rewriting it.
+# error taxonomy, tests); the project accepts this variant rather than
+# mass-rewriting it.
 unparseable = "unparseable"
 # "invokable" is used deliberately in prose about runnable scripts.
 invokable = "invokable"
-# "ded" appears only inside example rustc/clippy commit hashes ("ded5c06cf...")
-# quoted in comments; it is not a misspelling.
-ded = "ded"
-# "afe" appears inside abbreviated commit SHAs in CHANGELOG.md (e.g. 7b0afe0).
-afe = "afe"
+# "mis-" is a valid English prefix used in prose ("mis-quoting", "mis-detect",
+# "mis-flagged"); typos sees the hyphenated stem as its own word.
+mis = "mis"
+# "ands" is the plural of the boolean operator, used in a test name
+# (``test_master_switch_ands_with_sub_toggles``).
+ands = "ands"
+# "edn" is the Clojure EDN file extension, listed in the review corpus schema.
+edn = "edn"
+
+# --- Deliberate misspellings baked into test fixtures -------------------
+# These strings exist *because* they are wrong: they exercise unknown-key and
+# unknown-tool error paths, and a misspell-linter parser fixture. Correcting
+# them would break the tests they belong to.
+provdier = "provdier" # unknown AI config key fixture
+valdate = "valdate"   # "html-valdate" unknown-tool fixture
+langauge = "langauge" # golangci-lint misspell parser fixture
 
 [files]
-# These paths embed deliberate fixture data (French words, scrambled tokens,
-# and typos' own test corpus) used to exercise parser/severity handling;
-# spell-checking them is meaningless.
 extend-exclude = [
+  # Generated release notes: every entry carries an abbreviated commit SHA
+  # (7b0afe0, faf3daa, ...) that typos reads as a misspelled word.
+  "CHANGELOG.md",
+  # Fixture data that deliberately embeds non-English / scrambled text used to
+  # exercise parser and severity handling; spell-checking it is meaningless.
   "tests/unit/parsers/test_taplo_parser.py",
   "tests/unit/enums/test_severity_level.py",
   "tests/unit/parsers/typos_parser/",
   "tests/unit/tools/typos/",
-  "tests/integration/tools/test_typos_integration.py",
+  "tests/integration/tools/typos/",
+  "test_samples/tools/spelling/typos/",
   # Binary assets — typos scans file bytes as text and emits noise.
   "*.png",
   "*.jpg",

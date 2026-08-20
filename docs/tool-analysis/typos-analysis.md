@@ -12,7 +12,9 @@ parser-selection decision.
 ## Core Tool Capabilities
 
 - **Fast, broad scanning**: checks all text files in a tree; binary files are detected
-  and skipped automatically.
+  and skipped automatically when typos walks the tree itself. Paths named explicitly on
+  the command line bypass both that binary detection and the configured excludes, so the
+  Lintro wrapper compensates (see below).
 - **Auto-fix**: `typos --write-changes` applies corrections in place.
 - **Low false positives**: a curated dictionary keyed on common misspellings rather than
   a full natural-language dictionary.
@@ -26,13 +28,23 @@ parser-selection decision.
 - **Definition**: `lintro/tools/definitions/typos.py` — `can_fix=True`,
   `tool_type=ToolType.LINTER`, `file_patterns=["*"]`, native configs `typos.toml` /
   `.typos.toml` / `_typos.toml`.
-- **Check**: runs `typos --format json <files>` and parses the newline-delimited JSON.
+- **Check**: runs `typos --format json --force-exclude <files>` and parses the
+  newline-delimited JSON from stdout only, so a warning on stderr cannot corrupt the
+  report.
 - **Fix**: detects issues, runs `typos --write-changes <files>`, then re-checks to
   report the `initial = fixed + remaining` breakdown expected by Lintro's fix pipeline.
+- **Explicit-path safeguards**: Lintro always passes a resolved file list, and typos
+  (like ripgrep) skips its ignore rules for paths given as arguments. `--force-exclude`
+  restores the project's `[files] extend-exclude`, and the plugin additionally sniffs
+  each file for NUL bytes so `--write-changes` can never rewrite the inside of an image
+  or other binary asset.
 - **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
   misspelled word, and its suggested corrections. The composed message has the form
-  `"<typo>" should be "<correction>"`.
+  `"<typo>" should be "<correction>"`, with several corrections comma-separated. When
+  typos offers no corrections at all, the message instead reads `"<word>" is disallowed`
+  (this happens for words banned through configuration rather than matched against the
+  correction dictionary).
 
 ### JSON output shape
 

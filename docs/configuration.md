@@ -2690,7 +2690,10 @@ extend-exclude = ["tests/fixtures/"]
 | `timeout` | integer | Per-invocation timeout in seconds |
 
 typos' word list and file scope are configured through its native `typos.toml` file
-rather than `--tool-options`.
+rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
+`[files] extend-exclude` still applies to the explicit file list Lintro passes, and it
+filters out binary files itself so `lintro format` can never rewrite bytes inside an
+image or other binary asset.
 
 **Usage Examples:**
 

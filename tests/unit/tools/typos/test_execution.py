@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.typos import TyposPlugin
 
 
@@ -35,15 +36,43 @@ def _typo_line(path: str, typo: str, correction: str) -> str:
     )
 
 
+def _proc(
+    stdout: str = "",
+    returncode: int = 0,
+    stderr: str = "",
+) -> SubprocessResult:
+    """Build a SubprocessResult standing in for a real typos run.
+
+    Args:
+        stdout: Captured standard output (the JSON report).
+        returncode: Exit code (typos uses 2 to signal findings).
+        stderr: Captured standard error.
+
+    Returns:
+        SubprocessResult with the given streams.
+    """
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        output=stdout + stderr,
+    )
+
+
 def test_check_success_when_clean(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check returns success and no issues when typos finds nothing."""
+    """Check returns success and no issues when typos finds nothing.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "clean.txt"
     target.write_text("all good words here\n")
 
-    with patch.object(typos_plugin, "_run_subprocess", return_value=(True, "")):
+    with patch.object(typos_plugin, "_run_subprocess_result", return_value=_proc()):
         result = typos_plugin.check([str(target)], {})
 
     assert_that(result.success).is_true()
@@ -54,35 +83,103 @@ def test_check_reports_issues(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check surfaces parsed issues and fails when typos are present."""
+    """Check surfaces parsed issues and fails when typos are present.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "bad.txt"
     target.write_text("teh cat\n")
     output = _typo_line("bad.txt", "teh", "the")
 
-    with patch.object(typos_plugin, "_run_subprocess", return_value=(False, output)):
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(stdout=output, returncode=2),
+    ):
         result = typos_plugin.check([str(target)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].typo).is_equal_to("teh")
+    assert_that(getattr((result.issues or [])[0], "typo", None)).is_equal_to("teh")
+
+
+def test_check_ignores_stderr_noise(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """Warnings on stderr do not corrupt the stdout JSON report.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "bad.txt"
+    target.write_text("teh cat\n")
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(
+            stdout=_typo_line("bad.txt", "teh", "the"),
+            returncode=2,
+            stderr="warning: ignoring unreadable file\n",
+        ),
+    ):
+        result = typos_plugin.check([str(target)], {})
+
+    assert_that(result.issues_count).is_equal_to(1)
+
+
+def test_check_runtime_error_is_not_a_clean_pass(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no parseable report is reported as a failure.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "bad.txt"
+    target.write_text("content\n")
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(returncode=1, stderr="error: invalid config\n"),
+    ):
+        result = typos_plugin.check([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).contains("invalid config")
 
 
 def test_check_timeout_returns_failure(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check handles a subprocess timeout gracefully."""
+    """Check handles a subprocess timeout gracefully.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "slow.txt"
     target.write_text("content\n")
 
     with patch.object(
         typos_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(cmd=["typos"], timeout=30),
     ):
         result = typos_plugin.check([str(target)], {})
 
     assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("timed out")
 
 
@@ -90,7 +187,12 @@ def test_fix_corrects_all_typos(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix reports every typo as fixed when the re-check is clean."""
+    """Fix reports every typo as fixed when the re-check is clean.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "fixme.txt"
     target.write_text("teh cat\n")
     initial = _typo_line("fixme.txt", "teh", "the")
@@ -98,8 +200,12 @@ def test_fix_corrects_all_typos(
     # Sequence: initial check, write-changes, re-check (clean).
     with patch.object(
         typos_plugin,
-        "_run_subprocess",
-        side_effect=[(False, initial), (True, ""), (True, "")],
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(stdout=initial, returncode=2),
+            _proc(),
+            _proc(),
+        ],
     ):
         result = typos_plugin.fix([str(target)], {})
 
@@ -108,16 +214,21 @@ def test_fix_corrects_all_typos(
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
     # Invariant: initial == fixed + remaining.
-    assert_that(result.fixed_issues_count + result.remaining_issues_count).is_equal_to(
-        result.initial_issues_count,
-    )
+    assert_that(
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
+    ).is_equal_to(result.initial_issues_count)
 
 
 def test_fix_partial_leaves_remaining(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix reports remaining typos when the re-check still finds one."""
+    """Fix reports remaining typos when the re-check still finds one.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "fixme.txt"
     target.write_text("teh seperate cat\n")
     initial = "\n".join(
@@ -127,8 +238,12 @@ def test_fix_partial_leaves_remaining(
 
     with patch.object(
         typos_plugin,
-        "_run_subprocess",
-        side_effect=[(False, initial), (True, ""), (False, remaining)],
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(stdout=initial, returncode=2),
+            _proc(),
+            _proc(stdout=remaining, returncode=2),
+        ],
     ):
         result = typos_plugin.fix([str(target)], {})
 
@@ -138,20 +253,56 @@ def test_fix_partial_leaves_remaining(
     assert_that(result.remaining_issues_count).is_equal_to(1)
 
 
+def test_fix_write_failure_reports_error(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failing ``--write-changes`` pass counts nothing as fixed.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "fixme.txt"
+    target.write_text("teh cat\n")
+    initial = _typo_line("fixme.txt", "teh", "the")
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(stdout=initial, returncode=2),
+            _proc(returncode=1, stderr="error: read-only file system\n"),
+        ],
+    ):
+        result = typos_plugin.fix([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.output).contains("read-only file system")
+
+
 def test_fix_timeout_returns_failure(
     typos_plugin: TyposPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix handles a timeout during the initial detection pass."""
+    """Fix handles a timeout during the initial detection pass.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
     target = tmp_path / "slow.txt"
     target.write_text("teh\n")
 
     with patch.object(
         typos_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(cmd=["typos"], timeout=30),
     ):
         result = typos_plugin.fix([str(target)], {})
 
     assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("timed out")
