@@ -90,6 +90,19 @@ def skip_config_injection(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def disable_global_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's real user-level global config out of tests.
+
+    Tests that exercise the global tier explicitly re-enable it by deleting
+    ``LINTRO_GLOBAL_CONFIG`` and patching ``Path.home`` to a temp directory.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+
+
+@pytest.fixture(autouse=True)
 def clear_logging_handlers() -> Iterator[None]:
     """Clear logging handlers before each test.
 
