@@ -12,6 +12,7 @@ import contextlib
 import json
 import os
 import shutil
+import tempfile
 import threading
 import time
 from collections.abc import Mapping
@@ -232,17 +233,24 @@ def set_force_fresh_probes(force: bool) -> None:
         _force_fresh = force
 
 
-def clear_snapshot_cache(*, cache_root: Path | None = None) -> None:
-    """Clear in-memory and on-disk tool snapshot caches.
+def clear_snapshot_cache(
+    *,
+    cache_root: Path | None = None,
+    include_disk: bool = True,
+) -> None:
+    """Clear in-memory and optionally on-disk tool snapshot caches.
 
     Args:
         cache_root: Directory containing ``.lintro-cache``; defaults to cwd.
+        include_disk: When False, only the in-process memory cache is reset.
     """
     global _memory_cache, _memory_cache_path, _memory_probed_at
     with _cache_lock:
         _memory_cache = None
         _memory_cache_path = None
         _memory_probed_at = None
+        if not include_disk:
+            return
         cache_file = _cache_file_path(cache_root=cache_root)
         if cache_file.exists():
             try:
@@ -639,9 +647,17 @@ def _write_disk_cache(
     }
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_file.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(cache_file)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=cache_file.parent,
+            delete=False,
+            prefix=f"{cache_file.stem}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(json.dumps(payload, indent=2, sort_keys=True))
+            tmp_path = Path(handle.name)
+        tmp_path.replace(cache_file)
     except OSError as exc:
         logger.debug("Failed to write tool snapshot cache {}: {}", cache_file, exc)
 
@@ -796,6 +812,8 @@ def probe_all_tools(
     fresh = _probe_all_fresh(names, search_root=root, max_workers=max_workers)
 
     with _cache_lock:
+        if _memory_cache_path != cache_file:
+            _memory_cache = None
         merged = dict(_memory_cache or {})
         merged.update(fresh)
         _memory_cache = merged

@@ -258,6 +258,10 @@ def test_disabled_tools_are_reported_rather_than_dropped(
             status=ToolStatus.OK,
         ),
     )
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **_kwargs: {},
+    )
 
     results = collect_tool_checks(
         registry=registry,
@@ -289,6 +293,10 @@ def test_named_tools_are_probed_even_when_disabled(
             tool=tool,
             status=ToolStatus.OK,
         ),
+    )
+    monkeypatch.setattr(
+        "lintro.tools.core.snapshots.probe_all_tools",
+        lambda **_kwargs: {},
     )
 
     results = collect_tool_checks(
