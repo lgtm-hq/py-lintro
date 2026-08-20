@@ -121,6 +121,11 @@ sections:
 A value set in the global config survives only where the project config does not
 override that exact key path. A missing or empty global file is never an error.
 
+In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
+about the tool, so a project scalar replaces the global mapping wholesale. A project
+_mapping_ that never mentions `enabled` is only a partial statement, so a global
+`ruff: false` still keeps the tool disabled while the project's other keys apply.
+
 ### User-Level Global Config
 
 Place a `~/.lintro-config.yaml` in your home directory to share settings across every
@@ -131,11 +136,12 @@ projects can still override.
 
 **Resolution order** (first existing file wins):
 
-1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `none`, or empty)
-   to disable the global tier entirely. Useful for CI and hermetic test environments
-   that must not inherit a developer's personal defaults. An explicit path that does not
-   exist is an error rather than a silent fallback, so a typo cannot leave you running
-   without the defaults you asked for; use `off` to opt out deliberately.
+1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `false`, `no`,
+   `none`, or empty) to disable the global tier entirely. Useful for CI and hermetic
+   test environments that must not inherit a developer's personal defaults. An explicit
+   path that does not exist is an error rather than a silent fallback, so a typo cannot
+   leave you running without the defaults you asked for; use `off` to opt out
+   deliberately.
 2. `~/.lintro-config.yaml` — the primary, authoritative location.
 3. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
    defaults to `~/.config` when unset.

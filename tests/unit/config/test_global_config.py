@@ -170,7 +170,10 @@ def test_default_xdg_dir_used_when_env_unset(
     assert_that(config.enforce.line_length).is_equal_to(66)
 
 
-@pytest.mark.parametrize("disable_value", ["off", "0", "none", "", "  OFF  "])
+@pytest.mark.parametrize(
+    "disable_value",
+    ["off", "0", "false", "no", "none", "", "  OFF  "],
+)
 def test_env_override_disables_global_tier(
     disable_value: str,
     isolated_home: Path,
@@ -437,6 +440,55 @@ def test_load_config_scalar_tool_override_hides_global_tool_children(
     assert_that(config.global_contributed_keys).is_equal_to(["ai.enabled"])
 
 
+def test_load_config_project_tool_mapping_keeps_global_disable(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project tool mapping without ``enabled`` keeps the global scalar off.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text("tools:\n  ruff: false\n")
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "tools:\n  ruff:\n    config_source: ruff.toml\n",
+    )
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.tools["ruff"].enabled).is_false()
+    assert_that(config.tools["ruff"].config_source).is_equal_to("ruff.toml")
+    assert_that(config.global_contributed_keys).contains("tools.ruff.enabled")
+
+
+def test_load_config_project_tool_mapping_may_re_enable(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit project ``enabled`` still wins over the global scalar.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text("tools:\n  ruff: false\n")
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "tools:\n  ruff:\n    enabled: true\n",
+    )
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.tools["ruff"].enabled).is_true()
+    assert_that(config.global_contributed_keys).does_not_contain("tools.ruff.enabled")
+
+
 def test_load_config_global_merges_with_pyproject_project_tier(
     isolated_home: Path,
     tmp_path: Path,
@@ -562,6 +614,10 @@ def test_load_config_reports_only_effective_contributions(
         "    enabled: true\n"
         "    select:\n"
         "      - E\n"
+        "review:\n"
+        "  bogus: true\n"
+        "  checklist:\n"
+        "    items: []\n"
         "licenses:\n"
         "  allow:\n"
         "    - MIT\n",
@@ -575,12 +631,15 @@ def test_load_config_reports_only_effective_contributions(
         "output.art",
         "enforce.line_length",
         "tools.ruff.enabled",
+        # Nested model fields are walked segment by segment, not just level one.
+        "review.checklist.items",
     )
     # Unknown leaves and sections load_config never applies are filtered out.
     assert_that(config.global_contributed_keys).does_not_contain(
         "output.typo",
         "enforce.bogus",
         "tools.ruff.select",
+        "review.bogus",
         "licenses.allow",
     )
 

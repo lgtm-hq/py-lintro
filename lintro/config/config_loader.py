@@ -15,9 +15,10 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, get_args
 
 from loguru import logger
+from pydantic import BaseModel
 
 from lintro.config.deps_config import DepsConfig
 from lintro.config.lintro_config import (
@@ -86,6 +87,11 @@ GLOBAL_CONFIG_FILENAME = ".lintro-config.yaml"
 # home-directory dotfile above is absent.
 XDG_GLOBAL_CONFIG_RELPATH = Path("lintro") / "config.yaml"
 
+# Values of ``LINTRO_GLOBAL_CONFIG`` that disable the global tier instead of
+# naming a file. Mirrors the truthy set used for other Lintro env flags
+# (``1``/``true``/``yes``/``on``), so ``false``/``no`` work as expected.
+GLOBAL_CONFIG_DISABLE_VALUES = frozenset({"", "0", "false", "no", "none", "off"})
+
 
 def _find_global_config_file() -> Path | None:
     """Resolve the user-level global config file path, if present.
@@ -93,8 +99,9 @@ def _find_global_config_file() -> Path | None:
     Resolution order (first existing file wins):
 
     1. ``LINTRO_GLOBAL_CONFIG`` environment variable — an explicit file path,
-       or the value ``off`` (also ``0``/``none``/empty) to disable the global
-       tier entirely (used by hermetic environments such as test suites and CI)
+       or any value in ``GLOBAL_CONFIG_DISABLE_VALUES`` (``off``, ``0``,
+       ``false``, ``no``, ``none`` or empty) to disable the global tier
+       entirely (used by hermetic environments such as test suites and CI)
     2. ``~/.lintro-config.yaml`` (home-directory dotfile, the primary location)
     3. ``$XDG_CONFIG_HOME/lintro/config.yaml`` (XDG fallback; ``$XDG_CONFIG_HOME``
        defaults to ``~/.config`` when unset)
@@ -115,7 +122,7 @@ def _find_global_config_file() -> Path | None:
     """
     env_value = os.environ.get("LINTRO_GLOBAL_CONFIG")
     if env_value is not None:
-        if env_value.strip().lower() in ("", "0", "off", "none"):
+        if env_value.strip().lower() in GLOBAL_CONFIG_DISABLE_VALUES:
             return None
         env_path = Path(env_value).expanduser()
         if not env_path.is_file():
@@ -212,7 +219,7 @@ def _global_contributed_paths(
 # the model whose fields are retained by the corresponding section parser.
 # ``ai`` and ``defaults`` are stored verbatim and ``tools`` keys are arbitrary
 # tool names, so they carry no leaf-key schema here.
-_SECTION_FIELD_OWNERS: dict[str, Any] = {
+_SECTION_FIELD_OWNERS: dict[str, type[BaseModel]] = {
     "enforce": EnforceConfig,
     "execution": ExecutionConfig,
     "output": OutputConfig,
@@ -222,13 +229,98 @@ _SECTION_FIELD_OWNERS: dict[str, Any] = {
 _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
 
 
+def _merge_tools_section(
+    global_tools: dict[str, Any],
+    project_tools: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge the ``tools`` section, preserving a global scalar enable flag.
+
+    A scalar tool entry (``ruff: false``) is a complete statement about the
+    tool, so a scalar in the project config replaces the global mapping
+    wholesale. A project *mapping* that never mentions ``enabled`` is only a
+    partial statement, so the global scalar still supplies ``enabled``;
+    otherwise ``_parse_tool_config`` would silently default it back to True and
+    a globally disabled tool would run.
+
+    Args:
+        global_tools: Raw ``tools`` mapping from the global config.
+        project_tools: Raw ``tools`` mapping from the project config.
+
+    Returns:
+        dict[str, Any]: The merged ``tools`` mapping.
+    """
+    merged = _deep_merge(base=global_tools, override=project_tools)
+    for name, project_value in project_tools.items():
+        global_value = global_tools.get(name)
+        if isinstance(project_value, dict) and isinstance(global_value, bool):
+            entry = dict(merged.get(name) or {})
+            entry.setdefault("enabled", global_value)
+            merged[name] = entry
+    return merged
+
+
+def _global_tool_enable_contributions(
+    global_tools: dict[str, Any],
+    project_tools: dict[str, Any],
+) -> list[str]:
+    """Report ``tools.<name>.enabled`` keys supplied by a global scalar entry.
+
+    Complements ``_global_contributed_paths``, which sees the global scalar as
+    overridden by the project mapping and therefore skips it even though
+    ``_merge_tools_section`` keeps it in force.
+
+    Args:
+        global_tools: Raw ``tools`` mapping from the global config.
+        project_tools: Raw ``tools`` mapping from the project config.
+
+    Returns:
+        list[str]: Dotted paths for enable flags still coming from global.
+    """
+    paths: list[str] = []
+    for name, project_value in project_tools.items():
+        global_value = global_tools.get(name)
+        if (
+            isinstance(project_value, dict)
+            and isinstance(global_value, bool)
+            and "enabled" not in project_value
+        ):
+            paths.append(f"tools.{name}.enabled")
+    return paths
+
+
+def _nested_model(owner: type[BaseModel], field: str) -> type[BaseModel] | None:
+    """Return the model a field is parsed into, when it is itself a model.
+
+    Optional annotations are unwrapped so ``ReviewConfig.checklist`` typed as
+    ``ReviewChecklistConfig | None`` still resolves to the nested model.
+
+    Args:
+        owner: Model that declares the field.
+        field: Field name to resolve.
+
+    Returns:
+        type[BaseModel] | None: The nested model, or None when the field is not
+            a model (a scalar, list or free-form mapping).
+    """
+    info = owner.model_fields.get(field)
+    if info is None:
+        return None
+    candidates = [info.annotation, *get_args(info.annotation)]
+    for candidate in candidates:
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
+            return candidate
+    return None
+
+
 def _is_effective_contributed_path(path: str) -> bool:
     """Report whether a dotted global key survives section parsing.
 
     ``_global_contributed_paths`` works on raw YAML, so it happily reports keys
-    the section parsers drop (an unknown ``output.typo``, a section
-    ``load_config`` does not read at all). Reporting those in ``lintro config``
-    would advertise values that never take effect.
+    the section parsers drop (an unknown ``output.typo`` or
+    ``review.checklist.typo``, a section ``load_config`` does not read at all).
+    Reporting those in ``lintro config`` would advertise values that never take
+    effect. Every segment backed by a model is checked, not just the first, so
+    nested sections are filtered as strictly as flat ones.
 
     Args:
         path: Dotted key path contributed by the global config.
@@ -243,12 +335,23 @@ def _is_effective_contributed_path(path: str) -> bool:
         if section == "tools" and len(parts) >= 3:
             return parts[2] in LintroToolConfig.model_fields
         return True
-    owner = _SECTION_FIELD_OWNERS.get(section)
+    owner: type[BaseModel] | None = _SECTION_FIELD_OWNERS.get(section)
     if owner is None:
         # Not a section load_config reads (e.g. licenses, plugins), or a bare
         # scalar where a mapping is expected.
         return False
-    return len(parts) >= 2 and parts[1] in owner.model_fields
+    for index, part in enumerate(parts[1:], start=1):
+        if part not in owner.model_fields:
+            return False
+        nested = _nested_model(owner=owner, field=part)
+        if nested is None:
+            # Free-form or scalar field: anything below it is opaque to us.
+            return True
+        if index == len(parts) - 1:
+            return True
+        owner = nested
+    # ``path`` was the bare section name, i.e. a scalar where a mapping belongs.
+    return False
 
 
 def _find_config_file(start_dir: Path | None = None) -> Path | None:
@@ -1012,6 +1115,11 @@ def load_config(
     ``global_contributed_keys`` lists only keys that survive section parsing,
     so it never advertises a global value that has no effect.
 
+    In the ``tools`` section a scalar entry (``ruff: false``) is a complete
+    statement: a project scalar replaces the global mapping wholesale. A
+    project mapping that omits ``enabled`` is a partial statement, so a global
+    scalar still supplies the enable flag.
+
     Args:
         config_path: Explicit path to config file. If None, searches for
             .lintro-config.yaml.
@@ -1089,16 +1197,32 @@ def load_config(
 
         # Deep-merge: global config is the base, project config overrides per key.
         data = _deep_merge(base=global_data, override=project_data)
+        global_tools = global_data.get("tools") or {}
+        project_tools = project_data.get("tools") or {}
+        if isinstance(global_tools, dict) and isinstance(project_tools, dict):
+            data["tools"] = _merge_tools_section(
+                global_tools=global_tools,
+                project_tools=project_tools,
+            )
+            tool_enable_paths = _global_tool_enable_contributions(
+                global_tools=global_tools,
+                project_tools=project_tools,
+            )
+        else:
+            tool_enable_paths = []
         config = build_config_from_dict(data, resolved_path=resolved_path)
         config.global_config_path = global_config_path
-        config.global_contributed_keys = [
-            path
-            for path in _global_contributed_paths(
-                global_data=global_data,
-                project_data=project_data,
-            )
-            if _is_effective_contributed_path(path)
-        ]
+        config.global_contributed_keys = sorted(
+            [
+                path
+                for path in _global_contributed_paths(
+                    global_data=global_data,
+                    project_data=project_data,
+                )
+                if _is_effective_contributed_path(path)
+            ]
+            + tool_enable_paths,
+        )
         return config
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
