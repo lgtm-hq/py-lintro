@@ -49,6 +49,25 @@ SPECTRAL_RULESET_FILES: list[str] = [
     ".spectral.json",
     ".spectral.js",
 ]
+# Built-in Spectral 6.16 rule codes that live on the OpenAPI rules page but
+# do not start with ``oas``. Custom / JSON Schema codes have no fragment map
+# and must not inherit this page.
+_SPECTRAL_OAS_PREFIXES: tuple[str, ...] = (
+    "array-items",
+    "contact-",
+    "duplicated-entry-in-enum",
+    "info-",
+    "license-",
+    "no-",
+    "oas2-",
+    "oas3-",
+    "oas3_",
+    "openapi-",
+    "operation-",
+    "path-",
+    "tag-",
+    "typed-enum",
+)
 
 
 @register_tool
@@ -159,19 +178,30 @@ class SpectralPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return the Spectral documentation URL for the given rule.
 
-        Built-in OAS rules are documented as fragments on Spectral's OpenAPI
-        rules page. AsyncAPI, JSON Schema, and custom-ruleset codes still get
-        that page: Spectral 6.16 SARIF ``helpUri`` uses the same OAS URL for
-        built-in OAS rules, and there is no per-ruleset fragment map. The
-        fragment is simply unused when the rule is not in the OAS set.
+        Built-in rulesets publish separate pages. ``asyncapi-*`` and
+        ``arazzo-*`` codes go to those indexes; OpenAPI codes (``oas2-`` /
+        ``oas3-`` plus unprefixed OAS names such as ``operation-operationId``)
+        stay on the OpenAPI page. Custom and JSON Schema codes have no
+        per-rule fragment map, so they return None rather than a misleading
+        OAS URL.
 
         Args:
             code: Spectral rule code (e.g., ``oas3-api-servers``).
 
         Returns:
-            Per-rule documentation URL.
+            Per-rule documentation URL, or None when the code is empty or
+            not a built-in OpenAPI/AsyncAPI/Arazzo rule.
         """
-        return DocUrlTemplate.SPECTRAL.format(code=code)
+        if not code:
+            return None
+        lowered = code.lower()
+        if lowered.startswith("asyncapi-"):
+            return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=code)
+        if lowered.startswith("arazzo-"):
+            return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=code)
+        if any(lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES):
+            return DocUrlTemplate.SPECTRAL.format(code=code)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Spectral.
