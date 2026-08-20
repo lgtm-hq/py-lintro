@@ -595,6 +595,8 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.TSC: "tsc",
                 # Package is "@commitlint/cli", binary is "commitlint"
                 ToolName.COMMITLINT: "commitlint",
+                # Package is "@stoplight/spectral-cli", binary is "spectral"
+                ToolName.SPECTRAL: "spectral",
             }
         return self._binary_names
 

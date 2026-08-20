@@ -128,6 +128,21 @@ def test_get_install_hints_includes_commitlint_cli_alias() -> None:
     assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
 
 
+def test_get_install_hints_includes_spectral_cli_alias() -> None:
+    """``@stoplight/spectral-cli`` npm alias has the same bun install hint.
+
+    The hint must be a plain argv-safe string: no nested quotes or backticks
+    around the scoped package name.
+    """
+    result = get_install_hints()
+    hint = result["spectral"]
+    assert_that(result).contains_key("@stoplight/spectral-cli")
+    assert_that(hint).contains("bun add")
+    assert_that(hint).contains("@stoplight/spectral-cli@")
+    assert_that(hint).does_not_contain("`")
+    assert_that(result["@stoplight/spectral-cli"]).is_equal_to(hint)
+
+
 def test_get_install_hints_uses_commitlint_companion_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

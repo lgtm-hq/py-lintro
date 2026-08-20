@@ -160,8 +160,10 @@ class SpectralPlugin(BaseToolPlugin):
         """Return the Spectral documentation URL for the given rule.
 
         Built-in OAS rules are documented as fragments on Spectral's OpenAPI
-        rules page. Custom ruleset codes still get that page; the fragment is
-        simply unused when the rule is not in the OAS set.
+        rules page. AsyncAPI, JSON Schema, and custom-ruleset codes still get
+        that page: Spectral 6.16 SARIF ``helpUri`` uses the same OAS URL for
+        built-in OAS rules, and there is no per-ruleset fragment map. The
+        fragment is simply unused when the rule is not in the OAS set.
 
         Args:
             code: Spectral rule code (e.g., ``oas3-api-servers``).
