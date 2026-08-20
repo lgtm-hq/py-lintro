@@ -50,41 +50,14 @@ if [ ! -f "$PYTHON_BIN" ]; then
 	exit 1
 fi
 
-# Extract all packages from pyproject.toml
+# Extract all packages from pyproject.toml via setuptools (the same finder
+# the wheel build uses). Discovery runs under uv so the test venv does not
+# need setuptools installed.
 log_info "Extracting packages from pyproject.toml..."
-PACKAGES=$("$PYTHON_BIN" -c "
-import tomllib
-from pathlib import Path
-
-pyproject = Path('$PROJECT_ROOT/pyproject.toml')
-with open(pyproject, 'rb') as f:
-    data = tomllib.load(f)
-
-packages = data.get('tool', {}).get('setuptools', {}).get('packages', [])
-if isinstance(packages, dict) and 'find' in packages:
-    # packages.find directive: discover packages from the source tree the
-    # same way setuptools would, honoring include/exclude fnmatch patterns.
-    from fnmatch import fnmatch
-
-    find = packages['find']
-    include = find.get('include', ['*'])
-    exclude = find.get('exclude', [])
-    discovered = []
-    for where in find.get('where', ['.']):
-        root = (Path('$PROJECT_ROOT') / where).resolve()
-        for init in root.rglob('__init__.py'):
-            pkg = '.'.join(init.parent.relative_to(root).parts)
-            if not pkg:
-                continue
-            if not any(fnmatch(pkg, pat) for pat in include):
-                continue
-            if any(fnmatch(pkg, pat) for pat in exclude):
-                continue
-            discovered.append(pkg)
-    packages = discovered
-for pkg in sorted(packages):
-    print(pkg)
-")
+PACKAGES=$(
+	cd "$PROJECT_ROOT"
+	uv run python tests/packaging/configured_packages.py
+)
 
 if [ -z "$PACKAGES" ]; then
 	log_error "No packages found in pyproject.toml"

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.packaging.configured_packages import configured_packages
+
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -38,48 +40,12 @@ def _discover_packages_from_source() -> set[str]:
 def _get_packages_from_pyproject() -> set[str]:
     """Resolve the packages selected by pyproject.toml packaging config.
 
-    Evaluates the [tool.setuptools.packages.find] directive with the same
-    where/include/exclude settings setuptools uses at build time.
+    Delegates to setuptools so this matches the wheel build finder.
 
     Returns:
         Set of package names resolved from the find directive.
     """
-    import tomllib
-    from fnmatch import fnmatchcase
-
-    pyproject_path = PROJECT_ROOT / "pyproject.toml"
-    with pyproject_path.open("rb") as f:
-        data = tomllib.load(f)
-
-    find_config = (
-        data.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {})
-    )
-    where_dirs = find_config.get("where", ["."])
-    include = find_config.get("include", ["*"])
-    exclude = find_config.get("exclude", [])
-
-    packages: set[str] = set()
-    for where in where_dirs:
-        base = (PROJECT_ROOT / where).resolve()
-        for init_file in base.rglob("__init__.py"):
-            parts = init_file.parent.relative_to(base).parts
-            if not parts:
-                continue
-            # Mirror setuptools find_packages: every ancestor directory
-            # must itself be a package (contain __init__.py).
-            ancestors_are_packages = all(
-                (base / Path(*parts[: depth + 1]) / "__init__.py").is_file()
-                for depth in range(len(parts))
-            )
-            if not ancestors_are_packages:
-                continue
-            package_name = ".".join(parts)
-            if not any(fnmatchcase(package_name, pat) for pat in include):
-                continue
-            if any(fnmatchcase(package_name, pat) for pat in exclude):
-                continue
-            packages.add(package_name)
-    return packages
+    return configured_packages(project_root=PROJECT_ROOT)
 
 
 def _get_configured_packages() -> list[str]:
@@ -114,9 +80,9 @@ def test_all_source_packages_are_configured() -> None:
     matched by an exclude pattern or lacks an __init__.py).
     """
     source_packages = _discover_packages_from_source()
-    configured_packages = _get_packages_from_pyproject()
+    selected_packages = _get_packages_from_pyproject()
 
-    missing = source_packages - configured_packages
+    missing = source_packages - selected_packages
     if missing:
         missing_list = "\n  - ".join(sorted(missing))
         pytest.fail(

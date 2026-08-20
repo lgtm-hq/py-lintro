@@ -11,6 +11,7 @@ directly to catch packaging regressions such as:
 
 from __future__ import annotations
 
+import shutil
 import subprocess  # nosec B404 - subprocess builds the wheel under test with fixed argv, shell=False
 import tempfile
 import zipfile
@@ -23,6 +24,12 @@ from assertpy import assert_that
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
+def _skip_if_uv_missing() -> None:
+    """Skip the caller when ``uv`` is not on ``PATH``."""
+    if shutil.which("uv") is None:
+        pytest.skip("uv is required to build the wheel")
+
+
 @pytest.fixture(scope="module")
 def built_wheel_path() -> Iterator[Path]:
     """Build the lintro wheel once and yield its path.
@@ -30,6 +37,7 @@ def built_wheel_path() -> Iterator[Path]:
     Yields:
         Path: The built wheel file in a temporary output directory.
     """
+    _skip_if_uv_missing()
     with tempfile.TemporaryDirectory() as tmpdir:
         dist_dir = Path(tmpdir) / "dist"
         build_result = subprocess.run(  # nosec B603 B607 - fixed argv resolved from PATH, shell=False
@@ -47,6 +55,19 @@ def built_wheel_path() -> Iterator[Path]:
         wheels = list(dist_dir.glob("*.whl"))
         assert_that(wheels).is_not_empty()
         yield wheels[0]
+
+
+def test_skip_if_uv_missing_skips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wheel fixture must skip, not error, when ``uv`` is absent.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    with pytest.raises(pytest.skip.Exception, match="uv is required"):
+        _skip_if_uv_missing()
 
 
 @pytest.fixture(scope="module")
