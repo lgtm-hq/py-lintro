@@ -101,7 +101,11 @@ splits selection in two:
   (`_detection_scoped_tool_names` in `lintro/utils/execution/tool_configuration.py`),
   which does not select typos on its own. It enters through the "unmapped tool with a
   native config" branch — once a `typos.toml`, `.typos.toml` or `_typos.toml` exists at
-  a scan root. An empty `[tool.lintro]` table is not a config (the guard is
+  a scan root. crate-ci/typos also reads `[tool.typos]` in `pyproject.toml` and
+  `[package.metadata.typos]` / `[workspace.metadata.typos]` in `Cargo.toml`; those
+  filenames are intentionally omitted from `native_configs` so every Python or Rust
+  project does not auto-enable the plugin. The binary still honors those tables once
+  typos is selected. An empty `[tool.lintro]` table is not a config (the guard is
   `tools is None and config.config_path is None and not config.tools`), so this path
   still applies.
 - With **any resolved lintro config** (`.lintro-config.yaml` / `.yml`, a **non-empty**

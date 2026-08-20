@@ -2178,8 +2178,12 @@ misspellings.
 > - **No Lintro config (first run).** Tool selection comes from language detection,
 >   which does not pull typos in on its own. It joins through the "unmapped tool with a
 >   native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or `_typos.toml`
->   exists at a scan root. An empty `[tool.lintro]` table is not a config, so this path
->   still applies.
+>   exists at a scan root. crate-ci/typos also reads `[tool.typos]` in `pyproject.toml`
+>   and `[package.metadata.typos]` / `[workspace.metadata.typos]` in `Cargo.toml`; those
+>   files are **not** in Lintro's `native_configs`, so a typical Python or Rust tree
+>   does not auto-select the plugin. The binary still honors those tables once typos is
+>   selected. An empty `[tool.lintro]` table is not a config, so this path still
+>   applies.
 > - **With a resolved Lintro config, or `--tools all`.** Language scoping is bypassed. A
 >   resolved config is `.lintro-config.yaml` (or `.yml`), a **non-empty**
 >   `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section. Typos
@@ -2195,9 +2199,9 @@ misspellings.
 >
 > - **Turning it off.** Do not create a Lintro config solely to disable typos on a
 >   no-config first run: that file is a resolved config, so language scoping is skipped
->   and an empty `enabled_tools` allowlist runs the full registry minus typos. On a
->   first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On a project
->   that already has a Lintro config, disable the tool:
+>   and an empty `enabled_tools` allowlist runs the full unscoped registry, including
+>   typos. On a first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On
+>   a project that already has a Lintro config, disable the tool:
 >
 >   ```yaml
 >   tools:

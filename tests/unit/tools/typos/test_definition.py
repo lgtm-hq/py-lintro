@@ -12,8 +12,10 @@ from lintro.enums.tool_type import ToolType
 from lintro.tools.core.install_strategies.package_names import ecosystem_package_name
 from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.tools.core.version_parsing import (
+    TOOLS_WITH_SIMPLE_VERSION_PATTERN,
     extract_version_from_output,
     get_install_hints,
+    get_minimum_versions,
 )
 from lintro.tools.definitions.typos import (
     BINARY_PATH_SUFFIXES,
@@ -45,15 +47,18 @@ def test_definition_file_patterns_match_all(typos_plugin: TyposPlugin) -> None:
 
 
 def test_definition_native_configs(typos_plugin: TyposPlugin) -> None:
-    """The definition advertises typos' native config filenames.
+    """No-config selection only looks at standalone typos config files.
+
+    crate-ci/typos also reads ``[tool.typos]`` in ``pyproject.toml`` and
+    ``[package.metadata.typos]`` / ``[workspace.metadata.typos]`` in
+    ``Cargo.toml``. Those files must stay off ``native_configs``: listing
+    them would auto-select the plugin on every Python or Rust tree.
 
     Args:
         typos_plugin: Plugin fixture with version checking mocked out.
     """
-    assert_that(typos_plugin.definition.native_configs).contains(
-        "typos.toml",
-        ".typos.toml",
-        "_typos.toml",
+    assert_that(typos_plugin.definition.native_configs).is_equal_to(
+        ["typos.toml", ".typos.toml", "_typos.toml"],
     )
 
 
@@ -216,12 +221,36 @@ def test_selection_docs_name_every_config_source_and_the_allowlist() -> None:
     assert_that(collapsed).contains("recommended profile")
     assert_that(collapsed).contains("does **not** include typos")
     assert_that(collapsed).contains("enabled_tools: []")
+    assert_that(collapsed).contains("pyproject.toml")
+    assert_that(collapsed).contains("Cargo.toml")
+    assert_that(collapsed).contains("native_configs")
     assert_that(collapsed).does_not_contain(
         "typos runs as soon as the binary is on",
     )
     assert_that(analysis_doc).contains("execution.enabled_tools")
     assert_that(analysis_doc).contains("non-empty")
     assert_that(analysis_doc).contains("lintro init --profile recommended")
+    assert_that(analysis_doc).contains("intentionally omitted from `native_configs`")
+
+
+def test_disable_docs_do_not_claim_empty_allowlist_drops_typos() -> None:
+    """An empty ``enabled_tools`` list runs the full registry, including typos.
+
+    Creating a Lintro config solely to turn typos off would skip language
+    scoping; the docs must not say that empty allowlist "minus typos".
+    """
+    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    start = config_doc.find("**Turning it off.**")
+    end = config_doc.find("**Project vocabulary.**", start)
+    section = config_doc[start:end]
+    collapsed = " ".join(
+        line.lstrip("> ").strip() for line in section.splitlines() if line.strip()
+    )
+
+    assert_that(start).is_not_equal_to(-1)
+    assert_that(collapsed).contains("full unscoped registry, including typos")
+    assert_that(collapsed).does_not_contain("minus typos")
+    assert_that(collapsed).contains("enabled: false")
 
 
 def test_getting_started_notes_first_run_native_config() -> None:
@@ -263,3 +292,15 @@ def test_typos_version_output_parses(typos_plugin: TyposPlugin) -> None:
         extract_version_from_output(f"typos-cli {pinned}", "typos"),
     ).is_equal_to(pinned)
     assert_that(typos_plugin.definition.min_version).is_not_none()
+
+
+def test_typos_enum_pin_and_install_hint_land_together() -> None:
+    """Version parsing, the manifest pin, and install hints must all name typos.
+
+    A slice that only sees ``version_parsing.py`` can look as if
+    ``ToolName.TYPOS`` and the pin are missing; they live in other modules
+    on this branch and must stay wired together.
+    """
+    assert_that(ToolName.TYPOS in TOOLS_WITH_SIMPLE_VERSION_PATTERN).is_true()
+    assert_that(get_minimum_versions().get("typos")).is_not_none()
+    assert_that(get_install_hints().get("typos")).contains("typos-cli")

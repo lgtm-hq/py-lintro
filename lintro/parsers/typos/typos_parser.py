@@ -78,9 +78,13 @@ def _build_message(typo: str, corrections: list[str]) -> str:
 # ``typo`` is treated as a diagnostic, so a record type added by a future typos
 # release fails loudly rather than vanishing.
 #
-# ``file`` and ``parse`` exist on typos 1.49.0's ``Message`` enum but are not
-# allowlisted: the default ``typos --format json`` spell-check walker never
-# emits them. Adding ``file`` here would also hide a ``--files`` listing run.
+# The tags are serde ``rename_all = "snake_case"`` names of ``Message``
+# variants, not payload field names: ``file_type`` is ``Message::FileType``
+# (which also has a ``file_type`` field), ``binary_file`` is
+# ``Message::BinaryFile``. ``file`` and ``parse`` exist on typos 1.49.0's
+# ``Message`` enum but are not allowlisted: the default
+# ``typos --format json`` spell-check walker never emits them. Adding
+# ``file`` here would also hide a ``--files`` listing run.
 _INFORMATIONAL_RECORD_TYPES: frozenset[str] = frozenset({"binary_file", "file_type"})
 
 
