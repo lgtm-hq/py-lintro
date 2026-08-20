@@ -569,6 +569,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
                 ToolName.PRETTIER: "prettier",
+                ToolName.SPECTRAL: "@stoplight/spectral-cli",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
