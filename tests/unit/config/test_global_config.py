@@ -17,6 +17,7 @@ autouse ``disable_global_config`` fixture in ``tests/conftest.py``, which sets
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -921,15 +922,22 @@ def test_disabled_global_tier_hides_home_plugins_section(
         isolated_home: Isolated fake home directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    from lintro.plugins.discovery import _load_plugins_config
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
 
     (isolated_home / ".lintro-config.yaml").write_text(
         "plugins:\n  trusted:\n    - evil-plugin\n",
     )
     _make_project(isolated_home, monkeypatch)
     monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
 
-    assert_that(_load_plugins_config()).is_equal_to({})
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_false()
+    assert_that(trusted).is_none()
 
 
 def test_disabled_global_tier_hides_home_licenses_section(
@@ -953,3 +961,236 @@ def test_disabled_global_tier_hides_home_licenses_section(
     config = load_licenses_config()
 
     assert_that(config.policy).is_equal_to("permissive")
+
+
+def test_home_global_file_supplies_plugins_trust(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The home global file is the plugins: base tier, not a project config.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - home-plugin\n",
+    )
+    _make_project(tmp_path, monkeypatch)
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_true()
+    assert_that(trusted).is_equal_to(frozenset({"home-plugin"}))
+
+
+def test_explicit_global_path_supplies_plugins_not_home_dotfile(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit LINTRO_GLOBAL_CONFIG path wins over the home plugins: list.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - home-plugin\n",
+    )
+    custom = tmp_path / "custom-global.yaml"
+    custom.write_text("plugins:\n  trusted:\n    - env-plugin\n")
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(custom))
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_true()
+    assert_that(trusted).is_equal_to(frozenset({"env-plugin"}))
+
+
+def test_xdg_global_file_supplies_plugins_trust(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The XDG global file supplies plugins: when the home dotfile is absent.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
+
+    xdg = isolated_home / ".config"
+    (xdg / "lintro").mkdir(parents=True)
+    (xdg / "lintro" / "config.yaml").write_text(
+        "plugins:\n  trusted:\n    - xdg-plugin\n",
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    _make_project(tmp_path, monkeypatch)
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_true()
+    assert_that(trusted).is_equal_to(frozenset({"xdg-plugin"}))
+
+
+def test_project_plugins_overlay_global_trusted_list(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project plugins: trusted list replaces the global list wholesale.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - global-plugin\n",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - project-plugin\n",
+    )
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_true()
+    assert_that(trusted).is_equal_to(frozenset({"project-plugin"}))
+
+
+def test_explicit_global_path_supplies_licenses_not_home_dotfile(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit LINTRO_GLOBAL_CONFIG path wins over the home licenses: policy.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.config.licenses_config import load_licenses_config
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "licenses:\n  policy: strict\n",
+    )
+    custom = tmp_path / "custom-global.yaml"
+    custom.write_text("licenses:\n  policy: copyleft-ok\n")
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(custom))
+    _make_project(isolated_home, monkeypatch)
+
+    config = load_licenses_config()
+
+    assert_that(config.policy).is_equal_to("copyleft-ok")
+
+
+def test_xdg_global_file_supplies_licenses_policy(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The XDG global file supplies licenses: when the home dotfile is absent.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.config.licenses_config import load_licenses_config
+
+    xdg = isolated_home / ".config"
+    (xdg / "lintro").mkdir(parents=True)
+    (xdg / "lintro" / "config.yaml").write_text("licenses:\n  policy: strict\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    _make_project(tmp_path, monkeypatch)
+
+    config = load_licenses_config()
+
+    assert_that(config.policy).is_equal_to("strict")
+
+
+def test_project_licenses_overlay_global_policy(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project licenses: section overlays the global policy and lists.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.config.licenses_config import load_licenses_config
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "licenses:\n  policy: strict\n  allowed:\n    - MIT\n",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "licenses:\n  unknown_policy: deny\n",
+    )
+
+    config = load_licenses_config()
+
+    assert_that(config.policy).is_equal_to("strict")
+    assert_that(config.allowed).is_equal_to(["MIT"])
+    assert_that(config.unknown_policy).is_equal_to("deny")
+
+
+def test_chk_tool_selection_uses_global_config_when_env_unset(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset LINTRO_GLOBAL_CONFIG still applies home-file tool scoping to chk.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.utils.execution.tool_configuration import get_tools_to_run
+
+    (isolated_home / ".lintro-config.yaml").write_text("tools:\n  ruff: false\n")
+    _make_project(tmp_path, monkeypatch)
+
+    assert_that("LINTRO_GLOBAL_CONFIG" in os.environ).is_false()
+
+    result = get_tools_to_run(tools="ruff", action="check")
+    skipped_by_name = {item.name: item.reason for item in result.skipped}
+
+    assert_that(result.to_run).does_not_contain("ruff")
+    assert_that(skipped_by_name).contains_key("ruff")
+    assert_that(skipped_by_name["ruff"]).is_equal_to("disabled in config")
