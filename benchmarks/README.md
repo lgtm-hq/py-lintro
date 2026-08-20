@@ -33,18 +33,25 @@ Smoke / iterate faster:
 ./benchmarks/run-hyperfine.sh --quick
 ./benchmarks/run-hyperfine.sh --suite ruff
 WARMUP=5 RUNS=20 ./benchmarks/run-hyperfine.sh
+
+# --quick only supplies defaults: an explicit --runs (or RUNS) still wins.
+./benchmarks/run-hyperfine.sh --quick --runs 20
 ```
 
 If `hyperfine` is missing, the script exits with a clear install hint (exit 127).
 
 ### What is measured
 
-| Suite    | Lintro command                                                          | Direct reference              |
-| -------- | ----------------------------------------------------------------------- | ----------------------------- |
-| `ruff`   | `lintro chk --tools ruff --yes --tool-options ruff:format_check=False`  | `ruff check`                  |
-| `mypy`   | `lintro chk --tools mypy --yes`                                         | `mypy`                        |
-| `format` | `lintro fmt --tools ruff --yes --tool-options ruff:lint_fix=False`      | `ruff format`                 |
-| `multi`  | `lintro chk --tools ruff,mypy --yes --tool-options ruff:format_check=False` | sequential `ruff` then `mypy` |
+| Suite    | Lintro command                                                              | Native reference          |
+| -------- | --------------------------------------------------------------------------- | ------------------------- |
+| `ruff`   | `lintro chk --tools ruff --yes --tool-options ruff:format_check=False`      | `ruff check`              |
+| `mypy`   | `lintro chk --tools mypy --yes`                                             | `mypy`                    |
+| `format` | `lintro fmt --tools ruff --yes --tool-options ruff:lint_fix=False`          | `sequential-ruff-fmt.sh`  |
+| `multi`  | `lintro chk --tools ruff,mypy --yes --tool-options ruff:format_check=False` | `sequential-ruff-mypy.sh` |
+
+The two sequential references live in `benchmarks/hyperfine/`. They run their stages
+unconditionally and exit with the worst status — no `&&` short-circuit, because lintro
+runs every selected tool regardless of earlier failures.
 
 All runs target `benchmarks/fixtures/small-python/` and use:
 
@@ -54,25 +61,32 @@ All runs target `benchmarks/fixtures/small-python/` and use:
   orchestration rather than uv's resolver
 - `benchmarks/hyperfine/run-in-dir.sh` to set cwd to the fixture on both sides
   (portable; GNU `env -C` is not available on stock macOS `/usr/bin/env`)
-- `--tool-options ruff:format_check=False` on check and `ruff:lint_fix=False` on
-  fmt so the timed ruff work matches `ruff check` / `ruff format`
+- `--tool-options ruff:format_check=False` on check so the timed ruff work matches a
+  direct `ruff check`
+- `--tool-options ruff:lint_fix=False` on fmt, which drops the `ruff check --fix` stage.
+  `lintro fmt` still runs `ruff check` (to count lint issues), `ruff format --check` and
+  `ruff format`, so the format suite is timed against `sequential-ruff-fmt.sh`, which
+  replays exactly those three stages — a bare `ruff format` reference would bill two
+  extra ruff processes to orchestration overhead
 - repo `.venv` binaries for direct `ruff` / `mypy` on `PATH`
 
-`--suite ruff` or `--suite format` does not require mypy. An unknown `--suite`
-name exits 2 and does not rewrite baseline JSON.
+`--suite ruff` or `--suite format` does not require mypy. An unknown `--suite` name
+exits 2 and does not rewrite baseline JSON.
 
 ### Results
 
-JSON exports (hyperfine native schema) land in `benchmarks/results/hyperfine/`:
+JSON exports (hyperfine native schema) land in `benchmarks/results/hyperfine/` (override
+with `HYPERFINE_RESULTS_DIR`):
 
 - `ruff-check-overhead.json`
 - `mypy-overhead.json`
 - `ruff-format-overhead.json`
 - `multi-tool-overhead.json`
-- `baseline-meta.json` (host + git metadata)
+- `baseline-meta.json` (host + git metadata + methodology notes)
 
-Committed files under that directory are reference baselines. Re-running `make bench`
-overwrites them. Interpret **relative** columns (hyperfine prints ratios vs
+These are **generated, never committed** — hyperfine timings are specific to the machine
+and the tool versions installed on it, so the directory is gitignored and each run
+overwrites the previous one. Interpret **relative** columns (hyperfine prints ratios vs
 `--reference`) as the portable signal; absolute times vary by CPU and OS.
 
 ### Interpreting overhead
@@ -209,7 +223,8 @@ print(render_markdown_table(report))
 
 - `small-python/` — a small, clean Python-only project (passes ruff/mypy), so timing
   reflects startup and traversal cost rather than variable diagnostic volume. Includes a
-  fixture-local `pyproject.toml` that disables lintro `post_checks` for overhead runs.
+  fixture-local `pyproject.toml` that disables lintro `post_checks` and the
+  `module_size` gate for overhead runs.
 
 Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo) by
 dropping new directories under `fixtures/`; the comparative harness auto-discovers them.

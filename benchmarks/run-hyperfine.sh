@@ -20,9 +20,20 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FIXTURE_DIR="${REPO_ROOT}/benchmarks/fixtures/small-python"
 RESULTS_DIR="${HYPERFINE_RESULTS_DIR:-${REPO_ROOT}/benchmarks/results/hyperfine}"
 SEQUENTIAL_SCRIPT="${REPO_ROOT}/benchmarks/hyperfine/sequential-ruff-mypy.sh"
+SEQUENTIAL_FMT_SCRIPT="${REPO_ROOT}/benchmarks/hyperfine/sequential-ruff-fmt.sh"
 RUN_IN_DIR="${REPO_ROOT}/benchmarks/hyperfine/run-in-dir.sh"
+VENV_BIN="${LINTRO_BENCH_VENV_BIN:-${REPO_ROOT}/.venv/bin}"
 VALID_SUITES=(all ruff mypy format multi)
 
+# Explicit env values win over --quick defaults; track whether they were set.
+WARMUP_SET=0
+RUNS_SET=0
+if [[ -n "${WARMUP:-}" ]]; then
+	WARMUP_SET=1
+fi
+if [[ -n "${RUNS:-}" ]]; then
+	RUNS_SET=1
+fi
 WARMUP="${WARMUP:-3}"
 RUNS="${RUNS:-10}"
 SUITE="all"
@@ -33,17 +44,23 @@ usage() {
 Usage: ./benchmarks/run-hyperfine.sh [options]
 
 Options:
-  --quick              Smoke mode (warmup=1, runs=3)
+  --quick              Smoke defaults (warmup=1, runs=3); an explicit
+                       --warmup/--runs or WARMUP/RUNS env value still wins
   --suite NAME         One of: all, ruff, mypy, format, multi (default: all)
   --warmup N           Warmup runs (default: 3, or WARMUP env)
   --runs N             Timed runs (default: 10, or RUNS env)
   -h, --help           Show this help
 
 Environment:
-  WARMUP, RUNS         Same as --warmup / --runs
-  UV_LINK_MODE         Defaults to copy when unset
+  WARMUP, RUNS           Same as --warmup / --runs
+  UV_LINK_MODE           Defaults to copy when unset
+  HYPERFINE_RESULTS_DIR  Output directory (default:
+                         benchmarks/results/hyperfine)
+  LINTRO_BENCH_VENV_BIN  Bin directory prepended to PATH and searched for
+                         lintro (default: <repo>/.venv/bin)
 
-JSON results are written under benchmarks/results/hyperfine/.
+JSON results are written under benchmarks/results/hyperfine/ (gitignored;
+they are machine-specific and are generated, never committed).
 EOF
 }
 
@@ -59,10 +76,12 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--warmup)
 		WARMUP="${2:?--warmup requires a number}"
+		WARMUP_SET=1
 		shift 2
 		;;
 	--runs)
 		RUNS="${2:?--runs requires a number}"
+		RUNS_SET=1
 		shift 2
 		;;
 	-h | --help)
@@ -90,9 +109,10 @@ if ((suite_is_valid == 0)); then
 	exit 2
 fi
 
+# --quick only fills in defaults so --warmup/--runs (or WARMUP/RUNS) still win.
 if ((QUICK)); then
-	WARMUP=1
-	RUNS=3
+	((WARMUP_SET)) || WARMUP=1
+	((RUNS_SET)) || RUNS=3
 fi
 
 should_run() {
@@ -117,7 +137,7 @@ EOF
 	exit 127
 fi
 
-PATH="${REPO_ROOT}/.venv/bin:${HOME}/.local/bin:${PATH}"
+PATH="${VENV_BIN}:${HOME}/.local/bin:${PATH}"
 export PATH
 export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
 
@@ -131,7 +151,7 @@ if [[ ! -d "${FIXTURE_DIR}/src" ]]; then
 	exit 1
 fi
 
-LINTRO_BIN="${REPO_ROOT}/.venv/bin/lintro"
+LINTRO_BIN="${VENV_BIN}/lintro"
 if [[ ! -x "${LINTRO_BIN}" ]]; then
 	LINTRO_BIN="$(command -v lintro || true)"
 fi
@@ -172,6 +192,11 @@ if ((need_sequential)) && [[ ! -x "${SEQUENTIAL_SCRIPT}" ]]; then
 	exit 1
 fi
 
+if should_run format && [[ ! -x "${SEQUENTIAL_FMT_SCRIPT}" ]]; then
+	echo "error: sequential helper is not executable: ${SEQUENTIAL_FMT_SCRIPT}" >&2
+	exit 1
+fi
+
 mkdir -p "${RESULTS_DIR}"
 
 # Resolve absolute binaries once so --shell=none never depends on a login shell.
@@ -179,8 +204,12 @@ RUFF_BIN="$(command -v ruff || true)"
 MYPY_BIN="$(command -v mypy || true)"
 
 # Invoke the installed lintro binary (not ``uv run``) so measured overhead is
-# orchestration, not uv's project resolver. Extra ruff stages are disabled so
-# the timed work matches the direct ``ruff check`` / ``ruff format`` commands.
+# orchestration, not uv's project resolver. ``ruff:format_check=False`` makes
+# the timed chk work match a direct ``ruff check``. ``lintro fmt`` cannot be
+# reduced to a single ruff process (it always counts lint issues first, then
+# format-checks, then formats), so ``ruff:lint_fix=False`` only drops the
+# ``ruff check --fix`` stage and the format suite is compared against the
+# equivalent sequential reference instead of a bare ``ruff format``.
 LINTRO_CHK=(
 	"${RUN_IN_DIR}" "${FIXTURE_DIR}"
 	"${LINTRO_BIN}" chk --yes
@@ -243,12 +272,14 @@ meta = {
     'fixture': 'small-python',
     'methodology': {
         'shell': 'none',
-        'lintro_invocation': '.venv/bin/lintro (chdir via run-in-dir.sh)',
+        'lintro_invocation': r'''${LINTRO_BIN}''' + ' (chdir via run-in-dir.sh)',
         'cwd': 'benchmarks/fixtures/small-python (via run-in-dir.sh)',
         'notes': [
             'Fixture pyproject disables post_checks so single-tool runs are isolated.',
             'Direct tools use the repo .venv binaries on PATH.',
-            'lintro ruff check disables format_check; fmt disables lint_fix so the timed work matches the direct binary.',
+            'lintro chk disables ruff format_check so the timed work matches $(ruff check).',
+            'lintro fmt disables ruff lint_fix and is compared against sequential-ruff-fmt.sh (ruff check, ruff format --check, ruff format), which are the stages lintro fmt actually runs.',
+            'The multi suite reference (sequential-ruff-mypy.sh) runs both tools unconditionally and returns the worst exit status; it does not short-circuit the way a shell AND-list would.',
             'Relative overhead is most meaningful on the same machine/OS.',
         ],
     },
@@ -301,11 +332,12 @@ fi
 
 if should_run format; then
 	# Formatter path. Fixture sources are already formatted (no-op write).
-	ref_cmd="$(join_cmd "${RUN_IN_DIR}" "${FIXTURE_DIR}" "${RUFF_BIN}" format .)"
+	# The reference replays the same ruff stages lintro fmt runs.
+	ref_cmd="$(join_cmd "${SEQUENTIAL_FMT_SCRIPT}")"
 	lintro_cmd="$(join_cmd "${LINTRO_FMT[@]}" --tools ruff .)"
 	run_hyperfine "${RESULTS_DIR}/ruff-format-overhead.json" \
 		--reference "${ref_cmd}" \
-		--reference-name "ruff format" \
+		--reference-name "sequential ruff check then format" \
 		--command-name "lintro fmt --tools ruff" "${lintro_cmd}"
 	expected_json+=("${RESULTS_DIR}/ruff-format-overhead.json")
 	ran=1
@@ -317,7 +349,7 @@ if should_run multi; then
 	lintro_cmd="$(join_cmd "${LINTRO_CHK[@]}" --tools ruff,mypy .)"
 	run_hyperfine "${RESULTS_DIR}/multi-tool-overhead.json" \
 		--reference "${ref_cmd}" \
-		--reference-name "sequential ruff && mypy" \
+		--reference-name "sequential ruff then mypy" \
 		--command-name "lintro chk --tools ruff,mypy" "${lintro_cmd}"
 	expected_json+=("${RESULTS_DIR}/multi-tool-overhead.json")
 	ran=1

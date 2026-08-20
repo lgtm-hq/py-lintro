@@ -343,8 +343,8 @@ dist
 .lintro/
 coverage.json
 
-# Hyperfine local scratch exports (committed baselines omit the .local suffix)
-benchmarks/results/hyperfine/*.local.json
+# Hyperfine exports are machine-specific: generated locally, never committed.
+benchmarks/results/hyperfine/*.json
 benchmarks/fixtures/**/.mypy_cache/
 benchmarks/fixtures/**/.ruff_cache/
 
