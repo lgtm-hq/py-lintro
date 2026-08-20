@@ -945,6 +945,11 @@ main() {
 				binary_url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/swiftlint_linux_${arch}.zip"
 				if download_with_retries "$binary_url" "$swiftlint_zip" 3 &&
 					unzip -q -o "$swiftlint_zip" -d "$swiftlint_tmp"; then
+					if [ ! -f "${swiftlint_tmp}/swiftlint-static" ]; then
+						echo -e "${RED}✗ Could not find extracted swiftlint-static binary${NC}"
+						rm -rf "$swiftlint_tmp"
+						exit 1
+					fi
 					mv "${swiftlint_tmp}/swiftlint-static" "$BIN_DIR/swiftlint"
 					chmod +x "$BIN_DIR/swiftlint"
 					echo -e "${GREEN}✓ swiftlint installed successfully${NC}"
