@@ -151,7 +151,18 @@ If your project lives inside your home directory, the upward search for a projec
 `.lintro-config.yaml` can reach `~/.lintro-config.yaml` itself. That file is counted as
 the **global tier only** — never as both tiers — so it is reported once and its keys are
 still listed as global contributions rather than looking like a project override of
-itself.
+itself. This holds even when the global tier is disabled: with
+`LINTRO_GLOBAL_CONFIG=off` the home dotfile is ignored outright rather than demoted to a
+project config, which is what makes the switch genuinely hermetic.
+
+> [!IMPORTANT] **Upgrading with an existing `~/.lintro-config.yaml`.** Before user-level
+> global config existed, that file only took effect when the upward search happened to
+> reach it — that is, for projects under your home directory with no config of their
+> own. It is now a base layer for **every** project, so keys your project config omits
+> (an `ai:` block, `enforce.line_length`, tool enables) start applying where they
+> previously did not. If you were using it as a no-project-config fallback and want the
+> old behavior, move it into the projects that need it, or set
+> `LINTRO_GLOBAL_CONFIG=off`.
 
 Run `lintro config` to see a **Global Config** section reporting whether a global file
 was found, its resolved path, and which effective values it contributed (the keys your

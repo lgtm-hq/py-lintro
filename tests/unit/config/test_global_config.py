@@ -563,6 +563,62 @@ def test_load_config_project_nested_under_home_uses_file_once(
     )
 
 
+def test_disabled_global_tier_ignores_home_dotfile_for_nested_project(
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``off`` keeps the home dotfile out of project discovery too.
+
+    Disabling the global tier must be hermetic: the home dotfile may not come
+    back as a *project* config for a cwd nested under home, which would
+    reinstate the developer defaults CI asked to exclude.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "enforce:\n  line_length: 100\nai:\n  enabled: true\n",
+    )
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.global_config_path).is_none()
+    assert_that(config.config_path).is_none()
+    assert_that(config.enforce.line_length).is_none()
+    assert_that(config.ai).is_equal_to({})
+    assert_that(config.global_contributed_keys).is_equal_to([])
+
+
+def test_env_override_path_ignores_home_dotfile_for_nested_project(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit env path does not demote the home dotfile to a project config.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "enforce:\n  line_length: 100\n",
+    )
+    override = tmp_path / "override.yaml"
+    override.write_text("enforce:\n  line_length: 55\n")
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(override))
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.global_config_path).is_equal_to(str(override.resolve()))
+    assert_that(config.config_path).is_none()
+    assert_that(config.enforce.line_length).is_equal_to(55)
+
+
 def test_load_config_project_nested_under_home_with_own_config(
     isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,
