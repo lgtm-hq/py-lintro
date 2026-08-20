@@ -9,7 +9,6 @@ rather than reporting an error.
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -143,38 +142,34 @@ class SpectralPlugin(BaseToolPlugin):
             return str(found)
         return None
 
-    def _get_spectral_command(self) -> list[str]:
+    def _get_spectral_command(self, cwd: str | Path | None = None) -> list[str]:
         """Get the command to run spectral.
 
-        The npm package (``@stoplight/spectral-cli``) installs a ``spectral``
-        binary. A globally installed binary is preferred (Docker/Homebrew),
-        falling back to running the full package name via ``bunx``/``npx`` so
-        resolution works even when the binary is not on PATH.
+        Uses the shared Node.js resolution chain (project-local binary, PATH,
+        then pinned ``bunx``/``npx``).
+
+        Args:
+            cwd: Directory the tool will execute in, when known.
 
         Returns:
             Command argument list to invoke spectral.
         """
-        if shutil.which("spectral"):
-            return ["spectral"]
-        if shutil.which("bunx"):
-            return ["bunx", "@stoplight/spectral-cli"]
-        if shutil.which("npx"):
-            return ["npx", "--yes", "@stoplight/spectral-cli"]
-        return ["spectral"]
+        return self._get_executable_command(tool_name="spectral", cwd=cwd)
 
     def doc_url(self, code: str) -> str | None:
         """Return the Spectral documentation URL for the given rule.
 
-        Rule codes are ruleset-defined (custom rulesets choose their own),
-        so a single canonical documentation page is returned for all rules.
+        Built-in OAS rules are documented as fragments on Spectral's OpenAPI
+        rules page. Custom ruleset codes still get that page; the fragment is
+        simply unused when the rule is not in the OAS set.
 
         Args:
             code: Spectral rule code (e.g., ``oas3-api-servers``).
 
         Returns:
-            URL to the Spectral rules documentation.
+            Per-rule documentation URL.
         """
-        return str(DocUrlTemplate.SPECTRAL)
+        return DocUrlTemplate.SPECTRAL.format(code=code)
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Spectral.
@@ -210,7 +205,8 @@ class SpectralPlugin(BaseToolPlugin):
                 success=True,
                 output=(
                     "Skipping spectral: no ruleset found. Add a .spectral.yaml "
-                    "(or .spectral.yml/.spectral.json) to enable API linting."
+                    "(or .spectral.yml/.spectral.json/.spectral.js) to enable "
+                    "API linting."
                 ),
                 issues_count=0,
             )
@@ -224,7 +220,7 @@ class SpectralPlugin(BaseToolPlugin):
                 f"[SpectralPlugin] Files to check (first 10): {ctx.files[:10]}",
             )
 
-        cmd: list[str] = self._get_spectral_command() + [
+        cmd: list[str] = self._get_spectral_command(cwd=ctx.cwd) + [
             "lint",
             "--format",
             "json",

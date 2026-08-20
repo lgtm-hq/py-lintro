@@ -47,8 +47,12 @@ def test_definition_native_configs(spectral_plugin: SpectralPlugin) -> None:
         spectral_plugin: The SpectralPlugin instance under test.
     """
     configs = spectral_plugin.definition.native_configs
-    assert_that(configs).contains(".spectral.yaml")
-    assert_that(configs).contains(".spectral.json")
+    assert_that(configs).contains(
+        ".spectral.yaml",
+        ".spectral.yml",
+        ".spectral.json",
+        ".spectral.js",
+    )
 
 
 def test_definition_version_command(spectral_plugin: SpectralPlugin) -> None:
@@ -85,14 +89,17 @@ def test_set_options_rejects_invalid_timeout(spectral_plugin: SpectralPlugin) ->
         spectral_plugin.set_options(timeout=0)
 
 
-def test_doc_url_returns_reference(spectral_plugin: SpectralPlugin) -> None:
-    """doc_url returns the spectral rules reference for any code.
+def test_doc_url_returns_per_rule_fragment(
+    spectral_plugin: SpectralPlugin,
+) -> None:
+    """doc_url interpolates the rule code onto Spectral's OAS rules page.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
     """
     url = spectral_plugin.doc_url("oas3-api-servers")
-    assert_that(url).contains("stoplight.io")
+    assert_that(url).contains("meta.stoplight.io")
+    assert_that(url).contains("#oas3-api-servers")
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:
