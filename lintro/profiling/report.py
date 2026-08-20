@@ -7,30 +7,44 @@ table, a JSON-serializable payload, and optimization suggestions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from lintro.profiling.models import ToolTiming
+from lintro.formatters.formatter import merge_detected_and_remaining
+from lintro.profiling.models import ProfileData, ProfileToolEntry, ToolTiming
 from lintro.profiling.suggestions import get_suggestions
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.base_issue import BaseIssue
 
 # Rounding precision (decimal places) for reported durations.
 _DURATION_PRECISION: int = 2
 
 
-def _distinct_issue_files(result: ToolResult) -> int:
-    """Count distinct files a tool reported issues on.
+def _merged_issues(result: ToolResult) -> list[BaseIssue]:
+    """Return issues using the same merge as JSON ``results[]``.
 
     Args:
         result: The tool result to inspect.
 
     Returns:
-        Number of unique, non-empty file paths across the result's issues.
+        Deduplicated detected-plus-remaining issues.
     """
-    issues = getattr(result, "issues", None)
-    if not issues:
-        return 0
+    return merge_detected_and_remaining(
+        getattr(result, "initial_issues", None),
+        getattr(result, "issues", None),
+    )
+
+
+def _distinct_issue_files(issues: list[BaseIssue]) -> int:
+    """Count distinct files a tool reported issues on.
+
+    Args:
+        issues: Merged issues for one tool result.
+
+    Returns:
+        Number of unique, non-empty file paths across the issues.
+    """
     files: set[str] = set()
     for issue in issues:
         file_path = getattr(issue, "file", "")
@@ -44,8 +58,9 @@ def build_timings(results: list[ToolResult]) -> list[ToolTiming]:
 
     Only tools that were actually measured are included: skipped tools and
     any result without a captured ``duration`` (e.g. post-checks) are omitted
-    so the profile never fabricates timing data. Ties are broken by tool name
-    for deterministic ordering.
+    so the profile never fabricates timing data. Crashed and timed-out tools
+    are included when the executor recorded ``duration_seconds``. Ties are
+    broken by tool name for deterministic ordering.
 
     Args:
         results: Completed tool results from a run.
@@ -60,46 +75,49 @@ def build_timings(results: list[ToolResult]) -> list[ToolTiming]:
         duration = getattr(result, "duration_seconds", None)
         if duration is None:
             continue
+        merged = _merged_issues(result)
         timings.append(
             ToolTiming(
                 tool=result.name,
                 duration=float(duration),
-                files_checked=_distinct_issue_files(result),
-                issues_found=int(getattr(result, "issues_count", 0) or 0),
+                files_with_issues=_distinct_issue_files(merged),
+                issues_found=len(merged),
             ),
         )
     timings.sort(key=lambda t: (-t.duration, t.tool))
     return timings
 
 
-def build_profile_data(results: list[ToolResult]) -> dict[str, Any]:
+def build_profile_data(results: list[ToolResult]) -> ProfileData:
     """Build the JSON-serializable profile payload from tool results.
 
     Args:
         results: Completed tool results from a run.
 
     Returns:
-        A dict with ``cumulative_tool_duration`` (sum of per-tool seconds; not
-        wall-clock under parallel execution), a ``tools`` list of per-tool
-        objects (``name``, ``duration``, ``files_checked``, ``issues_found``),
-        and a ``suggestions`` list.
+        A payload with ``cumulative_tool_duration`` (sum of per-tool seconds;
+        not wall-clock under parallel execution), a ``tools`` list of
+        per-tool objects (``name``, ``duration``, ``files_with_issues``,
+        ``issues_found``), and a ``suggestions`` list. ``files_with_issues``
+        is distinct ``issue.file`` values, not files scanned.
     """
     timings = build_timings(results)
     total_duration = round(
         sum(t.duration for t in timings),
         _DURATION_PRECISION,
     )
+    tools: list[ProfileToolEntry] = [
+        {
+            "name": t.tool,
+            "duration": round(t.duration, _DURATION_PRECISION),
+            "files_with_issues": t.files_with_issues,
+            "issues_found": t.issues_found,
+        }
+        for t in timings
+    ]
     return {
         "cumulative_tool_duration": total_duration,
-        "tools": [
-            {
-                "name": t.tool,
-                "duration": round(t.duration, _DURATION_PRECISION),
-                "files_checked": t.files_checked,
-                "issues_found": t.issues_found,
-            }
-            for t in timings
-        ],
+        "tools": tools,
         "suggestions": get_suggestions(timings),
     }
 
@@ -114,12 +132,12 @@ def _render_table(timings: list[ToolTiming], total_duration: float) -> list[str]
     Returns:
         The table rendered as individual text lines.
     """
-    headers = ("Tool", "Duration", "Files", "Issues")
+    headers = ("Tool", "Duration", "Issue files", "Issues")
     rows: list[tuple[str, str, str, str]] = [
         (
             t.tool,
             f"{t.duration:.2f}s",
-            str(t.files_checked),
+            str(t.files_with_issues),
             str(t.issues_found),
         )
         for t in timings

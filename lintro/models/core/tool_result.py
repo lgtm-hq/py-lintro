@@ -89,9 +89,10 @@ class ToolResult:
     parse_failures_count: int | None = field(default=None)
 
     # Wall-clock seconds the tool took, recorded by the executor around the
-    # check/fix call. ``None`` when the result was not produced by a run (a
-    # synthetic failure result, or a result built directly in a test).
-    # Surfaced in the optional ``--profile`` report.
+    # check/fix call (and around synthetic crash/timeout failure results so
+    # they still appear in ``--profile``). ``None`` when the result was not
+    # produced by a run (skipped tools, post-checks, or a result built
+    # directly in a test).
     duration_seconds: float | None = field(default=None)
 
     def __post_init__(self) -> None:

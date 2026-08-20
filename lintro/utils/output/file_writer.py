@@ -48,6 +48,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+    from lintro.profiling.models import ProfileData
 
 
 def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
@@ -303,7 +304,7 @@ def write_output_file(
     total_issues: int,
     total_fixed: int,
     ai_enrichment: AISarifEnrichment | None = None,
-    profile_data: dict[str, Any] | None = None,
+    profile_data: ProfileData | None = None,
 ) -> None:
     """Write results to user-specified output file.
 

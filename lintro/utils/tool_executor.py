@@ -286,6 +286,7 @@ def _execute_tools_sequential(
     all_results: list[ToolResult] = []
 
     for tool_name in tools_to_run:
+        attempt_started = time.monotonic()
         try:
             tool = tool_manager.get_tool(tool_name)
 
@@ -354,13 +355,15 @@ def _execute_tools_sequential(
             # Show user-friendly error message on console
             logger.console_output(f"Error running {tool_name}: {e}")
 
-            # Create a failed result for this tool
+            # Create a failed result for this tool. Duration is recorded so
+            # crashed tools still appear in the ``--profile`` table/JSON.
             all_results.append(
                 ToolResult(
                     name=tool_name,
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    duration_seconds=time.monotonic() - attempt_started,
                 ),
             )
 
