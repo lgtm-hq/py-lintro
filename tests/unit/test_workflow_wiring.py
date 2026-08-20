@@ -237,7 +237,9 @@ def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
     script = version_pr["jobs"]["version-pr"]["with"]["version-update-script"]
     assert_that(script).is_equal_to("scripts/ci/finalize-version-pr.py")
     assert_that((_REPO_ROOT / script).is_file()).is_true()
-    # The finalizer orchestrates changelog, security-table, and release-docs scripts.
+    finalizer = (_REPO_ROOT / script).read_text(encoding="utf-8")
+    assert_that(finalizer).contains('release_docs = _load("sync_release_docs"')
+    assert_that(finalizer).contains("release_docs.main([])")
     assert_that((_REPO_ROOT / "scripts/ci/format-changelog.py").is_file()).is_true()
     assert_that(
         (_REPO_ROOT / "scripts/ci/update-security-support.py").is_file(),
@@ -1556,8 +1558,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                     continue
                 if with_block.get("ref") != canonical:
                     offenders.append(
-                        f"{path.name}:{job_id}: checkout ref "
-                        f"{with_block.get('ref')!r}",
+                        f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
 
     assert_that(offenders).is_empty()

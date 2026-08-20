@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tomllib
 from pathlib import Path
 from types import ModuleType
 
@@ -71,6 +72,16 @@ def test_update_pre_commit_rev_pins_is_idempotent(module: ModuleType) -> None:
     )
 
 
+def test_resolve_version_prefers_cli_argv(module: ModuleType) -> None:
+    """A CLI version argument wins over NEXT_VERSION."""
+    assert_that(
+        module.resolve_version(
+            argv=["0.81.0"],
+            env={"NEXT_VERSION": "9.9.9"},
+        ),
+    ).is_equal_to("0.81.0")
+
+
 def test_resolve_version_prefers_next_version_env(module: ModuleType) -> None:
     """Release hook reads NEXT_VERSION when present."""
     assert_that(
@@ -85,11 +96,39 @@ def test_resolve_version_strips_leading_v(module: ModuleType) -> None:
     ).is_equal_to("2.0.0")
 
 
+def test_resolve_version_rejects_garbage(module: ModuleType) -> None:
+    """A malformed NEXT_VERSION must not stamp rev: vgarbage."""
+    with pytest.raises(ValueError, match="Unrecognized version string"):
+        module.resolve_version(env={"NEXT_VERSION": "garbage"})
+
+
 def test_resolve_version_falls_back_to_pyproject(module: ModuleType) -> None:
     """An empty NEXT_VERSION falls back to the pyproject version."""
+    with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        expected = str(tomllib.load(handle)["project"]["version"])
     assert_that(module.resolve_version(env={"NEXT_VERSION": "  "})).is_equal_to(
-        module._read_pyproject_version(),
+        expected,
     )
+
+
+def test_main_uses_cli_version(
+    tmp_path: Path,
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``python scripts/ci/sync-release-docs.py 0.81.0`` stamps that tag."""
+    pre_commit = tmp_path / "docs" / "pre-commit.md"
+    pre_commit.parent.mkdir(parents=True)
+    pre_commit.write_text("    rev: v0.69.0\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+
+    assert_that(module.main(["0.81.0"])).is_equal_to(0)
+    assert_that(pre_commit.read_text(encoding="utf-8")).contains("rev: v0.81.0")
+
+
+def test_main_rejects_invalid_cli_version(module: ModuleType) -> None:
+    """Invalid CLI versions exit 2 the way update-security-support.py does."""
+    assert_that(module.main(["not-a-version"])).is_equal_to(2)
 
 
 def test_sync_release_docs_updates_pre_commit_doc(
@@ -121,11 +160,32 @@ def test_sync_release_docs_is_a_noop_when_already_synced(
     assert_that(changed).is_empty()
 
 
-def test_sync_release_docs_tolerates_missing_doc(
+def test_sync_release_docs_fails_when_doc_missing(
     tmp_path: Path,
     module: ModuleType,
 ) -> None:
-    """A missing target doc warns instead of raising."""
-    assert_that(
-        module.sync_release_docs(version="0.80.0", repo_root=tmp_path),
-    ).is_empty()
+    """A missing target doc fails closed so the Version-PR cannot skip pins."""
+    with pytest.raises(RuntimeError, match="Missing required doc"):
+        module.sync_release_docs(version="0.80.0", repo_root=tmp_path)
+
+
+def test_sync_release_docs_fails_when_no_rev_pins(
+    tmp_path: Path,
+    module: ModuleType,
+) -> None:
+    """A pre-commit doc without rev pins must not look already-synced."""
+    pre_commit = tmp_path / "docs" / "pre-commit.md"
+    pre_commit.parent.mkdir(parents=True)
+    pre_commit.write_text("# no pins here\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="no 'rev: vX.Y.Z' pins"):
+        module.sync_release_docs(version="0.80.0", repo_root=tmp_path)
+
+
+def test_pre_commit_md_pins_match_pyproject_version(module: ModuleType) -> None:
+    """The live pre-commit examples must already pin the current release."""
+    with (_REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        version = str(tomllib.load(handle)["project"]["version"])
+    text = (_REPO_ROOT / "docs" / "pre-commit.md").read_text(encoding="utf-8")
+    updated = module.update_pre_commit_rev_pins(text=text, version=version)
+    assert_that(updated).is_equal_to(text)
