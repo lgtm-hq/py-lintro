@@ -224,6 +224,8 @@ validation channels (see "Validation-only switches" below and
   always reports and is safe to require
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
   **test-built-package.yml**, **build-binaries.yml**, **publish-binaries.yml**
+- **pr-size.yml** — Labels PRs `size:XS`…`size:XL` from effective diff lines
+  (`scripts/ci/pr-size-label.py`; `pull_request_target`, base-ref checkout only)
 
 ## Binary release stages
 
