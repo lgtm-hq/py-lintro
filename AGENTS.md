@@ -14,13 +14,13 @@ fresh shell can't find `uv`).
 
 ## Running / linting / testing / building
 
-Standard commands live in the `Makefile` and `docs/contributing.md`; prefer those. All
+Standard commands live in the `justfile` and `docs/contributing.md`; prefer those. All
 commands run through `uv` (do not call bare `python`/`pytest`):
 
 - Run the CLI: `uv run lintro check .`, `uv run lintro format .`,
   `uv run lintro list-tools`.
-- Lint: `make lint` (runs `mypy` then `lintro check .`); type-check only: `make mypy`.
-- Test: `uv run pytest` (or `make test`, which wraps pytest via lintro with coverage).
+- Lint: `just lint` (runs `mypy` then `lintro check .`); type-check only: `just mypy`.
+- Test: `uv run pytest` (or `just test`, which wraps pytest via lintro with coverage).
 - Build a wheel/sdist: `uv build`.
 
 ## Non-obvious gotchas
@@ -50,5 +50,5 @@ commands run through `uv` (do not call bare `python`/`pytest`):
 
 ## Docs site (optional secondary product)
 
-`apps/site` is an Astro + Pagefind docs site built with `bun` (`make site-dev`,
-`make site-build`). It is not required to develop or test the CLI.
+`apps/site` is an Astro + Pagefind docs site built with `bun` (`just site-dev`,
+`just site-build`). It is not required to develop or test the CLI.

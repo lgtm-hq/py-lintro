@@ -174,6 +174,7 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | Script                          | Purpose                                                    | Usage                                                    |
 | ------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
 | `build.sh`                      | Build the docs site for GitHub Pages                       | `./scripts/ci/site/build.sh --help`                      |
+| `dev.sh`                        | Run the docs site Astro dev server                         | `./scripts/ci/site/dev.sh --help`                        |
 | `check.sh`                      | Run Astro type-check (`astro check`)                       | `./scripts/ci/site/check.sh --help`                      |
 | `test.sh`                       | Run Vitest with coverage in `apps/site`                    | `./scripts/ci/site/test.sh --help`                       |
 | `test-python.sh`                | Run pytest for site maintenance scripts                    | `./scripts/ci/site/test-python.sh --help`                |

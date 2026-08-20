@@ -5,6 +5,7 @@ consistency, accuracy, and completeness.
 """
 
 import re
+import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
@@ -491,3 +492,56 @@ def test_preview_serve_disables_astro_agent_background() -> None:
     assert_that(script).described_as(
         "preview-serve.sh must default ASTRO_PREVIEW_BACKGROUND to 0",
     ).contains('ASTRO_PREVIEW_BACKGROUND="${ASTRO_PREVIEW_BACKGROUND:-0}"')
+
+
+def test_justfile_parses() -> None:
+    """Test that the developer justfile exists and parses via `just --list`.
+
+    Skips when the `just` binary is unavailable (e.g. minimal CI images) so the
+    suite stays green while still validating the recipe file wherever `just` is
+    installed.
+    """
+    assert_that(Path("justfile").exists()).is_true()
+
+    just_bin = shutil.which("just")
+    if just_bin is None:
+        pytest.skip("`just` binary not installed; skipping justfile parse check")
+
+    try:
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary resolved via shutil.which; shell=False, no user input
+            [just_bin, "--list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("`just --list` timed out")
+
+    assert_that(result.returncode).is_equal_to(0)
+    for recipe in (
+        "setup",
+        "install",
+        "lint",
+        "format",
+        "mypy",
+        "test",
+        "test-integration",
+        "test-unit",
+        "docker-build",
+        "docker-test",
+        "clean",
+        "site-dev",
+        "site-build",
+        "site-test",
+        "site-preview",
+    ):
+        assert_that(result.stdout).described_as(
+            f"justfile must expose a `{recipe}` recipe",
+        ).contains(recipe)
+
+
+def test_makefile_is_retired() -> None:
+    """The root Makefile is replaced by the justfile and must not return."""
+    assert_that(Path("Makefile").exists()).described_as(
+        "root Makefile was replaced by the justfile",
+    ).is_false()
