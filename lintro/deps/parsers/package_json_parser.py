@@ -18,6 +18,22 @@ _DEP_SECTIONS: tuple[str, ...] = (
     "optionalDependencies",
 )
 
+# Protocol prefixes that mean "not a registry semver range". Matched as
+# prefixes only, to avoid false positives like the ``1.0.0-git.1`` prerelease.
+_NON_REGISTRY_PREFIXES: tuple[str, ...] = (
+    "workspace:",
+    "file:",
+    "link:",
+    "portal:",
+    "npm:",
+    "git+",
+    "git:",
+    "github:",
+    "gitlab:",
+    "bitbucket:",
+    "bitbucket.org:",
+)
+
 
 class PackageJsonParser:
     """Parse dependency maps from ``package.json``."""
@@ -45,19 +61,7 @@ class PackageJsonParser:
             for name, version_spec in table.items():
                 if not isinstance(version_spec, str):
                     continue
-                # Skip non-registry references (workspaces, git URLs, file paths).
-                # Match protocol prefixes only — avoid false positives like
-                # ``1.0.0-git.1`` prerelease tags.
-                lowered = version_spec.lower()
-                if (
-                    lowered.startswith("workspace:")
-                    or lowered.startswith("file:")
-                    or lowered.startswith("npm:")
-                    or lowered.startswith("git+")
-                    or lowered.startswith("git:")
-                    or "://" in lowered
-                    or lowered.endswith(".git")
-                ):
+                if self._is_non_registry(version_spec):
                     continue
                 deps.append(
                     build_dependency(
@@ -69,3 +73,26 @@ class PackageJsonParser:
                 )
 
         return deps
+
+    @staticmethod
+    def _is_non_registry(version_spec: str) -> bool:
+        """Return whether a spec points somewhere other than the registry.
+
+        npm accepts protocol shorthands (``github:owner/repo``) and bare
+        ``owner/repo`` GitHub shorthands. These carry no semver comparator, so
+        classifying them would report a floating git reference as an exact pin.
+
+        Args:
+            version_spec: Raw value from a ``package.json`` dependency map.
+
+        Returns:
+            bool: ``True`` when the spec is not a registry semver range.
+        """
+        lowered = version_spec.strip().lower()
+        if lowered.startswith(_NON_REGISTRY_PREFIXES):
+            return True
+        if "://" in lowered or lowered.endswith(".git"):
+            return True
+        # Bare ``owner/repo`` (optionally ``owner/repo#ref``) GitHub shorthand.
+        # No registry semver range contains a slash.
+        return "/" in lowered

@@ -26,9 +26,14 @@ class RequirementsParser:
 
         Returns:
             list[Dependency]: Parsed dependencies.
+
+        Raises:
+            ValueError: When any line is not a valid PEP 508 requirement. The
+                check fails closed rather than silently dropping the line.
         """
         file = str(path)
         deps: list[Dependency] = []
+        invalid: list[str] = []
 
         for lineno, raw_line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
@@ -42,32 +47,23 @@ class RequirementsParser:
             if not line or "://" in line:
                 continue
 
-            dep = self._parse_line(line, file, lineno)
-            if dep is not None:
-                deps.append(dep)
+            try:
+                requirement = Requirement(line)
+            except InvalidRequirement:
+                invalid.append(f"line {lineno}: {line!r}")
+                continue
+            deps.append(
+                build_dependency(
+                    name=requirement.name,
+                    version_spec=str(requirement.specifier),
+                    ecosystem=Ecosystem.PYTHON,
+                    file=file,
+                    line=lineno,
+                ),
+            )
 
+        if invalid:
+            joined = "; ".join(invalid)
+            msg = f"invalid requirement specification(s): {joined}"
+            raise ValueError(msg)
         return deps
-
-    @staticmethod
-    def _parse_line(line: str, file: str, lineno: int) -> Dependency | None:
-        """Parse a single requirement line.
-
-        Args:
-            line: Cleaned requirement text.
-            file: Manifest path string.
-            lineno: 1-based line number.
-
-        Returns:
-            Dependency | None: Parsed dependency, or ``None`` when invalid.
-        """
-        try:
-            requirement = Requirement(line)
-        except InvalidRequirement:
-            return None
-        return build_dependency(
-            name=requirement.name,
-            version_spec=str(requirement.specifier),
-            ecosystem=Ecosystem.PYTHON,
-            file=file,
-            line=lineno,
-        )

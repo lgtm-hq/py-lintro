@@ -15,48 +15,66 @@ __all__ = ["PyprojectParser"]
 
 
 class PyprojectParser:
-    """Parse PEP 621 and Poetry dependency tables from ``pyproject.toml``."""
+    """Parse PEP 621, PEP 735 and Poetry dependency tables."""
 
     def parse(self, path: Path) -> list[Dependency]:
         """Parse dependencies from a ``pyproject.toml`` file.
 
         Reads ``[project.dependencies]``,
-        ``[project.optional-dependencies]``, and
-        ``[tool.poetry.dependencies]``.
+        ``[project.optional-dependencies]``, PEP 735
+        ``[dependency-groups]``, and ``[tool.poetry.dependencies]``.
 
         Args:
             path: Path to the ``pyproject.toml`` file.
 
         Returns:
             list[Dependency]: Parsed dependencies.
+
+        Raises:
+            ValueError: When any requirement string is not valid PEP 508. The
+                check fails closed rather than silently dropping the entry.
         """
         with path.open("rb") as handle:
             data = tomllib.load(handle)
 
         file = str(path)
         deps: list[Dependency] = []
+        invalid: list[str] = []
 
         project = data.get("project", {})
         if isinstance(project, dict):
-            deps.extend(self._parse_pep621(project, file))
+            deps.extend(self._parse_pep621(project, file, invalid))
+
+        groups = data.get("dependency-groups", {})
+        if isinstance(groups, dict):
+            deps.extend(self._parse_dependency_groups(groups, file, invalid))
 
         poetry = data.get("tool", {}).get("poetry", {})
         if isinstance(poetry, dict):
             deps.extend(self._parse_poetry(poetry, file))
 
+        if invalid:
+            joined = ", ".join(repr(entry) for entry in invalid)
+            msg = f"invalid requirement specification(s): {joined}"
+            raise ValueError(msg)
         return deps
 
-    def _parse_pep621(self, project: dict[str, Any], file: str) -> list[Dependency]:
+    def _parse_pep621(
+        self,
+        project: dict[str, Any],
+        file: str,
+        invalid: list[str],
+    ) -> list[Dependency]:
         """Parse PEP 621 ``dependencies`` and ``optional-dependencies``.
 
         Args:
             project: The ``[project]`` table.
             file: Manifest path string.
+            invalid: Accumulator for requirement strings that fail to parse.
 
         Returns:
             list[Dependency]: Parsed dependencies.
         """
-        deps: list[Dependency] = []
         raw: list[str] = []
 
         if isinstance(project.get("dependencies"), list):
@@ -68,11 +86,32 @@ class PyprojectParser:
                 if isinstance(group, list):
                     raw.extend(group)
 
-        for entry in raw:
-            dep = self._from_requirement_string(entry, file)
-            if dep is not None:
-                deps.append(dep)
-        return deps
+        return self._from_requirement_strings(raw, file, invalid)
+
+    def _parse_dependency_groups(
+        self,
+        groups: dict[str, Any],
+        file: str,
+        invalid: list[str],
+    ) -> list[Dependency]:
+        """Parse PEP 735 ``[dependency-groups]`` tables.
+
+        Args:
+            groups: The ``[dependency-groups]`` table.
+            file: Manifest path string.
+            invalid: Accumulator for requirement strings that fail to parse.
+
+        Returns:
+            list[Dependency]: Parsed dependencies.
+        """
+        raw: list[str] = []
+        for entries in groups.values():
+            if not isinstance(entries, list):
+                continue
+            # ``{include-group = "..."}`` entries are references, not
+            # requirements; the referenced group is parsed on its own.
+            raw.extend(entry for entry in entries if isinstance(entry, str))
+        return self._from_requirement_strings(raw, file, invalid)
 
     def _parse_poetry(self, poetry: dict[str, Any], file: str) -> list[Dependency]:
         """Parse ``[tool.poetry.dependencies]`` and group dependencies.
@@ -142,23 +181,34 @@ class PyprojectParser:
         return None
 
     @staticmethod
-    def _from_requirement_string(entry: str, file: str) -> Dependency | None:
-        """Build a dependency from a PEP 508 requirement string.
+    def _from_requirement_strings(
+        entries: list[str],
+        file: str,
+        invalid: list[str],
+    ) -> list[Dependency]:
+        """Build dependencies from PEP 508 requirement strings.
 
         Args:
-            entry: Requirement string (e.g. ``requests>=2.28.0``).
+            entries: Requirement strings (e.g. ``requests>=2.28.0``).
             file: Manifest path string.
+            invalid: Accumulator for entries that fail to parse.
 
         Returns:
-            Dependency | None: Parsed dependency, or ``None`` when invalid.
+            list[Dependency]: Parsed dependencies.
         """
-        try:
-            requirement = Requirement(entry)
-        except InvalidRequirement:
-            return None
-        return build_dependency(
-            name=requirement.name,
-            version_spec=str(requirement.specifier),
-            ecosystem=Ecosystem.PYTHON,
-            file=file,
-        )
+        deps: list[Dependency] = []
+        for entry in entries:
+            try:
+                requirement = Requirement(entry)
+            except InvalidRequirement:
+                invalid.append(entry)
+                continue
+            deps.append(
+                build_dependency(
+                    name=requirement.name,
+                    version_spec=str(requirement.specifier),
+                    ecosystem=Ecosystem.PYTHON,
+                    file=file,
+                ),
+            )
+        return deps

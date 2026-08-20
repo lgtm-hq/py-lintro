@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from assertpy import assert_that
 
 from lintro.config.deps_config import DepsConfig, DepsPolicy, PackageException
 from lintro.deps.models import Dependency, Ecosystem, VersionSpecType
+from lintro.deps.parsers import parse_file
 from lintro.deps.policy_engine import PolicyEngine
 
 
@@ -128,3 +132,107 @@ def test_get_preset_rules_custom_falls_back_to_flexible() -> None:
     engine = PolicyEngine(DepsConfig(policy=DepsPolicy.FLEXIBLE))
     rules = engine.get_preset_rules(DepsPolicy.CUSTOM)
     assert_that(rules.require_upper_bound).is_true()
+
+
+def test_unknown_custom_type_name_is_rejected() -> None:
+    """A typo in a custom type list fails closed instead of dropping a rule."""
+    config = DepsConfig(
+        policy=DepsPolicy.CUSTOM,
+        allowed_types=["exact"],
+        disallowed_types=["unbounded", "unbouded"],
+    )
+    assert_that(PolicyEngine).raises(ValueError).when_called_with(config).contains(
+        "unbouded",
+    )
+
+
+def test_unknown_exception_type_name_is_rejected() -> None:
+    """A typo in a package exception's allowed_types fails closed."""
+    config = DepsConfig(
+        policy=DepsPolicy.STRICT,
+        exceptions=[PackageException(package="boto3", allowed_types=["exac"])],
+    )
+    assert_that(PolicyEngine).raises(ValueError).when_called_with(config).contains(
+        "exac",
+    )
+
+
+def _deps_from_manifest(tmp_path: Path, body: str, name: str) -> list[Dependency]:
+    """Parse a manifest snippet through the real parser pipeline.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+        body: Manifest contents.
+        name: Manifest file name.
+
+    Returns:
+        list[Dependency]: Dependencies classified by ``VersionAnalyzer``.
+    """
+    manifest = tmp_path / name
+    manifest.write_text(body)
+    return parse_file(manifest)
+
+
+def test_pipeline_flexible_flags_unbounded_npm_alternatives(tmp_path: Path) -> None:
+    """A real package.json flows through parser, analyzer and engine.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    deps = _deps_from_manifest(
+        tmp_path,
+        json.dumps(
+            {
+                "dependencies": {
+                    "mixed": ">=1.0.0 || >=2.0.0 <3.0.0",
+                    "wildcard-alt": "1.2.* || >=3.0.0",
+                    "hyphen": "1.2.3 - 2.3.4",
+                    "dual-major": "^1.0.0 || ^2.0.0",
+                },
+            },
+        ),
+        "package.json",
+    )
+    engine = PolicyEngine(DepsConfig(policy=DepsPolicy.FLEXIBLE))
+    flagged = {v.dependency.name for v in engine.validate(deps)}
+    assert_that(flagged).is_equal_to({"mixed", "wildcard-alt"})
+
+
+def test_pipeline_strict_flags_npm_hyphen_range(tmp_path: Path) -> None:
+    """A hyphen range is a range, so strict policy flags it as non-exact.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    deps = _deps_from_manifest(
+        tmp_path,
+        json.dumps({"dependencies": {"hyphen": "1.2.3 - 2.3.4"}}),
+        "package.json",
+    )
+    assert_that(deps[0].spec_type).is_equal_to(VersionSpecType.RANGE)
+    engine = PolicyEngine(DepsConfig(policy=DepsPolicy.STRICT))
+    assert_that(engine.validate(deps)).is_length(1)
+
+
+def test_pipeline_pyproject_groups_are_policed(tmp_path: Path) -> None:
+    """PEP 735 group members reach the policy engine.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    deps = _deps_from_manifest(
+        tmp_path,
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["requests==2.31.0"]',
+                "[dependency-groups]",
+                'dev = ["pytest>=8.0"]',
+            ],
+        ),
+        "pyproject.toml",
+    )
+    engine = PolicyEngine(DepsConfig(policy=DepsPolicy.FLEXIBLE))
+    flagged = {v.dependency.name for v in engine.validate(deps)}
+    assert_that(flagged).is_equal_to({"pytest"})

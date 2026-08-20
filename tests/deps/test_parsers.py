@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from assertpy import assert_that
@@ -239,3 +240,138 @@ def test_package_json_parser_keeps_git_prerelease(tmp_path: Path) -> None:
     names = {d.name for d in deps}
     assert_that(names).contains("demo")
     assert_that(names).does_not_contain("other")
+
+
+def test_package_json_parser_skips_host_shorthands(tmp_path: Path) -> None:
+    """Non-registry locators are skipped instead of read as exact pins.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "dependencies": {
+                    "gh": "github:owner/repo",
+                    "gl": "gitlab:owner/repo",
+                    "bb": "bitbucket:owner/repo",
+                    "short": "owner/repo#semver:^1.0.0",
+                    "linked": "link:../x",
+                    "real": "^1.0.0",
+                },
+            },
+        ),
+    )
+    deps = PackageJsonParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"real"})
+
+
+def test_pyproject_parser_dependency_groups(tmp_path: Path) -> None:
+    """PEP 735 ``[dependency-groups]`` entries are parsed.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["requests==2.31.0"]',
+                "[dependency-groups]",
+                'dev = ["pytest>=8.0", {include-group = "test"}]',
+                'test = ["coverage~=7.4"]',
+            ],
+        ),
+    )
+    deps = PyprojectParser().parse(manifest)
+    names = {d.name for d in deps}
+    assert_that(names).is_equal_to({"requests", "pytest", "coverage"})
+    assert_that(_by_name(deps, "pytest").spec_type).is_equal_to(
+        VersionSpecType.UNBOUNDED,
+    )
+
+
+def test_pyproject_parser_invalid_requirement_raises(tmp_path: Path) -> None:
+    """A malformed PEP 508 entry fails the parse instead of being dropped.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["requests>=", "click==1.0"]',
+            ],
+        ),
+    )
+    parser = PyprojectParser()
+    assert_that(parser.parse).raises(ValueError).when_called_with(
+        manifest,
+    ).contains("invalid requirement")
+
+
+def test_requirements_parser_invalid_line_raises(tmp_path: Path) -> None:
+    """A malformed requirements line fails the parse instead of being dropped.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text("requests>=2.28.0\nbroken>=\n")
+    parser = RequirementsParser()
+    assert_that(parser.parse).raises(ValueError).when_called_with(
+        manifest,
+    ).contains("line 2")
+
+
+def test_cargo_parser_workspace_dependencies(tmp_path: Path) -> None:
+    """``[workspace.dependencies]`` and ``workspace = true`` members parse.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[workspace.dependencies]",
+                'serde = "1.0.100"',
+                'anyhow = { version = ">=1.0", features = ["std"] }',
+                "[dependencies]",
+                "serde = { workspace = true }",
+                "anyhow = { workspace = true }",
+            ],
+        ),
+    )
+    deps = CargoParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"serde", "anyhow"})
+    assert_that(_by_name(deps, "serde").spec_type).is_equal_to(VersionSpecType.CARET)
+    assert_that(_by_name(deps, "anyhow").spec_type).is_equal_to(
+        VersionSpecType.UNBOUNDED,
+    )
+
+
+def test_cargo_parser_skips_unresolvable_workspace_member(tmp_path: Path) -> None:
+    """A ``workspace = true`` entry with no workspace table is skipped.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[dependencies]",
+                "serde = { workspace = true }",
+                'rand = "0.8"',
+            ],
+        ),
+    )
+    deps = CargoParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"rand"})

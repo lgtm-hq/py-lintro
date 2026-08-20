@@ -63,11 +63,18 @@ class PolicyEngine:
     def __init__(self, config: DepsConfig) -> None:
         """Initialize the engine.
 
+        Every configured spec-type name is parsed eagerly, so a typo in
+        ``allowed_types``/``disallowed_types`` (on the config or on a package
+        exception) surfaces here as a ``ValueError`` instead of silently
+        dropping the rule at validation time.
+
         Args:
             config: Resolved dependency policy configuration.
         """
         self.config = config
         self._base_rules = self._resolve_base_rules(config)
+        for exception in config.exceptions:
+            self._parse_types(exception.allowed_types)
 
     def get_preset_rules(self, preset: DepsPolicy) -> PolicyRules:
         """Return the rule set for a named policy preset.
@@ -191,7 +198,8 @@ class PolicyEngine:
 
         Returns:
             PolicyRules: Rules from the preset, or custom fields when the
-            policy is ``custom``.
+            policy is ``custom``. Propagates ``ValueError`` from
+            :meth:`_parse_types` when a spec-type name is unknown.
         """
         if config.policy is DepsPolicy.CUSTOM:
             allowed = frozenset(self._parse_types(config.allowed_types))
@@ -208,17 +216,23 @@ class PolicyEngine:
         """Convert type name strings into :class:`VersionSpecType` values.
 
         Args:
-            names: Version-spec type names (unknown names are ignored).
+            names: Version-spec type names.
 
         Returns:
             set[VersionSpecType]: The parsed types.
+
+        Raises:
+            ValueError: When a name is not a known spec type. Failing closed
+                keeps a typo in ``disallowed_types`` from dropping the rule.
         """
         parsed: set[VersionSpecType] = set()
+        known = ", ".join(sorted(t.value for t in VersionSpecType))
         for name in names:
             try:
                 parsed.add(VersionSpecType(name.strip().lower()))
-            except ValueError:
-                continue
+            except ValueError as exc:
+                msg = f"Unknown version spec type '{name}'. Known types: {known}"
+                raise ValueError(msg) from exc
         return parsed
 
     @staticmethod
