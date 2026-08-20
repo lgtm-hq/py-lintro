@@ -147,6 +147,43 @@ def _find_global_config_file() -> Path | None:
     return None
 
 
+def _is_global_tier_only(
+    candidate: Path,
+    global_file: Path | None,
+) -> bool:
+    """Report whether a discovered file belongs to the global tier only.
+
+    ``~/.lintro-config.yaml`` is the user-level global config. The upward
+    project search reaches it whenever the cwd sits under ``$HOME`` with no
+    nearer config, but it must never be adopted as a project config: doing so
+    reports one file as two tiers, empties ``global_contributed_keys``, and —
+    when the global tier is disabled — would resurrect the very file
+    ``LINTRO_GLOBAL_CONFIG=off`` exists to exclude. The currently selected
+    global file (which ``LINTRO_GLOBAL_CONFIG`` may point elsewhere) is
+    excluded on the same grounds.
+
+    Args:
+        candidate: Config file returned by the upward project search.
+        global_file: Global config file in force, if any.
+
+    Returns:
+        bool: True when the candidate must not be used as a project config.
+    """
+    try:
+        resolved = candidate.resolve()
+    except OSError:  # pragma: no cover - defensive, resolve() is strict=False
+        return False
+
+    if global_file is not None and resolved == global_file.resolve():
+        return True
+
+    try:
+        home_dotfile = (Path.home() / GLOBAL_CONFIG_FILENAME).resolve()
+    except (OSError, RuntimeError):  # pragma: no cover - no resolvable home
+        return False
+    return resolved == home_dotfile
+
+
 def _deep_merge(
     base: dict[str, Any],
     override: dict[str, Any],
@@ -1161,20 +1198,21 @@ def load_config(
         # Try searching for .lintro-config.yaml
         if not project_data:
             found_path = _find_config_file()
-            if (
-                found_path is not None
-                and global_file is not None
-                and found_path.resolve() == global_file.resolve()
+            if found_path is not None and _is_global_tier_only(
+                candidate=found_path,
+                global_file=global_file,
             ):
                 # A project directory nested under the home directory makes the
                 # upward search reach the user-level global file itself. That file
                 # is the global tier, not a project config: adopting it as both
                 # would report it twice and silently empty
                 # ``global_contributed_keys`` (every global leaf would look
-                # "overridden" by itself).
+                # "overridden" by itself). It stays global-tier-only even when the
+                # global tier is disabled, so LINTRO_GLOBAL_CONFIG=off really is
+                # hermetic instead of demoting the file to a project config.
                 logger.debug(
-                    "Upward search resolved to the global config file "
-                    f"({global_config_path}); treating it as the global tier only.",
+                    f"Upward search resolved to the global config file "
+                    f"({found_path}); it is never used as a project config.",
                 )
                 found_path = None
             if found_path:
