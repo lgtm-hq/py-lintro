@@ -535,3 +535,71 @@ def test_fix_reports_a_failed_write_batch(
     assert_that(result.success).is_false()
     assert_that(result.fixed_issues_count).is_equal_to(0)
     assert_that(result.output).contains("read-only file system")
+
+
+def test_check_reports_an_error_record_beside_findings_in_one_batch(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A per-file error is surfaced even when the same batch found typos.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    good = tmp_path / "good.txt"
+    good.write_text("teh cat\n")
+    bad = tmp_path / "bad.txt"
+    bad.write_text("unreadable\n")
+    stdout = "\n".join(
+        [
+            _typo_line("good.txt", "teh", "the"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(stdout=stdout, returncode=1),
+    ):
+        result = typos_plugin.check([str(good), str(bad)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).contains("Permission denied")
+
+
+def test_fix_does_not_write_when_a_batch_mixes_typos_and_an_error(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """An error record in the detect pass blocks ``--write-changes``.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    good = tmp_path / "good.txt"
+    good.write_text("teh cat\n")
+    bad = tmp_path / "bad.txt"
+    bad.write_text("unreadable\n")
+    stdout = "\n".join(
+        [
+            _typo_line("good.txt", "teh", "the"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+    commands: list[list[str]] = []
+
+    def _record(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        commands.append(cmd)
+        return _proc(stdout=stdout, returncode=1)
+
+    with patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record):
+        result = typos_plugin.fix([str(good), str(bad)], {})
+
+    assert_that([c for c in commands if "--write-changes" in c]).is_empty()
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("Permission denied")

@@ -19,7 +19,10 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
-from lintro.parsers.typos.typos_parser import parse_typos_output
+from lintro.parsers.typos.typos_parser import (
+    parse_typos_errors,
+    parse_typos_output,
+)
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -295,10 +298,17 @@ class TyposPlugin(BaseToolPlugin):
             issues.extend(batch_issues)
             if proc.output:
                 outputs.append(proc.output)
-            # typos exits 0 when clean and 2 when it reports typos. A non-zero
-            # exit with nothing parseable is a real failure, and it is tracked
-            # per batch: a sibling batch that did report typos must not hide it.
-            if not proc.success and not batch_issues:
+            # typos exits 0 when clean and 2 when it reports typos. Failures
+            # are tracked per batch so a sibling batch that did report typos
+            # cannot hide them. Two signals matter, because a single batch can
+            # both report a typo for one file and fail on another:
+            #   1. explicit ``error`` records on stdout (unreadable file, ...);
+            #   2. a non-zero exit with nothing parseable at all (bad config,
+            #      a usage error typos only wrote to stderr).
+            batch_errors = parse_typos_errors(output=proc.stdout)
+            if batch_errors:
+                fatal_outputs.extend(batch_errors)
+            elif not proc.success and not batch_issues:
                 fatal_outputs.append(proc.output or "")
         return _BatchOutcome(
             issues=issues,

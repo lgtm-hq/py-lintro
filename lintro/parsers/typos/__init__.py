@@ -5,9 +5,13 @@ by ``skills/lintro-verify``.
 """
 
 from lintro.parsers.typos.typos_issue import TyposIssue
-from lintro.parsers.typos.typos_parser import parse_typos_output
+from lintro.parsers.typos.typos_parser import (
+    parse_typos_errors,
+    parse_typos_output,
+)
 
 __all__ = [
     "TyposIssue",
+    "parse_typos_errors",
     "parse_typos_output",
 ]

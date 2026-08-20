@@ -52,6 +52,43 @@ def _build_message(typo: str, corrections: list[str]) -> str:
     return f'"{typo}" should be {joined}'
 
 
+def parse_typos_errors(output: str | None) -> list[str]:
+    """Extract typos' ``error`` diagnostics from its JSON output.
+
+    typos reports per-file problems (unreadable file, decode failure, ...) as
+    ``{"type": "error", "path": ..., "msg": ...}`` records interleaved with the
+    ``typo`` findings on stdout. Those must be surfaced as tool failures even
+    when the same run also reported real typos for other files, so they are
+    parsed separately from :func:`parse_typos_output`.
+
+    Args:
+        output: Raw stdout from ``typos --format json``, or None.
+
+    Returns:
+        One human-readable message per ``error`` record, in output order.
+        Empty when the input is empty, None, or free of error records.
+    """
+    if not output:
+        return []
+
+    messages: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(record, dict) or record.get("type") != "error":
+            continue
+        msg = record.get("msg")
+        path = record.get("path")
+        detail = str(msg) if msg is not None else "typos reported an error"
+        messages.append(f"{path}: {detail}" if isinstance(path, str) else detail)
+    return messages
+
+
 def parse_typos_output(output: str | None) -> list[TyposIssue]:
     """Parse typos JSON output into issues.
 

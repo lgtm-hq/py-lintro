@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.parsers.typos.typos_parser import parse_typos_output
+from lintro.parsers.typos.typos_parser import (
+    parse_typos_errors,
+    parse_typos_output,
+)
 
 from .conftest import make_typo_record
 
@@ -127,3 +130,31 @@ def test_findings_with_corrections_are_fixable() -> None:
     issues = parse_typos_output(output)
 
     assert_that(issues[0].fixable).is_true()
+
+
+def test_error_records_are_extracted_separately() -> None:
+    """``error`` records are reported as diagnostics, not as findings."""
+    output = "\n".join(
+        [
+            make_typo_record(path="good.txt"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+
+    assert_that(parse_typos_output(output)).is_length(1)
+    assert_that(parse_typos_errors(output)).is_equal_to(
+        ["bad.txt: Permission denied"],
+    )
+
+
+def test_error_records_without_a_path_still_report() -> None:
+    """A pathless error record still yields a readable message."""
+    output = '{"type":"error","msg":"config is invalid"}'
+
+    assert_that(parse_typos_errors(output)).is_equal_to(["config is invalid"])
+
+
+def test_no_error_records_yields_no_diagnostics() -> None:
+    """Clean output produces no diagnostics."""
+    assert_that(parse_typos_errors(make_typo_record())).is_empty()
+    assert_that(parse_typos_errors(None)).is_empty()

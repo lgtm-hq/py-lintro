@@ -25,6 +25,23 @@ fi
 export RUFF_UNSAFE_FIXES=true
 echo -e "${YELLOW}Enabled unsafe fixes for local development (RUFF_UNSAFE_FIXES=true)${NC}"
 
+# install-tools.sh --local drops binaries into ~/.local/bin. Its own PATH
+# export dies with that subprocess, so add the directory here too — otherwise
+# a tool this script just installed is still invisible to the lintro run below
+# on a fresh shell that does not already have ~/.local/bin on PATH.
+add_local_bin_to_path() {
+	local local_bin="$HOME/.local/bin"
+	case ":$PATH:" in
+	*":$local_bin:"*) ;;
+	*)
+		export PATH="$local_bin:$PATH"
+		echo -e "${YELLOW}Added $local_bin to PATH for this run.${NC}"
+		echo -e "${YELLOW}Add it to your shell profile to make this permanent:${NC}"
+		echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+		;;
+	esac
+}
+
 # Function to check if tools are installed
 check_and_install_tools() {
 	echo -e "${BLUE}Checking tool availability...${NC}"
@@ -56,6 +73,7 @@ check_and_install_tools() {
 			echo -e "${BLUE}Installing missing tools (non-interactive)...${NC}"
 			if [ -f "./scripts/utils/install-tools.sh" ]; then
 				./scripts/utils/install-tools.sh --local
+				add_local_bin_to_path
 			else
 				echo -e "${RED}Error: scripts/utils/install-tools.sh not found${NC}"
 				echo -e "${YELLOW}Please run the installation script manually or ensure tools are installed${NC}"
@@ -68,6 +86,7 @@ check_and_install_tools() {
 				echo -e "${BLUE}Installing missing tools...${NC}"
 				if [ -f "./scripts/utils/install-tools.sh" ]; then
 					./scripts/utils/install-tools.sh --local
+					add_local_bin_to_path
 				else
 					echo -e "${RED}Error: scripts/utils/install-tools.sh not found${NC}"
 					echo -e "${YELLOW}Please run the installation script manually or ensure tools are installed${NC}"

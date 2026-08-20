@@ -45,7 +45,10 @@ parser-selection decision.
   into budget-sized batches by `lintro/tools/core/argv_batching.py` (shared with
   TruffleHog) and the per-batch results are merged. A batch that exits non-zero
   _without_ a parseable report is tracked separately from the merged findings, so a
-  genuine failure in one batch is never hidden by typos another batch reported.
+  genuine failure in one batch is never hidden by typos another batch reported. Two
+  signals feed that: typos' own `{"type": "error", ...}` records on stdout (which can
+  appear in the _same_ batch as real findings, e.g. one unreadable file among many), and
+  a non-zero exit with nothing parseable at all.
 - **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
   misspelled word, and its suggested corrections. `fixable` is set from whether typos
