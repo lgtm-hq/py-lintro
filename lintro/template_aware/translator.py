@@ -93,23 +93,21 @@ def translate_issue(
         return issue
 
     new_line = source_map.lookup_line(issue.line)
-    updates: dict[str, str | int] = {
-        "file": source_map.original_path,
-        "line": new_line,
-    }
-    end_line = getattr(issue, "end_line", None)
+    updated = replace(
+        issue,
+        file=source_map.original_path,
+        line=new_line,
+    )
+    end_line = getattr(updated, "end_line", None)
     if isinstance(end_line, int) and end_line > 0:
         mapped_end = source_map.lookup_line(end_line)
-        field_names = (
-            {item.name for item in fields(issue)} if is_dataclass(issue) else set()
-        )
-        if "end_line" in field_names:
-            updates["end_line"] = mapped_end
-            return replace(issue, **updates)
-        updated = replace(issue, **updates)
-        object.__setattr__(updated, "end_line", mapped_end)
-        return updated
-    return replace(issue, **updates)
+        if is_dataclass(updated) and any(
+            item.name == "end_line" for item in fields(updated)
+        ):
+            # ``end_line`` is not on IssueT, so replace() cannot be typed.
+            # object.__setattr__ works for both mutable and frozen dataclasses.
+            object.__setattr__(updated, "end_line", mapped_end)
+    return updated
 
 
 def translate_issues(

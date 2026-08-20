@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -163,8 +162,9 @@ def test_prepare_execution_templates_only_still_runs(
         assert_that(result).does_not_contain_key("early_result")
         assert_that(result["files"]).is_not_empty()
         cwd = os.path.abspath(result["cwd"])
-        assert_that(cwd).does_not_start_with(tempfile.gettempdir())
+        assert_that("lintro-template-aware-" in cwd).is_false()
         assert_that(cwd).is_equal_to(os.path.abspath(str(tmp_path)))
+        assert_that(cwd).is_not_equal_to("/")
     finally:
         session = result.get("template_session")
         if session is not None:
@@ -226,9 +226,7 @@ def test_prepare_execution_cwd_stays_in_project_with_mixed_files(
         assert_that(cwd).is_equal_to(os.path.abspath(str(tmp_path)))
         assert_that(cwd).is_not_equal_to("/")
         rendered_rel = [
-            path
-            for path in result["rel_files"]
-            if "lintro-template-aware-" in path
+            path for path in result["rel_files"] if "lintro-template-aware-" in path
         ]
         assert_that(rendered_rel).is_not_empty()
         assert_that(os.path.isabs(rendered_rel[0])).is_true()
