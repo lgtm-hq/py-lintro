@@ -22,7 +22,10 @@ def test_check_clean_file(black_plugin: BlackPlugin, tmp_path: Path) -> None:
     py_file = tmp_path / "module.py"
     py_file.write_text('"""Module."""\n')
 
-    with patch.object(black_plugin, "_run_subprocess", return_value=(True, "")):
+    with (
+        patch.object(black_plugin, "_run_subprocess", return_value=(True, "")),
+        patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
+    ):
         result = black_plugin.check([str(py_file)], {})
 
     assert_that(result.success).is_true()
@@ -41,10 +44,13 @@ def test_check_needs_reformat(black_plugin: BlackPlugin, tmp_path: Path) -> None
 
     output = f"would reformat {py_file}\n"
 
-    with patch.object(
-        black_plugin,
-        "_run_subprocess",
-        return_value=(False, output),
+    with (
+        patch.object(
+            black_plugin,
+            "_run_subprocess",
+            return_value=(False, output),
+        ),
+        patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
     ):
         result = black_plugin.check([str(py_file)], {})
 

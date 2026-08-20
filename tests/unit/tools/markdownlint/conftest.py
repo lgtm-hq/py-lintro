@@ -17,15 +17,8 @@ def markdownlint_plugin() -> Generator[MarkdownlintPlugin, None, None]:
     Yields:
         MarkdownlintPlugin: A MarkdownlintPlugin instance with version checks mocked.
     """
-    with (
-        patch.object(
-            MarkdownlintPlugin,
-            "_verify_tool_version",
-            return_value=None,
-        ),
-        patch(
-            "lintro.plugins.execution_preparation.verify_tool_version",
-            return_value=None,
-        ),
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
     ):
         yield MarkdownlintPlugin()

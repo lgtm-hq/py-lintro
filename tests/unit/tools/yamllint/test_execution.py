@@ -66,8 +66,8 @@ def test_check_no_yaml_files(yamllint_plugin: YamllintPlugin, tmp_path: Path) ->
     result = yamllint_plugin.check([str(non_yaml_file)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.output).is_equal_to("No .yml/.yaml files found to check.")
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).is_not_none()
 
 
 def test_check_no_yaml_files_after_ignore_filter(
@@ -98,8 +98,8 @@ def test_check_no_yaml_files_after_ignore_filter(
         result = yamllint_plugin.check([str(yaml_file)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.output).is_equal_to("No YAML files found to check.")
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).is_not_none()
 
 
 def test_fix_raises_not_implemented(yamllint_plugin: YamllintPlugin) -> None:

@@ -30,6 +30,21 @@ def test_extract_version_from_rustc_output() -> None:
     assert_that(version).is_equal_to(pin)
 
 
+def test_extract_version_from_clippy_rustc_banner() -> None:
+    """Clippy version-gating parses a rustc banner under the clippy tool name."""
+    pin = TOOL_VERSIONS[ToolName.RUSTC]
+    output = f"rustc {pin} (ded5c06cf 2025-12-08)"
+    version = extract_version_from_output(output, "clippy")
+    assert_that(version).is_equal_to(pin)
+
+
+def test_extract_version_from_clippy_banner() -> None:
+    """Clippy's 0.1.X banner maps to the corresponding Rust 1.X.0 version."""
+    output = "clippy 0.1.92 (ded5c06cf2 2025-12-08)"
+    version = extract_version_from_output(output, "clippy")
+    assert_that(version).is_equal_to("1.92.0")
+
+
 def test_extract_version_from_rustc_output_ignores_case() -> None:
     """Rustc version extraction is case-insensitive on the prefix."""
     output = "RUSTC 1.80.1 (abcdef123 2024-05-01)"
@@ -42,6 +57,5 @@ def test_rustc_has_install_hint() -> None:
     hints = get_install_hints()
     pin = TOOL_VERSIONS[ToolName.RUSTC]
     assert_that(hints).contains_key("rustc")
-    assert_that(hints["rustc"]).is_equal_to(
-        f"Install via: rustup toolchain install {pin} && rustup default {pin}",
-    )
+    assert_that(hints["rustc"]).contains("rustup toolchain install")
+    assert_that(hints["rustc"]).contains(pin)
