@@ -84,6 +84,8 @@ def test_check_bare_file_does_not_crash(
 
     assert_that(isinstance(result, ToolResult)).is_true()
     assert_that(result.name).is_equal_to("phpstan")
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_check_empty_directory(

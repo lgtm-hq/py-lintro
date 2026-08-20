@@ -100,7 +100,7 @@ def parse_phpstan_output(output: str | None) -> list[PhpstanIssue]:
 
     if not isinstance(data, dict):
         logger.warning(
-            "PHPStan output must be a JSON object, got %s",
+            "PHPStan output must be a JSON object, got {}",
             type(data).__name__,
         )
         return []

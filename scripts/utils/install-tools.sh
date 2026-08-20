@@ -1918,6 +1918,18 @@ main() {
 			else
 				echo -e "${RED}✗ rustfmt: not found (requires rustup component add rustfmt)${NC}"
 			fi
+		elif [ "$tool" = "phpstan" ]; then
+			# PHPStan is a PHAR; --version needs a PHP interpreter. Skip
+			# verification when the install path skipped PHPStan for lack of
+			# php, so a stale phpstan on PATH cannot report success.
+			if ! command -v php &>/dev/null; then
+				echo -e "${YELLOW}⚠ phpstan: skipped (PHP runtime not found)${NC}"
+			elif command -v phpstan &>/dev/null; then
+				version=$(phpstan --version 2>/dev/null || echo "installed")
+				echo -e "${GREEN}✓ phpstan: $version${NC}"
+			else
+				echo -e "${RED}✗ phpstan: not found in PATH${NC}"
+			fi
 		elif command -v "$tool" &>/dev/null; then
 			version=$("$tool" --version 2>/dev/null || echo "installed")
 			echo -e "${GREEN}✓ $tool: $version${NC}"

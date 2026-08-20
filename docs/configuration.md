@@ -2564,15 +2564,17 @@ parameters:
         - src
 ```
 
-When a `phpstan.neon` config is present, PHPStan reads the analysis level from it and
-lintro does not inject a `--level`. When no config exists, lintro runs with `--level=0`
-(the most conservative level, minimizing false positives on files without an
-autoloader).
+When a `phpstan.neon` config **defines** `level`, lintro does not inject `--level`
+and PHPStan reads it from the file. A paths-only neon that does not set `level` still
+gets `--level=0` so PHPStan has the required level. Passing
+`--tool-options phpstan:level=N` always forwards `--level N` (CLI wins). When no
+config exists, lintro runs with `--level=0` (the most conservative level, minimizing
+false positives on files without an autoloader).
 
 **Lintro options via `--tool-options`:**
 
 ```bash
-# Raise the analysis level (0-9); ignored when phpstan.neon sets the level
+# Raise the analysis level (0-9); always forwarded, including when a neon exists
 lintro check --tools phpstan --tool-options "phpstan:level=6"
 
 # Point at an explicit configuration file
@@ -2586,7 +2588,7 @@ lintro check --tools phpstan --tool-options "phpstan:memory_limit=1G"
 
 | Option          | Type | Description                                                      |
 | --------------- | ---- | ---------------------------------------------------------------- |
-| `level`         | int  | Analysis strictness 0-9 (default 0; ignored when config sets it) |
+| `level`         | int  | Analysis strictness 0-9 (default 0; not injected when config sets it; CLI override is still forwarded) |
 | `configuration` | str  | Path to a PHPStan configuration file                             |
 | `memory_limit`  | str  | Memory limit passed to PHPStan (e.g. `512M`, `1G`)               |
 

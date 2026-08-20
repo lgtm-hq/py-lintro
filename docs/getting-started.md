@@ -123,8 +123,8 @@ order and for what changed.
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
-- `phpstan` - PHP static analysis (`brew install phpstan` or
-  `composer require --dev phpstan/phpstan`; requires PHP)
+- `phpstan` - PHP static analysis (`brew install php phpstan` or
+  `composer require --dev phpstan/phpstan`; requires a PHP runtime)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)

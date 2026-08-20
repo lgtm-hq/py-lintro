@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -18,9 +19,11 @@ from lintro.tools.core.command_builders import (
     CommandBuilder,
     CommandBuilderRegistry,
     NodeJSBuilder,
+    PhpstanBuilder,
     PytestBuilder,
     PythonBundledBuilder,
     StandaloneBuilder,
+    find_local_composer_binary,
     find_local_node_binary,
     pinned_npm_spec,
 )
@@ -823,6 +826,97 @@ def test_find_local_node_binary_stops_at_nested_package_json(
 
     assert_that(found).is_none()
     assert_that(root_bin.is_file()).is_true()
+
+
+def _write_local_composer_binary(root: Path, binary_name: str) -> Path:
+    """Create a fake ``vendor/bin`` executable under *root*.
+
+    Args:
+        root: Directory that should contain ``vendor/bin``.
+        binary_name: Executable name.
+
+    Returns:
+        Path to the created executable.
+    """
+    local_bin = root / "vendor" / "bin"
+    local_bin.mkdir(parents=True, exist_ok=True)
+    binary = local_bin / binary_name
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    return binary
+
+
+def test_find_local_composer_binary_walks_up_to_project_root(tmp_path: Path) -> None:
+    """Resolution walks up so subdirectories still find the Composer install.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "composer.json").write_text("{}\n")
+    binary = _write_local_composer_binary(tmp_path, "phpstan")
+    nested = tmp_path / "src" / "App"
+    nested.mkdir(parents=True)
+
+    found = find_local_composer_binary("phpstan", start=nested)
+
+    assert_that(found).is_equal_to(binary.resolve().as_posix())
+
+
+def test_find_local_composer_binary_returns_none_when_absent(tmp_path: Path) -> None:
+    """No local Composer install resolves to None.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    found = find_local_composer_binary("phpstan", start=tmp_path)
+    assert_that(found).is_none()
+
+
+def test_find_local_composer_binary_ignores_decoy_above_composer_json(
+    tmp_path: Path,
+) -> None:
+    """A ``vendor/bin`` above the nearest ``composer.json`` is not used.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    decoy = _write_local_composer_binary(tmp_path, "phpstan")
+    project = tmp_path / "project"
+    nested = project / "src"
+    nested.mkdir(parents=True)
+    (project / "composer.json").write_text("{}\n")
+
+    found = find_local_composer_binary("phpstan", start=nested)
+
+    assert_that(found).is_none()
+    assert_that(decoy.is_file()).is_true()
+
+
+def test_phpstan_builder_prefers_vendor_bin_over_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PhpstanBuilder uses ``vendor/bin/phpstan`` even when PATH has phpstan.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "composer.json").write_text("{}\n")
+    local = _write_local_composer_binary(tmp_path, "phpstan")
+    path_dir = tmp_path / "pathbin"
+    path_dir.mkdir()
+    path_phpstan = path_dir / "phpstan"
+    path_phpstan.write_text("#!/bin/sh\n")
+    path_phpstan.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{path_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    cmd = PhpstanBuilder().get_command_in(
+        tool_name="phpstan",
+        tool_name_enum=ToolName.PHPSTAN,
+        cwd=tmp_path,
+    )
+    assert_that(cmd).is_equal_to([local.resolve().as_posix()])
 
 
 def test_node_tool_prefers_path_binary_over_bunx(

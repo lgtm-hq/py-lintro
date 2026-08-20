@@ -8,8 +8,9 @@ reports a wide range of correctness issues at a configurable strictness
 
 from __future__ import annotations
 
+import re
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,11 +39,10 @@ PHPSTAN_FILE_PATTERNS: list[str] = ["*.php"]
 PHPSTAN_OUTPUT_FORMAT: str = "json"
 
 # PHPStan requires an analysis level (0-9). When the project ships no
-# ``phpstan.neon`` config, lintro runs with the most conservative level so
-# that standalone files without an autoloader produce the fewest false
-# positives. Projects that want stricter analysis add a ``phpstan.neon`` with
-# their chosen ``level:`` and lintro defers to it (mirrors ruff/rubocop running
-# with defaults, while still respecting native config when present).
+# ``phpstan.neon`` (or the neon does not define ``level``), lintro runs with
+# the most conservative level so standalone files without an autoloader
+# produce the fewest false positives. A neon that sets ``level:`` wins unless
+# the user passed ``phpstan:level=N``, which is always forwarded.
 PHPSTAN_DEFAULT_LEVEL: int = 0
 PHPSTAN_MIN_LEVEL: int = 0
 PHPSTAN_MAX_LEVEL: int = 9
@@ -53,6 +53,57 @@ PHPSTAN_NATIVE_CONFIGS: list[str] = [
     "phpstan.dist.neon",
 ]
 
+# Uncommented neon ``level:`` assignment (not a mention inside another value).
+_LEVEL_LINE_RE = re.compile(r"^[ \t]*level[ \t]*:")
+
+_CRASH_NO_OUTPUT: str = (
+    "PHPStan execution failed with no output.\n"
+    "Re-run with LINTRO_LOG_LEVEL=DEBUG for details."
+)
+
+
+def config_defines_level(config_path: Path) -> bool:
+    """Return whether a PHPStan neon/config file assigns ``level``.
+
+    PHPStan requires a level from config or ``--level``. A paths-only neon
+    does not satisfy that, so lintro must still inject a CLI level.
+
+    Args:
+        config_path: Path to a neon (or other) PHPStan configuration file.
+
+    Returns:
+        True when an uncommented ``level:`` assignment is present.
+    """
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _LEVEL_LINE_RE.match(line):
+            return True
+    return False
+
+
+def crash_output(*, stderr: str, stdout: str) -> str:
+    """Build ToolResult output for a crashed PHPStan run.
+
+    PHP fatals and truncated JSON land on stdout while stderr often holds
+    only the AI-guidance preamble. Both streams must be shown when nothing
+    was parsed as issues.
+
+    Args:
+        stderr: Captured standard error (may be empty).
+        stdout: Captured standard output (may be empty).
+
+    Returns:
+        Joined non-empty streams, or a generic failure message.
+    """
+    joined = "\n".join(part for part in (stderr, stdout) if part)
+    return joined or _CRASH_NO_OUTPUT
+
 
 @register_tool
 @dataclass
@@ -62,6 +113,8 @@ class PhpstanPlugin(BaseToolPlugin):
     This plugin integrates PHPStan with Lintro for static analysis of PHP
     files. It is check-only and does not support automatic fixing.
     """
+
+    _level_explicit: bool = field(default=False, init=False, repr=False)
 
     @property
     def definition(self) -> ToolDefinition:
@@ -100,8 +153,9 @@ class PhpstanPlugin(BaseToolPlugin):
         """Set PHPStan-specific options.
 
         Args:
-            level: Analysis strictness level (0-9). Ignored when a native
-                ``phpstan.neon`` configuration defines the level.
+            level: Analysis strictness level (0-9). Always forwarded as
+                ``--level`` when set. The injected default is omitted only
+                when a config file actually defines ``level``.
             configuration: Path to a PHPStan configuration file.
             memory_limit: Memory limit passed to PHPStan (e.g. ``512M``).
             **kwargs: Other tool options.
@@ -113,6 +167,7 @@ class PhpstanPlugin(BaseToolPlugin):
                 min_value=PHPSTAN_MIN_LEVEL,
                 max_value=PHPSTAN_MAX_LEVEL,
             )
+            self._level_explicit = True
         validate_str(configuration, "configuration")
         validate_str(memory_limit, "memory_limit")
 
@@ -123,26 +178,46 @@ class PhpstanPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
-    def _has_native_config(self, run_cwd: str | None = None) -> bool:
-        """Check whether a PHPStan configuration file is discoverable.
-
-        PHPStan auto-discovers ``phpstan.neon`` / ``phpstan.neon.dist`` /
-        ``phpstan.dist.neon`` from the directory it runs in. When one is
-        present it defines the analysis level, so lintro must not also pass
-        ``--level`` (which would either be redundant or conflict). The check
-        must look at the same directory the subprocess will run from, not
-        lintro's own cwd — otherwise a repo-root config can suppress --level
-        while the subprocess never discovers that config.
+    def _resolve_config_path(self, run_cwd: str | None = None) -> Path | None:
+        """Return the PHPStan config file the subprocess will see, if any.
 
         Args:
             run_cwd: Directory the PHPStan subprocess will execute from;
                 defaults to the current working directory.
 
         Returns:
-            True when a native config file exists in the run directory.
+            Path to an explicit ``--configuration`` file or a native neon in
+            the run directory, or None when neither is present.
         """
         cwd = Path(run_cwd) if run_cwd else Path.cwd()
-        return any((cwd / name).is_file() for name in PHPSTAN_NATIVE_CONFIGS)
+        configuration = self.options.get("configuration")
+        if configuration:
+            path = Path(str(configuration))
+            if not path.is_absolute():
+                path = cwd / path
+            return path if path.is_file() else None
+        for name in PHPSTAN_NATIVE_CONFIGS:
+            candidate = cwd / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _should_pass_level(self, run_cwd: str | None = None) -> bool:
+        """Return whether ``--level`` should be added to the command.
+
+        Args:
+            run_cwd: Directory the subprocess will execute from.
+
+        Returns:
+            True when the user set ``phpstan:level`` or the config does not
+            define ``level`` (so PHPStan still receives a required level).
+        """
+        if self._level_explicit:
+            return True
+        config_path = self._resolve_config_path(run_cwd=run_cwd)
+        if config_path is None:
+            return True
+        return not config_defines_level(config_path)
 
     def _build_command(
         self,
@@ -154,25 +229,25 @@ class PhpstanPlugin(BaseToolPlugin):
         Args:
             files: Relative file paths that should be analysed by PHPStan.
             run_cwd: Directory the subprocess will execute from (used for
-                native-config discovery).
+                vendor/bin and native-config discovery).
 
         Returns:
             A list of command arguments ready to be executed.
         """
-        cmd: list[str] = self._get_executable_command("phpstan")
+        cmd: list[str] = self._get_executable_command(
+            tool_name="phpstan",
+            cwd=run_cwd,
+        )
         cmd.append("analyse")
         cmd.extend(["--error-format", PHPSTAN_OUTPUT_FORMAT])
         cmd.append("--no-progress")
         cmd.append("--no-interaction")
 
         configuration = self.options.get("configuration")
-        has_explicit_config = bool(configuration)
         if configuration:
             cmd.extend(["--configuration", str(configuration)])
 
-        # Only pass --level when the project provides no native config that
-        # already defines it (config-defined level wins, like ruff/mypy).
-        if not has_explicit_config and not self._has_native_config(run_cwd):
+        if self._should_pass_level(run_cwd=run_cwd):
             level = self.options.get("level", PHPSTAN_DEFAULT_LEVEL)
             cmd.extend(["--level", str(level)])
 
@@ -271,11 +346,7 @@ class PhpstanPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(
-                    stderr
-                    or "PHPStan execution failed with no output.\n"
-                    "Re-run with LINTRO_LOG_LEVEL=DEBUG for details."
-                ),
+                output=crash_output(stderr=stderr, stdout=stdout),
                 issues_count=0,
             )
 

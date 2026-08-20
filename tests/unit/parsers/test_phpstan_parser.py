@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
@@ -131,6 +132,29 @@ def test_parse_invalid_json() -> None:
 def test_parse_non_object_json() -> None:
     """A non-object JSON root returns an empty list."""
     assert_that(parse_phpstan_output(output=json.dumps([1, 2, 3]))).is_equal_to([])
+
+
+def test_parse_non_object_json_logs_type_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The invalid-root warning uses loguru braces and includes the type name.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    recorded: list[tuple[str, tuple[object, ...]]] = []
+
+    def fake_warning(message: str, *args: object, **_kwargs: object) -> None:
+        recorded.append((message, args))
+
+    monkeypatch.setattr(
+        "lintro.parsers.phpstan.phpstan_parser.logger.warning",
+        fake_warning,
+    )
+    parse_phpstan_output(output=json.dumps([1, 2, 3]))
+    assert_that(recorded).is_length(1)
+    message, args = recorded[0]
+    assert_that(message).contains("{}")
+    assert_that(message).does_not_contain("%s")
+    assert_that(args[0]).is_equal_to("list")
 
 
 def test_parse_missing_files_key() -> None:

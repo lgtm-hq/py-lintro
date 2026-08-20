@@ -485,6 +485,41 @@ def find_local_node_binary(
     return None
 
 
+def find_local_composer_binary(
+    binary_name: str,
+    *,
+    start: Path | None = None,
+) -> str | None:
+    """Find a consumer-local ``vendor/bin`` executable.
+
+    Walks up from *start* so a tool invoked from a subdirectory still resolves
+    the project's Composer install. A local ``vendor/bin`` install is the
+    documented per-project path (``composer require --dev …``) and must win
+    over a different binary on ``PATH``.
+
+    The walk stops at the nearest ancestor that contains ``composer.json`` or
+    ``.git`` (a file or directory). That marker directory is still searched;
+    directories above it are not, so a decoy ``vendor/bin`` outside the
+    project cannot win.
+
+    Args:
+        binary_name: Executable name inside ``vendor/bin``.
+        start: Directory to start searching from. Defaults to the process
+            working directory.
+
+    Returns:
+        POSIX path to the local executable, or None when none is present.
+    """
+    origin = (start or Path.cwd()).resolve()
+    for directory in (origin, *origin.parents):
+        candidate = directory / "vendor" / "bin" / binary_name
+        if candidate.is_file():
+            return candidate.as_posix()
+        if (directory / "composer.json").is_file() or (directory / ".git").exists():
+            break
+    return None
+
+
 def pinned_npm_spec(package_name: str) -> str:
     """Build a version-pinned ``package@version`` npm spec.
 
@@ -753,6 +788,78 @@ class NodeJSBuilder(CommandBuilder):
             Command list to execute the tool.
         """
         return self._resolve(tool_name, tool_name_enum, cwd)
+
+
+@register_command_builder
+class PhpstanBuilder(CommandBuilder):
+    """Builder for PHPStan.
+
+    Prefers a project-local Composer install (``vendor/bin/phpstan``) over a
+    ``PATH`` binary so ``composer require --dev phpstan/phpstan`` is
+    discoverable. Version verification uses this same resolution, so a
+    Composer-only project is not skipped as "phpstan not found".
+    """
+
+    def can_handle(self, tool_name_enum: ToolName | None) -> bool:
+        """Check if this builder handles PHPStan.
+
+        Args:
+            tool_name_enum: Tool name enum to check.
+
+        Returns:
+            True when the tool is PHPStan.
+        """
+        from lintro.enums.tool_name import ToolName
+
+        return tool_name_enum == ToolName.PHPSTAN
+
+    def get_command(
+        self,
+        tool_name: str,
+        tool_name_enum: ToolName | None,
+    ) -> list[str]:
+        """Get command for PHPStan from the process working directory.
+
+        Args:
+            tool_name: String name of the tool.
+            tool_name_enum: Tool name enum, or None if unknown.
+
+        Returns:
+            Command list to execute PHPStan.
+        """
+        return self.get_command_in(
+            tool_name=tool_name,
+            tool_name_enum=tool_name_enum,
+            cwd=None,
+        )
+
+    def get_command_in(
+        self,
+        tool_name: str,
+        tool_name_enum: ToolName | None,
+        cwd: Path | None = None,
+    ) -> list[str]:
+        """Get command for PHPStan, resolved relative to the execution directory.
+
+        Args:
+            tool_name: String name of the tool.
+            tool_name_enum: Tool name enum, or None if unknown.
+            cwd: Directory the tool will execute in, when known.
+
+        Returns:
+            Command list preferring ``vendor/bin/phpstan`` over ``PATH``.
+        """
+        local = find_local_composer_binary("phpstan", start=cwd)
+        if local is not None:
+            logger.debug(f"Using project-local phpstan: {local}")
+            return [local]
+
+        tool_path = shutil.which("phpstan")
+        if tool_path:
+            posix_path = Path(tool_path).as_posix().replace("\\", "/")
+            logger.debug(f"Using phpstan from PATH: {posix_path}")
+            return [posix_path]
+        return [tool_name]
 
 
 @register_command_builder

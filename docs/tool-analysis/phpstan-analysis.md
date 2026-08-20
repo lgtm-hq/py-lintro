@@ -60,14 +60,16 @@ level. Lintro therefore chooses **run-with-defaults**, not skip-on-no-config (co
 stylelint/vale, which skip without config):
 
 - When the project provides **no** native config (`phpstan.neon` / `phpstan.neon.dist` /
-  `phpstan.dist.neon`), lintro injects `--level=0`. Level 0 is the most conservative
-  setting: it reports only unambiguous problems (undefined symbols, wrong argument
-  counts) that are real bugs and that do not depend on an autoloader or type
-  annotations, which keeps false positives low on standalone files.
-- When a native `phpstan.neon` **is** present, it defines the level, so lintro does
-  **not** pass `--level` and defers entirely to the project configuration (mirroring how
-  ruff/mypy respect their native config). Users who want stricter analysis add a
-  `phpstan.neon` with their chosen `level:`.
+  `phpstan.dist.neon`), or the neon does not assign `level`, lintro injects
+  `--level=0`. Level 0 is the most conservative setting: it reports only unambiguous
+  problems (undefined symbols, wrong argument counts) that are real bugs and that do
+  not depend on an autoloader or type annotations, which keeps false positives low on
+  standalone files.
+- When a native config **defines** `level`, lintro does **not** inject the default
+  `--level` and defers to the project configuration (mirroring how ruff/mypy respect
+  their native config). `--tool-options phpstan:level=N` is still forwarded as
+  `--level N` so a CLI override cannot be dropped. Users who want stricter analysis
+  add a `phpstan.neon` with their chosen `level:` or pass the tool option.
 
 This mirrors ruff/rubocop (run with sensible defaults) while still respecting native
 configuration when it exists.
