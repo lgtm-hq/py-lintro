@@ -349,6 +349,10 @@ def test_doctor_post_fix_blocks_only_non_retryable_outcomes() -> None:
         p2,
         patch("shutil.which", return_value=None),
         patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
             "lintro.tools.core.tool_installer.ToolInstaller.plan",
             return_value=plan,
         ),
@@ -387,6 +391,10 @@ def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:
         p2,
         patch("shutil.which", return_value=None),
         patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
             "lintro.cli_utils.commands.doctor._run_fix",
             return_value=["ruff"],
         ) as mock_fix,
@@ -405,7 +413,15 @@ def test_doctor_quick_fix_lists_missing_tool_before_any_fix() -> None:
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
-    with p1, p2, patch("shutil.which", return_value=None):
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+    ):
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.output).contains("Quick fix: lintro install ruff")
