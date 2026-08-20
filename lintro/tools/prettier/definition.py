@@ -9,6 +9,7 @@ re-printing code.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from loguru import logger
 
 from lintro._tool_versions import get_min_version
 from lintro.enums.capability import Cap
+from lintro.enums.env_bool import EnvBool
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
@@ -43,6 +45,7 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
 PRETTIER_DEFAULT_TIMEOUT: int = 120
+PRETTIER_TEST_MODE_ENV: str = "LINTRO_TEST_MODE"
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
 PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -141,6 +144,33 @@ class PrettierPlugin(BaseToolPlugin):
             line_length=line_length,
         )
         super().set_options(**options, **kwargs)
+
+    def _test_mode_isolation_args(self, cwd: str | None = None) -> list[str]:
+        """Return CLI args that isolate Prettier from ambient project ignore/config.
+
+        When ``LINTRO_TEST_MODE=1``:
+        - Always neutralize ignore-file discovery so repo ``.gitignore`` patterns
+          (e.g. bare ``var/`` matching macOS ``/var/folders`` temps) cannot hide
+          fixture files.
+        - Force ``--no-config`` only when the execution cwd has no local Prettier
+          config, so fixtures that ship a cwd-local ``.prettierrc`` (Astro plugin
+          tests) still resolve it.
+
+        Args:
+            cwd: Working directory for the Prettier invocation.
+
+        Returns:
+            Extra CLI arguments, or an empty list outside test mode.
+        """
+        if os.environ.get(PRETTIER_TEST_MODE_ENV) != EnvBool.TRUE:
+            return []
+        args: list[str] = [
+            "--ignore-path",
+            os.devnull,
+        ]
+        if cwd is None or self._find_prettier_config(search_dir=cwd) is None:
+            args.insert(0, "--no-config")
+        return args
 
     def _find_prettier_config(self, search_dir: str | None = None) -> str | None:
         """Locate prettier config file by walking up the directory tree.
@@ -371,9 +401,13 @@ class PrettierPlugin(BaseToolPlugin):
             "--check",
         ]
 
-        # Add Lintro config injection args (--no-config, --config)
+        # Add Lintro config injection args (--config) unless test mode isolates
+        isolation_args = self._test_mode_isolation_args(cwd=ctx.cwd)
         config_args = self._build_config_args()
-        if config_args:
+        if isolation_args:
+            cmd.extend(isolation_args)
+            logger.debug("[PrettierPlugin] Using test-mode config isolation")
+        elif config_args:
             cmd.extend(config_args)
             logger.debug("[PrettierPlugin] Using Lintro config injection")
         else:
@@ -452,10 +486,14 @@ class PrettierPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Get Lintro config injection args (--no-config, --config)
+        # Prefer test-mode isolation, then Lintro injection, then fallbacks.
+        isolation_args = self._test_mode_isolation_args(cwd=ctx.cwd)
         config_args = self._build_config_args()
         fallback_args: list[str] = []
-        if not config_args:
+        if isolation_args:
+            config_args = isolation_args
+            logger.debug("[PrettierPlugin] Using test-mode config isolation")
+        elif not config_args:
             # Fallback: Find config and ignore files by walking up from cwd
             found_config = self._find_prettier_config(search_dir=ctx.cwd)
             if found_config:
