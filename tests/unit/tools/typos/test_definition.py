@@ -140,6 +140,63 @@ def test_version_command_targets_the_binary() -> None:
     )
 
 
+def test_typos_is_absent_from_language_map_and_recommended_allowlist() -> None:
+    """Init's recommended profile cannot pull typos in via language detection.
+
+    typos is language-agnostic: it is not listed in ``language_map``, so
+    ``tools_for_profile("recommended", ...)`` never adds it. That is why
+    ``lintro init --profile recommended`` does not start spell-checking on
+    upgrade, while an unscoped config still can.
+    """
+    registry = ManifestRegistry.load()
+    mapped = {name for tools in registry.language_map.values() for name in tools}
+
+    assert_that(mapped).does_not_contain("typos")
+    recommended = [
+        tool.name
+        for tool in registry.tools_for_profile(
+            "recommended",
+            detected_langs=list(registry.language_map),
+        )
+    ]
+    assert_that(recommended).does_not_contain("typos")
+
+
+def test_selection_docs_name_every_config_source_and_the_allowlist() -> None:
+    """User-facing selection prose must match ``get_tools_to_run``.
+
+    A resolved config is more than ``.lintro-config.yaml``, and
+    ``execution.enabled_tools`` still filters default / ``--tools all``
+    runs after language scoping is bypassed.
+    """
+    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    analysis_doc = Path("docs/tool-analysis/typos-analysis.md").read_text(
+        encoding="utf-8",
+    )
+    section_start = config_doc.find("**When typos runs.**")
+    section_end = config_doc.find("`lintro check --tools typos`", section_start)
+    section = config_doc[section_start:section_end]
+    # Collapse markdown wrap and blockquote prefixes so prettier line breaks
+    # cannot hide the required phrases.
+    collapsed = " ".join(
+        line.lstrip("> ").strip() for line in section.splitlines() if line.strip()
+    )
+
+    assert_that(section_start).is_not_equal_to(-1)
+    assert_that(collapsed).contains("non-empty")
+    assert_that(collapsed).contains("[tool.lintro]")
+    assert_that(collapsed).contains("execution.enabled_tools")
+    assert_that(collapsed).contains("recommended profile")
+    assert_that(collapsed).contains("does **not** include typos")
+    assert_that(collapsed).contains("enabled_tools: []")
+    assert_that(collapsed).does_not_contain(
+        "typos runs as soon as the binary is on",
+    )
+    assert_that(analysis_doc).contains("execution.enabled_tools")
+    assert_that(analysis_doc).contains("non-empty")
+    assert_that(analysis_doc).contains("lintro init --profile recommended")
+
+
 def test_typos_version_output_parses(typos_plugin: TyposPlugin) -> None:
     """``typos --version`` prints the crate name first; parsing must cope.
 

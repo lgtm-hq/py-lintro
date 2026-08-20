@@ -89,13 +89,16 @@ splits selection in two:
   (`_detection_scoped_tool_names` in `lintro/utils/execution/tool_configuration.py`),
   which does not select typos on its own. It enters through the "unmapped tool with a
   native config" branch — once a `typos.toml`, `.typos.toml` or `_typos.toml` exists at
-  a scan root.
-- With **any resolved lintro config** (`.lintro-config.yaml`, a `[tool.lintro]` table in
-  `pyproject.toml`, or an in-memory `tools:` section), or under `--tools all`, the
-  detection branch is skipped entirely — the guard is
-  `tools is None and config.config_path is None and not config.tools` — so the full
-  registry runs and typos runs as soon as the binary is on `PATH`. This is the path that
-  changes behaviour for existing users, and `tools.typos.enabled: false` is the opt-out.
+  a scan root. An empty `[tool.lintro]` table is not a config (the guard is
+  `tools is None and config.config_path is None and not config.tools`), so this path
+  still applies.
+- With **any resolved lintro config** (`.lintro-config.yaml` / `.yml`, a **non-empty**
+  `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section), or under
+  `--tools all`, language scoping is skipped. Typos then runs when the binary is on
+  `PATH` **and** it is not filtered by `execution.enabled_tools` or
+  `tools.typos.enabled: false`. `lintro init --profile recommended` writes a
+  language-map `enabled_tools` allowlist that does not include typos. An unscoped config
+  (`enabled_tools: []` or omitted) will start spell-checking on upgrade.
 
 Explicit selection (`--tools typos`) works in either case.
 

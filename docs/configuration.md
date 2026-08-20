@@ -2175,15 +2175,19 @@ misspellings.
 > **When typos runs.** typos is language-agnostic, so it has no entry in the manifest's
 > `language_map`. That makes selection depend on which path a project takes:
 >
-> - **No `.lintro-config.yaml` (first run).** Tool selection comes from language
->   detection, which does not pull typos in on its own. It joins through the "unmapped
->   tool with a native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or
->   `_typos.toml` exists at a scan root.
-> - **With a `.lintro-config.yaml`, or `--tools all`.** Language scoping is bypassed and
->   the full registry runs, so **typos runs as soon as the binary is on `PATH`**, with
->   or without a `.typos.toml`. If you already keep a lintro config, this is the case
->   that applies to you: an existing unscoped `lintro check` will start spell-checking
->   the whole repository on the first run after upgrading.
+> - **No Lintro config (first run).** Tool selection comes from language detection,
+>   which does not pull typos in on its own. It joins through the "unmapped tool with a
+>   native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or `_typos.toml`
+>   exists at a scan root. An empty `[tool.lintro]` table is not a config, so this path
+>   still applies.
+> - **With a resolved Lintro config, or `--tools all`.** Language scoping is bypassed. A
+>   resolved config is `.lintro-config.yaml` (or `.yml`), a **non-empty**
+>   `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section. Typos
+>   then runs when the binary is on `PATH` **and** it is not filtered out by
+>   `execution.enabled_tools` or `tools.typos.enabled: false`. `lintro init`'s
+>   recommended profile writes a language-based `enabled_tools` allowlist that does
+>   **not** include typos, so those projects do not start spell-checking on upgrade. An
+>   existing **unscoped** `lintro check` (`enabled_tools: []` or omitted) will.
 >
 > `lintro check --tools typos` selects it explicitly in either case.
 >
