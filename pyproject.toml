@@ -176,6 +176,7 @@ packages = [
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.commitlint",
+  "lintro.parsers.cppcheck",
   "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
   "lintro.parsers.golangci_lint",
