@@ -458,7 +458,9 @@ def _output_json(
     )
 
     output: dict[str, Any] = {
-        "config_source": config.config_path or "defaults",
+        # A user-level global file is a real source; reporting "defaults" when
+        # one supplied values would contradict the global_config block (#1235).
+        "config_source": config.config_path or config.global_config_path or "defaults",
         "global_config": {
             "found": config.global_config_path is not None,
             "path": config.global_config_path,
@@ -573,7 +575,12 @@ def _output_rich(
     console.print()
 
     # Config Source Section
-    config_source = config.config_path or "[dim]No config file (using defaults)[/dim]"
+    if config.config_path:
+        config_source = config.config_path
+    elif config.global_config_path:
+        config_source = f"{config.global_config_path} [dim](user-level global)[/dim]"
+    else:
+        config_source = "[dim]No config file (using defaults)[/dim]"
     console.print(f"[bold]Config Source:[/bold] {config_source}")
     console.print()
 

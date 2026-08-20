@@ -751,6 +751,30 @@ def test_config_command_json_reports_global_config(
     )
 
 
+def test_config_command_global_only_is_not_reported_as_defaults(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A global-only config is named as the source instead of "defaults".
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    home_config = isolated_home / ".lintro-config.yaml"
+    home_config.write_text("enforce:\n  line_length: 100\n")
+    _make_project(tmp_path, monkeypatch)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["config", "--json"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["config_source"]).is_equal_to(str(home_config.resolve()))
+
+
 def test_config_command_json_no_global(
     isolated_home: Path,
     tmp_path: Path,

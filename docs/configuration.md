@@ -114,9 +114,8 @@ sections:
 1. **Built-in defaults** — the empty baseline configuration.
 2. **User-level global config** — `~/.lintro-config.yaml` (see below). Supplies base
    values shared across all your projects.
-3. **Project config** — the first of: an explicit `--config` path, an upward-searched
-   `.lintro-config.yaml` variant, or `[tool.lintro]` in `pyproject.toml`. Overrides the
-   global config per key.
+3. **Project config** — the first of: an upward-searched `.lintro-config.yaml` variant,
+   or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
 
 A value set in the global config survives only where the project config does not
 override that exact key path. A missing or empty global file is never an error.
