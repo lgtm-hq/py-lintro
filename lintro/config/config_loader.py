@@ -266,6 +266,30 @@ _SECTION_FIELD_OWNERS: dict[str, type[BaseModel]] = {
 _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
 
 
+def _with_normalized_tool_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Lowercase the ``tools`` keys of a raw config mapping.
+
+    ``_parse_tools_config`` lowercases tool names, so a global ``tools: {Ruff:
+    false}`` and a project ``tools: {ruff: {...}}`` would otherwise survive the
+    merge as two entries and the project one would silently re-enable the
+    globally disabled tool. Normalizing before the merge (and before
+    contribution tracking) makes both tiers agree on one key per tool.
+
+    Args:
+        data: Raw config mapping for one tier.
+
+    Returns:
+        dict[str, Any]: A shallow copy whose ``tools`` keys are lowercased, or
+            the input unchanged when there is no ``tools`` mapping.
+    """
+    tools = data.get("tools")
+    if not isinstance(tools, dict):
+        return data
+    normalized = dict(data)
+    normalized["tools"] = {str(name).lower(): value for name, value in tools.items()}
+    return normalized
+
+
 def _merge_tools_section(
     global_tools: dict[str, Any],
     project_tools: dict[str, Any],
@@ -1232,6 +1256,11 @@ def load_config(
                     "Using [tool.lintro] from pyproject.toml. "
                     "Consider migrating to .lintro-config.yaml",
                 )
+
+        # Tool names are case-insensitive, so both tiers must agree on one key per
+        # tool before merging or tracking contributions.
+        global_data = _with_normalized_tool_keys(global_data)
+        project_data = _with_normalized_tool_keys(project_data)
 
         # Deep-merge: global config is the base, project config overrides per key.
         data = _deep_merge(base=global_data, override=project_data)
