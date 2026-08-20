@@ -94,10 +94,10 @@ def test_build_result_filters_skipped(
         all_issues=sample_pytest_issues,
     )
     # SKIPPED issues should not be in the result.issues
-    assert_that(result.issues).is_not_none()
-    issue_statuses = {
-        cast(PytestIssue, issue).test_status for issue in result.issues
-    }
+    issues = result.issues
+    assert_that(issues).is_not_none()
+    assert issues is not None  # narrow type for mypy
+    issue_statuses = {cast(PytestIssue, issue).test_status for issue in issues}
     assert_that(issue_statuses).does_not_contain("SKIPPED")
 
 
@@ -122,5 +122,7 @@ def test_build_result_has_pytest_summary(
         summary_data=summary_data,
         all_issues=[],
     )
-    assert_that(result.pytest_summary).is_not_none()
-    assert_that(result.pytest_summary.get("passed")).is_equal_to(10)
+    pytest_summary = result.pytest_summary
+    assert_that(pytest_summary).is_not_none()
+    assert pytest_summary is not None  # narrow type for mypy
+    assert_that(pytest_summary.get("passed")).is_equal_to(10)
