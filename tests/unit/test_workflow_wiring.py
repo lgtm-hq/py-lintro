@@ -1929,7 +1929,6 @@ def test_sbom_callers_grant_contents_read_only(workflow_name: str) -> None:
     assert_that(permissions).contains_entry({"attestations": "write"})
 
 
-
 # --- Mirror release automation (#1171) ---------------------------------------
 
 _SHA_PIN_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -2043,6 +2042,7 @@ def test_mirror_release_scripts_are_executable() -> None:
         assert_that(script.stat().st_mode & 0o111).described_as(
             f"{script} is not executable",
         ).is_not_zero()
+
 
 # --- Binary build job timeouts (#1702) ---------------------------------------
 #
