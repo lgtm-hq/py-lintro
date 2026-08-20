@@ -75,8 +75,9 @@ comments so Renovate can track digest updates. Policy is enforced by
   `scripts/ci/mirror/`; see `docs/pre-commit.md`)
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
-are traceable from the Actions list rather than the default commit subject. Failure
-visibility itself lives upstream: the reusables run a `report-release-failure` job that
+are traceable from the Actions list rather than the default commit subject. The mirror
+workflow (`mirror-release.yml`) uses a fixed run name because it is triggered by release
+events rather than branch pushes. Failure visibility itself lives upstream: the reusables run a `report-release-failure` job that
 writes trigger context to the step summary and opens/updates a deduplicated GitHub issue
 on `main` failures — hence the `actions: read` + `issues: write` job permissions.
 
