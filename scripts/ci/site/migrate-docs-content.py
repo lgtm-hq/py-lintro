@@ -87,6 +87,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/mypy": ("mypy", "python"),
     "tools/osv-scanner": ("osv-scanner", "security"),
     "tools/oxc": ("oxc", "js-ts"),
+    "tools/phpstan": ("phpstan", "php"),
     "tools/pip-audit": ("pip-audit", "security"),
     "tools/prettier": ("prettier", "js-ts"),
     "tools/pydoclint": ("pydoclint", "python"),

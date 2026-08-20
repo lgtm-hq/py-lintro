@@ -29,10 +29,11 @@ from lintro.tools.core.option_validators import (
     validate_int,
     validate_str,
 )
+from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for PHPStan configuration
 PHPSTAN_DEFAULT_TIMEOUT: int = 120
-PHPSTAN_DEFAULT_PRIORITY: int = 80
+PHPSTAN_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("phpstan", 80)
 PHPSTAN_FILE_PATTERNS: list[str] = ["*.php"]
 PHPSTAN_OUTPUT_FORMAT: str = "json"
 
