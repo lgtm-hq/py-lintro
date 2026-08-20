@@ -76,13 +76,18 @@ def test_resolve_circular_extends(tmp_path: Path) -> None:
 
 
 def test_resolve_missing_extends_target(tmp_path: Path) -> None:
-    """Missing extends target is silently skipped."""
+    """Missing extends target is skipped for field merge but flagged.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     write_tsconfig(
         tmp_path / "tsconfig.json",
         {"extends": "./nonexistent.json", "include": ["src/**/*.ts"]},
     )
     info = resolve_extends_chain(tmp_path / "tsconfig.json")
     assert_that(info.include_patterns).is_equal_to(["src/**/*.ts"])
+    assert_that(info.unresolved_extends).is_true()
 
 
 def test_resolve_array_extends_ts5(tmp_path: Path) -> None:

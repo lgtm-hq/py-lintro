@@ -11,7 +11,6 @@ from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.tsc import (
     TSC_DEFAULT_PRIORITY,
     TSC_DEFAULT_TIMEOUT,
-    TSC_FILE_PATTERNS,
     TscPlugin,
 )
 
@@ -65,7 +64,6 @@ def test_definition_file_patterns(tsc_plugin: TscPlugin) -> None:
         tsc_plugin: The TscPlugin instance to test.
     """
     patterns = tsc_plugin.definition.file_patterns
-    assert_that(patterns).is_equal_to(TSC_FILE_PATTERNS)
     assert_that(patterns).contains(
         "*.ts",
         "*.tsx",

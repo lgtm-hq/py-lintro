@@ -488,8 +488,10 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         """Optionally skip the check after file discovery.
 
         The default implementation never skips. ``tsc`` overrides this to
-        avoid running on JavaScript-only inputs when no discovered tsconfig
-        enables ``checkJs``.
+        skip JavaScript-only inputs when no discovered tsconfig enables
+        ``checkJs``, no file has ``@ts-check``, and native project
+        selection is not requested. It also drops uncheckable JS from the
+        file set for mixed trees.
 
         Args:
             ctx: Prepared execution context with discovered files.
