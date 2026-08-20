@@ -2172,19 +2172,29 @@ lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
 for source code and documentation. It checks all text files and can auto-correct
 misspellings.
 
-> **Heads-up:** unlike Vale — which skips itself when no `.vale.ini` is resolvable —
-> typos needs no configuration to run, so it joins the default toolset as soon as the
-> binary is on `PATH`. An existing unscoped `lintro check` will therefore start
-> spell-checking the whole repository. Two things to know before that first run:
+> **When typos runs.** typos is language-agnostic, so it is not listed for any
+> individual language in the manifest's `language_map`. On a no-config first run,
+> language detection therefore does **not** pull it in on its own — it joins the run
+> through the "unmapped tool with a native config" path, i.e. as soon as a `typos.toml`,
+> `.typos.toml` or `_typos.toml` exists at a scan root. Adding that file is what opts a
+> project in; an existing unscoped `lintro check` in a project without one is
+> unaffected. You can also select it explicitly at any time with
+> `lintro check --tools typos`.
 >
-> - **Opting out.** Scope a run with `lintro check --tools ruff,prettier` (typos only
->   runs when selected), or disable it for the project in `.lintro-config.yaml`:
+> Once it is enabled, two things are worth knowing:
+>
+> - **Turning it back off.** Disable it for the project in `.lintro-config.yaml` (this
+>   is the real opt-out — it survives config-driven and unscoped runs alike):
 >
 >   ```yaml
 >   tools:
 >     typos:
 >       enabled: false
 >   ```
+>
+>   `--tools` is an allowlist rather than an opt-out: `lintro check --tools ruff` runs
+>   ruff _only_, dropping every other tool as well, so reach for it to narrow a single
+>   run, not to exclude one tool.
 >
 > - **Project vocabulary.** The first run usually reports a handful of deliberate
 >   spellings — product names, abbreviations, deliberate misspellings inside test
@@ -2193,13 +2203,6 @@ misspellings.
 >   better handled by a context-anchored `[default] extend-ignore-re` pattern so the
 >   same word is still caught elsewhere. `lintro format --tools typos` applies the
 >   corrections typos is confident about, which clears most of the rest.
-
-**Installation:**
-
-```bash
-brew install typos-cli      # Homebrew
-cargo install typos-cli     # crates.io
-```
 
 **File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
 
