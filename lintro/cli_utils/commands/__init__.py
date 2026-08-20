@@ -19,7 +19,10 @@ __all__ = [
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "check_command": ("lintro.cli_utils.commands.check", "check_command"),
-    "completions_command": ("lintro.cli_utils.commands.completions", "completions_command"),
+    "completions_command": (
+        "lintro.cli_utils.commands.completions",
+        "completions_command",
+    ),
     "format_command": ("lintro.cli_utils.commands.format", "format_command"),
     "format_code": ("lintro.cli_utils.commands.format", "format_code"),
     "format_code_legacy": ("lintro.cli_utils.commands.format", "format_code_legacy"),

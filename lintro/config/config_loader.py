@@ -16,8 +16,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from lintro.utils.lazy_logger import logger
-
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -32,6 +30,7 @@ from lintro.config.review_config import (
 )
 from lintro.config.score_config import ScoreConfig
 from lintro.enums.config_key import ConfigKey
+from lintro.utils.lazy_logger import logger
 from lintro.utils.path_utils import find_file_upward
 
 try:

@@ -12,6 +12,7 @@ import click
 
 from lintro import __version__
 
+
 def _is_utf8_encoding(encoding: str | None) -> bool:
     """Return whether *encoding* names UTF-8.
 
@@ -57,7 +58,6 @@ def ensure_utf8_stdio() -> None:
     """
     _reconfigure_stream_utf8(sys.stdout)
     _reconfigure_stream_utf8(sys.stderr)
-
 
 
 # Canonical command name -> "module.path.attr" for lazy loading.
@@ -129,20 +129,29 @@ _CANONICAL_NAMES: dict[str, str] = {
     "version": "versions",
 }
 
+# Longest short-help string rendered without truncation. Well above every entry
+# in ``_COMMAND_SHORT_HELP``, so the sync test compares full sentences rather
+# than Click's ellipsis-truncated form.
+SHORT_HELP_LIMIT: int = 200
+
 # Canonical command -> short help for ``--help`` without importing subcommands.
+#
+# Each value must equal ``cmd.get_short_help_str(limit=SHORT_HELP_LIMIT)`` for
+# the command it names; ``tests/unit/cli/test_lazy_subcommands.py`` fails the
+# build when a subcommand's docstring and this table drift apart.
 _COMMAND_SHORT_HELP: dict[str, str] = {
     "badge": "Generate a shields.io markdown badge for the project health score.",
     "check": "Check files for issues using the specified tools.",
-    "completions": "Print shell completion scripts for bash, zsh, or fish.",
+    "completions": "Print a shell completion script for bash, zsh, or fish.",
     "config": "Display Lintro configuration status.",
     "doctor": "Check tool installation status and version compatibility.",
     "format": "Format code using configured formatting tools.",
-    "init": "Initialize Lintro for this project.",
+    "init": "Initialize Lintro configuration for your project.",
     "install": "Install or upgrade external tools used by lintro.",
     "licenses": "Check dependency licenses for policy compliance.",
     "list-tools": "List all available tools and their configurations.",
     "mcp": "Start the lintro MCP server on stdio.",
-    "review": "Run AI-powered diff-based code review.",
+    "review": "Run AI-powered diff-based code review, plus advisory AI finders.",
     "setup": "Set up lintro for your project.",
     "test": "Run tests using pytest.",
     "versions": "Display version information for all supported tools.",
