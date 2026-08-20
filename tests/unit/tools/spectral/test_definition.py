@@ -89,17 +89,46 @@ def test_set_options_rejects_invalid_timeout(spectral_plugin: SpectralPlugin) ->
         spectral_plugin.set_options(timeout=0)
 
 
-def test_doc_url_returns_per_rule_fragment(
+@pytest.mark.parametrize(
+    ("code", "page_fragment", "anchor"),
+    [
+        ("oas3-api-servers", "openapi-rules.md", "#oas3-api-servers"),
+        ("operation-operationId", "openapi-rules.md", "#operation-operationId"),
+        ("asyncapi-info-contact", "asyncapi-rules.md", "#asyncapi-info-contact"),
+        ("asyncapi-3-tags", "asyncapi-rules.md", "#asyncapi-3-tags"),
+        ("arazzo-workflow-id", "arazzo-rules.md", "#arazzo-workflow-id"),
+    ],
+)
+def test_doc_url_routes_by_ruleset_prefix(
+    spectral_plugin: SpectralPlugin,
+    code: str,
+    page_fragment: str,
+    anchor: str,
+) -> None:
+    """doc_url picks the OpenAPI, AsyncAPI, or Arazzo rules page by prefix.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        code: Spectral rule code.
+        page_fragment: Filename of the ruleset docs page.
+        anchor: Expected URL fragment for the rule.
+    """
+    url = spectral_plugin.doc_url(code)
+    assert_that(url).contains("meta.stoplight.io")
+    assert_that(url).contains(page_fragment)
+    assert_that(url).contains(anchor)
+
+
+def test_doc_url_skips_custom_and_empty_codes(
     spectral_plugin: SpectralPlugin,
 ) -> None:
-    """doc_url interpolates the rule code onto Spectral's OAS rules page.
+    """Custom / JSON Schema codes must not inherit the OpenAPI rules page.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
     """
-    url = spectral_plugin.doc_url("oas3-api-servers")
-    assert_that(url).contains("meta.stoplight.io")
-    assert_that(url).contains("#oas3-api-servers")
+    assert_that(spectral_plugin.doc_url("my-org-rule")).is_none()
+    assert_that(spectral_plugin.doc_url("")).is_none()
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:

@@ -77,9 +77,9 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 ### Where SARIF would help
 
 - SARIF embeds `helpUri` per built-in rule in `tool.driver.rules[]`, whereas the native
-  JSON has no per-finding doc URL. Lintro compensates with a single documentation-page
-  template (rule codes are ruleset-defined, so per-code URLs are unreliable for custom
-  rulesets anyway).
+  JSON has no per-finding doc URL. Lintro compensates with prefix-routed documentation
+  templates (`openapi-rules.md`, `asyncapi-rules.md`, `arazzo-rules.md`). Custom and
+  JSON Schema codes have no fragment map, so their docs link is left empty.
 
 ### Decision
 
@@ -104,7 +104,8 @@ template.
 
 - ⚠️ Check-only; `fix()` raises `NotImplementedError` (Spectral has no fixer)
 - ⚠️ Severity is normalized to lintro's ERROR/WARNING/INFO (hint → INFO)
-- ⚠️ Doc URLs use a single reference page because rule codes are ruleset-defined
+- ⚠️ Doc URLs are prefix-routed to the OpenAPI, AsyncAPI, or Arazzo rules page; custom /
+  JSON Schema codes have no per-rule index and get no link
 
 ### 🚀 Enhancements
 
