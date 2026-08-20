@@ -83,9 +83,9 @@ calls `parse_typos_report` (the only public parser entry), which pairs both view
 same stdout so check, fix, `--write-changes`, and the post-write re-check cannot consume
 findings without also seeing diagnostics. The conventional `parse_<tool>_output` name is
 intentionally not public: it would return an empty findings list for a diagnostic-only
-stream and look like a clean scan. Informational types (`binary_file`, `file_type`) are debug-logged
-and dropped. Any other record type is treated as a diagnostic so a future typos release
-cannot vanish.
+stream and look like a clean scan. Informational types (`binary_file`, `file_type`) are
+debug-logged and dropped. Any other record type is treated as a diagnostic so a future
+typos release cannot vanish.
 
 typos 1.49.0's `Message` enum also has `file` and `parse`, but the default spell-check
 walker never emits them (`file` is `--files` listing; `parse` is the identifier/word
