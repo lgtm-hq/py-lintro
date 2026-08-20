@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.buf import BUF_DEFAULT_TIMEOUT, BufPlugin
+from lintro.utils.execution.tool_configuration import _detection_scoped_tool_names
 
 
 @pytest.mark.parametrize(
@@ -103,3 +106,22 @@ def test_build_common_args_honors_config_and_symlinks(buf_plugin: BufPlugin) -> 
     args = buf_plugin._build_common_args(["a.proto"])
 
     assert_that(args).contains("--config", "custom.yaml", "--disable-symlinks")
+
+
+def test_proto_files_select_buf_in_a_no_config_run(tmp_path: Path) -> None:
+    """A bare ``.proto`` tree detects protobuf and scopes buf into the run.
+
+    Without this mapping a default ``lintro chk .`` silently drops buf even
+    though ``.proto`` files are present.
+
+    Args:
+        tmp_path: Temporary directory holding the proto fixture.
+    """
+    (tmp_path / "a.proto").write_text('syntax = "proto3";\n\npackage a.v1;\n')
+
+    languages, scoped_names = _detection_scoped_tool_names(
+        scan_roots=[str(tmp_path)],
+    )
+
+    assert_that(languages).contains("protobuf")
+    assert_that(scoped_names).contains("buf")

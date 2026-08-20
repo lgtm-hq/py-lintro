@@ -39,6 +39,7 @@
     "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
+    "protobuf": ["buf"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
