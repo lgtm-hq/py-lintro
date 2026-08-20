@@ -26,6 +26,7 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     "golangci_lint": "golangci-lint",
     "hadolint": "hadolint",
     "osv_scanner": "osv-scanner",
+    "phpstan": "phpstan",
     "shellcheck": "shellcheck",
     "shfmt": "shfmt",
     "taplo": "taplo",

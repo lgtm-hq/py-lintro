@@ -100,6 +100,7 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.HADOLINT: 50,
     ToolName.OXLINT: 50,
     ToolName.ACTIONLINT: 55,
+    ToolName.PHPSTAN: 80,
     ToolName.MYPY: 82,
     ToolName.TSC: 82,
     ToolName.GOLANGCI_LINT: 85,
