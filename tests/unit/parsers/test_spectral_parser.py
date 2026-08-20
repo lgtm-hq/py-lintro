@@ -94,11 +94,14 @@ def test_parse_converts_line_and_column_to_one_based() -> None:
     assert_that(issues[1].column).is_equal_to(9)
 
 
-def test_parse_joins_json_path() -> None:
-    """The JSON path array is joined into a dotted string."""
-    issues = parse_spectral_output(REAL_OUTPUT)
-    assert_that(issues[0].path).is_equal_to("")
-    assert_that(issues[1].path).is_equal_to("paths./users.get")
+def test_non_list_path_is_empty() -> None:
+    """A non-array ``path`` field is treated as document-level (empty)."""
+    output = (
+        '[{"code": "c", "path": "not-a-list", "message": "m", "severity": 1,'
+        ' "source": "f.yaml"}]'
+    )
+    issue = parse_spectral_output(output)[0]
+    assert_that(issue.path).is_empty()
 
 
 def test_parse_extracts_source_file() -> None:
@@ -156,14 +159,26 @@ def test_hint_severity_normalizes_to_info() -> None:
     assert_that(issue.get_severity()).is_equal_to(SeverityLevel.INFO)
 
 
-def test_missing_range_defaults_to_one_one() -> None:
-    """A finding with no range defaults to line 1, column 1."""
+def test_missing_range_is_unknown_location() -> None:
+    """A finding with no range uses line 0, column 0 (unknown)."""
     output = (
         '[{"code": "c", "path": [], "message": "m", "severity": 1, "source": "f.yaml"}]'
     )
     issue = parse_spectral_output(output)[0]
-    assert_that(issue.line).is_equal_to(1)
-    assert_that(issue.column).is_equal_to(1)
+    assert_that(issue.line).is_equal_to(0)
+    assert_that(issue.column).is_equal_to(0)
+
+
+def test_null_range_offsets_are_unknown() -> None:
+    """JSON null line/character values must not raise or become 1:1."""
+    output = (
+        '[{"code": "c", "path": [], "message": "m", "severity": 1,'
+        ' "range": {"start": {"line": null, "character": null}},'
+        ' "source": "f.yaml"}]'
+    )
+    issue = parse_spectral_output(output)[0]
+    assert_that(issue.line).is_equal_to(0)
+    assert_that(issue.column).is_equal_to(0)
 
 
 def test_non_dict_entries_skipped() -> None:
@@ -201,11 +216,31 @@ def test_bracketed_stderr_preamble_is_tolerated() -> None:
 def test_null_fields_do_not_become_literal_none() -> None:
     """JSON nulls map to empty strings, not the string 'None'."""
     output = (
-        '[{"code": null, "message": null, "source": null,'
+        '[{"code": "c", "message": "m", "source": null,'
         ' "severity": 1, "range": {"start": {"line": 0, "character": 0}}}]'
     )
     issues = parse_spectral_output(output)
     assert_that(issues).is_length(1)
-    assert_that(issues[0].code).is_empty()
-    assert_that(issues[0].message).is_empty()
     assert_that(issues[0].file).is_empty()
+    assert_that(issues[0].code).is_equal_to("c")
+    assert_that(issues[0].message).is_equal_to("m")
+
+
+def test_empty_code_and_message_is_skipped() -> None:
+    """A finding with no code and no message is not a blank 1:1 warning."""
+    output = '[{"severity": 1, "source": "f.yaml"}]'
+    assert_that(parse_spectral_output(output)).is_empty()
+
+
+def test_noise_json_array_does_not_hide_findings() -> None:
+    """A non-finding JSON array before the payload does not win the scan."""
+    output = '["warning"]\n' + REAL_OUTPUT
+    assert_that(parse_spectral_output(output)).is_length(2)
+
+
+def test_display_row_includes_json_path_in_message() -> None:
+    """The JSON path is visible in the unified display row."""
+    issue = parse_spectral_output(REAL_OUTPUT)[1]
+    row = issue.to_display_row()
+    assert_that(row["message"]).contains("paths./users.get")
+    assert_that(row["path"]).is_equal_to("paths./users.get")

@@ -158,6 +158,27 @@ def test_check_clean_spec_passes(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_detects_violations_in_json_openapi(tmp_path: Path) -> None:
+    """JSON OpenAPI documents are in Spectral's file patterns, not only YAML.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / ".spectral.yaml").write_text(RULESET)
+    spec = tmp_path / "openapi.json"
+    spec.write_text(
+        '{"openapi":"3.0.0","info":{"title":"S","version":"1.0.0"},"paths":{}}',
+    )
+
+    plugin = SpectralPlugin()
+    plugin.exclude_patterns = []
+    result = plugin.check([str(spec)], {})
+
+    assert_that(result.name).is_equal_to("spectral")
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
 def test_check_skips_without_ruleset(tmp_path: Path) -> None:
     """Spectral skips gracefully when no ruleset is present.
 

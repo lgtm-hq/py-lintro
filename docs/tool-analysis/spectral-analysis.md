@@ -27,8 +27,9 @@ bun add -D @stoplight/spectral-cli   # project-local (lintro's convention)
 npm install -D @stoplight/spectral-cli
 ```
 
-The package installs a `spectral` binary. Lintro prefers a `spectral` binary on `PATH`,
-falling back to `bunx @stoplight/spectral-cli` (or `npx`).
+The package installs a `spectral` binary. Lintro resolves it the same way as every other
+Node tool: project-local `node_modules/.bin/spectral` (walked upward from the execution
+directory), then `spectral` on `PATH`, then a version-pinned `bunx`/`npx` fallback.
 
 ## Ruleset Requirement and File Targeting
 
