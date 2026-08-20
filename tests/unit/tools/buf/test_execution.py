@@ -488,3 +488,45 @@ def test_fix_reports_both_verification_errors(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("format verify blew up")
     assert_that(result.output).contains("lint verify blew up")
+
+
+def test_check_runs_buf_from_the_project_root(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Buf runs from the project root with ``.`` as the module input.
+
+    The cwd comes from ``get_execution_cwd()`` (nearest project marker), not
+    the selected files' directory, and the run is narrowed with ``--path``
+    relative to that root.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory used as the project root.
+    """
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "fixture"\n')
+    proto_dir = tmp_path / "proto" / "a" / "v1"
+    proto_dir.mkdir(parents=True)
+    proto = proto_dir / "thing.proto"
+    proto.write_text('syntax = "proto3";\n\npackage a.v1;\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[_result(0, ""), _result(0, "")],
+        ) as runner:
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_true()
+    lint_call = runner.call_args_list[0].kwargs
+    assert_that(lint_call["cwd"]).is_equal_to(str(tmp_path))
+    cmd = lint_call["cmd"]
+    assert_that(cmd).contains("lint")
+    # The module input is the project root, expressed as ``.``.
+    assert_that(cmd[cmd.index("lint") + 1]).is_equal_to(".")
+    assert_that(cmd).contains("--path")
+    assert_that(cmd[cmd.index("--path") + 1]).is_equal_to("proto/a/v1/thing.proto")
