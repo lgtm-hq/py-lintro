@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from lintro.profiling.suggestions import get_suggestions
 from lintro.profiling.models import ToolTiming
+from lintro.profiling.suggestions import get_suggestions
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult

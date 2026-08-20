@@ -534,8 +534,9 @@ Suggestions:
 ```
 
 The `Files` column counts the distinct files each tool reported issues on. In JSON mode
-the profile is added additively under a top-level `profile` key (`cumulative_tool_duration`,
-`tools[]`, `suggestions[]`) and the existing `results`/`summary` schema is unchanged.
+the profile is added additively under a top-level `profile` key
+(`cumulative_tool_duration`, `tools[]`, `suggestions[]`) and the existing
+`results`/`summary` schema is unchanged.
 
 ## Tips and Tricks
 

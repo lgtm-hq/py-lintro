@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.profiling.suggestions import get_suggestions
 from lintro.profiling.models import ToolTiming
+from lintro.profiling.suggestions import get_suggestions
 
 
 def test_no_timings_yields_no_suggestions() -> None:

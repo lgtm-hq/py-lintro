@@ -55,7 +55,12 @@ def sample_results() -> list[ToolResult]:
             duration_seconds=None,
         ),
         # An untimed result (e.g. a post-check) must be excluded.
-        ToolResult(name="darglint", success=True, issues_count=1, duration_seconds=None),
+        ToolResult(
+            name="darglint",
+            success=True,
+            issues_count=1,
+            duration_seconds=None,
+        ),
     ]
 
 

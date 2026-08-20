@@ -254,11 +254,13 @@ def _write_artifacts(
         ai_enrichment: Optional AI enrichment for a SARIF artifact, supplied by
             the caller. Applied only when SARIF is actually among the
             artifacts, so a non-SARIF run never carries AI data.
+        profile_data: Optional ``--profile`` payload. Attached to the JSON
+            artifact only, so the artifact matches the stdout JSON document.
     """
     import os
     from pathlib import Path
 
-    from lintro.enums.output_format import normalize_output_format
+    from lintro.enums.output_format import OutputFormat, normalize_output_format
     from lintro.utils.output.file_writer import write_output_file
 
     artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
@@ -301,9 +303,7 @@ def _write_artifacts(
                 total_issues=total_issues,
                 total_fixed=total_fixed,
                 ai_enrichment=enrichment,
-                profile_data=(
-                    profile_data if fmt == OutputFormat.JSON else None
-                ),
+                profile_data=(profile_data if fmt == OutputFormat.JSON else None),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
