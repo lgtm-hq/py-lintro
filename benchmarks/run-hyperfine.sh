@@ -198,6 +198,9 @@ if should_run format && [[ ! -x "${SEQUENTIAL_FMT_SCRIPT}" ]]; then
 fi
 
 mkdir -p "${RESULTS_DIR}"
+# A reused RESULTS_DIR must not mix this invocation with leftover suite JSON.
+# Docs advertise generate as overwrite; baseline-meta.json only lists this run.
+rm -f "${RESULTS_DIR}"/*-overhead.json
 
 # Resolve absolute binaries once so --shell=none never depends on a login shell.
 RUFF_BIN="$(command -v ruff || true)"
@@ -246,22 +249,34 @@ run_hyperfine() {
 
 write_baseline_meta() {
 	local meta_file="${RESULTS_DIR}/baseline-meta.json"
+	# Paths go through the environment so an apostrophe in REPO_ROOT / RESULTS_DIR
+	# cannot break the python3 -c snippet. result_files come from this run's
+	# expected JSON paths (argv after -c), not a glob of leftovers.
 	# python3, not ``uv run``: this metadata writer is stdlib-only and the whole
 	# suite deliberately avoids uv so no resolver work can perturb a run.
-	python3 -c "
-import json, platform, subprocess
+	LINTRO_BENCH_META_FILE="${meta_file}" \
+		LINTRO_BENCH_RESULTS_DIR="${RESULTS_DIR}" \
+		LINTRO_BENCH_REPO_ROOT="${REPO_ROOT}" \
+		LINTRO_BENCH_LINTRO_BIN="${LINTRO_BIN}" \
+		LINTRO_BENCH_WARMUP="${WARMUP}" \
+		LINTRO_BENCH_RUNS="${RUNS}" \
+		python3 -c "
+import json, os, platform, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-results_dir = Path(r'''${RESULTS_DIR}''')
+results_dir = Path(os.environ['LINTRO_BENCH_RESULTS_DIR'])
 results_dir.mkdir(parents=True, exist_ok=True)
+meta_file = Path(os.environ['LINTRO_BENCH_META_FILE'])
+repo_root = os.environ['LINTRO_BENCH_REPO_ROOT']
+lintro_bin = os.environ['LINTRO_BENCH_LINTRO_BIN']
 meta = {
     'schema_version': 1,
     'suite': 'hyperfine-cli-overhead',
     'issue': 'https://github.com/lgtm-hq/py-lintro/issues/598',
     'generated_at': datetime.now(timezone.utc).isoformat(),
     'git_sha': subprocess.check_output(
-        ['git', '-C', r'''${REPO_ROOT}''', 'rev-parse', '--short', 'HEAD'],
+        ['git', '-C', repo_root, 'rev-parse', '--short', 'HEAD'],
         text=True,
     ).strip(),
     'platform': platform.platform(),
@@ -269,27 +284,27 @@ meta = {
     'hyperfine_version': subprocess.check_output(
         ['hyperfine', '--version'], text=True
     ).strip(),
-    'warmup': int('''${WARMUP}'''),
-    'runs': int('''${RUNS}'''),
+    'warmup': int(os.environ['LINTRO_BENCH_WARMUP']),
+    'runs': int(os.environ['LINTRO_BENCH_RUNS']),
     'fixture': 'small-python',
     'methodology': {
         'shell': 'none',
-        'lintro_invocation': r'''${LINTRO_BIN}''' + ' (chdir via run-in-dir.sh)',
+        'lintro_invocation': lintro_bin + ' (chdir via run-in-dir.sh)',
         'cwd': 'benchmarks/fixtures/small-python (via run-in-dir.sh)',
         'notes': [
             'Fixture pyproject disables post_checks so single-tool runs are isolated.',
             'Direct tools use the repo .venv binaries on PATH.',
-            'lintro chk disables ruff format_check so the timed work matches $(ruff check).',
+            'lintro chk disables ruff format_check so the timed work matches \$(ruff check).',
             'lintro fmt disables ruff lint_fix and is compared against sequential-ruff-fmt.sh (ruff check, ruff format --check, ruff format), which are the stages lintro fmt actually runs.',
             'The multi suite reference (sequential-ruff-mypy.sh) runs both tools unconditionally and returns the worst exit status; it does not short-circuit the way a shell AND-list would.',
             'Relative overhead is most meaningful on the same machine/OS.',
         ],
     },
-    'result_files': sorted(p.name for p in results_dir.glob('*-overhead.json')),
+    'result_files': sorted(Path(path).name for path in sys.argv[1:]),
 }
-Path(r'''${meta_file}''').write_text(json.dumps(meta, indent=2) + '\n', encoding='utf-8')
-print('Wrote', r'''${meta_file}''')
-"
+meta_file.write_text(json.dumps(meta, indent=2) + '\n', encoding='utf-8')
+print('Wrote', meta_file)
+" "$@"
 }
 
 echo "hyperfine CLI overhead suite"
@@ -362,7 +377,7 @@ if ((ran == 0)); then
 	exit 1
 fi
 
-write_baseline_meta
+write_baseline_meta "${expected_json[@]}"
 
 echo
 echo "Done. JSON results:"

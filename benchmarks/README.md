@@ -58,7 +58,9 @@ All runs target `benchmarks/fixtures/small-python/` and use:
 - `--shell=none` (`-N`) so an intermediate shell is not timed
 - `--yes` so lintro never blocks on confirmation prompts
 - the installed `.venv/bin/lintro` binary (not `uv run`) so measured overhead is
-  orchestration rather than uv's resolver
+  orchestration rather than uv's resolver. If that path is not executable, the
+  driver falls back to `command -v lintro` on the rewritten PATH (`LINTRO_BENCH_VENV_BIN`
+  then `~/.local/bin`). Prefer the venv binary for published numbers.
 - `benchmarks/hyperfine/run-in-dir.sh` to set cwd to the fixture (portable; GNU `env -C`
   is not available on stock macOS `/usr/bin/env`). The `ruff` and `mypy` suites put it
   on both sides, so the extra process cancels out. The `format` and `multi` references
@@ -90,8 +92,10 @@ with `HYPERFINE_RESULTS_DIR`):
 
 These are **generated, never committed** — hyperfine timings are specific to the machine
 and the tool versions installed on it, so the directory is gitignored and each run
-overwrites the previous one. Interpret **relative** columns (hyperfine prints ratios vs
-`--reference`) as the portable signal; absolute times vary by CPU and OS.
+overwrites the previous one. A reused `HYPERFINE_RESULTS_DIR` drops leftover
+`*-overhead.json` files from suites that did not run, and `baseline-meta.json`
+`result_files` lists only this invocation. Interpret **relative** columns (hyperfine
+prints ratios vs `--reference`) as the portable signal; absolute times vary by CPU and OS.
 
 ### Interpreting overhead
 

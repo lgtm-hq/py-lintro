@@ -7,6 +7,7 @@ reference vs lintro) rather than grepping the driver's source text.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -58,7 +59,7 @@ _SUITE_EXPECTATIONS: dict[str, tuple[str, str, str, str]] = {
     "mypy": (
         "mypy-overhead.json",
         "mypy",
-        "run-in-dir.sh",
+        "mypy .",
         "--tools mypy .",
     ),
     "format": (
@@ -279,7 +280,8 @@ def test_each_suite_passes_expected_commands_to_hyperfine(
     assert_that(export_path.is_file()).is_true()
     assert_that(argv).contains("--shell=none")
     assert_that(_flag_value(argv, "--reference-name")).is_equal_to(ref_name)
-    assert_that(_flag_value(argv, "--reference")).contains(ref_fragment)
+    reference = _flag_value(argv, "--reference").replace("\\", "")
+    assert_that(reference).contains(ref_fragment)
     assert_that(_flag_value(argv, "--command-name")).contains("lintro")
     # The lintro command is the trailing positional after --command-name.
     # printf %q backslash-escapes shell metacharacters (e.g. the tool comma).
@@ -292,8 +294,10 @@ def test_each_suite_passes_expected_commands_to_hyperfine(
     else:
         assert_that(lintro_cmd).contains("ruff:format_check=False")
     if suite in {"ruff", "mypy"}:
-        assert_that(_flag_value(argv, "--reference")).contains("run-in-dir.sh")
-    assert_that((results / "baseline-meta.json").is_file()).is_true()
+        assert_that(reference).contains("run-in-dir.sh")
+        assert_that(reference).contains(" .")
+    meta = json.loads((results / "baseline-meta.json").read_text(encoding="utf-8"))
+    assert_that(meta["result_files"]).is_equal_to([export_name])
 
 
 def test_reference_names_do_not_claim_short_circuit(tmp_path: Path) -> None:
@@ -404,24 +408,30 @@ def test_run_in_dir_requires_a_command() -> None:
     assert_that(result.stderr).contains("usage: run-in-dir.sh")
 
 
-def test_run_hyperfine_ruff_suite_does_not_require_mypy(tmp_path: Path) -> None:
-    """``--suite ruff`` must not fail only because mypy is absent.
+@pytest.mark.parametrize("suite", ["ruff", "format"])
+def test_ruff_and_format_suites_do_not_require_mypy(
+    suite: str,
+    tmp_path: Path,
+) -> None:
+    """``--suite ruff`` and ``--suite format`` must not require mypy.
 
     Args:
+        suite: Suite that is documented as mypy-optional.
         tmp_path: Pytest temporary directory.
     """
     env, results, argv_log = _make_sandbox(tmp_path)
     (tmp_path / "bin" / "mypy").unlink()
 
-    result = _run_sandboxed(env, "--suite", "ruff", "--quick")
+    result = _run_sandboxed(env, "--suite", suite, "--quick")
 
     combined = result.stdout + result.stderr
     assert_that(combined).does_not_contain("missing tools on PATH: mypy")
     assert_that(result.returncode).is_equal_to(0)
     argv = _invocations(argv_log)[0]
     assert_that(argv[-1]).contains("--tools ruff")
-    assert_that(argv[-1]).does_not_contain("mypy")
-    assert_that((results / "ruff-check-overhead.json").is_file()).is_true()
+    assert_that(argv[-1].replace("\\", "")).does_not_contain("mypy")
+    export_name = _SUITE_EXPECTATIONS[suite][0]
+    assert_that((results / export_name).is_file()).is_true()
 
 
 def test_multi_suite_reports_missing_mypy(tmp_path: Path) -> None:
@@ -594,3 +604,22 @@ def test_default_warmup_and_runs_without_quick(tmp_path: Path) -> None:
     argv = _invocations(argv_log)[0]
     assert_that(_flag_value(argv, "--warmup")).is_equal_to("3")
     assert_that(_flag_value(argv, "--runs")).is_equal_to("10")
+
+
+def test_single_suite_run_drops_stale_overhead_json(tmp_path: Path) -> None:
+    """A reused results dir must not keep leftover suite JSON in metadata.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, results, _argv_log = _make_sandbox(tmp_path)
+    stale = results / "mypy-overhead.json"
+    stale.write_text('{"results": []}\n', encoding="utf-8")
+
+    result = _run_sandboxed(env, "--suite", "ruff", "--quick")
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(stale.exists()).is_false()
+    meta = json.loads((results / "baseline-meta.json").read_text(encoding="utf-8"))
+    assert_that(meta["result_files"]).is_equal_to(["ruff-check-overhead.json"])
+    assert_that((results / "ruff-check-overhead.json").is_file()).is_true()
