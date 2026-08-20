@@ -1,0 +1,27 @@
+openapi: 3.0.0
+info:
+  title: Sample API
+  version: 1.0.0
+  description: A clean sample API used for linting tests.
+  contact:
+    name: API Team
+    url: https://example.com
+    email: api@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: https://api.example.com
+tags:
+  - name: users
+    description: User operations
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      description: List all users.
+      tags:
+        - users
+      responses:
+        '200':
+          description: OK

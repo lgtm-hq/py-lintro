@@ -569,6 +569,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
                 ToolName.PRETTIER: "prettier",
+                ToolName.SPECTRAL: "@stoplight/spectral-cli",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
@@ -594,6 +595,8 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.TSC: "tsc",
                 # Package is "@commitlint/cli", binary is "commitlint"
                 ToolName.COMMITLINT: "commitlint",
+                # Package is "@stoplight/spectral-cli", binary is "spectral"
+                ToolName.SPECTRAL: "spectral",
             }
         return self._binary_names
 

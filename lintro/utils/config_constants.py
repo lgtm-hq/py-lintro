@@ -97,6 +97,7 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.HTML_VALIDATE: 30,
     ToolName.YAMLLINT: 35,
     ToolName.BANDIT: 45,
+    ToolName.SPECTRAL: 45,
     ToolName.HADOLINT: 50,
     ToolName.OXLINT: 50,
     ToolName.ACTIONLINT: 55,

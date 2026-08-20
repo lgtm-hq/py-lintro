@@ -912,7 +912,7 @@ Rationale:
 **Every Node.js tool resolves the same way.** There is one chain, implemented once in
 `NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
 `astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
-`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
+`prettier`, `spectral`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
 1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
    checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
@@ -1648,6 +1648,59 @@ lintro check styles/ --tools stylelint --tool-options "stylelint:config=.styleli
 
 # Increase timeout for large stylesheets
 lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
+```
+
+#### Spectral Configuration
+
+Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents. It
+is check-only (no autofixer) and **requires a ruleset** — lintro only runs Spectral when
+one is present and skips it gracefully otherwise, so it never lints arbitrary YAML/JSON
+files.
+
+**Native Config Detection:**
+
+Lintro detects (and Spectral requires) one of these ruleset files:
+
+- `.spectral.yaml`
+- `.spectral.yml`
+- `.spectral.json`
+- `.spectral.js`
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D @stoplight/spectral-cli
+
+# npm
+npm install -D @stoplight/spectral-cli
+```
+
+Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
+
+**File:** `.spectral.yaml`
+
+```yaml
+extends: ['spectral:oas'] # or ["spectral:asyncapi"]
+```
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                      |
+| --------- | ------- | ------------------------------------------------ |
+| `ruleset` | string  | Explicit path to a ruleset (overrides discovery) |
+| `timeout` | integer | Execution timeout in seconds (default: 30)       |
+
+**Usage Examples:**
+
+```bash
+# Lint an OpenAPI document (requires a .spectral.yaml ruleset alongside it)
+lintro check --tools spectral openapi.yaml
+
+# Use an explicit ruleset
+lintro check --tools spectral --tool-options "spectral:ruleset=.spectral.custom.yaml"
 ```
 
 #### Oxfmt Configuration
