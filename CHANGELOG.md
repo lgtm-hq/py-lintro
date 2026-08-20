@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.124.0] - 2026-08-20
+
+### Added
+
+- **tools**: add typos spell-checker plugin (#1146) (1a61c40)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 61d1c91 (#2121)
+  (62921d3)
+- **deps**: update dependency golangci/golangci-lint to 2.13.0 (minor) (#2133) (2721d88)
+- **deps**: update dependency html-validate to 11.8.0 (minor) (#2135) (1998b82)
+- **deps**: update dependency golang to 1.27.0 (minor) (#2129) (f625245)
+- **docker**: repin setup-buildx-action to v4.3.0 tag SHA (#2134) (9153b88)
+
 ## [0.123.3] - 2026-08-20
 
 ### Fixed
