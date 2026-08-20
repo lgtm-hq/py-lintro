@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, NamedTuple
 
 from loguru import logger
 
@@ -73,7 +73,19 @@ def _build_message(typo: str, corrections: list[str]) -> str:
 _INFORMATIONAL_RECORD_TYPES: frozenset[str] = frozenset({"binary_file", "file_type"})
 
 
-def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, str]]:
+class _Line(NamedTuple):
+    """One decoded line of typos' newline-delimited JSON output.
+
+    Attributes:
+        record: The decoded JSON object, or None when the line was not one.
+        raw: The original line, needed to report undecodable output.
+    """
+
+    record: dict[str, Any] | None
+    raw: str
+
+
+def _iter_records(output: str | None) -> Iterator[_Line]:
     """Iterate the newline-delimited JSON records in typos' stdout.
 
     Both public parsers walk the same stream, so the decoding lives here: two
@@ -83,10 +95,9 @@ def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, s
         output: Raw stdout from ``typos --format json``, or None.
 
     Yields:
-        tuple[dict[str, Any] | None, str]: ``(record, raw_line)`` pairs.
-            ``record`` is the decoded object, or None when the line was not a
-            JSON object — callers decide whether that is a skip or a
-            diagnostic.
+        _Line: The decoded object and the original line. ``record`` is None
+            when the line was not a JSON object — callers decide whether that
+            is a skip or a diagnostic.
     """
     if not output:
         return
@@ -98,12 +109,12 @@ def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, s
             record = json.loads(stripped)
         except (json.JSONDecodeError, ValueError):
             logger.debug(f"typos: undecodable output line: {stripped}")
-            yield None, stripped
+            yield _Line(record=None, raw=stripped)
             continue
         if not isinstance(record, dict):
-            yield None, stripped
+            yield _Line(record=None, raw=stripped)
             continue
-        yield record, stripped
+        yield _Line(record=record, raw=stripped)
 
 
 def _typo_fields(record: dict[str, Any]) -> tuple[str, str] | None:
