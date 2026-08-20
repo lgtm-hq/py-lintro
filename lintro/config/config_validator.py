@@ -514,9 +514,7 @@ def _check_raw_pyproject_lintro(
                 errors.append(
                     ValidationMessage(
                         code=ValidationCode.INVALID_TYPE,
-                        message=(
-                            f"'{key_lower}' must be a mapping, got {actual}."
-                        ),
+                        message=(f"'{key_lower}' must be a mapping, got {actual}."),
                         location=f"tool.lintro.{key_lower}",
                     ),
                 )

@@ -722,6 +722,46 @@ def test_autodetect_malformed_pyproject_is_parse_error(
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.PARSE_ERROR)
 
 
+def test_autodetect_empty_yaml_without_pyproject_is_not_found(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty YAML with no pyproject fallback is not a successful config.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    yaml_path = tmp_path / ".lintro-config.yaml"
+    yaml_path.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = validate_config_file(None)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.NOT_FOUND)
+    assert_that(result.warnings[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+
+
+def test_explicit_pyproject_without_lintro_table_is_empty(
+    write_config: Callable[..., Path],
+) -> None:
+    """An explicit pyproject.toml without [tool.lintro] is EMPTY_CONFIG.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        '[project]\nname = "example"\n',
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+
+
 def test_plugin_tool_name_is_not_unknown(
     write_config: Callable[..., Path],
     monkeypatch: pytest.MonkeyPatch,
