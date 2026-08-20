@@ -61,6 +61,27 @@ with open(pyproject, 'rb') as f:
     data = tomllib.load(f)
 
 packages = data.get('tool', {}).get('setuptools', {}).get('packages', [])
+if isinstance(packages, dict) and 'find' in packages:
+    # packages.find directive: discover packages from the source tree the
+    # same way setuptools would, honoring include/exclude fnmatch patterns.
+    from fnmatch import fnmatch
+
+    find = packages['find']
+    include = find.get('include', ['*'])
+    exclude = find.get('exclude', [])
+    discovered = []
+    for where in find.get('where', ['.']):
+        root = (Path('$PROJECT_ROOT') / where).resolve()
+        for init in root.rglob('__init__.py'):
+            pkg = '.'.join(init.parent.relative_to(root).parts)
+            if not pkg:
+                continue
+            if not any(fnmatch(pkg, pat) for pat in include):
+                continue
+            if any(fnmatch(pkg, pat) for pat in exclude):
+                continue
+            discovered.append(pkg)
+    packages = discovered
 for pkg in sorted(packages):
     print(pkg)
 ")

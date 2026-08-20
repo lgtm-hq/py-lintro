@@ -11,7 +11,7 @@ directly to catch packaging regressions such as:
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess builds the wheel under test with fixed argv, shell=False
 import tempfile
 import zipfile
 from collections.abc import Iterator
@@ -32,7 +32,7 @@ def built_wheel_path() -> Iterator[Path]:
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         dist_dir = Path(tmpdir) / "dist"
-        build_result = subprocess.run(
+        build_result = subprocess.run(  # nosec B603 B607 - fixed argv resolved from PATH, shell=False
             ["uv", "build", "--out-dir", str(dist_dir)],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
