@@ -496,7 +496,7 @@ jobs:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,bandit:timeout=120,osv_scanner:check_suppressions=false
       egress-policy: block
       # Same-repo PRs: lint with the image built in this workflow run.
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
