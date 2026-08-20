@@ -600,3 +600,179 @@ def test_fix_does_not_write_when_a_batch_mixes_typos_and_an_error(
     assert_that([c for c in commands if "--write-changes" in c]).is_empty()
     assert_that(result.success).is_false()
     assert_that(result.output).contains("Permission denied")
+
+
+def _three_files(tmp_path: Path) -> list[str]:
+    """Create three checkable files with one typo each.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+
+    Returns:
+        Absolute paths of the created files, in a stable order.
+    """
+    targets = []
+    for index in range(3):
+        target = tmp_path / f"file_{index}.txt"
+        target.write_text("teh cat\n")
+        targets.append(str(target))
+    return targets
+
+
+def test_check_timeout_keeps_findings_from_earlier_batches(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A timed-out batch must not discard what earlier batches found.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    targets = _three_files(tmp_path)
+    calls: list[list[str]] = []
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        calls.append(cmd)
+        if len(calls) == 1:
+            return _proc(stdout=_typo_line("file_0.txt", "teh", "the"), returncode=2)
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.check(targets, {})
+
+    # The loop stops at the timeout rather than burning the budget three times.
+    assert_that(calls).is_length(2)
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("timed out")
+
+
+def test_fix_write_pass_stops_after_a_failing_batch(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A fatal write batch must not keep rewriting the batches after it.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    targets = _three_files(tmp_path)
+    write_calls: list[list[str]] = []
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        if "--write-changes" not in cmd:
+            name = next(a for a in cmd if a.endswith(".txt"))
+            return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
+        write_calls.append(cmd)
+        return _proc(returncode=1, stderr="error: read-only file system\n")
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.fix(targets, {})
+
+    assert_that(write_calls).is_length(1)
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("read-only file system")
+    # --write-changes ran, so the caller must be told disk state is uncertain.
+    assert_that(result.output).contains("may have been corrected on disk")
+
+
+def test_fix_write_pass_timeout_flags_possible_disk_changes(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A timeout during the write pass reports the after-write caveat.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    targets = _three_files(tmp_path)
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        if "--write-changes" in cmd:
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+        name = next(a for a in cmd if a.endswith(".txt"))
+        return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.fix(targets, {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.output).contains("timed out")
+    assert_that(result.output).contains("may have been corrected on disk")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_fix_failed_detect_keeps_sibling_findings(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """Refusing to write must not also throw away what was detected.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    targets = _three_files(tmp_path)
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        name = next(a for a in cmd if a.endswith(".txt"))
+        if name.endswith("file_2.txt"):
+            return _proc(returncode=1, stderr="error: unreadable path\n")
+        return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.fix(targets, {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("unreadable path")
+
+
+def test_fix_recheck_failure_flags_possible_disk_changes(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failing re-check reports the after-write caveat too.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "fixme.txt"
+    target.write_text("teh cat\n")
+    calls: list[list[str]] = []
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        calls.append(cmd)
+        if len(calls) == 1:
+            return _proc(stdout=_typo_line("fixme.txt", "teh", "the"), returncode=2)
+        if "--write-changes" in cmd:
+            return _proc()
+        return _proc(returncode=1, stderr="error: config went missing\n")
+
+    with patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond):
+        result = typos_plugin.fix([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("config went missing")
+    assert_that(result.output).contains("may have been corrected on disk")

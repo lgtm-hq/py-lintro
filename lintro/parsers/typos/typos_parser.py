@@ -106,6 +106,22 @@ def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, s
         yield record, stripped
 
 
+def _typo_fields(record: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the ``(path, typo)`` pair of a finding record, if usable.
+
+    Args:
+        record: A decoded ``type == "typo"`` record.
+
+    Returns:
+        The pair when both fields are strings, otherwise None.
+    """
+    path = record.get("path")
+    typo = record.get("typo")
+    if isinstance(path, str) and isinstance(typo, str):
+        return path, typo
+    return None
+
+
 def parse_typos_errors(output: str | None) -> list[str]:
     """Extract typos' diagnostics from its JSON output.
 
@@ -133,12 +149,16 @@ def parse_typos_errors(output: str | None) -> list[str]:
             messages.append(f"unparseable typos output: {raw}")
             continue
         record_type = record.get("type")
+        if record_type == "typo":
+            # A findings record that the parser cannot use would otherwise fall
+            # between the two functions and read as a clean run.
+            if _typo_fields(record) is None:
+                messages.append(f"incomplete typos finding: {raw}")
+            continue
         # A JSON object may carry an unhashable ``type`` (a list, an object).
         # Testing set membership on that would raise, so only string types are
         # eligible for the allowlist; everything else is a diagnostic.
-        if isinstance(record_type, str) and (
-            record_type == "typo" or record_type in _INFORMATIONAL_RECORD_TYPES
-        ):
+        if isinstance(record_type, str) and record_type in _INFORMATIONAL_RECORD_TYPES:
             continue
         msg = record.get("msg") or record.get("error")
         path = record.get("path")
@@ -173,10 +193,13 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             logger.debug(f"typos: ignoring non-typo record of type {record_type!r}")
             continue
 
-        path = record.get("path")
-        typo = record.get("typo")
-        if not isinstance(path, str) or not isinstance(typo, str):
+        fields = _typo_fields(record)
+        if fields is None:
+            # Reported as a diagnostic by parse_typos_errors, so this skip
+            # cannot make a broken run look clean.
+            logger.debug(f"typos: skipping incomplete typo record: {_raw}")
             continue
+        path, typo = fields
 
         # Only real strings are usable corrections. A null or nested value
         # stringified to "None"/a dict repr would both display nonsense and

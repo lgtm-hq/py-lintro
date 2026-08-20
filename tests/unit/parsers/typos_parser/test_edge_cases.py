@@ -217,3 +217,17 @@ def test_object_record_type_is_a_diagnostic() -> None:
     output = '{"type":{"kind":"odd"},"path":"x.txt"}'
 
     assert_that(parse_typos_errors(output)).is_length(1)
+
+
+def test_incomplete_typo_records_become_diagnostics() -> None:
+    """A finding the parser cannot use must not vanish from both views."""
+    output = '{"type":"typo","path":null,"line_num":1,"typo":"teh"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_length(1)
+    assert_that(parse_typos_errors(output)[0]).starts_with("incomplete typos finding:")
+
+
+def test_usable_typo_records_are_not_diagnostics() -> None:
+    """A well-formed finding stays out of the diagnostics list."""
+    assert_that(parse_typos_errors(make_typo_record())).is_empty()

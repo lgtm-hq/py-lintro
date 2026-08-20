@@ -36,7 +36,7 @@ from lintro.parsers.trufflehog.trufflehog_parser import parse_trufflehog_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.argv_batching import argv_byte_budget, chunk_paths
+from lintro.tools.core.argv_batching import chunk_paths
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -49,12 +49,6 @@ from lintro.utils.path_filtering import filter_existing_paths
 TRUFFLEHOG_DEFAULT_TIMEOUT: int = 60
 TRUFFLEHOG_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 TRUFFLEHOG_FILE_PATTERNS: list[str] = ["*"]  # Scans all files
-
-# TruffleHog's ``filesystem`` mode takes explicit file paths in argv, so the
-# resolved list must be split into ARG_MAX-safe batches. The budget/chunking
-# logic is shared with other catch-all tools in
-# ``lintro.tools.core.argv_batching``; the thin wrappers below keep this
-# module's long-standing private names as the patch points used by tests.
 
 
 def _existing_option_path(raw_path: str) -> str | None:
@@ -76,38 +70,6 @@ def _existing_option_path(raw_path: str) -> str | None:
     except OSError:
         return None
     return None
-
-
-def _argv_byte_budget() -> int:
-    """Return a safe byte budget for path arguments on one command line.
-
-    Returns:
-        The maximum number of argument-data bytes to place on one command line.
-    """
-    return argv_byte_budget()
-
-
-def _chunk_source_paths(
-    source_paths: list[str],
-    *,
-    fixed_arg_bytes: int,
-) -> list[list[str]]:
-    """Split resolved file paths into ARG_MAX-safe batches.
-
-    Args:
-        source_paths: Absolute file paths to scan, in a stable order.
-        fixed_arg_bytes: Byte length of the non-path portion of the command
-            (executable, subcommand, flags), which counts against the same
-            OS limit.
-
-    Returns:
-        A list of path batches, each safe to place on one command line.
-    """
-    return chunk_paths(
-        source_paths,
-        fixed_arg_bytes=fixed_arg_bytes,
-        budget=_argv_byte_budget(),
-    )
 
 
 @register_tool
@@ -343,10 +305,13 @@ class TrufflehogPlugin(BaseToolPlugin):
                 output=f"TruffleHog failed: {e}",
                 issues_count=0,
             )
+        # TruffleHog's ``filesystem`` mode takes explicit file paths in argv, so
+        # the resolved list must be split into ARG_MAX-safe batches (shared with
+        # the other catch-all tools in ``lintro.tools.core.argv_batching``).
         fixed_arg_bytes = sum(
             len(a.encode("utf-8", "surrogatepass")) + 1 for a in fixed_args
         )
-        batches = _chunk_source_paths(source_paths, fixed_arg_bytes=fixed_arg_bytes)
+        batches = chunk_paths(source_paths, fixed_arg_bytes=fixed_arg_bytes)
         logger.debug(
             f"[trufflehog] Scanning {len(source_paths)} files in "
             f"{len(batches)} batch(es) (cwd={ctx.cwd})",
