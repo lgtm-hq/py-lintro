@@ -2693,15 +2693,17 @@ lintro check --tools buf
 # Format .proto files in place (buf format --write)
 lintro format --tools buf
 
-# Use an explicit buf.yaml
+# Use an explicit buf.yaml (path relative to the project root)
 lintro check --tools buf --tool-options buf:config=proto/buf.yaml
 ```
 
-> **Note on module roots:** lintro runs buf from the common parent directory of the
-> `.proto` files it selects. buf's directory-based rules (e.g.
-> `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that directory, so run
-> lintro from the module root (or add a `buf.yaml`) when your packages are laid out as
-> nested directories.
+> **Note on module roots:** lintro runs buf from your **project root** — the nearest
+> ancestor of the selected `.proto` files holding a project marker (`.git`,
+> `pyproject.toml`, `package.json`, ...), not their common parent directory. A relative
+> `config` path is therefore resolved from the project root. buf's directory-based rules
+> (e.g. `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that same
+> directory, so add a `buf.yaml` with a `modules` `path` when your protos live in a
+> subdirectory and their packages are not laid out relative to the project root.
 
 ### Infrastructure Tools
 

@@ -67,6 +67,19 @@ message Anchor {
 """
 
 
+def _mark_project_root(tmp_path: Path) -> None:
+    """Make ``tmp_path`` the project root discovery will anchor on.
+
+    ``get_execution_cwd()`` walks up to the nearest project marker, so staging
+    one here exercises the production code path (project root) instead of the
+    marker-less fallback to the files' common ancestor.
+
+    Args:
+        tmp_path: Directory to mark as a project root.
+    """
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "fixture"\n')
+
+
 def _stage_module(tmp_path: Path, target_body: str) -> Path:
     """Stage a two-package buf module rooted at ``tmp_path``.
 
@@ -77,6 +90,7 @@ def _stage_module(tmp_path: Path, target_body: str) -> Path:
     Returns:
         Path to the staged target proto file.
     """
+    _mark_project_root(tmp_path)
     anchor_dir = tmp_path / "anchor" / "v1"
     anchor_dir.mkdir(parents=True)
     (anchor_dir / "anchor.proto").write_text(_ANCHOR)
@@ -94,6 +108,7 @@ def test_check_detects_lint_violations(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory for the staged fixture.
     """
+    _mark_project_root(tmp_path)
     proto = tmp_path / "bad.proto"
     proto.write_text(_VIOLATIONS)
 

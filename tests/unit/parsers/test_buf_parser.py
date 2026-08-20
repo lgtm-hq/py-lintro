@@ -220,3 +220,39 @@ def test_buf_issue_defaults() -> None:
     assert_that(issue.code).is_equal_to("")
     assert_that(issue.end_line).is_equal_to(0)
     assert_that(issue.end_column).is_equal_to(0)
+
+
+def test_buf_issue_fixable_only_for_format_findings() -> None:
+    """Only FORMAT findings are auto-fixable by ``buf format --write``."""
+    fmt_issue = BufIssue(file="x.proto", line=0, column=0, message="m", code="FORMAT")
+    lint_issue = BufIssue(
+        file="x.proto",
+        line=1,
+        column=1,
+        message="m",
+        code="PACKAGE_LOWER_SNAKE_CASE",
+    )
+    compile_issue = BufIssue(
+        file="x.proto",
+        line=1,
+        column=1,
+        message="m",
+        code="COMPILE",
+    )
+
+    assert_that(fmt_issue.fixable).is_true()
+    assert_that(lint_issue.fixable).is_false()
+    assert_that(compile_issue.fixable).is_false()
+
+
+def test_buf_issue_format_finding_renders_fixable_column() -> None:
+    """A FORMAT finding renders ``Yes`` in the display fixable column."""
+    row = BufIssue(
+        file="x.proto",
+        line=0,
+        column=0,
+        message="m",
+        code="FORMAT",
+    ).to_display_row()
+
+    assert_that(row["fixable"]).is_equal_to("Yes")

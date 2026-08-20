@@ -48,7 +48,7 @@ BUF_FILE_PATTERNS: list[str] = ["*.proto"]
 
 # Rule ids that are not part of the lint rule catalog and therefore have no
 # per-rule documentation anchor on the buf lint rules page.
-_NON_RULE_CODES: frozenset[str] = frozenset({"COMPILE", "FORMAT"})
+_NON_RULE_CODES: frozenset[str] = frozenset({"COMPILE", "FORMAT", "TIMEOUT"})
 
 
 @register_tool
@@ -177,12 +177,15 @@ class BufPlugin(BaseToolPlugin):
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
             )
+        # ``check`` has no fix counters, but any findings parsed before the
+        # timeout must survive it — dropping them would under-report.
+        collected = (initial_issues or []) + [timeout_issue]
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=1,
-            issues=[timeout_issue],
+            issues_count=len(collected),
+            issues=collected,
         )
 
     def _pre_fix_failure(
@@ -304,7 +307,10 @@ class BufPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(ctx.timeout)
+            return self._handle_timeout_error(
+                ctx.timeout,
+                initial_issues=all_issues,
+            )
 
         fmt_issues = parse_buf_format_output(fmt_result.stdout)
         all_issues.extend(fmt_issues)
