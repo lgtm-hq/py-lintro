@@ -4,17 +4,38 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from subprocess import CompletedProcess
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.trivy import TrivyIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.trivy import TrivyPlugin
 
 _VERIFY_VERSION = "lintro.plugins.execution_preparation.verify_tool_version"
-_SUBPROCESS_RUN = "lintro.tools.definitions.trivy.subprocess.run"
+_SUBPROCESS_RUN = "lintro.plugins.base.BaseToolPlugin._run_subprocess_result"
+
+
+def _completed(returncode: int, stdout: str = "", stderr: str = "") -> SubprocessResult:
+    """Build a SubprocessResult standing in for a real trivy invocation.
+
+    Args:
+        returncode: Exit code trivy would have returned.
+        stdout: Captured standard output.
+        stderr: Captured standard error.
+
+    Returns:
+        SubprocessResult with the given streams.
+    """
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        output=stdout + stderr,
+    )
 
 
 def _report(vulnerabilities: list[dict[str, Any]]) -> str:
@@ -64,7 +85,7 @@ def test_definition_metadata(trivy_plugin: TrivyPlugin) -> None:
 
 
 def test_file_patterns_exclude_iac_and_dockerfiles(trivy_plugin: TrivyPlugin) -> None:
-    """Trivy must not claim Dockerfiles (hadolint) or *.tf (checkov)."""
+    """Trivy must not claim Dockerfiles (hadolint) or Terraform files."""
     patterns = trivy_plugin.definition.file_patterns
 
     assert_that(patterns).does_not_contain("Dockerfile")
@@ -76,8 +97,11 @@ def test_build_command_is_hermetic(trivy_plugin: TrivyPlugin) -> None:
     """The check command runs offline with vuln scanners only."""
     cmd = trivy_plugin._build_check_command("requirements.txt")
 
-    assert_that(cmd[:3]).is_equal_to(["trivy", "fs", "--scanners"])
-    assert_that(cmd).contains("vuln")
+    assert_that(cmd[0]).contains("trivy")
+    subcommand = cmd.index("fs")
+    assert_that(cmd[subcommand : subcommand + 3]).is_equal_to(
+        ["fs", "--scanners", "vuln"],
+    )
     assert_that(cmd).contains("--format", "json")
     assert_that(cmd).contains("--skip-db-update")
     assert_that(cmd).contains("--offline-scan")
@@ -113,7 +137,11 @@ def test_doc_url_builds_advisory_link(trivy_plugin: TrivyPlugin) -> None:
     assert_that(trivy_plugin.doc_url("")).is_none()
 
 
-def _run_check(plugin: TrivyPlugin, req_file: Path, completed: CompletedProcess[str]):
+def _run_check(
+    plugin: TrivyPlugin,
+    req_file: Path,
+    completed: SubprocessResult,
+) -> ToolResult:
     """Run plugin.check with version verification and subprocess mocked.
 
     Args:
@@ -139,8 +167,7 @@ def test_check_reports_vulnerabilities(
     req = tmp_path / "requirements.txt"
     req.write_text("Django==2.2.0\n")
 
-    completed = CompletedProcess(
-        args=["trivy"],
+    completed = _completed(
         returncode=0,
         stdout=_report([_VULN]),
         stderr="",
@@ -150,7 +177,8 @@ def test_check_reports_vulnerabilities(
     assert_that(result.name).is_equal_to("trivy")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].vuln_id).is_equal_to("CVE-2019-14234")
+    issues = cast("list[TrivyIssue]", list(result.issues or []))
+    assert_that(issues[0].vuln_id).is_equal_to("CVE-2019-14234")
 
 
 def test_check_clean_scan_succeeds(
@@ -161,8 +189,7 @@ def test_check_clean_scan_succeeds(
     req = tmp_path / "requirements.txt"
     req.write_text("flask==3.0.0\n")
 
-    completed = CompletedProcess(
-        args=["trivy"],
+    completed = _completed(
         returncode=0,
         stdout=json.dumps({"SchemaVersion": 2, "ArtifactName": "."}),
         stderr="",
@@ -181,8 +208,7 @@ def test_check_missing_db_reports_non_fatal_skip(
     req = tmp_path / "requirements.txt"
     req.write_text("Django==2.2.0\n")
 
-    completed = CompletedProcess(
-        args=["trivy"],
+    completed = _completed(
         returncode=1,
         stdout="",
         stderr="FATAL vulnerability DB needs to be updated; run trivy",
@@ -202,8 +228,7 @@ def test_check_genuine_error_fails_closed(
     req = tmp_path / "requirements.txt"
     req.write_text("Django==2.2.0\n")
 
-    completed = CompletedProcess(
-        args=["trivy"],
+    completed = _completed(
         returncode=2,
         stdout="",
         stderr="permission denied reading target",
@@ -222,8 +247,7 @@ def test_check_unparseable_stdout_fails_closed(
     req = tmp_path / "requirements.txt"
     req.write_text("Django==2.2.0\n")
 
-    completed = CompletedProcess(
-        args=["trivy"],
+    completed = _completed(
         returncode=0,
         stdout="not json at all",
         stderr="",
@@ -259,14 +283,12 @@ def test_check_mid_scan_db_loss_keeps_collected_findings(
     req_a.write_text("Django==2.2.0\n")
     req_b.write_text("Django==2.2.0\n")
 
-    with_findings = CompletedProcess(
-        args=["trivy"],
+    with_findings = _completed(
         returncode=0,
         stdout=_report([_VULN]),
         stderr="",
     )
-    db_missing = CompletedProcess(
-        args=["trivy"],
+    db_missing = _completed(
         returncode=1,
         stdout="",
         stderr="FATAL vulnerability DB needs to be updated; run trivy",

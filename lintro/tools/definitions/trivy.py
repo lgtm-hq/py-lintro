@@ -3,8 +3,9 @@
 Trivy is a comprehensive security scanner by Aqua Security. This plugin scopes
 Trivy to *filesystem dependency-vulnerability* scanning of lockfiles and
 manifests (``trivy fs --scanners vuln``). Secret scanning is intentionally left
-to gitleaks, and Infrastructure-as-Code misconfiguration scanning to checkov, so
-Trivy does not double-report findings already owned by another lintro tool.
+to gitleaks, and Infrastructure-as-Code misconfiguration scanning is out of
+scope (hadolint owns Dockerfiles), so Trivy does not double-report findings
+already owned by another lintro tool.
 
 Trivy needs a local vulnerability database. To keep normal ``lintro`` runs
 hermetic, the plugin runs with ``--skip-db-update`` (never downloads during a
@@ -27,7 +28,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.trivy.trivy_parser import parse_trivy_output
+from lintro.parsers.trivy import TrivyIssue, parse_trivy_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -36,14 +37,15 @@ from lintro.tools.core.option_validators import (
     normalize_str_or_list,
     validate_bool,
 )
+from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for Trivy configuration
 TRIVY_DEFAULT_TIMEOUT: int = 300  # Generous: a first DB download can be slow.
-TRIVY_DEFAULT_PRIORITY: int = 87  # High priority for a security tool.
+TRIVY_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("trivy", 87)
 
 # Scoped to dependency lockfiles / manifests only. Trivy detects the ecosystem
 # from the filename, so lintro feeds it only files it can scan for vulnerable
-# dependencies. Secrets stay with gitleaks; IaC misconfig stays with checkov.
+# dependencies. Secrets stay with gitleaks; IaC misconfig is out of scope.
 TRIVY_FILE_PATTERNS: list[str] = [
     "requirements.txt",
     "Pipfile.lock",
@@ -161,7 +163,7 @@ class TrivyPlugin(BaseToolPlugin):
             List of command arguments.
         """
         cmd: list[str] = [
-            "trivy",
+            *self._get_executable_command("trivy"),
             "fs",
             "--scanners",
             "vuln",
@@ -249,7 +251,7 @@ class TrivyPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        all_issues = []
+        all_issues: list[TrivyIssue] = []
         parse_failures = 0
 
         for file in ctx.files:
@@ -257,10 +259,8 @@ class TrivyPlugin(BaseToolPlugin):
             logger.debug(f"[trivy] Running: {' '.join(cmd)}")
 
             try:
-                completed = subprocess.run(  # nosec B603 - cmd is a validated list
+                completed = self._run_subprocess_result(
                     cmd,
-                    capture_output=True,
-                    text=True,
                     timeout=ctx.timeout,
                 )
             except subprocess.TimeoutExpired:
@@ -275,7 +275,8 @@ class TrivyPlugin(BaseToolPlugin):
                         "via --tool-options trivy:timeout=N."
                     ),
                     issues_count=len(all_issues),
-                    issues=all_issues,
+                    issues=all_issues or None,
+                    timed_out=True,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
                 logger.error(f"Failed to run Trivy: {exc}")
@@ -284,13 +285,13 @@ class TrivyPlugin(BaseToolPlugin):
                     success=False,
                     output=f"Trivy failed: {exc}",
                     issues_count=len(all_issues),
-                    issues=all_issues,
+                    issues=all_issues or None,
                 )
 
             stdout = (completed.stdout or "").strip()
             stderr = (completed.stderr or "").strip()
 
-            if completed.returncode != 0:
+            if not completed.success:
                 # A missing DB is an environment condition, not a scan failure:
                 # report a clear, non-blocking skip instead of failing closed.
                 # But never let a mid-loop skip hide vulnerabilities already
@@ -315,7 +316,7 @@ class TrivyPlugin(BaseToolPlugin):
                     success=False,
                     output=stderr or "Trivy failed with non-zero exit code",
                     issues_count=len(all_issues),
-                    issues=all_issues,
+                    issues=all_issues or None,
                 )
 
             if not stdout:
@@ -345,7 +346,7 @@ class TrivyPlugin(BaseToolPlugin):
             success=len(all_issues) == 0,
             output=None,
             issues_count=len(all_issues),
-            issues=all_issues,
+            issues=all_issues or None,
             parse_failures_count=parse_failures,
         )
 

@@ -248,7 +248,6 @@ def get_install_hints() -> dict[str, str]:
             "Install via: brew install vale "
             "or download from https://github.com/errata-ai/vale/releases (v{version}+)"
         ),
-        ),
         "astro_check": (
             "Install via: bun add astro@>={version} or npm install astro@>={version}"
         ),

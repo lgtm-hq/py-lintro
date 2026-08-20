@@ -437,20 +437,20 @@
       "packageNameTemplate": "tamasfe/taplo",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
-        {
+    {
       "description": "Update trivy in _tool_versions.py (manifest follows via generator)",
       "customType": "regex",
       "managerFilePatterns": [
-        "lintro/_tool_versions\.py"
+        "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\.TRIVY:\s*\"(?<currentValue>[0-9]+\.[0-9]+\.[0-9]+)\""
+        "ToolName\\.TRIVY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "aquasecurity/trivy",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
-{
+    {
       "description": "Update trufflehog version in _tool_versions.py (manifest follows via generator)",
       "customType": "regex",
       "managerFilePatterns": [

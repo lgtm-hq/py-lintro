@@ -29,6 +29,7 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     "shellcheck": "shellcheck",
     "shfmt": "shfmt",
     "taplo": "taplo",
+    "trivy": "trivy",
     "trufflehog": "trufflehog",
     "vale": "vale",
     # Non-binary tools that Homebrew can also provide
