@@ -58,6 +58,14 @@ implementations with the core tools themselves.
 
 ### [Hadolint Analysis](./hadolint-analysis.md)
 
+### [ktlint Analysis](./ktlint-analysis.md)
+
+**Kotlin Linter and Formatter**
+
+- ✅ **Preserved**: `.kt`/`.kts` lint + `--format` auto-fix, `.editorconfig` support
+- ⚠️ **Defaults**: JSON reporter with `--log-level=error` for stable parsing
+- 🚀 **Notes**: Native JSON parser (SARIF evaluated, not lossless); requires a JVM
+
 ### [Bandit Analysis](./bandit-analysis.md)
 
 **Python Security Linter**
