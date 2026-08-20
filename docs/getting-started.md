@@ -117,6 +117,8 @@ order and for what changed.
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
   `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `djlint` - HTML template linter and formatter for Jinja/Django/Nunjucks/Handlebars
+  (`brew install djlint` or `pip install djlint`)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -D stylelint` or
   `npm install -D stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting

@@ -92,8 +92,8 @@ ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 mcp = ["mcp>=2,<3"]
 # Semgrep is intentionally absent: it ships from the isolated lockfile
 # ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
-# lintro's shared resolver. sqlfluff and pip-audit remain here.
-tools = ["sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
+# lintro's shared resolver. djlint, sqlfluff and pip-audit remain here.
+tools = ["djlint>=1.44.2", "sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -176,6 +176,7 @@ packages = [
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.commitlint",
+  "lintro.parsers.djlint",
   "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
   "lintro.parsers.golangci_lint",

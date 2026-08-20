@@ -148,6 +148,9 @@ def get_install_hints() -> dict[str, str]:
         "black": (
             "Install via: pip install black>={version} or uv add black>={version}"
         ),
+        "djlint": (
+            "Install via: pip install djlint>={version} or uv add djlint>={version}"
+        ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
         "pip_audit": (
             "Install via: pip install 'pip-audit>={version}' "
