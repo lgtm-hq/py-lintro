@@ -303,6 +303,7 @@ def write_output_file(
     total_issues: int,
     total_fixed: int,
     ai_enrichment: AISarifEnrichment | None = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write results to user-specified output file.
 
@@ -316,6 +317,9 @@ def write_output_file(
         ai_enrichment: Optional AI objects for SARIF output, supplied by the
             caller via the AI seam. Ignored for non-SARIF formats. When None,
             SARIF is rendered without AI enrichment.
+        profile_data: Optional performance profile payload; attached to the
+            JSON artifact under ``profile`` so the file output matches the
+            stdout payload when ``--profile`` is on.
     """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -341,6 +345,8 @@ def write_output_file(
             json_data["results"].append(
                 serialize_tool_result(result, action=action),
             )
+        if profile_data is not None:
+            json_data["profile"] = profile_data
         output_file.write_text(
             json.dumps(json_data, indent=2, ensure_ascii=False),
             encoding="utf-8",
