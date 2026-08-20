@@ -503,3 +503,23 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             A ToolResult to return immediately, or ``None`` to continue.
         """
         return None
+
+    def _use_native_tsconfig_scoping(
+        self,
+        info: Any,
+        files: list[str],
+    ) -> bool:
+        """Return whether to run ``-p`` against the project's tsconfig as-is.
+
+        The default is to honour explicit include/exclude/files (#851).
+        ``tsc`` overrides this so remaining JavaScript (``@ts-check``)
+        is not dropped by native project loading without ``allowJs``.
+
+        Args:
+            info: Resolved tsconfig metadata for the project.
+            files: Absolute file paths assigned to this project.
+
+        Returns:
+            ``True`` to use the tsconfig path directly.
+        """
+        return True

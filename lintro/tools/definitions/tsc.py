@@ -59,7 +59,11 @@ from lintro.plugins.base import ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.definitions._ts_checker_base import TypeScriptCheckerPlugin
-from lintro.utils.tsconfig import discover_tsconfigs, resolve_extends_chain
+from lintro.utils.tsconfig import (
+    create_temp_tsconfig,
+    discover_tsconfigs,
+    resolve_extends_chain,
+)
 from lintro.utils.tsconfig_info import TsconfigInfo
 
 # Constants for Tsc configuration
@@ -286,6 +290,59 @@ class TscPlugin(TypeScriptCheckerPlugin):
             default_timeout=TSC_DEFAULT_TIMEOUT,
         )
 
+    def _create_temp_tsconfig(
+        self,
+        base_tsconfig: Path,
+        files: list[str],
+        cwd: Path,
+    ) -> Path:
+        """Create a temp tsconfig, enabling allowJs when JS files are targeted.
+
+        Native ``tsc -p`` drops JavaScript from the program unless
+        ``allowJs`` is set, which would hide ``// @ts-check`` files and
+        yield TS18003. The skip hook already filtered uncheckable JS, so
+        remaining JS files are ones tsc should load.
+
+        Args:
+            base_tsconfig: Path to the original tsconfig.json to extend.
+            files: File paths to include (relative to *cwd*).
+            cwd: Working directory for resolving paths.
+
+        Returns:
+            Path to the temporary tsconfig.json file.
+        """
+        extra: dict[str, Any] = {}
+        if any(Path(path).suffix.lower() in _JS_EXTENSIONS for path in files):
+            extra["allowJs"] = True
+        return create_temp_tsconfig(
+            base_tsconfig=base_tsconfig,
+            files=files,
+            cwd=cwd,
+            prefix=self._temp_config_prefix,
+            tool_label=self._tool_label,
+            extra_compiler_options=extra,
+        )
+
+    def _use_native_tsconfig_scoping(
+        self,
+        info: TsconfigInfo,
+        files: list[str],
+    ) -> bool:
+        """Use native ``-p`` unless remaining JS would be dropped without allowJs.
+
+        Args:
+            info: Resolved tsconfig for the project.
+            files: Absolute file paths assigned to this project.
+
+        Returns:
+            ``True`` to honour tsconfig include/exclude/files as-is.
+        """
+        has_js = any(Path(path).suffix.lower() in _JS_EXTENSIONS for path in files)
+        if not has_js:
+            return True
+        opts = info.compiler_options
+        return opts.get("allowJs") is True or opts.get("checkJs") is True
+
     def _pre_run_skip(
         self,
         ctx: ExecutionContext,
@@ -337,15 +394,9 @@ class TscPlugin(TypeScriptCheckerPlugin):
             return None
 
         ts_check_js = (
-            set()
-            if gating.check_js
-            else _js_files_with_ts_check(files=ctx.files)
+            set() if gating.check_js else _js_files_with_ts_check(files=ctx.files)
         )
-        if (
-            _is_js_only(files=ctx.files)
-            and not gating.check_js
-            and not ts_check_js
-        ):
+        if _is_js_only(files=ctx.files) and not gating.check_js and not ts_check_js:
             logger.debug(
                 "[tsc] Skipping JS-only check: no tsconfig enables checkJs",
             )

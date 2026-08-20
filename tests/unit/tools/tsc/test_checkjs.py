@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -359,6 +360,55 @@ def test_ts_check_pragma_does_not_skip_js_only(
     assert_that(result.skipped).is_false()
     assert_that(mock_run.called).is_true()
     assert_that(result.issues_count).is_greater_than(0)
+
+
+def test_ts_check_temp_config_enables_allowjs(
+    tsc_plugin: TscPlugin,
+    tmp_path: Path,
+) -> None:
+    """Temp tsconfig sets allowJs so ``@ts-check`` JS files are loaded.
+
+    Args:
+        tsc_plugin: The TscPlugin instance to test.
+        tmp_path: Pytest temporary directory.
+    """
+    write_tsconfig(
+        tmp_path / "tsconfig.json",
+        {"compilerOptions": {"strict": True, "noEmit": True}},
+    )
+    (tmp_path / "checked.js").write_text(
+        "// @ts-check\nexport const x = 1;\n",
+        encoding="utf-8",
+    )
+    captured: list[dict[str, object]] = []
+    original_create = tsc_plugin._create_temp_tsconfig
+
+    def _spy_create(*args: Any, **kwargs: Any) -> Path:
+        path = original_create(*args, **kwargs)
+        captured.append(json.loads(path.read_text(encoding="utf-8")))
+        return path
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            tsc_plugin,
+            "_create_temp_tsconfig",
+            side_effect=_spy_create,
+        ):
+            with patch.object(
+                tsc_plugin,
+                "_run_subprocess",
+                return_value=(True, ""),
+            ):
+                result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(captured).is_not_empty()
+    compiler_options = captured[0]["compilerOptions"]
+    assert isinstance(compiler_options, dict)
+    assert_that(compiler_options.get("allowJs")).is_true()
 
 
 def test_ts_nocheck_pragma_still_skips_js_only(
