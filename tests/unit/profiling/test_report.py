@@ -14,16 +14,17 @@ from lintro.profiling.report import (
 )
 
 
-def _issue(file: str) -> BaseIssue:
+def _issue(file: str, *, line: int = 1) -> BaseIssue:
     """Build a minimal issue with a ``file`` attribute.
 
     Args:
         file: The file path to attach to the issue.
+        line: 1-indexed line number (unique lines avoid merge collapse).
 
     Returns:
         A ``BaseIssue`` exposing ``file``.
     """
-    return BaseIssue(file=file, line=1, column=1, message="test")
+    return BaseIssue(file=file, line=line, column=1, message="test")
 
 
 @pytest.fixture
@@ -45,7 +46,7 @@ def sample_results() -> list[ToolResult]:
             name="mypy",
             success=False,
             issues_count=3,
-            issues=[_issue("a.py"), _issue("a.py"), _issue("c.py")],
+            issues=[_issue("a.py", line=1), _issue("a.py", line=2), _issue("c.py")],
             duration_seconds=12.0,
         ),
         ToolResult(
@@ -83,15 +84,57 @@ def test_build_timings_excludes_skipped_and_untimed(
     assert_that(tools).does_not_contain("darglint")
 
 
+def test_build_timings_includes_timed_failures() -> None:
+    """Crashed tools with a recorded duration appear in the profile."""
+    results = [
+        ToolResult(
+            name="ruff",
+            success=False,
+            output="Failed to initialize tool: boom",
+            issues_count=0,
+            duration_seconds=0.12,
+        ),
+    ]
+
+    timings = build_timings(results)
+
+    assert_that(timings).is_length(1)
+    assert_that(timings[0].tool).is_equal_to("ruff")
+    assert_that(timings[0].duration).is_equal_to(0.12)
+    assert_that(timings[0].files_with_issues).is_equal_to(0)
+    assert_that(timings[0].issues_found).is_equal_to(0)
+
+
 def test_build_timings_attributes_files_and_issues(
     sample_results: list[ToolResult],
 ) -> None:
-    """Per-tool file counts dedupe by path; issue counts mirror the result."""
+    """Per-tool file counts dedupe by path; issue counts use the merge."""
     timings = {t.tool: t for t in build_timings(sample_results)}
 
-    assert_that(timings["mypy"].files_checked).is_equal_to(2)
+    assert_that(timings["mypy"].files_with_issues).is_equal_to(2)
     assert_that(timings["mypy"].issues_found).is_equal_to(3)
-    assert_that(timings["ruff"].files_checked).is_equal_to(2)
+    assert_that(timings["ruff"].files_with_issues).is_equal_to(2)
+
+
+def test_build_timings_uses_merged_issue_count_in_fmt_mode() -> None:
+    """``issues_found`` matches JSON ``results[]`` after detected/remaining merge."""
+    detected = [_issue("a.py", line=1), _issue("b.py", line=1)]
+    remaining = [_issue("b.py", line=1)]
+    result = ToolResult(
+        name="ruff",
+        success=True,
+        issues_count=1,
+        initial_issues=detected,
+        issues=remaining,
+        duration_seconds=1.0,
+    )
+
+    timings = build_timings([result])
+
+    assert_that(timings).is_length(1)
+    # Raw issues_count is remaining-only (1); the JSON merge keeps both files.
+    assert_that(timings[0].issues_found).is_equal_to(2)
+    assert_that(timings[0].files_with_issues).is_equal_to(2)
 
 
 def test_build_profile_data_shape(sample_results: list[ToolResult]) -> None:
@@ -105,10 +148,13 @@ def test_build_profile_data_shape(sample_results: list[ToolResult]) -> None:
     assert_that(first).contains_key(
         "name",
         "duration",
-        "files_checked",
+        "files_with_issues",
         "issues_found",
     )
+    assert_that(first).does_not_contain_key("files_checked")
     assert_that(first["name"]).is_equal_to("mypy")
+    assert_that(first["files_with_issues"]).is_equal_to(2)
+    assert_that(first["issues_found"]).is_equal_to(3)
 
 
 def test_build_profile_data_empty_when_nothing_timed() -> None:
@@ -137,6 +183,7 @@ def test_render_profile_report_contains_table_and_total(
     assert_that(report).contains("Performance Profile")
     assert_that(report).contains("mypy")
     assert_that(report).contains("ruff")
+    assert_that(report).contains("Issue files")
     assert_that(report).contains("CUMULATIVE")
     assert_that(report).contains("12.00s")
 
