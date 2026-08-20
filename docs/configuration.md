@@ -2172,19 +2172,25 @@ lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
 for source code and documentation. It checks all text files and can auto-correct
 misspellings.
 
-> **When typos runs.** typos is language-agnostic, so it is not listed for any
-> individual language in the manifest's `language_map`. On a no-config first run,
-> language detection therefore does **not** pull it in on its own — it joins the run
-> through the "unmapped tool with a native config" path, i.e. as soon as a `typos.toml`,
-> `.typos.toml` or `_typos.toml` exists at a scan root. Adding that file is what opts a
-> project in; an existing unscoped `lintro check` in a project without one is
-> unaffected. You can also select it explicitly at any time with
-> `lintro check --tools typos`.
+> **When typos runs.** typos is language-agnostic, so it has no entry in the manifest's
+> `language_map`. That makes selection depend on which path a project takes:
 >
-> Once it is enabled, two things are worth knowing:
+> - **No `.lintro-config.yaml` (first run).** Tool selection comes from language
+>   detection, which does not pull typos in on its own. It joins through the "unmapped
+>   tool with a native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or
+>   `_typos.toml` exists at a scan root.
+> - **With a `.lintro-config.yaml`, or `--tools all`.** Language scoping is bypassed and
+>   the full registry runs, so **typos runs as soon as the binary is on `PATH`**, with
+>   or without a `.typos.toml`. If you already keep a lintro config, this is the case
+>   that applies to you: an existing unscoped `lintro check` will start spell-checking
+>   the whole repository on the first run after upgrading.
 >
-> - **Turning it back off.** Disable it for the project in `.lintro-config.yaml` (this
->   is the real opt-out — it survives config-driven and unscoped runs alike):
+> `lintro check --tools typos` selects it explicitly in either case.
+>
+> Two things are worth knowing before that first run:
+>
+> - **Turning it off.** Disable it for the project in `.lintro-config.yaml` — this is
+>   the real opt-out, and it works on both paths above:
 >
 >   ```yaml
 >   tools:

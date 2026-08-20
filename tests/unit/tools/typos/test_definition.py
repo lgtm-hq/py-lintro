@@ -6,7 +6,15 @@ from pathlib import Path
 
 from assertpy import assert_that
 
+from lintro._tool_versions import get_tool_version
+from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.tools.core.install_strategies.package_names import ecosystem_package_name
+from lintro.tools.core.tool_registry import ManifestRegistry
+from lintro.tools.core.version_parsing import (
+    extract_version_from_output,
+    get_install_hints,
+)
 from lintro.tools.definitions.typos import TYPOS_DEFAULT_TIMEOUT, TyposPlugin
 
 
@@ -96,3 +104,54 @@ def test_text_files_drops_binary_files(
     )
 
     assert_that(kept).is_equal_to(["notes.txt"])
+
+
+def test_manifest_pins_the_crate_not_the_binary_name() -> None:
+    """The binary is ``typos`` but the crate/formula is ``typos-cli``.
+
+    Installing ``typos`` from crates.io fetches an unrelated library, so the
+    package override must stay explicit.
+    """
+    registry = ManifestRegistry.load()
+    entry = registry.get("typos")
+
+    assert_that(entry).is_not_none()
+    assert_that(entry.install_type).is_equal_to("cargo")
+    assert_that(entry.install_package).is_equal_to("typos-cli")
+    assert_that(ecosystem_package_name("typos", entry.install_package)).is_equal_to(
+        "typos-cli",
+    )
+
+
+def test_install_hint_names_the_crate_and_the_formula() -> None:
+    """The hint must not tell users to install the wrong package."""
+    hint = get_install_hints()["typos"]
+
+    assert_that(hint).contains("cargo install typos-cli")
+    assert_that(hint).contains("brew install typos-cli")
+
+
+def test_version_command_targets_the_binary() -> None:
+    """``--version`` is invoked on the binary name, not the crate name."""
+    registry = ManifestRegistry.load()
+
+    assert_that(list(registry.get("typos").version_command)).is_equal_to(
+        ["typos", "--version"],
+    )
+
+
+def test_typos_version_output_parses(typos_plugin: TyposPlugin) -> None:
+    """``typos --version`` prints the crate name first; parsing must cope.
+
+    The pinned version is read from the manifest rather than written inline so
+    a Renovate bump does not have to touch this test.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+    """
+    pinned = get_tool_version(ToolName.TYPOS)
+
+    assert_that(
+        extract_version_from_output(f"typos-cli {pinned}", "typos"),
+    ).is_equal_to(pinned)
+    assert_that(typos_plugin.definition.min_version).is_not_none()

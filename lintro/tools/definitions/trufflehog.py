@@ -36,7 +36,7 @@ from lintro.parsers.trufflehog.trufflehog_parser import parse_trufflehog_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.argv_batching import chunk_paths
+from lintro.tools.core.argv_batching import argv_cost, chunk_paths
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -308,10 +308,7 @@ class TrufflehogPlugin(BaseToolPlugin):
         # TruffleHog's ``filesystem`` mode takes explicit file paths in argv, so
         # the resolved list must be split into ARG_MAX-safe batches (shared with
         # the other catch-all tools in ``lintro.tools.core.argv_batching``).
-        fixed_arg_bytes = sum(
-            len(a.encode("utf-8", "surrogatepass")) + 1 for a in fixed_args
-        )
-        batches = chunk_paths(source_paths, fixed_arg_bytes=fixed_arg_bytes)
+        batches = chunk_paths(source_paths, fixed_arg_bytes=argv_cost(fixed_args))
         logger.debug(
             f"[trufflehog] Scanning {len(source_paths)} files in "
             f"{len(batches)} batch(es) (cwd={ctx.cwd})",

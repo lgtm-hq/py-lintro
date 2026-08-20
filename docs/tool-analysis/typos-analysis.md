@@ -82,13 +82,20 @@ non-zero, and the plugin fails closed on a non-zero exit with no parsed findings
 
 ## When typos is selected
 
-typos is language-agnostic, so it has no entry in the manifest's `language_map`. On a
-no-config first run, language detection alone does not select it; it enters through the
-"unmapped tool with a native config" path in
-`lintro/utils/execution/tool_configuration.py`, i.e. once a `typos.toml`, `.typos.toml`
-or `_typos.toml` exists at a scan root. Explicit selection (`--tools typos`) always
-works. Adding the config file is therefore the deliberate opt-in for a project, which
-keeps existing unscoped `lintro check` runs unchanged.
+typos is language-agnostic, so it has no entry in the manifest's `language_map`. That
+splits selection in two:
+
+- On a **no-config first run**, tool selection comes from language detection
+  (`_detection_scoped_tool_names` in `lintro/utils/execution/tool_configuration.py`),
+  which does not select typos on its own. It enters through the "unmapped tool with a
+  native config" branch — once a `typos.toml`, `.typos.toml` or `_typos.toml` exists at
+  a scan root.
+- With a **`.lintro-config.yaml` present**, or under `--tools all`, language scoping is
+  bypassed and the full registry runs, so typos runs as soon as the binary is on `PATH`.
+  This is the path that changes behaviour for existing users, and
+  `tools.typos.enabled: false` is the opt-out.
+
+Explicit selection (`--tools typos`) works in either case.
 
 ## Parser choice: native JSON vs shared SARIF
 

@@ -26,7 +26,7 @@ from lintro.parsers.typos.typos_parser import (
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.argv_batching import chunk_paths
+from lintro.tools.core.argv_batching import argv_cost, chunk_paths
 
 # Constants for typos configuration
 TYPOS_DEFAULT_TIMEOUT: int = 30
@@ -240,10 +240,7 @@ class TyposPlugin(BaseToolPlugin):
             any batch that failed outright, and the combined display output.
         """
         base_cmd = self._build_command(cwd=ctx.cwd) + list(extra_args or [])
-        fixed_arg_bytes = sum(
-            len(arg.encode("utf-8", "surrogatepass")) + 1 for arg in base_cmd
-        )
-        batches = chunk_paths(files, fixed_arg_bytes=fixed_arg_bytes)
+        batches = chunk_paths(files, fixed_arg_bytes=argv_cost(base_cmd))
         logger.debug(
             f"[TyposPlugin] Scanning {len(files)} files in {len(batches)} "
             f"batch(es) (cwd={ctx.cwd})",

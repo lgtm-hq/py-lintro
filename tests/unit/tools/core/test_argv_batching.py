@@ -13,6 +13,7 @@ from lintro.tools.core.argv_batching import (
     ARGV_POINTER_BYTES,
     ARGV_SAFETY_HEADROOM_BYTES,
     argv_byte_budget,
+    argv_cost,
     chunk_paths,
 )
 
@@ -118,10 +119,10 @@ def test_argv_byte_budget_tracks_remaining_capacity_when_headroom_does_not_fit()
 ):
     """Between "roomy" and "exhausted", the budget is the true remainder."""
     arg_max = 10**6
-    # Leave less than the scaled headroom but more than zero.
-    value_len = arg_max - 10
+    leftover = 100  # positive, but far below the 4096-byte headroom.
+    # env_bytes = len("K") + len(value) + 2 + one pointer slot.
+    value_len = arg_max - leftover - 1 - 2 - ARGV_POINTER_BYTES
     env = {"K": "x" * value_len}
-    env_bytes = 1 + value_len + 2 + ARGV_POINTER_BYTES
 
     with (
         patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
@@ -129,8 +130,11 @@ def test_argv_byte_budget_tracks_remaining_capacity_when_headroom_does_not_fit()
     ):
         budget = argv_byte_budget()
 
-    assert_that(budget).is_equal_to(max(arg_max - env_bytes, 1))
-    assert_that(budget).is_less_than_or_equal_to(max(arg_max - env_bytes, 1))
+    # The distinct branch: positive remainder, no headroom subtracted, and
+    # crucially not the exhausted-environment floor of 1.
+    assert_that(budget).is_equal_to(leftover)
+    assert_that(budget).is_greater_than(1)
+    assert_that(budget).is_less_than(ARGV_SAFETY_HEADROOM_BYTES)
 
 
 def test_argv_byte_budget_counts_environment_in_bytes_not_characters() -> None:
@@ -287,3 +291,35 @@ def test_default_budget_batches_fit_the_derived_limit() -> None:
         if len(batch) > 1:
             assert_that(batch_bytes).is_less_than_or_equal_to(limit)
     assert_that([p for batch in batches for p in batch]).is_equal_to(paths)
+
+
+def test_argv_cost_charges_encoding_nul_and_pointer_per_argument() -> None:
+    """The public cost helper is the one rule both budget sides must use."""
+    encoding = sys.getfilesystemencoding()
+    args = ["typos", "--format", "json", "/café/naïve.md"]
+    expected = sum(
+        len(arg.encode(encoding, "surrogateescape")) + 1 + ARGV_POINTER_BYTES
+        for arg in args
+    )
+
+    assert_that(argv_cost(args)).is_equal_to(expected)
+
+
+def test_argv_cost_of_nothing_is_zero() -> None:
+    """An empty argument list costs nothing."""
+    assert_that(argv_cost([])).is_equal_to(0)
+
+
+def test_chunk_uses_argv_cost_for_paths() -> None:
+    """A path's budget cost is exactly what ``argv_cost`` reports for it."""
+    path = "/café/naïve.md"
+
+    fits = chunk_paths([path, path], fixed_arg_bytes=0, budget=argv_cost([path, path]))
+    splits = chunk_paths(
+        [path, path],
+        fixed_arg_bytes=0,
+        budget=argv_cost([path, path]) - 1,
+    )
+
+    assert_that(fits).is_length(1)
+    assert_that(splits).is_length(2)

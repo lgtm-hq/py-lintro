@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Sequence
 
 # Reserved bytes for argv/environment accounting slack. Scaled down on hosts
 # with a small ``ARG_MAX`` (see :func:`_headroom_for`) so the margin can never
@@ -39,6 +40,23 @@ def _fsbytes(value: str) -> bytes:
     return value.encode(sys.getfilesystemencoding(), "surrogateescape")
 
 
+def argv_cost(args: Sequence[str]) -> int:
+    """Return the bytes ``execve`` charges for ``args``.
+
+    Callers must size ``fixed_arg_bytes`` with this function so the command
+    prefix is measured by the same rules as the paths — encoded byte length,
+    the NUL terminator, and one pointer slot per entry. Sizing it with
+    ``len(s)`` undercounts non-ASCII flags and ignores the pointer slots.
+
+    Args:
+        args: Command-line arguments (executable, subcommands, flags, paths).
+
+    Returns:
+        Total bytes those arguments occupy against the OS limit.
+    """
+    return sum(len(_fsbytes(arg)) + 1 + ARGV_POINTER_BYTES for arg in args)
+
+
 def _headroom_for(arg_max: int) -> int:
     """Scale the safety margin to the limit it is carved out of.
 
@@ -61,8 +79,13 @@ def argv_byte_budget() -> int:
     The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
     current environment block (``execve`` counts it against the same limit) and
     a safety margin. Falls back to the POSIX minimum when ``ARG_MAX`` cannot be
-    queried. The result never exceeds the bytes actually left after the
-    environment block, so it cannot promise capacity the kernel does not have.
+    queried.
+
+    The result tracks the bytes actually left after the environment block
+    rather than a fixed floor. The one exception is a 1-byte lower bound when
+    nothing is left at all: that is not a claim of capacity, only enough for
+    :func:`chunk_paths` to terminate with one path per batch and let the OS be
+    the authority — the same contract as an individually oversized path.
 
     Returns:
         The maximum number of argument-data bytes to place on one command line.
@@ -85,13 +108,18 @@ def argv_byte_budget() -> int:
     budget = remaining - _headroom_for(arg_max)
     if budget > 0:
         return budget
-    # The environment has consumed the limit. Report what is actually left
-    # rather than a comfortable-looking floor: inventing capacity the kernel
-    # does not have is exactly the ``E2BIG`` this module exists to prevent.
-    # The 1-byte lower bound only keeps :func:`chunk_paths` terminating (one
-    # path per batch); whether that argv is executable is then the OS's call,
-    # which is the same contract as an individually oversized path.
-    return max(remaining, 1)
+    if remaining > 0:
+        # Positive but tighter than the safety margin. Deliberately hand back
+        # the true remainder with no slack rather than a comfortable-looking
+        # floor: the margin is insurance against our own accounting drift, and
+        # spending bytes we do not have is exactly the ``E2BIG`` this module
+        # exists to prevent.
+        return remaining
+    # Nothing is left at all. Returning 1 does exceed what remains; it is not a
+    # capacity claim, only the smallest value that keeps :func:`chunk_paths`
+    # terminating (one path per batch). Whether that argv executes is then the
+    # OS's call, the same contract as an individually oversized path.
+    return 1
 
 
 def chunk_paths(
@@ -127,7 +155,7 @@ def chunk_paths(
     for path in paths:
         # +1 for the argv NUL terminator and one pointer slot, both of which
         # the kernel accounts per argument.
-        path_bytes = len(_fsbytes(path)) + 1 + ARGV_POINTER_BYTES
+        path_bytes = argv_cost([path])
         if current and current_bytes + path_bytes > remaining:
             batches.append(current)
             current = []
@@ -144,5 +172,6 @@ __all__ = [
     "ARGV_POINTER_BYTES",
     "ARGV_SAFETY_HEADROOM_BYTES",
     "argv_byte_budget",
+    "argv_cost",
     "chunk_paths",
 ]
