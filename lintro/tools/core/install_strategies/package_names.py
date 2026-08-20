@@ -28,6 +28,7 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     "osv_scanner": "osv-scanner",
     "shellcheck": "shellcheck",
     "shfmt": "shfmt",
+    "swiftlint": "swiftlint",
     "taplo": "taplo",
     "trufflehog": "trufflehog",
     "vale": "vale",
