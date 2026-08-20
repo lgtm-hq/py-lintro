@@ -81,6 +81,16 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: Runtime rule customization, Docker Compose support, auto-fixing
 - 🚀 **Enhanced**: Issue normalization, Python integration, error parsing
 
+### [Terraform Analysis](./terraform-analysis.md)
+
+**Infrastructure-as-Code Formatter and Validator**
+
+- ✅ **Preserved**: `terraform fmt` formatting (fixable) and `terraform validate`
+  per-module validation via JSON diagnostics
+- ⚠️ **Limited**: No `plan`/provider-backed checks; validation runs with
+  `-backend=false`
+- 🚀 **Notes**: fmt file-list and validate JSON diagnostics normalized to Lintro issues
+
 <!-- markdownlint-enable MD036 -->
 
 ### [Black Analysis](./black-analysis.md)

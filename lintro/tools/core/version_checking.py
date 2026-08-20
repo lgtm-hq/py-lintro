@@ -235,6 +235,11 @@ def get_install_hints() -> dict[str, str]:
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
+        "terraform": (
+            "Install via: brew install hashicorp/tap/terraform "
+            "or download from https://releases.hashicorp.com/terraform "
+            "(v{version}+)"
+        ),
         "trufflehog": (
             "Install via: brew install trufflehog "
             "or download from "
