@@ -531,7 +531,14 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
             ),
         ]
 
-    source = config.config_path or "built-in defaults (no config file found)"
+    if config.config_path:
+        source = config.config_path
+    elif config.global_config_path:
+        # A user-level global file is a real config source; reporting
+        # "no config file found" here would contradict lintro config (#1235).
+        source = f"{config.global_config_path} (user-level global config)"
+    else:
+        source = "built-in defaults (no config file found)"
     checks = [
         DoctorCheck(
             category=DoctorCheckCategory.CONFIG,

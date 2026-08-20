@@ -627,14 +627,21 @@ def get_tools_to_run(
         else:  # check
             available_tools = tool_manager.get_check_tools()
 
-        # On a no-config default run (``tools`` is None, no config file, and no
-        # in-memory ``tools:`` section), scope the toolset to languages present
-        # in the project. Explicit ``--tools all`` and any configured project
-        # keep the full behavior.
+        # On a no-config default run (``tools`` is None, no project *or*
+        # user-level global config file, and no in-memory ``tools:`` section),
+        # scope the toolset to languages present in the project. Explicit
+        # ``--tools all`` and any configured project keep the full behavior.
+        # A global config counts as configured: the user opted in deliberately,
+        # so silently language-scoping their run would ignore that (#1235).
         detected_languages: list[str] = []
         scoped_names: set[str] | None = None
         scoped_by_detection = False
-        if tools is None and config.config_path is None and not config.tools:
+        if (
+            tools is None
+            and config.config_path is None
+            and config.global_config_path is None
+            and not config.tools
+        ):
             detected_languages, scoped_names = _detection_scoped_tool_names(
                 scan_roots=scan_roots,
             )
