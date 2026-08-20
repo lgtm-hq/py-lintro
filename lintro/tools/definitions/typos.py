@@ -40,6 +40,45 @@ TYPOS_CONFIG_FILENAMES: list[str] = ["typos.toml", ".typos.toml", "_typos.toml"]
 BINARY_SNIFF_BYTES: int = 8192
 
 
+@dataclass(frozen=True)
+class _BatchOutcome:
+    """Merged result of running typos over one or more argv batches.
+
+    Attributes:
+        issues: Every typo parsed across all batches, in batch order.
+        fatal_outputs: Display output of each batch that exited non-zero
+            *without* producing a parseable report. Those are genuine tool
+            failures (bad config, unreadable path, failed write) as opposed to
+            typos' normal non-zero "I found something" exit, and they must not
+            be swallowed just because a sibling batch did report typos.
+        output: Combined display output of every batch.
+    """
+
+    issues: list[TyposIssue]
+    fatal_outputs: list[str]
+    output: str
+
+    @property
+    def failed(self) -> bool:
+        """Whether any batch failed outright.
+
+        Returns:
+            True when at least one batch exited non-zero with nothing parseable.
+        """
+        return bool(self.fatal_outputs)
+
+    def failure_message(self, default: str) -> str:
+        """Compose the message describing the failed batches.
+
+        Args:
+            default: Message to use when the failed batches produced no output.
+
+        Returns:
+            The combined failure text, or ``default`` when there is none.
+        """
+        return "\n".join(t for t in self.fatal_outputs if t) or default
+
+
 @register_tool
 @dataclass
 class TyposPlugin(BaseToolPlugin):
@@ -211,7 +250,7 @@ class TyposPlugin(BaseToolPlugin):
         files: list[str],
         ctx: ExecutionContext,
         extra_args: list[str] | None = None,
-    ) -> tuple[list[TyposIssue], bool, str]:
+    ) -> _BatchOutcome:
         """Run typos over ARG_MAX-safe batches of ``files`` and merge results.
 
         typos is default-on with a catch-all file pattern, so a large tree
@@ -228,8 +267,8 @@ class TyposPlugin(BaseToolPlugin):
                 ``["--write-changes"]``.
 
         Returns:
-            Tuple of (merged issues, whether every batch exited 0, combined
-            display output).
+            A :class:`_BatchOutcome` carrying the merged issues, the output of
+            any batch that failed outright, and the combined display output.
         """
         base_cmd = self._build_command(cwd=ctx.cwd) + list(extra_args or [])
         fixed_arg_bytes = sum(
@@ -243,7 +282,7 @@ class TyposPlugin(BaseToolPlugin):
 
         issues: list[TyposIssue] = []
         outputs: list[str] = []
-        all_ok = True
+        fatal_outputs: list[str] = []
         for batch in batches:
             proc = self._run_subprocess_result(
                 cmd=base_cmd + batch,
@@ -252,11 +291,20 @@ class TyposPlugin(BaseToolPlugin):
             )
             # typos writes its JSON report to stdout and diagnostics to stderr;
             # parse stdout only so a stderr warning cannot corrupt the report.
-            issues.extend(parse_typos_output(output=proc.stdout))
+            batch_issues = parse_typos_output(output=proc.stdout)
+            issues.extend(batch_issues)
             if proc.output:
                 outputs.append(proc.output)
-            all_ok = all_ok and proc.success
-        return issues, all_ok, "\n".join(outputs)
+            # typos exits 0 when clean and 2 when it reports typos. A non-zero
+            # exit with nothing parseable is a real failure, and it is tracked
+            # per batch: a sibling batch that did report typos must not hide it.
+            if not proc.success and not batch_issues:
+                fatal_outputs.append(proc.output or "")
+        return _BatchOutcome(
+            issues=issues,
+            fatal_outputs=fatal_outputs,
+            output="\n".join(outputs),
+        )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files for typos.
@@ -280,27 +328,30 @@ class TyposPlugin(BaseToolPlugin):
 
         cmd = self._build_command(cwd=ctx.cwd)
         try:
-            issues, all_ok, output = self._run_batched(files=files, ctx=ctx)
+            outcome = self._run_batched(files=files, ctx=ctx)
         except subprocess.TimeoutExpired:
             return self._timeout_result(cmd=cmd, timeout=ctx.timeout, cwd=ctx.cwd)
 
-        # typos exits 0 when clean and 2 when it reports typos. Any other
-        # non-zero exit with nothing parseable is a runtime problem (bad
-        # config, unreadable path) and must not read as a clean pass.
-        if not issues and not all_ok:
+        issues = outcome.issues
+
+        # A batch that exited non-zero with nothing parseable is a runtime
+        # problem (bad config, unreadable path). Report it even when another
+        # batch did produce findings, so the failure is never swallowed.
+        if outcome.failed:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(output or "typos exited with an error."),
-                issues_count=0,
-                parse_failures_count=1,
+                output=outcome.failure_message("typos exited with an error."),
+                issues_count=len(issues),
+                issues=issues,
+                parse_failures_count=len(outcome.fatal_outputs),
                 cwd=ctx.cwd,
             )
 
         return ToolResult(
             name=self.definition.name,
             success=not issues,
-            output=output if issues else None,
+            output=outcome.output if issues else None,
             issues_count=len(issues),
             issues=issues,
             cwd=ctx.cwd,
@@ -334,10 +385,7 @@ class TyposPlugin(BaseToolPlugin):
         # Detect issues before fixing.
         check_cmd = self._build_command(cwd=ctx.cwd)
         try:
-            initial_issues, initial_ok, initial_output = self._run_batched(
-                files=files,
-                ctx=ctx,
-            )
+            initial = self._run_batched(files=files, ctx=ctx)
         except subprocess.TimeoutExpired:
             return self._timeout_result(
                 cmd=check_cmd,
@@ -345,17 +393,18 @@ class TyposPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
 
-        # Mirror check(): a non-zero exit with nothing parseable means typos
-        # never ran properly (bad config, unreadable path). Stop here rather
-        # than letting a mutating --write-changes pass run after a failed
-        # detection.
-        if not initial_issues and not initial_ok:
+        # Mirror check(): a batch that exited non-zero with nothing parseable
+        # means typos never ran properly there (bad config, unreadable path).
+        # Stop before the mutating --write-changes pass rather than writing on
+        # the strength of a partially failed detection.
+        if initial.failed:
             return self._error_result(
-                message=(initial_output or "typos exited with an error."),
+                message=initial.failure_message("typos exited with an error."),
                 initial_issues=[],
                 cwd=ctx.cwd,
             )
 
+        initial_issues = initial.issues
         initial_count = len(initial_issues)
 
         # Apply corrections in place. typos exits non-zero when it reports
@@ -364,7 +413,7 @@ class TyposPlugin(BaseToolPlugin):
         # kept for the fix pass so that guard can tell the two apart.
         fix_cmd = [*check_cmd, "--write-changes"]
         try:
-            fix_issues, fix_ok, fix_output = self._run_batched(
+            written = self._run_batched(
                 files=files,
                 ctx=ctx,
                 extra_args=["--write-changes"],
@@ -377,19 +426,18 @@ class TyposPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        if not fix_ok and not fix_issues:
+        if written.failed:
             return self._error_result(
-                message=(fix_output or "typos --write-changes exited with an error."),
+                message=written.failure_message(
+                    "typos --write-changes exited with an error.",
+                ),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
             )
 
         # Re-check for anything typos could not auto-correct.
         try:
-            remaining_issues, remaining_ok, remaining_output = self._run_batched(
-                files=files,
-                ctx=ctx,
-            )
+            recheck = self._run_batched(files=files, ctx=ctx)
         except subprocess.TimeoutExpired:
             return self._timeout_result(
                 cmd=check_cmd,
@@ -399,13 +447,16 @@ class TyposPlugin(BaseToolPlugin):
                 after_write=True,
             )
 
-        if not remaining_issues and not remaining_ok:
+        if recheck.failed:
             return self._error_result(
-                message=(remaining_output or "typos re-check exited with an error."),
+                message=recheck.failure_message(
+                    "typos re-check exited with an error.",
+                ),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
             )
 
+        remaining_issues = recheck.issues
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
 

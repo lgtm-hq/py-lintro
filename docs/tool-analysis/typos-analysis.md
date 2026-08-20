@@ -43,7 +43,9 @@ parser-selection decision.
 - **ARG_MAX batching**: with `file_patterns=["*"]` a large tree would otherwise expand
   into a single argv that exceeds the OS limit and fails with `E2BIG`. Paths are split
   into budget-sized batches by `lintro/tools/core/argv_batching.py` (shared with
-  TruffleHog) and the per-batch results are merged.
+  TruffleHog) and the per-batch results are merged. A batch that exits non-zero
+  *without* a parseable report is tracked separately from the merged findings, so a
+  genuine failure in one batch is never hidden by typos another batch reported.
 - **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
   misspelled word, and its suggested corrections. The composed message has the form

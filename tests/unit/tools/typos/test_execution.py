@@ -422,3 +422,116 @@ def test_large_file_lists_are_split_into_batches(
 
     assert_that(commands).is_length(5)
     assert_that(result.success).is_true()
+
+
+def _one_file_per_batch(paths: list[str], **_kwargs: object) -> list[list[str]]:
+    """Chunk every path into its own batch.
+
+    Args:
+        paths: Paths to chunk.
+        **_kwargs: Ignored budget arguments.
+
+    Returns:
+        One single-element batch per path.
+    """
+    return [[path] for path in paths]
+
+
+def test_check_surfaces_a_failed_batch_alongside_findings(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """One failing batch is reported even when another batch found typos.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    good = tmp_path / "aaa_good.txt"
+    good.write_text("teh cat\n")
+    bad = tmp_path / "zzz_bad.txt"
+    bad.write_text("some words\n")
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        if any(arg.endswith("zzz_bad.txt") for arg in cmd):
+            return _proc(returncode=1, stderr="error: unreadable path\n")
+        return _proc(stdout=_typo_line("aaa_good.txt", "teh", "the"), returncode=2)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.check([str(good), str(bad)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.output).contains("unreadable path")
+
+
+def test_fix_does_not_write_when_one_detect_batch_fails(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A single failed detection batch stops the whole write pass.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    good = tmp_path / "aaa_good.txt"
+    good.write_text("teh cat\n")
+    bad = tmp_path / "zzz_bad.txt"
+    bad.write_text("some words\n")
+    commands: list[list[str]] = []
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        commands.append(cmd)
+        if any(arg.endswith("zzz_bad.txt") for arg in cmd):
+            return _proc(returncode=1, stderr="error: unreadable path\n")
+        return _proc(stdout=_typo_line("aaa_good.txt", "teh", "the"), returncode=2)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.fix([str(good), str(bad)], {})
+
+    assert_that([c for c in commands if "--write-changes" in c]).is_empty()
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("unreadable path")
+
+
+def test_fix_reports_a_failed_write_batch(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed ``--write-changes`` batch is not reported as remaining typos.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    good = tmp_path / "aaa_good.txt"
+    good.write_text("teh cat\n")
+    bad = tmp_path / "zzz_bad.txt"
+    bad.write_text("teh dog\n")
+
+    def _respond(cmd: list[str], **_kwargs: object) -> SubprocessResult:
+        writing = "--write-changes" in cmd
+        target_is_bad = any(arg.endswith("zzz_bad.txt") for arg in cmd)
+        if writing and target_is_bad:
+            return _proc(returncode=1, stderr="error: read-only file system\n")
+        name = "zzz_bad.txt" if target_is_bad else "aaa_good.txt"
+        return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
+
+    with (
+        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
+    ):
+        result = typos_plugin.fix([str(good), str(bad)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("read-only file system")
