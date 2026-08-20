@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.swiftlint.swiftlint_issue import SwiftlintIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import SAMPLE_JSON
@@ -124,7 +125,9 @@ def test_check_reports_issues(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)
-    codes = {issue.code for issue in result.issues}
+    assert_that(result.issues).is_not_none()
+    assert result.issues is not None  # narrow type for mypy
+    codes = {issue.code for issue in result.issues if isinstance(issue, SwiftlintIssue)}
     assert_that(codes).contains("identifier_name", "type_name")
 
 

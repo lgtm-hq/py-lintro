@@ -27,9 +27,9 @@ files and can auto-correct many rules.
 ## Parser choice: native JSON (not shared SARIF)
 
 Per the SARIF ingestion evaluation (`docs/design/sarif-ingestion-evaluation.md`, Refs
-Issue #1066 / PR #1140), a tool should use the shared SARIF parser only when its SARIF output
-is lossless for lintro's model. SwiftLint 0.65.0 emits **both** `--reporter json` and
-`--reporter sarif`; both were captured from the same run and compared against the
+Issue #1066 / PR #1140), a tool should use the shared SARIF parser only when its SARIF
+output is lossless for lintro's model. SwiftLint 0.65.0 emits **both** `--reporter json`
+and `--reporter sarif`; both were captured from the same run and compared against the
 fidelity checklist:
 
 | Field / concern      | JSON reporter                                                                   | SARIF reporter                                                                                                           |

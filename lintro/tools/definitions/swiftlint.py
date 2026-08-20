@@ -31,10 +31,11 @@ from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
 )
+from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for SwiftLint configuration
 SWIFTLINT_DEFAULT_TIMEOUT: int = 60
-SWIFTLINT_DEFAULT_PRIORITY: int = 50
+SWIFTLINT_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("swiftlint", 50)
 SWIFTLINT_FILE_PATTERNS: list[str] = ["*.swift"]
 
 
