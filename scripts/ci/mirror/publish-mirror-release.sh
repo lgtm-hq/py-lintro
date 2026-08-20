@@ -109,8 +109,13 @@ else
 	pr_number="${pr_url##*/}"
 fi
 
+log_info "Rebasing bump branch onto latest origin/main before merge"
+git fetch origin main --quiet
+git rebase origin/main
+git push --force-with-lease origin "HEAD:$BRANCH"
+
 log_info "Merging mirror PR #${pr_number}"
-gh pr merge "$pr_number" --squash --admin --delete-branch
+gh pr merge "$pr_number" --squash --delete-branch
 
 git fetch origin main --quiet
 git checkout -q main
