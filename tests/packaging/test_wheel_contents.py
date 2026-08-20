@@ -220,14 +220,20 @@ def test_wheel_contains_declared_package_data(wheel_namelist: list[str]) -> None
 
 @pytest.mark.slow
 @pytest.mark.packaging
-def test_sdist_contains_py_typed_marker(sdist_namelist: list[str]) -> None:
-    """The PEP 561 marker must also ship in the sdist."""
-    typed = [
-        name
-        for name in sdist_namelist
-        if name.replace("\\", "/").endswith("lintro/py.typed")
+def test_sdist_contains_declared_package_data(sdist_namelist: list[str]) -> None:
+    """Declared package-data files, including ``py.typed``, must ship in the sdist."""
+    members = [name.replace("\\", "/") for name in sdist_namelist]
+    missing = [
+        path
+        for path in sorted(_declared_package_data_paths())
+        if not any(member.endswith(path) for member in members)
     ]
-    assert_that(typed).is_not_empty()
+    assert_that(missing).described_as(
+        f"Package-data files missing from sdist: {missing}",
+    ).is_empty()
+    assert_that(
+        any(member.endswith("lintro/py.typed") for member in members),
+    ).is_true()
 
 
 @pytest.mark.packaging

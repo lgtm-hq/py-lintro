@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess  # nosec B404 - subprocess runs uv with a fixed argv, shell=False
+import sys
 import tomllib
 from pathlib import Path
 
@@ -60,19 +61,40 @@ def test_configured_packages_main_prints_one_name_per_line(
 
 
 def test_verify_imports_script_discovers_packages_without_project_venv() -> None:
-    """CI import verification must not require a synced project environment.
+    """CI pin extraction must run via PYTHONPATH tomllib, not a project venv.
 
     The built-package workflow sets ``BOOTSTRAP_SKIP_SYNC=1``, so
-    ``uv run python`` against the repo would fail. Discovery has to use
-    ``uv run --no-project --with setuptools==…``.
+    ``uv run python`` against the repo would fail. The shell script parses
+    the ``[build-system]`` pin with the same helper the tests use.
     """
-    script_path = PROJECT_ROOT / "scripts" / "ci" / "test-verify-imports.sh"
-    script = script_path.read_text(encoding="utf-8")
+    snippet = (
+        "from pathlib import Path\n"
+        "from tests.packaging.configured_packages import "
+        "build_system_setuptools_pin\n"
+        "print(build_system_setuptools_pin(project_root=Path('.').resolve()))\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    result = subprocess.run(  # nosec B603 - sys.executable plus a fixed snippet
+        [sys.executable, "-c", snippet],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert_that(result.returncode).described_as(
+        f"pin parse failed\nstdout: {result.stdout}\nstderr: {result.stderr}",
+    ).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to(_build_system_setuptools_pin())
+
+    script = (PROJECT_ROOT / "scripts" / "ci" / "test-verify-imports.sh").read_text(
+        encoding="utf-8",
+    )
     assert_that(script).contains("uv run --no-project --with")
-    assert_that(script).contains("BOOTSTRAP_SKIP_SYNC")
-    assert_that(script).contains("build_system_setuptools_pin")
+    assert_that(script).contains("PYTHONPATH=")
     assert_that(script).does_not_contain("grep -m1")
-    assert_that(script).does_not_contain("uv run python tests/packaging")
 
 
 def test_package_discovery_runs_without_project_venv() -> None:
@@ -131,11 +153,14 @@ def test_configured_packages_module_does_not_import_setuptools() -> None:
 
 
 def test_test_extra_and_tox_pin_setuptools() -> None:
-    """The test extra and tox env must ship the build-system setuptools pin."""
+    """The test extra, dev group, and tox env must ship the build-system pin."""
     pin = _build_system_setuptools_pin()
     with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
-        extras = tomllib.load(handle)["project"]["optional-dependencies"]["test"]
+        data = tomllib.load(handle)
+    extras = data["project"]["optional-dependencies"]["test"]
+    dev = data["dependency-groups"]["dev"]
     assert_that(extras).contains(pin)
+    assert_that(dev).contains(pin)
     tox = (PROJECT_ROOT / "tox.ini").read_text(encoding="utf-8")
     assert_that(tox).contains(pin)
 
