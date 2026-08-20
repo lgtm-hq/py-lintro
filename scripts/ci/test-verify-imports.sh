@@ -51,12 +51,21 @@ if [ ! -f "$PYTHON_BIN" ]; then
 fi
 
 # Extract all packages from pyproject.toml via setuptools (the same finder
-# the wheel build uses). Discovery runs under uv so the test venv does not
-# need setuptools installed.
-log_info "Extracting packages from pyproject.toml..."
+# the wheel build uses). Discovery must not use the project .venv: the
+# built-package workflow sets BOOTSTRAP_SKIP_SYNC=1 and never uv-syncs.
+# --no-project --with setuptools==<build-system pin> is enough.
+SETUPTOOLS_PIN="$(
+	grep -m1 -oE 'setuptools==[0-9.]+' "$PROJECT_ROOT/pyproject.toml"
+)"
+if [ -z "$SETUPTOOLS_PIN" ]; then
+	log_error "Could not read setuptools pin from pyproject.toml [build-system]"
+	exit 1
+fi
+log_info "Extracting packages from pyproject.toml (using ${SETUPTOOLS_PIN})..."
 PACKAGES=$(
 	cd "$PROJECT_ROOT"
-	uv run python tests/packaging/configured_packages.py
+	uv run --no-project --with "$SETUPTOOLS_PIN" python \
+		tests/packaging/configured_packages.py
 )
 
 if [ -z "$PACKAGES" ]; then
