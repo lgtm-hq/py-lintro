@@ -55,6 +55,7 @@ documentation of their purposes and security considerations.
 | Secret Name                   | Purpose                                             | Scope                                      | Rotation                  |
 | ----------------------------- | --------------------------------------------------- | ------------------------------------------ | ------------------------- |
 | `GITHUB_TOKEN`                | Built-in token for GitHub API access                | Automatic                                  | Per-workflow              |
+| `MIRROR_REPO_TOKEN`           | Bump/tag the lintro-pre-commit mirror on release    | Contents + pull-requests write on mirror   | On compromise or key roll |
 | `HOMEBREW_TAP_DISPATCH_TOKEN` | Trigger tap formula updates via repository_dispatch | Dispatch-only on `homebrew-tap` (no write) | On compromise or key roll |
 | `CODECOV_TOKEN`               | Upload coverage reports                             | Codecov org                                | As needed                 |
 

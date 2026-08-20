@@ -1921,6 +1921,21 @@ def _job_steps(workflow: dict[str, Any], *, job: str) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], workflow["jobs"][job]["steps"])
 
 
+def test_mirror_release_serializes_with_global_concurrency() -> None:
+    """Only one mirror bump runs at a time to avoid clobbering newer pins."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    assert_that(workflow["concurrency"]["group"]).is_equal_to("mirror-release")
+    assert_that(workflow["concurrency"]["cancel-in-progress"]).is_false()
+
+
+def test_mirror_release_job_has_timeout() -> None:
+    """Mirror bump inherits a bounded job timeout instead of the 6-hour default."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    assert_that(workflow["jobs"]["mirror-bump"]).contains_key("timeout-minutes")
+
+
 def test_mirror_release_triggers_on_published_release() -> None:
     """Mirror bump runs on release publish plus a manual dispatch fallback."""
     workflow = _load_workflow(name="mirror-release.yml")
@@ -1987,14 +2002,17 @@ def test_mirror_release_uses_cross_repo_token() -> None:
 
 
 def test_mirror_release_skips_prereleases() -> None:
-    """Wheel-dependent steps are guarded on a non-prerelease resolution."""
+    """Wheel-dependent steps are guarded on stable, non-prerelease releases."""
     workflow = _load_workflow(name="mirror-release.yml")
     steps = _job_steps(workflow, job="mirror-bump")
     guard = "steps.resolve.outputs.is_prerelease == 'false'"
+    github_guard = "!github.event.release.prerelease"
 
-    for needle in ("wait-for-pypi.sh", "publish-mirror-release.sh"):
+    for needle in ("wait-for-pypi-wheel.sh", "publish-mirror-release.sh"):
         step = next(s for s in steps if needle in s.get("run", ""))
         assert_that(step["if"]).contains(guard)
+        assert_that(step["if"]).contains(github_guard)
+        assert_that(step.get("env", {})).contains_key("LINTRO_VERSION")
 
     mirror_checkout = next(
         s
@@ -2002,12 +2020,17 @@ def test_mirror_release_skips_prereleases() -> None:
         if s.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
     )
     assert_that(mirror_checkout["if"]).contains(guard)
+    assert_that(mirror_checkout["if"]).contains(github_guard)
+
+    setup_python = [s for s in steps if s.get("uses", "").startswith("actions/setup-python@")]
+    assert_that(setup_python).is_empty()
 
 
 def test_mirror_release_scripts_are_executable() -> None:
     """The CI scripts referenced by the mirror workflow exist and are executable."""
     scripts = (
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "resolve-version.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "wait-for-pypi-wheel.sh",
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "publish-mirror-release.sh",
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "bump_pin.py",
     )

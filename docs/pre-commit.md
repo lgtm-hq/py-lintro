@@ -120,8 +120,9 @@ isolated environment, so the hook provisions in **seconds** and never builds py-
 from source. This is the endorsed hermetic path — the same model
 [astral-sh/ruff-pre-commit](https://github.com/astral-sh/ruff-pre-commit) uses.
 
-The mirror's `rev:` tracks the lintro version it pins; each py-lintro release publishes
-a matching mirror tag automatically.
+The mirror's `rev:` tracks the lintro version it pins. For each **stable** py-lintro
+release, CI waits for the published wheel on PyPI, bumps the mirror pin, and tags the
+mirror automatically once `MIRROR_REPO_TOKEN` is configured. Prerelease tags are skipped.
 
 ## Alternative: isolated Python environment from this repo
 
