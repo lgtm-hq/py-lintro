@@ -6,6 +6,13 @@ of thousands of files, and expanding them all into a single invocation would
 exceed the OS ``ARG_MAX`` limit, making ``execve`` fail with ``E2BIG`` (surfaced
 as an ``OSError`` that fails the whole run). The helpers here derive a safe byte
 budget and split a path list into batches that fit inside it.
+
+The budget is a best effort, not a proof: it tracks the bytes left after the
+environment block, but :func:`chunk_paths` still emits an individually
+oversized path in a batch of its own rather than dropping it, and the budget
+floors at one byte when the environment has consumed the entire limit. In
+those two cases the OS remains the authority on whether the argv is
+executable.
 """
 
 from __future__ import annotations
@@ -130,10 +137,14 @@ def chunk_paths(
 ) -> list[list[str]]:
     """Split resolved file paths into ARG_MAX-safe batches.
 
-    Batches preserve input order so tool output is deterministic. A single path
-    that alone exceeds the budget is still placed in its own batch (the OS, not
-    lintro, then decides whether it is too long); this keeps the function total
-    and never silently drops a file from the run.
+    Batches preserve input order so tool output is deterministic.
+
+    The guarantee is bounded, deliberately: every batch of two or more paths
+    fits the budget, but a single path that alone exceeds it is still emitted
+    in a batch of its own, and when the environment has consumed the whole
+    limit the budget floors at one byte. Both cases hand the decision to the
+    OS rather than silently dropping a file, so callers must be prepared for
+    ``execve`` to reject a batch instead of assuming it cannot happen.
 
     Args:
         paths: File paths to pass as arguments, in a stable order.
@@ -144,7 +155,8 @@ def chunk_paths(
             :func:`argv_byte_budget`.
 
     Returns:
-        A list of path batches, each safe to place on one command line.
+        A list of path batches. Every batch holding more than one path fits
+        the budget; a single oversized path is returned as its own batch.
     """
     total_budget = argv_byte_budget() if budget is None else budget
     remaining = max(total_budget - fixed_arg_bytes, 1)

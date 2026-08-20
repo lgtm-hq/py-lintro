@@ -90,10 +90,12 @@ splits selection in two:
   which does not select typos on its own. It enters through the "unmapped tool with a
   native config" branch — once a `typos.toml`, `.typos.toml` or `_typos.toml` exists at
   a scan root.
-- With a **`.lintro-config.yaml` present**, or under `--tools all`, language scoping is
-  bypassed and the full registry runs, so typos runs as soon as the binary is on `PATH`.
-  This is the path that changes behaviour for existing users, and
-  `tools.typos.enabled: false` is the opt-out.
+- With **any resolved lintro config** (`.lintro-config.yaml`, a `[tool.lintro]` table in
+  `pyproject.toml`, or an in-memory `tools:` section), or under `--tools all`, the
+  detection branch is skipped entirely — the guard is
+  `tools is None and config.config_path is None and not config.tools` — so the full
+  registry runs and typos runs as soon as the binary is on `PATH`. This is the path that
+  changes behaviour for existing users, and `tools.typos.enabled: false` is the opt-out.
 
 Explicit selection (`--tools typos`) works in either case.
 
