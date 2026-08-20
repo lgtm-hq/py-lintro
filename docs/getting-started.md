@@ -102,6 +102,8 @@ order and for what changed.
   `npm install -D @commitlint/cli @commitlint/config-conventional`); requires a
   commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
+- `buf` - Protocol Buffer linter and formatter (`brew install bufbuild/buf/buf` or
+  GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`./scripts/utils/install-semgrep.sh`
   from a checkout, `uv tool install semgrep`, or `brew install semgrep`). Not included

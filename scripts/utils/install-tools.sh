@@ -167,7 +167,7 @@ should_install() {
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
+	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
@@ -1097,6 +1097,78 @@ main() {
 		fi
 	fi # clippy
 
+	if should_install "buf"; then
+		# Install buf (Protocol Buffer linter and formatter)
+		echo -e "${BLUE}Installing buf...${NC}"
+		BUF_VERSION=$(get_tool_version "buf") || exit 1
+		# An already-present buf only counts when it satisfies the pinned
+		# version; a stale binary would otherwise fail lintro's min_version
+		# check at runtime.
+		buf_needs_install=1
+		if [ $DRY_RUN -eq 0 ] && command -v buf &>/dev/null; then
+			installed_version=$(buf --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$BUF_VERSION"; then
+				echo -e "${GREEN}✓ buf v${installed_version} already installed (>= v${BUF_VERSION})${NC}"
+				buf_needs_install=0
+			else
+				echo -e "${YELLOW}⚠ Installing buf v${BUF_VERSION}...${NC}"
+			fi
+		fi
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install buf v${BUF_VERSION}"
+		elif [ $buf_needs_install -eq 1 ]; then
+			# buf release assets are named buf-$(uname -s)-$(uname -m), e.g.
+			# buf-Linux-x86_64, buf-Linux-aarch64, buf-Darwin-arm64.
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$arch" in
+			amd64) arch="x86_64" ;;
+			esac
+			tmpdir=$(mktemp -d)
+			asset="buf-${os}-${arch}"
+			binary_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/${asset}"
+			checksum_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/sha256.txt"
+			if download_with_retries "$binary_url" "$tmpdir/buf" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/sha256.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for buf${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for buf...${NC}"
+				expected=$(grep " ${asset}$" "$tmpdir/sha256.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ No checksum entry for ${asset}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/buf" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/buf" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for buf (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				mv "$tmpdir/buf" "$BIN_DIR/buf"
+				chmod +x "$BIN_DIR/buf"
+				echo -e "${GREEN}✓ buf installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download buf${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # buf
+
 	if should_install "cargo-audit"; then
 		# Install cargo-audit (Rust dependency vulnerability scanner)
 		# Prefer pre-built binary from cargo-quickinstall to avoid 20+ minute compile times
@@ -1807,6 +1879,7 @@ main() {
 		["actionlint"]="GitHub Actions linting"
 		["astro"]="Astro type checking"
 		["bandit"]="Python security checks"
+		["buf"]="Protocol Buffer linting and formatting"
 		["black"]="Python formatting"
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
@@ -1848,7 +1921,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
