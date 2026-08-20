@@ -762,15 +762,17 @@ install_binary_tools() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 		cat <<'EOF'
-Usage: binary-tools.sh [--help]
-Install prebuilt binary tools (hadolint, gitleaks, osv-scanner, actionlint,
-shfmt, vale, shellcheck, dotenv-linter, taplo).
+Usage: binary-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+                       [--tools tool1,tool2,...]
+Install prebuilt binary tools (hadolint, gitleaks, golangci-lint, osv-scanner,
+trufflehog, actionlint, shfmt, vale, shellcheck, dotenv-linter, taplo).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.
 EOF
 		exit 0
 	fi
+	parse_group_installer_args "$@" || exit 0
 	ensure_bin_dir
-	install_binary_tools "$@"
+	install_binary_tools
 fi

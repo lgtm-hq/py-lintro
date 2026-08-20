@@ -65,6 +65,8 @@ ensure_rust_toolchain() {
 	# Install rustup if not present
 	if ! command -v rustup &>/dev/null; then
 		echo -e "${YELLOW}Installing rustup...${NC}"
+		# Justification: Official rustup installer from trusted source (rustup.rs)
+		# nosemgrep: curl-pipe-bash
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 			--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component "$component"
 		# Source cargo environment (respect CARGO_HOME if set)
@@ -118,14 +120,7 @@ install_clippy() {
 		return 0
 	fi
 	echo -e "${BLUE}Installing clippy...${NC}"
-	# clippy is invoked via cargo, verify with cargo clippy
-	if [ "$DRY_RUN" -eq 1 ]; then
-		log_info "[DRY-RUN] Would install clippy"
-	elif command -v cargo &>/dev/null && cargo clippy --version &>/dev/null; then
-		echo -e "${GREEN}✓ clippy already installed${NC}"
-	else
-		ensure_rust_toolchain "clippy"
-	fi
+	ensure_rust_toolchain "clippy"
 }
 
 install_cargo_audit() {
@@ -181,7 +176,8 @@ install_cargo_audit() {
 		fi
 
 		if [ "$cargo_audit_installed" = false ]; then
-			echo -e "${YELLOW}⚠ Failed to install cargo-audit (optional tool)${NC}"
+			echo -e "${RED}✗ Failed to install cargo-audit${NC}"
+			exit 1
 		fi
 	fi
 }
@@ -239,7 +235,8 @@ install_cargo_deny() {
 		fi
 
 		if [ "$cargo_deny_installed" = false ]; then
-			echo -e "${YELLOW}⚠ Failed to install cargo-deny (optional tool)${NC}"
+			echo -e "${RED}✗ Failed to install cargo-deny${NC}"
+			exit 1
 		fi
 	fi
 }
@@ -254,7 +251,8 @@ install_rust_tools() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 		cat <<'EOF'
-Usage: rust-tools.sh [--help]
+Usage: rust-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+                     [--tools tool1,tool2,...]
 Install Rust toolchain tools (rustfmt, clippy, cargo-audit, cargo-deny).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
@@ -262,6 +260,7 @@ Usually invoked via scripts/utils/install-tools.sh.
 EOF
 		exit 0
 	fi
+	parse_group_installer_args "$@" || exit 0
 	ensure_bin_dir
-	install_rust_tools "$@"
+	install_rust_tools
 fi

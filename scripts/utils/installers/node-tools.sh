@@ -317,15 +317,17 @@ install_node_tools() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 		cat <<'EOF'
-Usage: node-tools.sh [--help]
-Install Node/bun ecosystem tools (prettier, markdownlint-cli2, oxlint,
-oxfmt, stylelint, tsc, astro, svelte-check, vue-tsc, commitlint).
+Usage: node-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+                     [--tools tool1,tool2,...]
+Install Node/bun ecosystem tools (prettier, markdownlint-cli2, html-validate,
+oxlint, oxfmt, stylelint, tsc, astro, svelte-check, vue-tsc, commitlint).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.
 EOF
 		exit 0
 	fi
+	parse_group_installer_args "$@" || exit 0
 	ensure_bin_dir
-	install_node_tools "$@"
+	install_node_tools
 fi

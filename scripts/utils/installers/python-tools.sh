@@ -6,6 +6,8 @@ set -euo pipefail
 _PYTHON_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_helpers.sh disable=SC1091
 source "$_PYTHON_TOOLS_DIR/_helpers.sh"
+# install-semgrep.sh lives in scripts/utils/, one level above installers/
+: "${SCRIPT_DIR:=$(cd "$_PYTHON_TOOLS_DIR/.." && pwd)}"
 
 install_ruff() {
 	if ! should_install "ruff"; then
@@ -215,7 +217,8 @@ install_python_tools() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 	if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 		cat <<'EOF'
-Usage: python-tools.sh [--help]
+Usage: python-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+                       [--tools tool1,tool2,...]
 Install Python ecosystem tools (ruff, black, bandit, mypy, semgrep,
 pip-audit, yamllint, pydoclint, sqlfluff).
 
@@ -224,6 +227,7 @@ Usually invoked via scripts/utils/install-tools.sh.
 EOF
 		exit 0
 	fi
+	parse_group_installer_args "$@" || exit 0
 	ensure_bin_dir
-	install_python_tools "$@"
+	install_python_tools
 fi
