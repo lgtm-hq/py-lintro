@@ -133,7 +133,9 @@ projects can still override.
 
 1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `none`, or empty)
    to disable the global tier entirely. Useful for CI and hermetic test environments
-   that must not inherit a developer's personal defaults.
+   that must not inherit a developer's personal defaults. An explicit path that does not
+   exist is an error rather than a silent fallback, so a typo cannot leave you running
+   without the defaults you asked for; use `off` to opt out deliberately.
 2. `~/.lintro-config.yaml` — the primary, authoritative location.
 3. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
    defaults to `~/.config` when unset.
@@ -150,7 +152,9 @@ itself.
 Run `lintro config` to see a **Global Config** section reporting whether a global file
 was found, its resolved path, and which effective values it contributed (the keys your
 project config did not override). The same details appear under `global_config` in
-`lintro config --json`.
+`lintro config --json`. Only keys that survive section parsing are listed there — an
+unrecognized key such as `output.typo`, or a section Lintro does not read from config at
+all, is never reported as a contribution it does not actually make.
 
 ```yaml
 # ~/.lintro-config.yaml — applies to all your projects unless overridden

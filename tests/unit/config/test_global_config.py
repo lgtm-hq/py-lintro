@@ -220,6 +220,29 @@ def test_env_override_selects_explicit_path(
     assert_that(config.enforce.line_length).is_equal_to(55)
 
 
+def test_env_override_missing_path_fails_closed(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``LINTRO_GLOBAL_CONFIG`` path that is not a file raises.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "enforce:\n  line_length: 100\n",
+    )
+    _make_project(tmp_path, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", str(tmp_path / "missing.yaml"))
+
+    assert_that(load_config).raises(FileNotFoundError).when_called_with(
+        allow_pyproject_fallback=False,
+    )
+
+
 # =============================================================================
 # load_config: precedence combinations
 # =============================================================================
@@ -509,6 +532,53 @@ def test_load_config_project_nested_under_home_with_own_config(
     assert_that(config.config_path).is_equal_to(str(project_config.resolve()))
     assert_that(config.global_contributed_keys).is_equal_to(
         ["enforce.target_python"],
+    )
+
+
+def test_load_config_reports_only_effective_contributions(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Global keys the section parsers drop are not reported as contributions.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "output:\n"
+        "  art: false\n"
+        "  typo: true\n"
+        "enforce:\n"
+        "  line_length: 100\n"
+        "  bogus: 1\n"
+        "tools:\n"
+        "  ruff:\n"
+        "    enabled: true\n"
+        "    select:\n"
+        "      - E\n"
+        "licenses:\n"
+        "  allow:\n"
+        "    - MIT\n",
+    )
+    _make_project(tmp_path, monkeypatch)
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.output.art).is_false()
+    assert_that(config.global_contributed_keys).contains(
+        "output.art",
+        "enforce.line_length",
+        "tools.ruff.enabled",
+    )
+    # Unknown leaves and sections load_config never applies are filtered out.
+    assert_that(config.global_contributed_keys).does_not_contain(
+        "output.typo",
+        "enforce.bogus",
+        "tools.ruff.select",
+        "licenses.allow",
     )
 
 

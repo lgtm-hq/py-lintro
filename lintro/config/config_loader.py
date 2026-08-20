@@ -106,13 +106,26 @@ def _find_global_config_file() -> Path | None:
     Returns:
         Path | None: Path to the global config file, or None if disabled or
             no location exists.
+
+    Raises:
+        FileNotFoundError: If ``LINTRO_GLOBAL_CONFIG`` names a path that is not
+            an existing file. An explicit path is a deliberate instruction, so
+            a typo must fail loudly instead of silently running without the
+            intended defaults.
     """
     env_value = os.environ.get("LINTRO_GLOBAL_CONFIG")
     if env_value is not None:
         if env_value.strip().lower() in ("", "0", "off", "none"):
             return None
         env_path = Path(env_value).expanduser()
-        return env_path if env_path.is_file() else None
+        if not env_path.is_file():
+            msg = (
+                f"LINTRO_GLOBAL_CONFIG points at {env_path}, which is not an "
+                "existing file. Fix the path, or set LINTRO_GLOBAL_CONFIG=off "
+                "to disable the user-level global config tier."
+            )
+            raise FileNotFoundError(msg)
+        return env_path
 
     home_config = Path.home() / GLOBAL_CONFIG_FILENAME
     if home_config.is_file():
@@ -193,6 +206,49 @@ def _global_contributed_paths(
         elif not project_has:
             paths.append(path)
     return sorted(paths)
+
+
+# Top-level config sections that ``load_config`` actually applies, mapped to
+# the model whose fields are retained by the corresponding section parser.
+# ``ai`` and ``defaults`` are stored verbatim and ``tools`` keys are arbitrary
+# tool names, so they carry no leaf-key schema here.
+_SECTION_FIELD_OWNERS: dict[str, Any] = {
+    "enforce": EnforceConfig,
+    "execution": ExecutionConfig,
+    "output": OutputConfig,
+    "review": ReviewConfig,
+    "score": ScoreConfig,
+}
+_SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
+
+
+def _is_effective_contributed_path(path: str) -> bool:
+    """Report whether a dotted global key survives section parsing.
+
+    ``_global_contributed_paths`` works on raw YAML, so it happily reports keys
+    the section parsers drop (an unknown ``output.typo``, a section
+    ``load_config`` does not read at all). Reporting those in ``lintro config``
+    would advertise values that never take effect.
+
+    Args:
+        path: Dotted key path contributed by the global config.
+
+    Returns:
+        bool: True when the key is retained by the parser for its section.
+    """
+    parts = path.split(".")
+    section = parts[0]
+    if section in _SCHEMALESS_SECTIONS:
+        # tools.<name>.<field> is the only schema-bearing depth here.
+        if section == "tools" and len(parts) >= 3:
+            return parts[2] in LintroToolConfig.model_fields
+        return True
+    owner = _SECTION_FIELD_OWNERS.get(section)
+    if owner is None:
+        # Not a section load_config reads (e.g. licenses, plugins), or a bare
+        # scalar where a mapping is expected.
+        return False
+    return len(parts) >= 2 and parts[1] in owner.model_fields
 
 
 def _find_config_file(start_dir: Path | None = None) -> Path | None:
@@ -949,7 +1005,12 @@ def load_config(
 
     The global config supplies base values; the project config overrides them
     key-by-key, including nested ``ai:`` and ``tools:`` sections. A missing or
-    empty global file is not an error.
+    empty global file is not an error, but an explicit
+    ``LINTRO_GLOBAL_CONFIG`` path that does not exist is: that raises
+    ``FileNotFoundError`` from ``_find_global_config_file``.
+
+    ``global_contributed_keys`` lists only keys that survive section parsing,
+    so it never advertises a global value that has no effect.
 
     Args:
         config_path: Explicit path to config file. If None, searches for
@@ -1030,10 +1091,14 @@ def load_config(
         data = _deep_merge(base=global_data, override=project_data)
         config = build_config_from_dict(data, resolved_path=resolved_path)
         config.global_config_path = global_config_path
-        config.global_contributed_keys = _global_contributed_paths(
-            global_data=global_data,
-            project_data=project_data,
-        )
+        config.global_contributed_keys = [
+            path
+            for path in _global_contributed_paths(
+                global_data=global_data,
+                project_data=project_data,
+            )
+            if _is_effective_contributed_path(path)
+        ]
         return config
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
@@ -1119,8 +1184,6 @@ def build_config_from_dict(
         watch=watch_config,
         deps=deps_config,
         config_path=resolved_path,
-        global_config_path=global_config_path,
-        global_contributed_keys=global_contributed_keys,
     )
 
 
