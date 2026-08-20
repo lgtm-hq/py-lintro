@@ -630,6 +630,7 @@ def create_temp_tsconfig(
     *,
     prefix: str = ".lintro-tsc-",
     tool_label: str = "tsc",
+    extra_compiler_options: dict[str, Any] | None = None,
 ) -> Path:
     """Create a temporary tsconfig.json extending a base config.
 
@@ -646,6 +647,8 @@ def create_temp_tsconfig(
         cwd: Working directory for resolving paths.
         prefix: Filename prefix for the temp file.
         tool_label: Label used in log messages (``"tsc"`` or ``"vue-tsc"``).
+        extra_compiler_options: Additional compiler options merged into the
+            temp config (for example ``allowJs`` when JS files are targeted).
 
     Returns:
         Path to the temporary tsconfig.json file.
@@ -663,6 +666,9 @@ def create_temp_tsconfig(
         # Ensure noEmit is set (type checking only)
         "noEmit": True,
     }
+    if extra_compiler_options:
+        compiler_options.update(extra_compiler_options)
+        compiler_options["noEmit"] = True
 
     # Read typeRoots from the base tsconfig once, up-front, and reuse the
     # extracted value in both the main and the read-only-fallback paths
