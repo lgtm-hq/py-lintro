@@ -94,15 +94,17 @@ def test_normalize_residual_alias_not_resolved_by_library() -> None:
 
 
 def test_normalize_mixed_or_and_respects_precedence() -> None:
-    """AND binds tighter than OR when collapsing SPDX expressions."""
-    assert_that(normalize_to_spdx("MIT OR Apache-2.0 AND GPL-3.0")).is_equal_to("MIT")
+    """AND binds tighter than OR; the full SPDX expression is preserved."""
+    assert_that(normalize_to_spdx("MIT OR Apache-2.0 AND GPL-3.0")).is_equal_to(
+        "MIT OR (Apache-2.0 AND GPL-3.0-only)",
+    )
     assert_that(normalize_to_spdx("Apache-2.0 AND GPL-3.0 OR MIT")).is_equal_to(
-        "GPL-3.0-only",
+        "(Apache-2.0 AND GPL-3.0-only) OR MIT",
     )
 
 
-def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
-    """A denied AND operand cannot be bypassed by a later OR branch."""
+def test_mixed_or_and_allows_permissive_or_branch() -> None:
+    """SPDX OR precedence still allows an expression with a permissive branch."""
     expression = "Apache-2.0 AND GPL-3.0 OR MIT"
     package = PackageLicense(
         name="mixed-license",
@@ -113,7 +115,7 @@ def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
     )
     engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
     result = engine.check(package)
-    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
 
 
 def test_normalize_unbalanced_parentheses_rejected() -> None:
