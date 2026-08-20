@@ -31,15 +31,17 @@ parser-selection decision.
 - **Check**: runs `typos --format json --force-exclude <files>` and parses the
   newline-delimited JSON from stdout only, so a warning on stderr cannot corrupt the
   report.
-- **Fix**: detects issues, runs `typos --write-changes <files>`, then re-checks to
+- **Fix**: detects issues, runs
+  `typos --format json --force-exclude --write-changes <files>` (the same always-on
+  wrapper flags as check, so `[files] extend-exclude` still applies), then re-checks to
   report the `initial = fixed + remaining` breakdown expected by Lintro's fix pipeline.
 - **Explicit-path safeguards**: Lintro always passes a resolved file list, and typos
   (like ripgrep) skips its ignore rules for paths given as arguments. `--force-exclude`
-  restores the project's `[files] extend-exclude`, and the plugin additionally sniffs
-  the first 8 KiB of each file for a NUL byte so `--write-changes` stays away from the
-  common binary formats. The sniff is a heuristic, not a guarantee: a binary format with
-  no NUL byte in its header would still be passed through, so projects with unusual
-  binary assets should list them in `[files] extend-exclude`.
+  restores the project's `[files] extend-exclude`, and the plugin additionally skips
+  known binary suffixes and sniffs the first 8 KiB of remaining files for a NUL byte so
+  `--write-changes` stays away from images, archives, and other binary assets. The sniff
+  is a heuristic for suffix-less binaries, not a guarantee: unusual binary assets should
+  still be listed in `[files] extend-exclude`.
 - **ARG_MAX batching**: with `file_patterns=["*"]` a large tree would otherwise expand
   into a single argv that exceeds the OS limit and fails with `E2BIG`. Paths are split
   into budget-sized batches by `lintro/tools/core/argv_batching.py` (shared with
@@ -75,10 +77,12 @@ parser-selection decision.
 }
 ```
 
-Only `type == "typo"` records are turned into issues; other diagnostic object types
-(`error`, `binary_file`, `file_not_found`, ...) are logged at debug level rather than
-converted into findings. They are not lost: a run that emits only diagnostics also exits
-non-zero, and the plugin fails closed on a non-zero exit with no parsed findings.
+Only `type == "typo"` records become findings. `type == "error"` records are surfaced by
+`parse_typos_errors` and fail the run even when findings were also parsed. Informational
+types (`binary_file`, `file_type`) are debug-logged and dropped. Any other record type
+is treated as a diagnostic so a future typos release cannot vanish. A non-zero exit with
+no parseable findings also fails closed; typos' findings exit code is 2, and any other
+non-zero is a runtime failure even if some JSON typos were emitted.
 
 ## When typos is selected
 
@@ -127,11 +131,14 @@ native JSON parser is the higher-fidelity choice.
 
 ## Configuration in this repository
 
-typos runs as part of Lintro's default tool set, so this repo ships a `.typos.toml` (the
-project's spell-checker config, analogous to `.hadolint.yaml` and `.yamllint`). It
-declares a small set of intentional project vocabulary and excludes a few test fixtures
-that deliberately embed non-English or scrambled text. Every entry is documented inline;
-it is a curated dictionary, not a generated suppression baseline.
+This repository keeps an unscoped `enabled_tools: []` config, so typos runs on
+`lintro check` here. That is not universal: no-config first runs and
+`lintro init --profile recommended` do not select typos (see **When typos is
+selected**). The repo ships a `.typos.toml` (the project's spell-checker config,
+analogous to `.hadolint.yaml` and `.yamllint`). It declares a small set of intentional
+project vocabulary and excludes a few test fixtures that deliberately embed non-English
+or scrambled text. Every entry is documented inline; it is a curated dictionary, not a
+generated suppression baseline.
 
 ## Installation
 

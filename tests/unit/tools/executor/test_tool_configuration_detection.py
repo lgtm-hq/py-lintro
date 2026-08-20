@@ -505,3 +505,99 @@ def test_commitlint_omitted_without_native_config(
     assert_that(result.scoped_by_detection).is_true()
     assert_that(result.to_run).contains("ruff")
     assert_that(result.to_run).does_not_contain("commitlint")
+
+
+def test_typos_included_when_native_config_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unmapped typos joins a first run only through a native config file.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project with a typos.toml.
+    """
+    _write_python_project(tmp_path)
+    (tmp_path / "typos.toml").write_text(
+        "[default.extend-words]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.to_run).contains("typos", "ruff")
+
+
+def test_typos_omitted_without_native_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """No-config first runs do not pull typos in from language detection.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project without a typos config.
+    """
+    _write_python_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("typos")
+
+
+def test_unscoped_config_runs_typos_without_native_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An empty enabled_tools allowlist unscope and includes typos.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project with an unscoped Lintro config.
+    """
+    _write_python_project(tmp_path)
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "execution:\n  enabled_tools: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_false()
+    assert_that(result.to_run).contains("typos")
+
+
+def test_recommended_allowlist_excludes_typos(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Init's language-map allowlist does not start spell-checking on upgrade.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary Python project with a recommended-style allowlist.
+    """
+    _write_python_project(tmp_path)
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "execution:\n  enabled_tools: [ruff, black, mypy]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_false()
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("typos")
+    skipped_names = [item.name for item in result.skipped]
+    assert_that(skipped_names).contains("typos")

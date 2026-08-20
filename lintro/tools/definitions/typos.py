@@ -38,6 +38,48 @@ TYPOS_DEFAULT_PRIORITY: int = 50
 TYPOS_FILE_PATTERNS: list[str] = ["*"]
 TYPOS_DEFAULT_FORMAT: str = "json"
 TYPOS_CONFIG_FILENAMES: list[str] = ["typos.toml", ".typos.toml", "_typos.toml"]
+# typos exits 2 when it reported typos. Any other non-zero is a runtime
+# failure (bad config, IO, usage), even if some JSON findings were emitted.
+TYPOS_ISSUES_EXIT_CODE: int = 2
+# Suffixes that are binary even when the first 8 KiB has no NUL (JPEG, PDF,
+# ZIP, …). Discovery uses ``file_patterns=["*"]``, so format would otherwise
+# pass these to ``--write-changes``.
+BINARY_PATH_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".7z",
+        ".a",
+        ".bin",
+        ".bmp",
+        ".class",
+        ".dll",
+        ".dylib",
+        ".eot",
+        ".exe",
+        ".gif",
+        ".gz",
+        ".ico",
+        ".jar",
+        ".jpeg",
+        ".jpg",
+        ".mp3",
+        ".mp4",
+        ".o",
+        ".otf",
+        ".pdf",
+        ".png",
+        ".pyc",
+        ".so",
+        ".sqlite",
+        ".ttf",
+        ".wasm",
+        ".webm",
+        ".webp",
+        ".whl",
+        ".woff",
+        ".woff2",
+        ".zip",
+    },
+)
 # Bytes sampled from the head of each file when sniffing for binary content.
 BINARY_SNIFF_BYTES: int = 8192
 # Appended when a fix run fails after ``--write-changes`` has already executed:
@@ -166,7 +208,9 @@ class TyposPlugin(BaseToolPlugin):
         typos only auto-detects binary content for files it discovers itself;
         paths named on the command line are read as text regardless. Since
         lintro always passes an explicit list, filter here so ``fix`` can never
-        rewrite bytes inside an image or other binary asset.
+        rewrite bytes inside an image or other binary asset. Known binary
+        suffixes are skipped first; remaining files are dropped when the first
+        8 KiB contains a NUL.
 
         Args:
             files: Candidate paths, relative to ``cwd`` when it is set.
@@ -178,6 +222,10 @@ class TyposPlugin(BaseToolPlugin):
         base = Path(cwd) if cwd else Path.cwd()
         text_files: list[str] = []
         for rel in files:
+            suffix = Path(rel).suffix.lower()
+            if suffix in BINARY_PATH_SUFFIXES:
+                logger.debug(f"[TyposPlugin] Skipping binary suffix: {rel}")
+                continue
             try:
                 with (base / rel).open("rb") as handle:
                     chunk = handle.read(BINARY_SNIFF_BYTES)
@@ -266,6 +314,12 @@ class TyposPlugin(BaseToolPlugin):
                     f"{len(batch)} file(s).",
                 )
                 break
+            except OSError as exc:
+                # E2BIG on a single over-budget path, or a vanished binary.
+                # Convert to a tool failure the way TruffleHog does instead of
+                # letting the executor report "Failed to initialize tool".
+                fatal_outputs.append(f"typos failed to execute: {exc}")
+                break
             # typos writes its JSON report to stdout and diagnostics to stderr;
             # parse stdout only so a stderr warning cannot corrupt the report.
             batch_issues = parse_typos_output(output=proc.stdout)
@@ -282,8 +336,16 @@ class TyposPlugin(BaseToolPlugin):
             batch_errors = parse_typos_errors(output=proc.stdout)
             if batch_errors:
                 fatal_outputs.extend(batch_errors)
-            elif not proc.success and not batch_issues:
-                fatal_outputs.append(proc.output or "")
+            elif not proc.success:
+                # Exit 2 is "I found typos". Any other non-zero is a runtime
+                # failure (config/IO/usage) even when some JSON findings were
+                # also emitted, so fix() must not continue to --write-changes.
+                if proc.returncode != TYPOS_ISSUES_EXIT_CODE:
+                    fatal_outputs.append(
+                        proc.output or f"typos exited {proc.returncode}.",
+                    )
+                elif not batch_issues:
+                    fatal_outputs.append(proc.output or "")
             if fatal_outputs and stop_on_failure:
                 break
         return _BatchOutcome(
@@ -328,7 +390,6 @@ class TyposPlugin(BaseToolPlugin):
                 output=outcome.failure_message("typos exited with an error."),
                 issues_count=len(issues),
                 issues=issues,
-                parse_failures_count=len(outcome.fatal_outputs),
                 cwd=ctx.cwd,
             )
 
@@ -424,6 +485,11 @@ class TyposPlugin(BaseToolPlugin):
         remaining_issues = recheck.issues
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
+        # A re-check can report more issues than the pre-scan (new findings
+        # after a rewrite). Grow initial so ToolResult's
+        # initial = fixed + remaining invariant cannot crash format.
+        if initial_count != fixed_count + remaining_count:
+            initial_count = fixed_count + remaining_count
 
         return ToolResult(
             name=self.definition.name,

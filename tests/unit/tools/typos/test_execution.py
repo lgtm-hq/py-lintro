@@ -167,7 +167,7 @@ def test_check_runtime_error_is_not_a_clean_pass(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_none()
     assert_that(result.output).contains("invalid config")
 
 
@@ -462,7 +462,7 @@ def test_check_surfaces_a_failed_batch_alongside_findings(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_none()
     assert_that(result.output).contains("unreadable path")
 
 
@@ -564,7 +564,7 @@ def test_check_reports_an_error_record_beside_findings_in_one_batch(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.parse_failures_count).is_equal_to(1)
+    assert_that(result.parse_failures_count).is_none()
     assert_that(result.output).contains("Permission denied")
 
 
@@ -776,3 +776,97 @@ def test_fix_recheck_failure_flags_possible_disk_changes(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("config went missing")
     assert_that(result.output).contains("may have been corrected on disk")
+
+
+def test_check_oserror_is_a_tool_failure(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """E2BIG / vanished binary become a tool failure, not an executor crash.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "notes.txt"
+    target.write_text("plain text\n")
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=OSError(7, "Argument list too long"),
+    ):
+        result = typos_plugin.check([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("Argument list too long")
+    assert_that(result.parse_failures_count).is_none()
+
+
+def test_check_nonzero_non_findings_exit_is_fatal_even_with_issues(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit 1 with some JSON findings is a runtime failure, not a clean report.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "bad.txt"
+    target.write_text("teh cat\n")
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(
+            stdout=_typo_line("bad.txt", "teh", "the"),
+            returncode=1,
+            stderr="error: config problem\n",
+        ),
+    ):
+        result = typos_plugin.check([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("config problem")
+
+
+def test_fix_grows_initial_when_recheck_finds_more(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """A re-check that grows must not raise ToolResult's count invariant.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    target = tmp_path / "fixme.txt"
+    target.write_text("teh cat\n")
+    initial = _typo_line("fixme.txt", "teh", "the")
+    recheck = "\n".join(
+        [
+            _typo_line("fixme.txt", "teh", "the"),
+            _typo_line("fixme.txt", "adn", "and"),
+        ],
+    )
+
+    with patch.object(
+        typos_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(stdout=initial, returncode=2),
+            _proc(),
+            _proc(stdout=recheck, returncode=2),
+        ],
+    ):
+        result = typos_plugin.fix([str(target)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
+    ).is_equal_to(result.initial_issues_count)

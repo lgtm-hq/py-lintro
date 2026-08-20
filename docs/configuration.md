@@ -2193,14 +2193,20 @@ misspellings.
 >
 > Two things are worth knowing before that first run:
 >
-> - **Turning it off.** Disable it for the project in `.lintro-config.yaml` — this is
->   the real opt-out, and it works on both paths above:
+> - **Turning it off.** Do not create a Lintro config solely to disable typos on a
+>   no-config first run: that file is a resolved config, so language scoping is skipped
+>   and an empty `enabled_tools` allowlist runs the full registry minus typos. On a
+>   first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On a project
+>   that already has a Lintro config, disable the tool:
 >
 >   ```yaml
 >   tools:
 >     typos:
 >       enabled: false
 >   ```
+>
+>   Or leave it out of `execution.enabled_tools` if you use an allowlist
+>   (`lintro init --profile recommended` already does).
 >
 >   `--tools` is an allowlist rather than an opt-out: `lintro check --tools ruff` runs
 >   ruff _only_, dropping every other tool as well, so reach for it to narrow a single

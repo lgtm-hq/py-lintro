@@ -184,6 +184,11 @@ run_lintro() {
 
 # Main execution flow
 main() {
+	# Always expose ~/.local/bin: install-tools.sh drops binaries there, and
+	# a fresh shell will not have that directory on PATH. Do this before the
+	# optional --install check so `local-lintro.sh check` still sees typos.
+	add_local_bin_to_path
+
 	# Check and install tools if needed (only if --install flag is provided)
 	if [ "${1:-}" = "--install" ] || [ "${1:-}" = "-i" ]; then
 		check_and_install_tools

@@ -15,7 +15,11 @@ from lintro.tools.core.version_parsing import (
     extract_version_from_output,
     get_install_hints,
 )
-from lintro.tools.definitions.typos import TYPOS_DEFAULT_TIMEOUT, TyposPlugin
+from lintro.tools.definitions.typos import (
+    BINARY_PATH_SUFFIXES,
+    TYPOS_DEFAULT_TIMEOUT,
+    TyposPlugin,
+)
 
 
 def test_definition_basic_metadata(typos_plugin: TyposPlugin) -> None:
@@ -104,6 +108,29 @@ def test_text_files_drops_binary_files(
     )
 
     assert_that(kept).is_equal_to(["notes.txt"])
+
+
+def test_text_files_drops_known_binary_suffixes_without_nul(
+    typos_plugin: TyposPlugin,
+    tmp_path: Path,
+) -> None:
+    """JPEG/PDF-style headers have no NUL in the first 8 KiB.
+
+    Args:
+        typos_plugin: Plugin fixture with version checking mocked out.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    (tmp_path / "notes.txt").write_text("plain text\n")
+    (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"A" * 100)
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.7\n" + b"A" * 100)
+
+    kept = typos_plugin._text_files(
+        files=["notes.txt", "photo.jpg", "doc.pdf"],
+        cwd=str(tmp_path),
+    )
+
+    assert_that(kept).is_equal_to(["notes.txt"])
+    assert_that(BINARY_PATH_SUFFIXES).contains(".jpg", ".pdf", ".png")
 
 
 def test_manifest_pins_the_crate_not_the_binary_name() -> None:
