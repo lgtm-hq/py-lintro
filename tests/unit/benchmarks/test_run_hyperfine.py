@@ -283,7 +283,16 @@ def test_each_suite_passes_expected_commands_to_hyperfine(
     assert_that(_flag_value(argv, "--command-name")).contains("lintro")
     # The lintro command is the trailing positional after --command-name.
     # printf %q backslash-escapes shell metacharacters (e.g. the tool comma).
-    assert_that(argv[-1].replace("\\", "")).contains(lintro_fragment)
+    lintro_cmd = argv[-1].replace("\\", "")
+    assert_that(lintro_cmd).contains(lintro_fragment)
+    assert_that(lintro_cmd).contains("--yes")
+    assert_that(lintro_cmd).contains("run-in-dir.sh")
+    if suite == "format":
+        assert_that(lintro_cmd).contains("ruff:lint_fix=False")
+    else:
+        assert_that(lintro_cmd).contains("ruff:format_check=False")
+    if suite in {"ruff", "mypy"}:
+        assert_that(_flag_value(argv, "--reference")).contains("run-in-dir.sh")
     assert_that((results / "baseline-meta.json").is_file()).is_true()
 
 
@@ -537,3 +546,51 @@ def test_sequential_scripts_exit_127_when_tools_are_missing(
 
     assert_that(result.returncode).is_equal_to(127)
     assert_that(result.stderr).contains("uv sync --dev --extra full")
+
+
+def test_hyperfine_is_found_after_venv_path_rewrite(tmp_path: Path) -> None:
+    """Hyperfine only in ``LINTRO_BENCH_VENV_BIN`` must still be found.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, results, argv_log = _make_sandbox(tmp_path)
+    env["PATH"] = os.pathsep.join(["/usr/bin", "/bin"])
+
+    result = _run_sandboxed(env, "--suite", "ruff", "--quick")
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(_invocations(argv_log)).is_length(1)
+    assert_that((results / "ruff-check-overhead.json").is_file()).is_true()
+
+
+def test_missing_hyperfine_exits_127(tmp_path: Path) -> None:
+    """A missing hyperfine after PATH rewrite exits 127 with install help.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, _results, _argv_log = _make_sandbox(tmp_path)
+    (tmp_path / "bin" / "hyperfine").unlink()
+    env["PATH"] = os.pathsep.join(["/usr/bin", "/bin"])
+
+    result = _run_sandboxed(env, "--suite", "ruff", "--quick")
+
+    assert_that(result.returncode).is_equal_to(127)
+    assert_that(result.stderr).contains("hyperfine is not installed")
+
+
+def test_default_warmup_and_runs_without_quick(tmp_path: Path) -> None:
+    """Production defaults are warmup=3 and runs=10 when ``--quick`` is omitted.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    env, _results, argv_log = _make_sandbox(tmp_path)
+
+    result = _run_sandboxed(env, "--suite", "ruff")
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    argv = _invocations(argv_log)[0]
+    assert_that(_flag_value(argv, "--warmup")).is_equal_to("3")
+    assert_that(_flag_value(argv, "--runs")).is_equal_to("10")

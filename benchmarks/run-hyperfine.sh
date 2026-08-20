@@ -122,6 +122,10 @@ should_run() {
 
 # --- dependency checks -------------------------------------------------------
 
+PATH="${VENV_BIN}:${HOME}/.local/bin:${PATH}"
+export PATH
+export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
+
 if ! command -v hyperfine >/dev/null 2>&1; then
 	cat >&2 <<'EOF'
 error: hyperfine is not installed or not on PATH.
@@ -136,10 +140,6 @@ Then re-run: ./benchmarks/run-hyperfine.sh
 EOF
 	exit 127
 fi
-
-PATH="${VENV_BIN}:${HOME}/.local/bin:${PATH}"
-export PATH
-export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
 
 if [[ ! -x "${RUN_IN_DIR}" ]]; then
 	echo "error: chdir helper is not executable: ${RUN_IN_DIR}" >&2
