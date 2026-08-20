@@ -74,6 +74,13 @@ implementations with the core tools themselves.
 - ⚠️ **Defaults**: No flags; filtered to `/.github/workflows/`
 - 🚀 **Notes**: Normalized parsing and formatting
 
+**Dockerfile Linter for Best Practices**
+
+- ✅ **Preserved**: Dockerfile analysis, shell script linting, best practices, security
+  scanning
+- ⚠️ **Limited**: Runtime rule customization, Docker Compose support, auto-fixing
+- 🚀 **Enhanced**: Issue normalization, Python integration, error parsing
+
 ### [Terraform Analysis](./terraform-analysis.md)
 
 **Infrastructure-as-Code Formatter and Validator**
@@ -83,13 +90,6 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No `plan`/provider-backed checks; validation runs with
   `-backend=false`
 - 🚀 **Notes**: fmt file-list and validate JSON diagnostics normalized to Lintro issues
-
-**Dockerfile Linter for Best Practices**
-
-- ✅ **Preserved**: Dockerfile analysis, shell script linting, best practices, security
-  scanning
-- ⚠️ **Limited**: Runtime rule customization, Docker Compose support, auto-fixing
-- 🚀 **Enhanced**: Issue normalization, Python integration, error parsing
 
 <!-- markdownlint-enable MD036 -->
 

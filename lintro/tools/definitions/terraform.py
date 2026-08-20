@@ -403,9 +403,13 @@ class TerraformPlugin(BaseToolPlugin):
         try:
             self._run_subprocess(cmd=fix_cmd, timeout=ctx.timeout, cwd=ctx.cwd)
         except subprocess.TimeoutExpired:
+            # Nothing was formatted, so the timeout counts as a pre-existing
+            # issue in both snapshots. Keeping it out of ``initial_issues``
+            # would break the ``initial == fixed + remaining`` invariant and
+            # make derived fixed counts negative.
             timeout_issue = self._timeout_issue("terraform fmt", ctx.timeout)
-            initial_issues = initial_fmt_issues + validate_issues
-            remaining = initial_issues + [timeout_issue]
+            initial_issues = initial_fmt_issues + validate_issues + [timeout_issue]
+            remaining = list(initial_issues)
             return ToolResult(
                 name=self.definition.name,
                 success=False,

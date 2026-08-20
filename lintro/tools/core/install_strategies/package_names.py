@@ -29,6 +29,9 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     "shellcheck": "shellcheck",
     "shfmt": "shfmt",
     "taplo": "taplo",
+    # Terraform is BUSL-licensed and is not in homebrew-core; the only
+    # Homebrew source is HashiCorp's own tap.
+    "terraform": "hashicorp/tap/terraform",
     "trufflehog": "trufflehog",
     "vale": "vale",
     # Non-binary tools that Homebrew can also provide

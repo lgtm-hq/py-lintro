@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -289,6 +290,99 @@ def test_fix_validate_issue_persists(
     assert_that(result.remaining_issues_count).is_equal_to(1)
     remaining_issue = cast(TerraformIssue, result.issues[0])  # type: ignore[index]
     assert_that(remaining_issue.code).is_equal_to("validate")
+
+
+def test_check_inits_each_module_directory_once(
+    terraform_plugin: TerraformPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check runs ``terraform init`` once per module dir, skipping caches.
+
+    Exercises module-directory discovery through the public ``check`` surface:
+    two sibling modules are each initialized once, while a file inside a
+    ``.terraform`` provider cache does not produce an extra module.
+
+    Args:
+        terraform_plugin: The TerraformPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    for rel in ("a/main.tf", "b/main.tf", "b/.terraform/cached.tf"):
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('output "x" {\n  value = 1\n}\n')
+
+    empty_validate = SubprocessResult(
+        returncode=0,
+        stdout=json.dumps({"valid": True, "diagnostics": []}),
+        stderr="",
+        output="",
+    )
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            terraform_plugin,
+            "_run_subprocess",
+            return_value=(True, ""),
+        ) as run_mock,
+        patch.object(
+            terraform_plugin,
+            "_run_subprocess_result",
+            return_value=empty_validate,
+        ),
+    ):
+        result = terraform_plugin.check([str(tmp_path)], {})
+
+    init_dirs = sorted(
+        Path(call.kwargs["cwd"]).name
+        for call in run_mock.call_args_list
+        if "init" in call.kwargs["cmd"]
+    )
+
+    assert_that(result.success).is_true()
+    assert_that(init_dirs).is_equal_to(["a", "b"])
+
+
+def test_fix_fmt_apply_timeout_keeps_counts_consistent(
+    terraform_plugin: TerraformPlugin,
+    tmp_path: Path,
+) -> None:
+    """A fmt-apply timeout leaves ``initial == fixed + remaining`` intact.
+
+    Args:
+        terraform_plugin: The TerraformPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    tf_file = _write_tf(tmp_path)
+    terraform_plugin.set_options(validate=False)
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            terraform_plugin,
+            "_run_subprocess",
+            side_effect=[
+                (False, "main.tf\n"),  # initial fmt check
+                subprocess.TimeoutExpired(cmd="terraform fmt", timeout=60),
+            ],
+        ),
+    ):
+        result = terraform_plugin.fix([str(tf_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.initial_issues_count).is_equal_to(
+        result.remaining_issues_count,
+    )
+    assert_that(result.issues_count).is_equal_to(result.remaining_issues_count)
+    codes = [cast(TerraformIssue, issue).code for issue in result.issues or []]
+    assert_that(codes).contains("timeout")
 
 
 def test_fix_no_terraform_files(

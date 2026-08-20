@@ -124,7 +124,11 @@ def parse_terraform_validate_output(
                 os.path.join(normalized_dir, filename) if normalized_dir else filename
             )
         else:
-            file_path = normalized_dir
+            # Module-level diagnostics (e.g. "Missing required argument")
+            # carry no range. Fall back to the module directory so the issue
+            # is still attributable to a location; the root module reports
+            # ``.`` rather than an empty path.
+            file_path = normalized_dir or module_dir or "."
 
         issues.append(
             TerraformIssue(

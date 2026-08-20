@@ -236,7 +236,7 @@ def get_install_hints() -> dict[str, str]:
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
         "terraform": (
-            "Install via: brew install terraform "
+            "Install via: brew install hashicorp/tap/terraform "
             "or download from https://releases.hashicorp.com/terraform "
             "(v{version}+)"
         ),
@@ -244,7 +244,6 @@ def get_install_hints() -> dict[str, str]:
             "Install via: brew install trufflehog "
             "or download from "
             "https://github.com/trufflesecurity/trufflehog/releases (v{version}+)"
-        ),
         ),
         "vale": (
             "Install via: brew install vale "

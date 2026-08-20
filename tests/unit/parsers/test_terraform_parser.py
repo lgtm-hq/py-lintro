@@ -125,6 +125,35 @@ def test_parse_validate_output_warning_without_range() -> None:
     assert_that(issues[0].message).is_equal_to("Deprecated attribute")
 
 
+@pytest.mark.parametrize(
+    "module_dir",
+    ["", "."],
+    ids=["empty", "dot"],
+)
+def test_parse_validate_output_root_module_without_range(module_dir: str) -> None:
+    """A root-module diagnostic without a range still names a file path.
+
+    Args:
+        module_dir: The root-module spelling passed to the parser.
+    """
+    payload = {
+        "diagnostics": [
+            {
+                "severity": "error",
+                "summary": "Missing required argument",
+                "detail": "",
+            },
+        ],
+    }
+    issues = parse_terraform_validate_output(
+        json.dumps(payload),
+        module_dir=module_dir,
+    )
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].file).is_equal_to(".")
+
+
 def test_parse_validate_output_no_diagnostics() -> None:
     """A valid config with an empty diagnostics array yields no issues."""
     payload = {"valid": True, "diagnostics": []}

@@ -2722,7 +2722,7 @@ and `terraform validate` (a check-only configuration validator).
 - `format` applies `terraform fmt` in place. Validation diagnostics are not auto-fixable
   and are reported as remaining issues.
 - Terraform respects its own native configuration; Lintro does not inject any.
-- Install: `brew install terraform` or download from
+- Install: `brew install hashicorp/tap/terraform` or download from
   [HashiCorp releases](https://releases.hashicorp.com/terraform).
 
 **Available Options:**

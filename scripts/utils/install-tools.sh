@@ -173,7 +173,6 @@ SUPPORTED_TOOLS=(
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform"
 	"trufflehog" "tsc"
-	"vale" "vue-tsc" "yamllint" 
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -1949,7 +1948,7 @@ main() {
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["terraform"]="Terraform formatting and validation"
-		["trufflehog"]="Secret detection with verification" 
+		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
