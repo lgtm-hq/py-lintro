@@ -9,12 +9,10 @@ import pytest
 from assertpy import assert_that
 
 from lintro.config.config_validator import (
-    KNOWN_TOP_LEVEL_KEYS,
     ValidationMessage,
     known_tool_names,
     validate_config_file,
 )
-from lintro.config.lintro_config import LintroConfig
 from lintro.enums.validation_code import ValidationCode
 
 
@@ -250,8 +248,11 @@ def test_non_mapping_root_is_error(write_config: Callable[..., Path]) -> None:
     assert_that(result.errors[0].message).contains("mapping")
 
 
-def test_empty_config_warns(write_config: Callable[..., Path]) -> None:
-    """An empty config file should warn rather than error.
+def test_empty_config_is_not_valid(write_config: Callable[..., Path]) -> None:
+    """An empty config file is not a successful config.
+
+    ``load_config`` ignores empty YAML and continues searching, so validate
+    must not report VALID for an explicit empty path.
 
     Args:
         write_config: Fixture writing config content to a temp file.
@@ -260,8 +261,9 @@ def test_empty_config_warns(write_config: Callable[..., Path]) -> None:
 
     result = validate_config_file(path)
 
-    assert_that(result.is_valid).is_true()
-    assert_that(result.warnings[0].message).contains("empty")
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+    assert_that(result.errors[0].message).contains("empty")
 
 
 def test_malformed_yaml_is_error(write_config: Callable[..., Path]) -> None:
@@ -325,11 +327,153 @@ max_fix_retries = 3
     assert_that(result.is_valid).is_true()
 
 
-def test_known_top_level_keys_cover_schema_fields() -> None:
-    """Every LintroConfig field must be an accepted top-level section."""
-    schema_fields = set(LintroConfig.model_fields) - {"config_path"}
+def test_pyproject_unknown_key_warns(write_config: Callable[..., Path]) -> None:
+    """Unknown keys on the raw [tool.lintro] table must reach validate output.
 
-    assert_that(set(KNOWN_TOP_LEVEL_KEYS)).contains(*sorted(schema_fields))
+    The converter drops unrecognized keys (log only); validate has to inspect
+    the raw table or YAML typos in pyproject would look VALID.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+bogus_option = 1
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_true()
+    matches = [w for w in result.warnings if w.location == "tool.lintro.bogus_option"]
+    assert_that(matches).is_length(1)
+    assert_that(matches[0].code).is_equal_to(ValidationCode.UNKNOWN_OPTION)
+
+
+def test_pyproject_unknown_tool_table_warns(
+    write_config: Callable[..., Path],
+) -> None:
+    """An unknown tool table under [tool.lintro] should warn UNKNOWN_TOOL.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+[tool.lintro.ruft]
+enabled = true
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_true()
+    matches = [w for w in result.warnings if w.code == ValidationCode.UNKNOWN_TOOL]
+    assert_that(matches).is_not_empty()
+    assert_that(matches[0].message).contains("ruft")
+
+
+def test_pyproject_non_mapping_tool_table_is_error(
+    write_config: Callable[..., Path],
+) -> None:
+    """A non-mapping ``tool`` value must be INVALID_TYPE, not a crash.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+tool = "not-a-table"
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].location).is_equal_to("tool")
+
+
+def test_pyproject_non_mapping_lintro_table_is_error(
+    write_config: Callable[..., Path],
+) -> None:
+    """A non-mapping ``tool.lintro`` value must be INVALID_TYPE, not a crash.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool]
+lintro = "not-a-table"
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].location).is_equal_to("tool.lintro")
+
+
+def test_scalar_tool_entry_is_error(write_config: Callable[..., Path]) -> None:
+    """A known tool whose value is not a mapping or bool is INVALID_TYPE.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config("tools:\n  ruff: 0\n")
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].location).is_equal_to("tools.ruff")
+    assert_that(result.errors[0].message).contains("mapping or boolean")
+
+
+def test_string_tool_entry_is_error(write_config: Callable[..., Path]) -> None:
+    """A string tool value such as ``tools.ruff: yes`` is INVALID_TYPE.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config('tools:\n  ruff: "yes"\n')
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].location).is_equal_to("tools.ruff")
+
+
+def test_pyproject_scalar_tool_entry_is_error(
+    write_config: Callable[..., Path],
+) -> None:
+    """A scalar ``[tool.lintro] ruff = 0`` entry is INVALID_TYPE.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+ruff = 0
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].location).is_equal_to("tools.ruff")
 
 
 @pytest.mark.parametrize(
@@ -451,7 +595,8 @@ def test_empty_mapping_does_not_validate_discovered_config(
     """An explicit empty-mapping file must not fall through to auto-discovery.
 
     ``load_config`` treats a falsy config as "nothing found" and searches
-    upward, which would silently validate a different file than requested.
+    upward. Validate must still report the requested file as empty (not
+    VALID, and not the parent file's typed errors).
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -470,8 +615,10 @@ def test_empty_mapping_does_not_validate_discovered_config(
     result = validate_config_file(target)
 
     assert_that(result.config_path).is_equal_to(target)
-    assert_that(result.errors).is_empty()
-    assert_that(result.is_valid).is_true()
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+    messages = [e.message for e in result.errors]
+    assert_that(any("max_fix_retries" in m for m in messages)).is_false()
 
 
 def test_autodetect_falls_back_to_pyproject(
@@ -524,3 +671,101 @@ def test_missing_file_uses_not_found_code(tmp_path: Path) -> None:
     result = validate_config_file(tmp_path / "nope.yaml")
 
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.NOT_FOUND)
+
+
+def test_autodetect_empty_yaml_reports_invalid_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty auto-detected YAML must not report VALID when pyproject is invalid.
+
+    Runtime ``load_config`` ignores empty YAML and applies [tool.lintro].
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / ".lintro-config.yaml").write_text("", encoding="utf-8")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[tool.lintro]\nmax_fix_retries = "not-an-int"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = validate_config_file(None)
+
+    assert_that(result.config_path).is_equal_to(pyproject)
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].message).contains("max_fix_retries")
+    assert_that(result.warnings[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
+
+
+def test_autodetect_malformed_pyproject_is_parse_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken pyproject.toml on auto-detect is PARSE_ERROR, not NOT_FOUND.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("not: [valid toml\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = validate_config_file(None)
+
+    assert_that(result.config_path).is_equal_to(pyproject)
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.PARSE_ERROR)
+
+
+def test_plugin_tool_name_is_not_unknown(
+    write_config: Callable[..., Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installed plugin names must not produce UNKNOWN_TOOL warnings.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.plugins.discovery.get_known_plugin_tool_names",
+        lambda: frozenset({"acme_lint"}),
+    )
+    path = write_config(
+        """
+tools:
+  acme_lint:
+    enabled: true
+""",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_true()
+    codes = [w.code for w in result.warnings]
+    assert_that(codes).does_not_contain(ValidationCode.UNKNOWN_TOOL)
+
+
+def test_known_tool_names_includes_plugin_and_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The validator tool set includes plugin names and the markdownlint alias.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.plugins.discovery.get_known_plugin_tool_names",
+        lambda: frozenset({"acme_lint"}),
+    )
+
+    names = known_tool_names()
+
+    assert_that(names).contains("acme_lint")
+    assert_that(names).contains("acme-lint")
+    assert_that(names).contains("markdownlint-cli2")

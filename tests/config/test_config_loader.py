@@ -85,6 +85,27 @@ def test_with_bool_values() -> None:
     assert_that(config["prettier"].enabled).is_false()
 
 
+def test_tools_config_rejects_scalar_entry() -> None:
+    """A known tool whose value is not a mapping or bool must raise.
+
+    ``tools.ruff: 0`` used to be dropped, so ruff stayed at the default
+    (enabled). The parser must fail closed instead.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": 0})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
+    assert_that(str(exc_info.value)).contains("mapping or boolean")
+
+
+def test_tools_config_rejects_string_entry() -> None:
+    """A string tool value such as ``"yes"`` must raise."""
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": "yes"})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
+
+
 def test_defaults_empty_data() -> None:
     """Should return empty dict for defaults."""
     defaults = _parse_defaults({})

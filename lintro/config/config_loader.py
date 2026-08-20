@@ -129,7 +129,21 @@ def _load_pyproject_fallback() -> tuple[dict[str, Any], Path | None]:
             try:
                 with pyproject_path.open("rb") as f:
                     data = tomllib.load(f)
-                return data.get("tool", {}).get("lintro", {}), pyproject_path
+                tool = data.get("tool", {})
+                if not isinstance(tool, dict):
+                    logger.warning(
+                        f"'tool' in {pyproject_path} is not a table; "
+                        "ignoring pyproject fallback.",
+                    )
+                    return {}, None
+                lintro = tool.get("lintro", {})
+                if not isinstance(lintro, dict):
+                    logger.warning(
+                        f"'tool.lintro' in {pyproject_path} is not a table; "
+                        "ignoring pyproject fallback.",
+                    )
+                    return {}, None
+                return lintro, pyproject_path
             except tomllib.TOMLDecodeError as e:
                 logger.warning(
                     f"Failed to parse pyproject.toml at {pyproject_path}: {e}",
@@ -273,18 +287,27 @@ def _parse_tools_config(data: dict[str, Any]) -> dict[str, LintroToolConfig]:
 
     Returns:
         dict[str, LintroToolConfig]: Tool configurations keyed by tool name.
+
+    Raises:
+        ValueError: If a tool entry is neither a mapping nor a boolean.
     """
     tools: dict[str, LintroToolConfig] = {}
 
     for tool_name, tool_data in data.items():
+        name = tool_name.lower()
         if isinstance(tool_data, dict):
-            tools[tool_name.lower()] = _parse_tool_config(
-                tool_name.lower(),
+            tools[name] = _parse_tool_config(
+                name,
                 tool_data,
             )
         elif isinstance(tool_data, bool):
             # Simple enabled/disabled flag
-            tools[tool_name.lower()] = LintroToolConfig(enabled=tool_data)
+            tools[name] = LintroToolConfig(enabled=tool_data)
+        else:
+            actual = "null" if tool_data is None else type(tool_data).__name__
+            raise ValueError(
+                f"tools.{name} must be a mapping or boolean, got {actual}.",
+            )
 
     return tools
 
@@ -465,6 +488,93 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     return ScoreConfig(**filtered)
 
 
+def _pyproject_lintro_catalog() -> tuple[set[str], dict[str, str], set[str]]:
+    """Return known tools, aliases, and reserved keys for ``[tool.lintro]``.
+
+    Shared by the pyproject converter and the config validator so YAML
+    ``tools:`` entries and TOML tool tables accept the same name set
+    (``ToolName``, legacy aliases, and installed plugins). Plugin names come
+    from :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`, which
+    does not trigger a discovery pass.
+
+    Returns:
+        tuple[set[str], dict[str, str], set[str]]: Known tool names (including
+            aliases), alias-to-canonical map, and reserved non-tool keys.
+    """
+    # Inline imports: ToolName is a static StrEnum that does not trigger
+    # the plugin registry. Discovery is imported here to avoid a circular
+    # dependency between config_loader and the tool subsystem.
+    from lintro.enums.tool_name import ToolName
+    from lintro.plugins.discovery import get_known_plugin_tool_names
+    from lintro.utils.config import LEGACY_TOOL_SECTION_ALIASES
+
+    known_tools = {t.value for t in ToolName} | {
+        t.value.replace("_", "-") for t in ToolName
+    }
+    tool_aliases = dict(LEGACY_TOOL_SECTION_ALIASES)
+
+    execution_keys = {
+        "enabled_tools",
+        "tool_order",
+        "fail_fast",
+        "parallel",
+        "max_workers",
+        "auto_install_deps",
+        "max_fix_retries",
+        "artifacts",
+    }
+    enforce_keys = {"line_length", "target_python"}
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
+        PYPROJECT_ORDERING_KEYS,
+    )
+    reserved_keys = (
+        execution_keys
+        | enforce_keys
+        | externally_handled_sections
+        | {
+            "ai",
+            "defaults",
+            "output",
+            "review",
+            "score",
+            "tool",
+            "tools",
+            ConfigKey.POST_CHECKS.value.lower(),
+            ConfigKey.VERSIONS.value.lower(),
+        }
+    )
+    reserved_keys |= {name.replace("_", "-") for name in reserved_keys}
+
+    # ToolName never sees entry-point-discovered tools, so config for an
+    # externally installed plugin used to be dropped on the floor (#1757).
+    for plugin_name in get_known_plugin_tool_names():
+        variants = {
+            plugin_name,
+            plugin_name.replace("_", "-"),
+            plugin_name.replace("-", "_"),
+        }
+        for variant in variants:
+            if variant not in known_tools and variant not in reserved_keys:
+                tool_aliases.setdefault(variant, plugin_name)
+
+    known_tools.update(tool_aliases.keys())
+    return known_tools, tool_aliases, reserved_keys
+
+
+def known_config_tool_names() -> frozenset[str]:
+    """Return tool names the loader accepts in configuration.
+
+    Includes ``ToolName`` values (underscore and hyphen forms), legacy
+    section aliases such as ``markdownlint-cli2``, and installed plugin
+    names. Does not trigger plugin discovery.
+
+    Returns:
+        frozenset[str]: Recognized tool identifiers.
+    """
+    known_tools, _aliases, _reserved = _pyproject_lintro_catalog()
+    return frozenset(known_tools)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -488,17 +598,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "output": {},
     }
 
-    # Inline imports: ToolName is a static StrEnum that does not trigger
-    # the plugin registry. Both are imported here to avoid a circular
-    # dependency between config_loader and the tool subsystem.
-    from lintro.enums.tool_name import ToolName
-    from lintro.plugins.discovery import get_known_plugin_tool_names
-
-    known_tools = {t.value for t in ToolName} | {
-        t.value.replace("_", "-") for t in ToolName
-    }
-    # Add common aliases for tools
-    tool_aliases = {"markdownlint-cli2": "markdownlint"}
+    known_tools, tool_aliases, _reserved_keys = _pyproject_lintro_catalog()
 
     # Known execution settings
     execution_keys = {
@@ -521,43 +621,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
         PYPROJECT_ORDERING_KEYS,
     )
-
-    # Names this converter interprets as config rather than as a tool section.
-    # A plugin must not be able to shadow them by advertising a colliding
-    # entry-point name.
-    reserved_keys = (
-        execution_keys
-        | enforce_keys
-        | externally_handled_sections
-        | {
-            "ai",
-            "defaults",
-            "output",
-            "review",
-            "score",
-            "tool",
-            "tools",
-            ConfigKey.POST_CHECKS.value.lower(),
-            ConfigKey.VERSIONS.value.lower(),
-        }
-    )
-    reserved_keys |= {name.replace("_", "-") for name in reserved_keys}
-
-    # ToolName never sees entry-point-discovered tools, so config for an
-    # externally installed plugin used to be dropped on the floor (#1757).
-    # ``get_known_plugin_tool_names`` reads cached entry-point metadata and
-    # the already-populated registry; it never triggers a discovery pass.
-    for plugin_name in get_known_plugin_tool_names():
-        variants = {
-            plugin_name,
-            plugin_name.replace("_", "-"),
-            plugin_name.replace("-", "_"),
-        }
-        for variant in variants:
-            if variant not in known_tools and variant not in reserved_keys:
-                tool_aliases.setdefault(variant, plugin_name)
-
-    known_tools.update(tool_aliases.keys())
 
     unknown_keys: list[str] = []
 

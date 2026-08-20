@@ -38,7 +38,8 @@ def test_validate_valid_config_exits_zero(cli_runner: CliRunner) -> None:
         result = cli_runner.invoke(cli, ["config", "validate"])
 
         assert_that(result.exit_code).is_equal_to(0)
-        assert_that(result.output).contains("VALID")
+        assert_that(result.output).contains("Configuration is VALID")
+        assert_that(result.output).does_not_contain("INVALID")
 
 
 def test_validate_invalid_config_exits_nonzero(cli_runner: CliRunner) -> None:
@@ -56,7 +57,8 @@ def test_validate_invalid_config_exits_nonzero(cli_runner: CliRunner) -> None:
         result = cli_runner.invoke(cli, ["config", "validate"])
 
         assert_that(result.exit_code).is_equal_to(1)
-        assert_that(result.output).contains("INVALID")
+        assert_that(result.output).contains("Configuration is INVALID")
+        assert_that(result.output).does_not_contain("Configuration is VALID")
 
 
 def test_validate_json_output(cli_runner: CliRunner) -> None:
@@ -158,7 +160,8 @@ def test_validate_explicit_path(cli_runner: CliRunner, tmp_path: Path) -> None:
 
         assert_that(rich_result.exit_code).is_equal_to(0)
         assert_that(rich_result.output).contains("custom.yaml")
-        assert_that(rich_result.output).contains("VALID")
+        assert_that(rich_result.output).contains("Configuration is VALID")
+        assert_that(rich_result.output).does_not_contain("INVALID")
 
 
 def test_validate_invalid_json_reports_error_code(cli_runner: CliRunner) -> None:
@@ -197,7 +200,7 @@ def test_validate_missing_config_errors(cli_runner: CliRunner) -> None:
 
 
 def test_config_init_subcommand_scaffolds(cli_runner: CliRunner) -> None:
-    """`config init` should scaffold a config like the top-level init.
+    """`config init` should scaffold the same minimal YAML as top-level init.
 
     Args:
         cli_runner: Click test runner instance.
@@ -206,7 +209,20 @@ def test_config_init_subcommand_scaffolds(cli_runner: CliRunner) -> None:
         result = cli_runner.invoke(cli, ["config", "init", "--minimal", "--static"])
 
         assert_that(result.exit_code).is_equal_to(0)
-        assert_that(Path(".lintro-config.yaml").exists()).is_true()
+        config_path = Path(".lintro-config.yaml")
+        assert_that(config_path.exists()).is_true()
+        content = config_path.read_text(encoding="utf-8")
+        assert_that(content).contains("# Lintro Configuration (Minimal)")
+        assert_that(content).contains("enforce:")
+        assert_that(content).contains("line_length: 88")
+        assert_that(content).contains("tools:")
+        assert_that(content).contains("ruff:")
+        assert_that(content).contains("black:")
+        assert_that(content).contains("mypy:")
+
+        top_level = cli_runner.invoke(cli, ["init", "--minimal", "--static", "--force"])
+        assert_that(top_level.exit_code).is_equal_to(0)
+        assert_that(config_path.read_text(encoding="utf-8")).is_equal_to(content)
 
 
 def test_config_show_subcommand(cli_runner: CliRunner) -> None:

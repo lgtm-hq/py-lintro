@@ -136,6 +136,28 @@ def test_load_pyproject_os_error_logs_debug(
         assert_that(debug_msg).contains("Could not read pyproject.toml")
 
 
+def test_load_pyproject_non_mapping_tool_does_not_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-table ``tool`` value must not raise AttributeError.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture for chdir.
+    """
+    clear_pyproject_cache()
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('tool = "not-a-table"\n')
+    monkeypatch.chdir(tmp_path)
+
+    result, path = _load_pyproject_fallback()
+
+    assert_that(result).is_equal_to({})
+    assert_that(path).is_none()
+
+
 def test_pyproject_nested_tool_table_disables_a_tool(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

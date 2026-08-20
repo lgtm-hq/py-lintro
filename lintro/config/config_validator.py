@@ -23,8 +23,9 @@ from lintro.config.config_loader import (
     EXTERNALLY_HANDLED_SECTIONS,
     _convert_pyproject_to_config,
     _find_config_file,
-    _load_pyproject_fallback,
+    _pyproject_lintro_catalog,
     build_config_from_dict,
+    known_config_tool_names,
 )
 from lintro.config.lintro_config import (
     EnforceConfig,
@@ -35,9 +36,8 @@ from lintro.config.lintro_config import (
     ReviewConfig,
     ScoreConfig,
 )
-from lintro.enums.tool_name import ToolName
 from lintro.enums.validation_code import ValidationCode
-from lintro.utils.config import STRUCTURAL_SECTIONS
+from lintro.utils.config import STRUCTURAL_SECTIONS, _find_pyproject
 
 try:
     import yaml
@@ -93,19 +93,16 @@ DEPRECATED_KEYS: dict[str, str] = {
 def known_tool_names() -> frozenset[str]:
     """Return the set of recognized tool names.
 
-    Includes both the canonical underscore form and the hyphenated form for
-    each tool, plus common aliases, so validation matches the loader's
-    tolerance.
+    Reuses the loader's known-tool set so YAML ``tools:`` entries and
+    pyproject tool tables accept the same names: ``ToolName`` (underscore
+    and hyphen forms), legacy aliases such as ``markdownlint-cli2``, and
+    installed plugin names from
+    :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`.
 
     Returns:
         frozenset[str]: Recognized tool identifiers.
     """
-    names: set[str] = set()
-    for tool in ToolName:
-        names.add(tool.value)
-        names.add(tool.value.replace("_", "-"))
-    names.add("markdownlint-cli2")
-    return frozenset(names)
+    return known_config_tool_names()
 
 
 @dataclass
@@ -221,35 +218,62 @@ def _check_unknown_keys(
         )
 
 
+def _tool_value_type_error(
+    name: str,
+    tool_data: Any,
+) -> ValidationMessage:
+    """Build an INVALID_TYPE finding for a non-mapping, non-bool tool entry.
+
+    Args:
+        name: Tool name as written in the config.
+        tool_data: The invalid value.
+
+    Returns:
+        ValidationMessage: Type error for ``tools.<name>``.
+    """
+    actual = "null" if tool_data is None else type(tool_data).__name__
+    return ValidationMessage(
+        code=ValidationCode.INVALID_TYPE,
+        message=f"tool entry must be a mapping or boolean, got {actual}.",
+        location=f"tools.{name}",
+    )
+
+
 def _check_tool_names(
     data: dict[str, Any],
     warnings: list[ValidationMessage],
+    errors: list[ValidationMessage],
 ) -> None:
-    """Warn about unknown tool names in the ``tools`` section.
+    """Warn about unknown tool names and reject non-mapping/non-bool entries.
 
     Args:
         data: The ``tools`` mapping.
-        warnings: List to append findings to.
+        warnings: List to append unknown-tool findings to.
+        errors: List to append type findings to.
     """
     known = known_tool_names()
     for name, tool_data in data.items():
-        if name.lower() in known:
-            if isinstance(tool_data, dict):
-                _check_unknown_keys(
-                    tool_data,
-                    KNOWN_TOOL_KEYS,
-                    f"tools.{name}",
-                    warnings,
-                )
+        if name.lower() not in known:
+            warnings.append(
+                ValidationMessage(
+                    code=ValidationCode.UNKNOWN_TOOL,
+                    message=f"unknown tool '{name}'",
+                    location="tools",
+                    suggestion=_suggest(name.lower(), known),
+                ),
+            )
             continue
-        warnings.append(
-            ValidationMessage(
-                code=ValidationCode.UNKNOWN_TOOL,
-                message=f"unknown tool '{name}'",
-                location="tools",
-                suggestion=_suggest(name.lower(), known),
-            ),
-        )
+        if isinstance(tool_data, dict):
+            _check_unknown_keys(
+                tool_data,
+                KNOWN_TOOL_KEYS,
+                f"tools.{name}",
+                warnings,
+            )
+            continue
+        if isinstance(tool_data, bool):
+            continue
+        errors.append(_tool_value_type_error(name, tool_data))
 
 
 def _check_enabled_tools(
@@ -312,70 +336,83 @@ def _check_section_types(
         )
 
 
-def validate_config_file(path: Path | str | None = None) -> ValidationResult:
-    """Validate a Lintro configuration file.
-
-    Loads the config (or locates one by searching upward), checks it against
-    the known schema, and reports both hard errors and softer warnings.
+def _not_found_result(
+    config_path: Path | None,
+    warnings: list[ValidationMessage] | None = None,
+) -> ValidationResult:
+    """Return the standard 'no config file' error result.
 
     Args:
-        path: Explicit path to a config file. When None, the nearest
-            ``.lintro-config.yaml`` is located by searching upward, then
-            ``[tool.lintro]`` in ``pyproject.toml``, mirroring
-            :func:`lintro.config.config_loader.load_config`.
+        config_path: Path to record on the result, if any.
+        warnings: Optional warnings to include (e.g. an ignored empty YAML).
 
     Returns:
-        ValidationResult: Structured validation outcome.
+        ValidationResult: Result with a ``NOT_FOUND`` error.
     """
-    config_path: Path
-    if path is not None:
-        config_path = Path(path)
-        if not config_path.exists():
-            return ValidationResult(
-                config_path=config_path,
-                errors=[
-                    ValidationMessage(
-                        code=ValidationCode.NOT_FOUND,
-                        message=f"Config file not found: {config_path}",
-                    ),
-                ],
-            )
-    else:
-        found = _find_config_file()
-        if found is None:
-            # The loader falls back to [tool.lintro] in pyproject.toml when no
-            # YAML config exists, so auto-detect must consider it too;
-            # otherwise validate reports "no config" for projects that lintro
-            # happily configures itself from.
-            pyproject_data, pyproject_path = _load_pyproject_fallback()
-            if pyproject_data and pyproject_path is not None:
-                found = pyproject_path
-        if found is None:
-            return ValidationResult(
-                config_path=None,
-                errors=[
-                    ValidationMessage(
-                        code=ValidationCode.NOT_FOUND,
-                        message=(
-                            "No .lintro-config.yaml found. "
-                            "Run 'lintro init' to create one."
-                        ),
-                    ),
-                ],
-            )
-        config_path = found
-
-    result = ValidationResult(config_path=config_path)
-
-    if yaml is None:  # pragma: no cover - enforced by packaging
-        result.errors.append(
+    return ValidationResult(
+        config_path=config_path,
+        errors=[
             ValidationMessage(
-                code=ValidationCode.MISSING_DEPENDENCY,
-                message="PyYAML is required to validate configuration.",
+                code=ValidationCode.NOT_FOUND,
+                message=(
+                    "No .lintro-config.yaml found. Run 'lintro init' to create one."
+                ),
             ),
-        )
-        return result
+        ],
+        warnings=list(warnings or []),
+    )
 
+
+def _is_empty_document(parsed: Any) -> bool:
+    """Return whether a parsed YAML document is empty for loader purposes.
+
+    ``load_config`` maps ``None`` and non-dicts to ``{}`` then treats a
+    falsy mapping as "nothing found" and continues searching. Validate must
+    not report success for those documents.
+
+    Args:
+        parsed: Value returned by ``yaml.safe_load``.
+
+    Returns:
+        bool: True when the document is ``None`` or ``{}``.
+    """
+    return parsed is None or parsed == {}
+
+
+def _empty_yaml_error(config_path: Path) -> ValidationMessage:
+    """Build the error for an empty YAML file given as an explicit path.
+
+    Args:
+        config_path: The empty file the caller asked to validate.
+
+    Returns:
+        ValidationMessage: ``EMPTY_CONFIG`` error describing runtime fallback.
+    """
+    return ValidationMessage(
+        code=ValidationCode.EMPTY_CONFIG,
+        message=(
+            f"Config file {config_path} is empty and is not a successful "
+            "config. load_config ignores empty YAML and still searches "
+            "upward for another file or [tool.lintro]."
+        ),
+        location=str(config_path),
+    )
+
+
+def _parse_config_file(
+    config_path: Path,
+    result: ValidationResult,
+) -> tuple[Any, bool] | None:
+    """Read and parse a config file, recording parse errors on ``result``.
+
+    Args:
+        config_path: File to parse.
+        result: Result to append parse errors to.
+
+    Returns:
+        tuple[Any, bool] | None: ``(parsed, is_pyproject)`` on success, or
+            None when a parse error was recorded.
+    """
     is_pyproject = config_path.name == "pyproject.toml"
     try:
         raw = config_path.read_text(encoding="utf-8")
@@ -387,69 +424,192 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
                 message=f"Could not parse config: {exc}",
             ),
         )
-        return result
+        return None
+    return parsed, is_pyproject
 
-    if parsed is None:
-        result.warnings.append(
-            ValidationMessage(
-                code=ValidationCode.EMPTY_CONFIG,
-                message="Config file is empty.",
-            ),
-        )
-        return result
 
-    if not isinstance(parsed, dict):
-        result.errors.append(
+def _pyproject_lintro_table(
+    parsed: dict[str, Any],
+    errors: list[ValidationMessage],
+) -> dict[str, Any] | None:
+    """Extract ``[tool.lintro]``, recording INVALID_TYPE for non-mappings.
+
+    Args:
+        parsed: Parsed pyproject.toml root table.
+        errors: List to append type findings to.
+
+    Returns:
+        dict[str, Any] | None: The lintro table (possibly empty), or None
+            when a type error was recorded and validation should stop.
+    """
+    if "tool" not in parsed:
+        return {}
+    tool = parsed["tool"]
+    if not isinstance(tool, dict):
+        actual = "null" if tool is None else type(tool).__name__
+        errors.append(
             ValidationMessage(
                 code=ValidationCode.INVALID_TYPE,
-                message=(
-                    f"Config root must be a mapping, got {type(parsed).__name__}."
-                ),
+                message=f"'tool' must be a mapping, got {actual}.",
+                location="tool",
             ),
         )
-        return result
-
-    # pyproject.toml uses a flat [tool.lintro] layout; normalize before
-    # structural checks so nested keys line up with the schema.
-    if is_pyproject:
-        parsed = _convert_pyproject_to_config(
-            parsed.get("tool", {}).get("lintro", {}),
+        return None
+    if "lintro" not in tool:
+        return {}
+    lintro = tool["lintro"]
+    if not isinstance(lintro, dict):
+        actual = "null" if lintro is None else type(lintro).__name__
+        errors.append(
+            ValidationMessage(
+                code=ValidationCode.INVALID_TYPE,
+                message=f"'tool.lintro' must be a mapping, got {actual}.",
+                location="tool.lintro",
+            ),
         )
-    else:
+        return None
+    return lintro
+
+
+def _check_raw_pyproject_lintro(
+    data: dict[str, Any],
+    warnings: list[ValidationMessage],
+    errors: list[ValidationMessage],
+) -> None:
+    """Run unknown-key and unknown-tool checks on the raw ``[tool.lintro]``.
+
+    Must run before :func:`_convert_pyproject_to_config`, which drops
+    unrecognized keys (logging only) so they would never reach validate
+    output.
+
+    Args:
+        data: Raw ``[tool.lintro]`` table.
+        warnings: List to append unknown-key/tool findings to.
+        errors: List to append type findings to.
+    """
+    known_tools, _aliases, reserved_keys = _pyproject_lintro_catalog()
+    known = frozenset(known_tools)
+
+    nested_tool_tables = ("tool", "tools")
+    typed_sections: dict[str, frozenset[str]] = {
+        "execution": KNOWN_EXECUTION_KEYS,
+        "enforce": KNOWN_ENFORCE_KEYS,
+        "review": KNOWN_REVIEW_KEYS,
+        "score": KNOWN_SCORE_KEYS,
+        "output": KNOWN_OUTPUT_KEYS,
+    }
+
+    for key, value in data.items():
+        key_lower = key.lower()
+        if key_lower in known_tools:
+            # Top-level [tool.lintro.<tool>] holds native tool config, so
+            # inner keys are not LintroToolConfig fields. Only the value
+            # type is checked here.
+            if not isinstance(value, dict) and not isinstance(value, bool):
+                errors.append(_tool_value_type_error(key, value))
+            continue
+        if key_lower in nested_tool_tables:
+            if not isinstance(value, dict):
+                actual = "null" if value is None else type(value).__name__
+                errors.append(
+                    ValidationMessage(
+                        code=ValidationCode.INVALID_TYPE,
+                        message=(
+                            f"'{key_lower}' must be a mapping, got {actual}."
+                        ),
+                        location=f"tool.lintro.{key_lower}",
+                    ),
+                )
+                continue
+            _check_tool_names(value, warnings, errors)
+            continue
+        if key_lower in typed_sections and isinstance(value, dict):
+            _check_unknown_keys(
+                value,
+                typed_sections[key_lower],
+                key_lower,
+                warnings,
+            )
+            continue
+        if key_lower in reserved_keys or key.replace("-", "_") in reserved_keys:
+            continue
+        location = f"tool.lintro.{key}"
+        if isinstance(value, dict):
+            warnings.append(
+                ValidationMessage(
+                    code=ValidationCode.UNKNOWN_TOOL,
+                    message=f"unknown tool '{key}'",
+                    location="tool.lintro",
+                    suggestion=_suggest(key_lower, known),
+                ),
+            )
+            continue
+        warnings.append(
+            ValidationMessage(
+                code=ValidationCode.UNKNOWN_OPTION,
+                message="unknown option",
+                location=location,
+                suggestion=_suggest(key_lower, frozenset(reserved_keys) | known),
+            ),
+        )
+
+
+def _schema_check_normalized(
+    parsed: dict[str, Any],
+    result: ValidationResult,
+    *,
+    skip_unknown_keys: bool,
+) -> None:
+    """Apply schema warnings and typed-parser checks to a normalized mapping.
+
+    Args:
+        parsed: YAML-shaped configuration mapping.
+        result: Result to append findings to.
+        skip_unknown_keys: When True, skip unknown-key/tool walks that were
+            already performed on the raw pyproject table.
+    """
+    if not skip_unknown_keys:
         _check_unknown_keys(parsed, KNOWN_TOP_LEVEL_KEYS, "", result.warnings)
 
     execution = parsed.get("execution")
     if isinstance(execution, dict):
-        _check_unknown_keys(
-            execution,
-            KNOWN_EXECUTION_KEYS,
-            "execution",
-            result.warnings,
-        )
+        if not skip_unknown_keys:
+            _check_unknown_keys(
+                execution,
+                KNOWN_EXECUTION_KEYS,
+                "execution",
+                result.warnings,
+            )
         _check_enabled_tools(execution, result.warnings)
 
-    enforce = parsed.get("enforce")
-    if isinstance(enforce, dict):
-        _check_unknown_keys(enforce, KNOWN_ENFORCE_KEYS, "enforce", result.warnings)
+    if not skip_unknown_keys:
+        enforce = parsed.get("enforce")
+        if isinstance(enforce, dict):
+            _check_unknown_keys(
+                enforce,
+                KNOWN_ENFORCE_KEYS,
+                "enforce",
+                result.warnings,
+            )
 
-    for section, known in (
-        ("review", KNOWN_REVIEW_KEYS),
-        ("score", KNOWN_SCORE_KEYS),
-        ("output", KNOWN_OUTPUT_KEYS),
-    ):
-        data = parsed.get(section)
-        if isinstance(data, dict):
-            _check_unknown_keys(data, known, section, result.warnings)
+        for section, known in (
+            ("review", KNOWN_REVIEW_KEYS),
+            ("score", KNOWN_SCORE_KEYS),
+            ("output", KNOWN_OUTPUT_KEYS),
+        ):
+            data = parsed.get(section)
+            if isinstance(data, dict):
+                _check_unknown_keys(data, known, section, result.warnings)
 
-    tools = parsed.get("tools")
-    if isinstance(tools, dict):
-        _check_tool_names(tools, result.warnings)
+        tools = parsed.get("tools")
+        if isinstance(tools, dict):
+            _check_tool_names(tools, result.warnings, result.errors)
 
     _check_section_types(parsed, result.errors)
     if result.errors:
         # The typed parsers below assume mappings; running them on a null or
         # scalar section raises instead of reporting the problem.
-        return result
+        return
 
     # Run the real typed parsers to catch value errors (max_fix_retries,
     # auto_install, review schema, etc.) against the requested file. The
@@ -466,4 +626,135 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
             ValidationMessage(code=ValidationCode.INVALID_TYPE, message=str(exc)),
         )
 
+
+def validate_config_file(path: Path | str | None = None) -> ValidationResult:
+    """Validate a Lintro configuration file.
+
+    Loads the config (or locates one by searching upward), checks it against
+    the known schema, and reports both hard errors and softer warnings.
+
+    Empty YAML (``None`` or ``{}``) is not a successful config: ``load_config``
+    ignores it and continues to ``[tool.lintro]``. Auto-detect therefore
+    falls through to pyproject the same way; an explicit empty path is
+    reported as ``EMPTY_CONFIG`` so validate never exits 0 while runtime
+    would load a different file.
+
+    Args:
+        path: Explicit path to a config file. When None, the nearest
+            ``.lintro-config.yaml`` is located by searching upward, then
+            ``[tool.lintro]`` in ``pyproject.toml``, mirroring
+            :func:`lintro.config.config_loader.load_config`.
+
+    Returns:
+        ValidationResult: Structured validation outcome.
+    """
+    explicit = path is not None
+    if explicit:
+        config_path = Path(path)
+        if not config_path.exists():
+            return ValidationResult(
+                config_path=config_path,
+                errors=[
+                    ValidationMessage(
+                        code=ValidationCode.NOT_FOUND,
+                        message=f"Config file not found: {config_path}",
+                    ),
+                ],
+            )
+    else:
+        found = _find_config_file()
+        if found is None:
+            # Locate pyproject.toml by path, then parse it ourselves. The
+            # loader's ``_load_pyproject_fallback`` returns ``{}, None`` on
+            # TOML errors, which would look like NOT_FOUND; validate must
+            # fail closed with PARSE_ERROR instead.
+            found = _find_pyproject()
+        if found is None:
+            return _not_found_result(config_path=None)
+        config_path = found
+
+    result = ValidationResult(config_path=config_path)
+
+    if yaml is None:  # pragma: no cover - enforced by packaging
+        result.errors.append(
+            ValidationMessage(
+                code=ValidationCode.MISSING_DEPENDENCY,
+                message="PyYAML is required to validate configuration.",
+            ),
+        )
+        return result
+
+    parsed_pair = _parse_config_file(config_path, result)
+    if parsed_pair is None:
+        return result
+    parsed, is_pyproject = parsed_pair
+
+    if not is_pyproject and _is_empty_document(parsed):
+        if explicit:
+            result.errors.append(_empty_yaml_error(config_path))
+            return result
+        # Auto-detect: treat empty YAML like the loader — continue to
+        # pyproject rather than reporting VALID for a file runtime ignores.
+        result.warnings.append(
+            ValidationMessage(
+                code=ValidationCode.EMPTY_CONFIG,
+                message=(
+                    f"{config_path} is empty and will be ignored at runtime; "
+                    "continuing to [tool.lintro] in pyproject.toml."
+                ),
+                location=str(config_path),
+            ),
+        )
+        pyproject_path = _find_pyproject()
+        if pyproject_path is None:
+            return _not_found_result(
+                config_path=config_path,
+                warnings=result.warnings,
+            )
+        config_path = pyproject_path
+        result.config_path = config_path
+        parsed_pair = _parse_config_file(config_path, result)
+        if parsed_pair is None:
+            return result
+        parsed, is_pyproject = parsed_pair
+
+    if not isinstance(parsed, dict):
+        result.errors.append(
+            ValidationMessage(
+                code=ValidationCode.INVALID_TYPE,
+                message=(
+                    f"Config root must be a mapping, got {type(parsed).__name__}."
+                ),
+            ),
+        )
+        return result
+
+    if is_pyproject:
+        lintro = _pyproject_lintro_table(parsed, result.errors)
+        if result.errors:
+            return result
+        if not lintro:
+            if explicit:
+                result.errors.append(
+                    ValidationMessage(
+                        code=ValidationCode.EMPTY_CONFIG,
+                        message=(
+                            "pyproject.toml has no [tool.lintro] table; "
+                            "this is not a successful Lintro config."
+                        ),
+                    ),
+                )
+                return result
+            return _not_found_result(
+                config_path=config_path,
+                warnings=result.warnings,
+            )
+        _check_raw_pyproject_lintro(lintro, result.warnings, result.errors)
+        if result.errors:
+            return result
+        parsed = _convert_pyproject_to_config(lintro)
+        _schema_check_normalized(parsed, result, skip_unknown_keys=True)
+        return result
+
+    _schema_check_normalized(parsed, result, skip_unknown_keys=False)
     return result
