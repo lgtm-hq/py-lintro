@@ -10,8 +10,8 @@ or inlining those helpers cannot break this suite.
 
 Every test monkeypatches ``Path.home`` and ``$XDG_CONFIG_HOME`` so the real
 user home directory is never read. The rest of the suite is isolated by the
-autouse ``disable_global_config`` fixture in ``tests/conftest.py``, which sets
-``LINTRO_GLOBAL_CONFIG=off``.
+session-scoped ``disable_global_config`` fixture in ``tests/conftest.py``,
+which sets ``LINTRO_GLOBAL_CONFIG=off`` before session tool discovery runs.
 """
 
 from __future__ import annotations
@@ -1086,6 +1086,76 @@ def test_project_plugins_overlay_global_trusted_list(
 
     assert_that(enabled).is_true()
     assert_that(trusted).is_equal_to(frozenset({"project-plugin"}))
+
+
+def test_project_plugins_disabled_overrides_global_trusted(
+    isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project ``plugins.enabled: false`` disables external plugins globally.
+
+    Deep merge keeps the global ``trusted`` allowlist, but an explicit project
+    disable must win so inherited trust cannot opt back in.
+
+    Args:
+        isolated_home: Isolated fake home directory.
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.plugins.discovery import (
+        ENV_ENABLE_EXTERNAL_PLUGINS,
+        _resolve_plugin_trust,
+    )
+
+    (isolated_home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - global-plugin\n",
+    )
+    project = _make_project(tmp_path, monkeypatch)
+    (project / ".lintro-config.yaml").write_text(
+        "plugins:\n  enabled: false\n",
+    )
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    enabled, trusted = _resolve_plugin_trust()
+
+    assert_that(enabled).is_false()
+    assert_that(trusted).is_none()
+
+
+@pytest.mark.parametrize(
+    "home_filename",
+    [
+        ".lintro-config.yml",
+        "lintro-config.yaml",
+        "lintro-config.yml",
+    ],
+)
+def test_disabled_global_tier_ignores_home_filename_variants_for_nested_project(
+    home_filename: str,
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``off`` excludes every home-root global filename from project discovery.
+
+    Args:
+        home_filename: Basename of the home-level config file under test.
+        isolated_home: Isolated fake home directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (isolated_home / home_filename).write_text(
+        "enforce:\n  line_length: 100\nai:\n  enabled: true\n",
+    )
+    _make_project(isolated_home, monkeypatch)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+
+    config = load_config(allow_pyproject_fallback=False)
+
+    assert_that(config.global_config_path).is_none()
+    assert_that(config.config_path).is_none()
+    assert_that(config.enforce.line_length).is_none()
+    assert_that(config.ai).is_equal_to({})
+    assert_that(config.global_contributed_keys).is_equal_to([])
 
 
 def test_explicit_global_path_supplies_licenses_not_home_dotfile(

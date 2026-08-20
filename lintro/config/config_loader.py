@@ -120,20 +120,46 @@ def _find_global_config_file() -> Path | None:
     return None
 
 
+def _home_global_config_paths() -> frozenset[Path]:
+    """Return resolved paths for every global-tier filename under ``$HOME``.
+
+    The upward project search uses :data:`LINTRO_CONFIG_FILENAMES`, so a cwd
+    nested under the home directory can discover any of those names at the
+    home root. Each must be treated as global-tier-only, not only the primary
+    ``~/.lintro-config.yaml`` dotfile.
+
+    Returns:
+        frozenset[Path]: Resolved home-directory global config paths, or empty
+            when ``$HOME`` cannot be resolved.
+    """
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):  # pragma: no cover - no resolvable home
+        return frozenset()
+
+    paths: set[Path] = set()
+    for filename in LINTRO_CONFIG_FILENAMES:
+        try:
+            paths.add((home / filename).resolve())
+        except OSError:  # pragma: no cover - defensive
+            continue
+    return frozenset(paths)
+
+
 def _is_global_tier_only(
     candidate: Path,
     global_file: Path | None,
 ) -> bool:
     """Report whether a discovered file belongs to the global tier only.
 
-    ``~/.lintro-config.yaml`` is the user-level global config. The upward
-    project search reaches it whenever the cwd sits under ``$HOME`` with no
-    nearer config, but it must never be adopted as a project config: doing so
-    reports one file as two tiers, empties ``global_contributed_keys``, and —
-    when the global tier is disabled — would resurrect the very file
-    ``LINTRO_GLOBAL_CONFIG=off`` exists to exclude. The currently selected
-    global file (which ``LINTRO_GLOBAL_CONFIG`` may point elsewhere) is
-    excluded on the same grounds.
+    Every filename in :data:`LINTRO_CONFIG_FILENAMES` at the home-directory
+    root is user-level global config. The upward project search reaches those
+    files whenever the cwd sits under ``$HOME`` with no nearer config, but
+    they must never be adopted as a project config: doing so reports one file
+    as two tiers, empties ``global_contributed_keys``, and — when the global
+    tier is disabled — would resurrect files ``LINTRO_GLOBAL_CONFIG=off`` exists
+    to exclude. The currently selected global file (which ``LINTRO_GLOBAL_CONFIG``
+    may point elsewhere) is excluded on the same grounds.
 
     Args:
         candidate: Config file returned by the upward project search.
@@ -150,22 +176,25 @@ def _is_global_tier_only(
     if global_file is not None and resolved == global_file.resolve():
         return True
 
-    try:
-        home_dotfile = (Path.home() / GLOBAL_CONFIG_FILENAME).resolve()
-    except (OSError, RuntimeError):  # pragma: no cover - no resolvable home
-        return False
-    return resolved == home_dotfile
+    return resolved in _home_global_config_paths()
 
 
 def _exclude_global_file_when_tier_disabled(candidate: Path) -> bool:
     """Return True when ``candidate`` belongs to the global tier only.
 
-    Plugin and license loaders search upward independently of
-    :func:`load_config`. The home dotfile and the active global file (an
-    explicit ``LINTRO_GLOBAL_CONFIG`` path or the XDG fallback) must never
-    be adopted as a project config. That remains true when the global tier
-    is off, so ``LINTRO_GLOBAL_CONFIG=off`` cannot demote
-    ``~/.lintro-config.yaml`` into a project file.
+    Shared by :func:`load_config` (via :func:`_is_global_tier_only`),
+    :func:`lintro.plugins.discovery._load_plugins_config`, and
+    :func:`lintro.config.licenses_config._load_yaml_section` so all three
+    loaders agree on which upward-search hits are global-tier-only. Plugin
+    and license loaders call this helper directly because they resolve
+    sections independently of the main tiered config parse.
+
+    Every home-root name in :data:`LINTRO_CONFIG_FILENAMES` and the active
+    global file (an explicit ``LINTRO_GLOBAL_CONFIG`` path or the XDG
+    fallback) must never be adopted as a project config. That remains true
+    when the global tier is off, so ``LINTRO_GLOBAL_CONFIG=off`` cannot
+    demote ``~/.lintro-config.yaml`` (or sibling home filenames) into a
+    project file.
 
     Args:
         candidate: Config file found by an upward search.
