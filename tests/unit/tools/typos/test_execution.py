@@ -882,6 +882,8 @@ def test_plugin_uses_combined_typos_report_parser() -> None:
     """
     source = inspect.getsource(TyposPlugin._run_batched)
     assert_that(source).contains("parse_typos_report")
+    # Substring match also rejects the private split helpers
+    # (``_parse_typos_output`` / ``_parse_typos_errors``).
     assert_that(source).does_not_contain("parse_typos_output")
     assert_that(source).does_not_contain("parse_typos_errors")
 

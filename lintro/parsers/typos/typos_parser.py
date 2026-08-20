@@ -3,17 +3,21 @@
 typos emits newline-delimited JSON (``--format json``): one JSON object per
 line, with a ``type`` discriminator.
 
-The stream mixes two different kinds of record. Callers that consume a full
-tool run should use :func:`parse_typos_report`, which pairs both views so a
-findings-only caller cannot treat a diagnostic stream as a clean scan:
+The stream mixes two different kinds of record. The only public plugin entry
+is :func:`parse_typos_report`, which pairs both views so a findings-only
+caller cannot treat a diagnostic stream as a clean scan:
 
-* :func:`parse_typos_output` returns the ``type == "typo"`` entries — the lint
+* :func:`_parse_typos_output` returns the ``type == "typo"`` entries — the lint
   findings.
-* :func:`parse_typos_errors` returns the ``type == "error"`` entries — per-file
+* :func:`_parse_typos_errors` returns the ``type == "error"`` entries — per-file
   diagnostics such as ``Permission denied``. These can appear in the *same*
   run as real findings (one unreadable file among many), so the plugin tracks
   them separately and fails the run on them instead of inferring failure from
   an empty findings list.
+
+Those split helpers stay private. Other tools expose ``parse_<tool>_output``
+as the public parser; that name is intentionally absent here because it would
+return ``[]`` for a diagnostic-only stream and look like a clean scan.
 
 Only a small allowlist of record types is treated as informational; anything
 else is reported as a diagnostic, so a type introduced by a future typos
@@ -103,7 +107,7 @@ class _Line(NamedTuple):
 def _iter_records(output: str | None) -> Iterator[_Line]:
     """Iterate the newline-delimited JSON records in typos' stdout.
 
-    Both public parsers walk the same stream, so the decoding lives here: two
+    Both split helpers walk the same stream, so the decoding lives here: two
     hand-rolled loops previously drifted apart on which lines they skipped.
 
     Args:
@@ -148,14 +152,14 @@ def _typo_fields(record: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def parse_typos_errors(output: str | None) -> list[str]:
+def _parse_typos_errors(output: str | None) -> list[str]:
     """Extract typos' diagnostics from its JSON output.
 
     typos reports per-file problems (unreadable file, decode failure, ...) as
     ``{"type": "error", "path": ..., "msg": ...}`` records interleaved with the
     ``typo`` findings on stdout. Those must be surfaced as tool failures even
     when the same run also reported real typos for other files, so they are
-    parsed separately from :func:`parse_typos_output`.
+    parsed separately from :func:`_parse_typos_output`.
 
     The check is deliberately fail-closed: any record that is neither a
     ``typo`` nor a known informational type counts as a diagnostic, and so does
@@ -193,11 +197,11 @@ def parse_typos_errors(output: str | None) -> list[str]:
     return messages
 
 
-def parse_typos_output(output: str | None) -> list[TyposIssue]:
+def _parse_typos_output(output: str | None) -> list[TyposIssue]:
     """Parse typos JSON output into issues.
 
     Only ``type == "typo"`` records become issues. Diagnostics on the same
-    stream are not represented here at all; :func:`parse_typos_errors` returns
+    stream are not represented here at all; :func:`_parse_typos_errors` returns
     them and the plugin fails the run on them, so an error interleaved with
     real findings is never silently dropped.
 
@@ -208,7 +212,7 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
     Returns:
         List of parsed typo issues. Empty when the input is empty, None, or
         contains no ``typo`` entries. Malformed lines are skipped here; they
-        are diagnostics in :func:`parse_typos_errors` / :func:`parse_typos_report`.
+        are diagnostics in :func:`_parse_typos_errors` / :func:`parse_typos_report`.
     """
     issues: list[TyposIssue] = []
     for record, _raw in _iter_records(output):
@@ -221,7 +225,7 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
 
         fields = _typo_fields(record)
         if fields is None:
-            # Reported as a diagnostic by parse_typos_errors, so this skip
+            # Reported as a diagnostic by _parse_typos_errors, so this skip
             # cannot make a broken run look clean.
             logger.debug(f"typos: skipping incomplete typo record: {_raw}")
             continue
@@ -275,8 +279,8 @@ class TyposReport(NamedTuple):
     """Findings and diagnostics from one typos JSON stdout stream.
 
     Attributes:
-        issues: ``type == "typo"`` findings from :func:`parse_typos_output`.
-        diagnostics: Fail-closed messages from :func:`parse_typos_errors`.
+        issues: ``type == "typo"`` findings from :func:`_parse_typos_output`.
+        diagnostics: Fail-closed messages from :func:`_parse_typos_errors`.
     """
 
     issues: list[TyposIssue]
@@ -286,9 +290,8 @@ class TyposReport(NamedTuple):
 def parse_typos_report(output: str | None) -> TyposReport:
     """Parse one typos JSON stdout stream into findings and diagnostics.
 
-    This is the function plugins should call. The two lower-level parsers stay
-    public for unit tests that need to assert one view in isolation; a caller
-    that only uses :func:`parse_typos_output` would treat diagnostics as a
+    This is the only public plugin entry. The split helpers stay private so a
+    conventional ``parse_<tool>_output`` caller cannot treat diagnostics as a
     clean scan.
 
     Args:
@@ -298,6 +301,6 @@ def parse_typos_report(output: str | None) -> TyposReport:
         A :class:`TyposReport` pairing both views of the same stream.
     """
     return TyposReport(
-        issues=parse_typos_output(output=output),
-        diagnostics=parse_typos_errors(output=output),
+        issues=_parse_typos_output(output=output),
+        diagnostics=_parse_typos_errors(output=output),
     )

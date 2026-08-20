@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.parsers.typos.typos_parser import parse_typos_output
+from lintro.parsers.typos.typos_parser import _parse_typos_output
 
 from .conftest import make_typo_record, make_typos_output
 
 
 def test_parse_single_typo(single_typo_output: str) -> None:
     """A single finding is parsed with all fields populated."""
-    issues = parse_typos_output(single_typo_output)
+    issues = _parse_typos_output(single_typo_output)
 
     assert_that(issues).is_length(1)
     issue = issues[0]
@@ -26,7 +26,7 @@ def test_parse_single_typo(single_typo_output: str) -> None:
 
 def test_parse_multiple_typos(multi_typo_output: str) -> None:
     """Multiple newline-delimited findings are all parsed."""
-    issues = parse_typos_output(multi_typo_output)
+    issues = _parse_typos_output(multi_typo_output)
 
     assert_that(issues).is_length(3)
     assert_that([i.typo for i in issues]).is_equal_to(["teh", "seperate", "reprot"])
@@ -37,7 +37,7 @@ def test_message_composed_from_typo_and_corrections() -> None:
     """The message is composed from the typo and its corrections."""
     output = make_typo_record(typo="seperate", corrections=["separate"])
 
-    issues = parse_typos_output(output)
+    issues = _parse_typos_output(output)
 
     assert_that(issues[0].message).is_equal_to('"seperate" should be "separate"')
 
@@ -46,7 +46,7 @@ def test_message_lists_multiple_corrections() -> None:
     """Several corrections are comma-separated in the message."""
     output = make_typo_record(typo="wrods", corrections=["words", "words'"])
 
-    issues = parse_typos_output(output)
+    issues = _parse_typos_output(output)
 
     assert_that(issues[0].message).is_equal_to('"wrods" should be "words", "words\'"')
 
@@ -57,7 +57,7 @@ def test_column_is_one_based() -> None:
         [make_typo_record(byte_offset=0, typo="reprot", corrections=["report"])],
     )
 
-    issues = parse_typos_output(output)
+    issues = _parse_typos_output(output)
 
     assert_that(issues[0].column).is_equal_to(1)
     assert_that(issues[0].byte_offset).is_equal_to(0)

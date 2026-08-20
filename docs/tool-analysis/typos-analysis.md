@@ -78,10 +78,12 @@ parser-selection decision.
 ```
 
 Only `type == "typo"` records become findings. `type == "error"` records are surfaced by
-`parse_typos_errors` and fail the run even when findings were also parsed. The plugin
-calls `parse_typos_report`, which pairs both parsers on the same stdout so check, fix,
-`--write-changes`, and the post-write re-check cannot consume findings without also
-seeing diagnostics. Informational types (`binary_file`, `file_type`) are debug-logged
+`_parse_typos_errors` and fail the run even when findings were also parsed. The plugin
+calls `parse_typos_report` (the only public parser entry), which pairs both views of the
+same stdout so check, fix, `--write-changes`, and the post-write re-check cannot consume
+findings without also seeing diagnostics. The conventional `parse_<tool>_output` name is
+intentionally not public: it would return an empty findings list for a diagnostic-only
+stream and look like a clean scan. Informational types (`binary_file`, `file_type`) are debug-logged
 and dropped. Any other record type is treated as a diagnostic so a future typos release
 cannot vanish.
 
