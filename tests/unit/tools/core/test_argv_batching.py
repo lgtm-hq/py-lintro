@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.argv_batching import (
@@ -20,13 +22,21 @@ def test_argv_byte_budget_is_positive() -> None:
     assert_that(argv_byte_budget()).is_greater_than(0)
 
 
-def test_argv_byte_budget_falls_back_when_sysconf_fails() -> None:
-    """An unavailable ``SC_ARG_MAX`` falls back to the POSIX minimum."""
+@pytest.mark.parametrize(
+    "failure",
+    [ValueError("bad name"), OSError("no sysconf"), AttributeError("no attr")],
+    ids=["ValueError", "OSError", "AttributeError"],
+)
+def test_argv_byte_budget_falls_back_for_every_sysconf_failure(
+    failure: Exception,
+) -> None:
+    """Each documented ``sysconf`` failure mode reaches the same fallback.
+
+    Args:
+        failure: Exception raised by ``os.sysconf``.
+    """
     with (
-        patch(
-            "lintro.tools.core.argv_batching.os.sysconf",
-            side_effect=OSError("no sysconf"),
-        ),
+        patch("lintro.tools.core.argv_batching.os.sysconf", side_effect=failure),
         patch.dict("os.environ", {}, clear=True),
     ):
         budget = argv_byte_budget()
@@ -36,11 +46,46 @@ def test_argv_byte_budget_falls_back_when_sysconf_fails() -> None:
     )
 
 
-def test_argv_byte_budget_never_drops_below_the_headroom_floor() -> None:
-    """A huge environment still leaves room for at least one long path."""
+@pytest.mark.parametrize(
+    "arg_max",
+    [-1, 0, None],
+    ids=["negative", "zero", "not-an-int"],
+)
+def test_argv_byte_budget_falls_back_for_unusable_arg_max(arg_max: object) -> None:
+    """A non-positive or non-int ``SC_ARG_MAX`` uses the POSIX minimum.
+
+    Args:
+        arg_max: Value returned by ``os.sysconf``.
+    """
     with (
-        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=4096),
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        budget = argv_byte_budget()
+
+    assert_that(budget).is_equal_to(
+        ARGV_FALLBACK_LIMIT_BYTES - ARGV_SAFETY_HEADROOM_BYTES,
+    )
+
+
+def test_argv_byte_budget_never_exceeds_arg_max() -> None:
+    """An environment that eats the limit must not yield an unusable budget."""
+    arg_max = 512
+    with (
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=arg_max),
         patch.dict("os.environ", {"BIG": "x" * 100_000}, clear=True),
+    ):
+        budget = argv_byte_budget()
+
+    assert_that(budget).is_greater_than(0)
+    assert_that(budget).is_less_than_or_equal_to(arg_max)
+
+
+def test_argv_byte_budget_uses_the_headroom_floor_when_arg_max_allows() -> None:
+    """With a roomy ``ARG_MAX`` the floor is the headroom constant."""
+    with (
+        patch("lintro.tools.core.argv_batching.os.sysconf", return_value=10**6),
+        patch.dict("os.environ", {"BIG": "x" * 10**6}, clear=True),
     ):
         budget = argv_byte_budget()
 
@@ -49,14 +94,37 @@ def test_argv_byte_budget_never_drops_below_the_headroom_floor() -> None:
 
 def test_argv_byte_budget_counts_environment_in_bytes_not_characters() -> None:
     """Non-ASCII environment values are charged their encoded byte length."""
-    with patch("lintro.tools.core.argv_batching.os.sysconf", return_value=10**7):
-        with patch.dict("os.environ", {"K": "a" * 10}, clear=True):
-            ascii_budget = argv_byte_budget()
-        with patch.dict("os.environ", {"K": "é" * 10}, clear=True):
-            latin1_budget = argv_byte_budget()
+    plain = "a" * 10
+    accented = "é" * 10
+    encoding = sys.getfilesystemencoding()
+    # Derive the delta the same way production does, so the test does not
+    # assume a UTF-8 filesystem encoding.
+    expected = len(accented.encode(encoding, "surrogateescape")) - len(
+        plain.encode(encoding, "surrogateescape"),
+    )
 
-    # "é" is two bytes in UTF-8, so the same character count costs 10 more.
-    assert_that(ascii_budget - latin1_budget).is_equal_to(10)
+    with patch("lintro.tools.core.argv_batching.os.sysconf", return_value=10**7):
+        with patch.dict("os.environ", {"K": plain}, clear=True):
+            plain_budget = argv_byte_budget()
+        with patch.dict("os.environ", {"K": accented}, clear=True):
+            accented_budget = argv_byte_budget()
+
+    assert_that(plain_budget - accented_budget).is_equal_to(expected)
+
+
+def test_chunk_charges_non_ascii_paths_their_encoded_length() -> None:
+    """Path cost is encoding-sensitive, not character-count based."""
+    encoding = sys.getfilesystemencoding()
+    path = "/café/naïve.md"
+    exact_budget = (
+        len(path.encode(encoding, "surrogateescape")) + 1 + ARGV_POINTER_BYTES
+    )
+
+    fits = chunk_paths([path, path], fixed_arg_bytes=0, budget=exact_budget * 2)
+    splits = chunk_paths([path, path], fixed_arg_bytes=0, budget=exact_budget * 2 - 1)
+
+    assert_that(fits).is_length(1)
+    assert_that(splits).is_length(2)
 
 
 def test_chunk_paths_returns_no_batches_for_no_paths() -> None:

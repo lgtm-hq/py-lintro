@@ -41,7 +41,8 @@ def argv_byte_budget() -> int:
     The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
     current environment block (``execve`` counts it against the same limit) and
     a fixed safety margin. Falls back to the POSIX-guaranteed minimum when
-    ``ARG_MAX`` cannot be queried.
+    ``ARG_MAX`` cannot be queried, and is clamped to ``ARG_MAX`` when the
+    environment has consumed the entire limit.
 
     Returns:
         The maximum number of argument-data bytes to place on one command line.
@@ -61,8 +62,13 @@ def argv_byte_budget() -> int:
         for key, value in os.environ.items()
     )
     budget = arg_max - env_bytes - ARGV_SAFETY_HEADROOM_BYTES
-    # Always leave room for at least a moderately long single path per batch.
-    return max(budget, ARGV_SAFETY_HEADROOM_BYTES)
+    if budget > 0:
+        return budget
+    # The environment has eaten the whole limit. Return something usable, but
+    # never more than ``ARG_MAX`` itself: raising the floor above the real
+    # kernel limit would hand back a budget that cannot be executed, which is
+    # exactly the ``E2BIG`` this module exists to prevent.
+    return max(min(ARGV_SAFETY_HEADROOM_BYTES, arg_max), 1)
 
 
 def chunk_paths(

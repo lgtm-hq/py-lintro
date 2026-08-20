@@ -158,3 +158,29 @@ def test_no_error_records_yields_no_diagnostics() -> None:
     """Clean output produces no diagnostics."""
     assert_that(parse_typos_errors(make_typo_record())).is_empty()
     assert_that(parse_typos_errors(None)).is_empty()
+
+
+def test_unknown_record_types_are_reported_as_diagnostics() -> None:
+    """A record type typos might add later fails loudly instead of vanishing."""
+    output = '{"type":"some_future_type","path":"x.txt","msg":"something odd"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_equal_to(["x.txt: something odd"])
+
+
+def test_informational_record_types_are_not_diagnostics() -> None:
+    """Known informational record types stay out of the diagnostics list."""
+    output = '{"type":"binary_file","path":"logo.png"}'
+
+    assert_that(parse_typos_output(output)).is_empty()
+    assert_that(parse_typos_errors(output)).is_empty()
+
+
+def test_undecodable_lines_are_reported_as_diagnostics() -> None:
+    """With --format json, a non-JSON stdout line means something went wrong."""
+    output = "\n".join([make_typo_record(), "argument `nosuch.txt` is not found"])
+
+    assert_that(parse_typos_output(output)).is_length(1)
+    assert_that(parse_typos_errors(output)).is_equal_to(
+        ["unparseable typos output: argument `nosuch.txt` is not found"],
+    )

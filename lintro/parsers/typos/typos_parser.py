@@ -14,12 +14,16 @@ parsers rather than one:
   them separately and fails the run on them instead of inferring failure from
   an empty findings list.
 
-Remaining record types are informational and are only logged.
+Only a small allowlist of record types is treated as informational; anything
+else is reported as a diagnostic, so a type introduced by a future typos
+release fails loudly rather than vanishing.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from typing import Any
 
 from loguru import logger
 
@@ -62,26 +66,30 @@ def _build_message(typo: str, corrections: list[str]) -> str:
     return f'"{typo}" should be {joined}'
 
 
-def parse_typos_errors(output: str | None) -> list[str]:
-    """Extract typos' ``error`` diagnostics from its JSON output.
+# typos record types that are informational only: they describe what typos did
+# with a file, not a problem the user must act on. Anything else that is not a
+# ``typo`` is treated as a diagnostic, so a record type added by a future typos
+# release fails loudly rather than vanishing.
+_INFORMATIONAL_RECORD_TYPES: frozenset[str] = frozenset({"binary_file", "file_type"})
 
-    typos reports per-file problems (unreadable file, decode failure, ...) as
-    ``{"type": "error", "path": ..., "msg": ...}`` records interleaved with the
-    ``typo`` findings on stdout. Those must be surfaced as tool failures even
-    when the same run also reported real typos for other files, so they are
-    parsed separately from :func:`parse_typos_output`.
+
+def _iter_records(output: str | None) -> Iterator[tuple[dict[str, Any] | None, str]]:
+    """Iterate the newline-delimited JSON records in typos' stdout.
+
+    Both public parsers walk the same stream, so the decoding lives here: two
+    hand-rolled loops previously drifted apart on which lines they skipped.
 
     Args:
         output: Raw stdout from ``typos --format json``, or None.
 
-    Returns:
-        One human-readable message per ``error`` record, in output order.
-        Empty when the input is empty, None, or free of error records.
+    Yields:
+        tuple[dict[str, Any] | None, str]: ``(record, raw_line)`` pairs.
+            ``record`` is the decoded object, or None when the line was not a
+            JSON object — callers decide whether that is a skip or a
+            diagnostic.
     """
     if not output:
-        return []
-
-    messages: list[str] = []
+        return
     for line in output.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -89,18 +97,57 @@ def parse_typos_errors(output: str | None) -> list[str]:
         try:
             record = json.loads(stripped)
         except (json.JSONDecodeError, ValueError):
+            yield None, stripped
             continue
-        if not isinstance(record, dict) or record.get("type") != "error":
+        if not isinstance(record, dict):
+            yield None, stripped
             continue
-        msg = record.get("msg")
+        yield record, stripped
+
+
+def parse_typos_errors(output: str | None) -> list[str]:
+    """Extract typos' diagnostics from its JSON output.
+
+    typos reports per-file problems (unreadable file, decode failure, ...) as
+    ``{"type": "error", "path": ..., "msg": ...}`` records interleaved with the
+    ``typo`` findings on stdout. Those must be surfaced as tool failures even
+    when the same run also reported real typos for other files, so they are
+    parsed separately from :func:`parse_typos_output`.
+
+    The check is deliberately fail-closed: any record that is neither a
+    ``typo`` nor a known informational type counts as a diagnostic, and so does
+    a line that is not decodable JSON at all (with ``--format json`` everything
+    on stdout should be).
+
+    Args:
+        output: Raw stdout from ``typos --format json``, or None.
+
+    Returns:
+        One human-readable message per diagnostic, in output order. Empty when
+        the input is empty, None, or contains only findings.
+    """
+    messages: list[str] = []
+    for record, raw in _iter_records(output):
+        if record is None:
+            messages.append(f"unparseable typos output: {raw}")
+            continue
+        record_type = record.get("type")
+        if record_type == "typo" or record_type in _INFORMATIONAL_RECORD_TYPES:
+            continue
+        msg = record.get("msg") or record.get("error")
         path = record.get("path")
-        detail = str(msg) if msg is not None else "typos reported an error"
+        detail = str(msg) if msg is not None else f"typos reported {record_type!r}"
         messages.append(f"{path}: {detail}" if isinstance(path, str) else detail)
     return messages
 
 
 def parse_typos_output(output: str | None) -> list[TyposIssue]:
     """Parse typos JSON output into issues.
+
+    Only ``type == "typo"`` records become issues. Diagnostics on the same
+    stream are not represented here at all; :func:`parse_typos_errors` returns
+    them and the plugin fails the run on them, so an error interleaved with
+    real findings is never silently dropped.
 
     Args:
         output: Raw stdout from ``typos --format json`` (newline-delimited
@@ -111,29 +158,12 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
         contains no ``typo`` entries. Malformed lines are skipped rather than
         raising.
     """
-    if not output:
-        return []
-
     issues: list[TyposIssue] = []
-    for line in output.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(record, dict):
+    for record, _raw in _iter_records(output):
+        if record is None:
             continue
         record_type = record.get("type")
         if record_type != "typo":
-            # This function returns lint findings only. typos interleaves
-            # diagnostic records on the same stream, and they are NOT handled
-            # here: ``error`` records are picked up by
-            # :func:`parse_typos_errors`, which the plugin treats as a hard
-            # failure even when this function also returned findings for other
-            # files in the same run. Anything else (``binary_file``,
-            # ``file_type``, ...) is informational and only logged.
             logger.debug(f"typos: ignoring non-typo record of type {record_type!r}")
             continue
 
