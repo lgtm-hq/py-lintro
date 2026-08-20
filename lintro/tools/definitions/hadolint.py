@@ -116,8 +116,8 @@ class HadolintPlugin(BaseToolPlugin):
             format = fmt_enum.name.lower()
 
         if failure_threshold is not None:
-            thr_enum = normalize_hadolint_threshold(failure_threshold)
-            failure_threshold = thr_enum.name.lower()
+            threshold_enum = normalize_hadolint_threshold(failure_threshold)
+            failure_threshold = threshold_enum.name.lower()
 
         validate_list(ignore, "ignore")
         validate_list(trusted_registries, "trusted_registries")

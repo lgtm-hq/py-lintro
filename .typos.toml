@@ -1,0 +1,42 @@
+# typos configuration for py-lintro
+# https://github.com/crate-ci/typos
+#
+# This is the project's spell-checker dictionary and file scope — analogous to
+# the repo's other native tool configs (.hadolint.yaml, .yamllint,
+# .prettierignore). It declares intentional project vocabulary and excludes a
+# couple of test fixtures that deliberately embed non-English / malformed text.
+# It is NOT a generated suppression baseline: every entry is a deliberate,
+# documented decision.
+
+[default.extend-words]
+# "unparseable" is an intentional, pervasive spelling in this codebase (parser
+# error taxonomy, tests). Several occurrences live in modules that are off-limits
+# to edit, so the project accepts this variant rather than mass-rewriting it.
+unparseable = "unparseable"
+# "invokable" is used deliberately in prose about runnable scripts.
+invokable = "invokable"
+# "ded" appears only inside example rustc/clippy commit hashes ("ded5c06cf...")
+# quoted in comments; it is not a misspelling.
+ded = "ded"
+# "afe" appears inside abbreviated commit SHAs in CHANGELOG.md (e.g. 7b0afe0).
+afe = "afe"
+
+[files]
+# These paths embed deliberate fixture data (French words, scrambled tokens,
+# and typos' own test corpus) used to exercise parser/severity handling;
+# spell-checking them is meaningless.
+extend-exclude = [
+  "tests/unit/parsers/test_taplo_parser.py",
+  "tests/unit/enums/test_severity_level.py",
+  "tests/unit/parsers/typos_parser/",
+  "tests/unit/tools/typos/",
+  "tests/integration/tools/test_typos_integration.py",
+  # Binary assets — typos scans file bytes as text and emits noise.
+  "*.png",
+  "*.jpg",
+  "*.jpeg",
+  "*.gif",
+  "*.webp",
+  "*.ico",
+  "apps/site/public/assets/",
+]
