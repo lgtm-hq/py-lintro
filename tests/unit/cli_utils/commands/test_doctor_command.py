@@ -8,16 +8,15 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 from loguru import logger
-from rich.console import Console
 
 from lintro.ai.config import AIConfig
 from lintro.cli_utils.commands.doctor import (
     _generate_markdown_report,
     _output_json,
-    _render_tool_line,
     doctor_command,
 )
 from lintro.config.lintro_config import LintroConfig
@@ -351,13 +350,16 @@ def test_check_tool_pip_only_host_does_not_emit_uv() -> None:
     )
     assert_that(result.upgrade_hint).does_not_contain("uv ")
     assert result.advisory is not None
-    assert_that(result.advisory.update_command).contains("uv pip install")
+    assert_that(result.advisory.channel).is_equal_to(UpdateChannel.STANDALONE)
+    assert_that(result.advisory.update_command).is_none()
 
 
-def test_render_outdated_prints_channel_and_strategy_hint() -> None:
+def test_doctor_outdated_prints_channel_and_strategy_hint() -> None:
     """Outdated lines show the channel as diagnostic and the strategy command."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
     tool = _make_tool(version="1.0.0", min_version="0.3.0")
-    result = ToolCheckResult(
+    outdated = ToolCheckResult(
         tool=tool,
         status=ToolStatus.OUTDATED,
         installed_version="0.5.0",
@@ -370,19 +372,29 @@ def test_render_outdated_prints_channel_and_strategy_hint() -> None:
             update_command="uv tool upgrade ruff",
         ),
     )
-    buf = StringIO()
-    console = Console(file=buf, force_terminal=False, width=120)
-    _render_tool_line(console, result, verbose=False, is_dev=False)
-    text = buf.getvalue()
-    assert_that(text).contains("installed via uv tool")
-    assert_that(text).contains("Upgrade: uv pip install --upgrade 'ruff>=1.0.0'")
-    assert_that(text).does_not_contain("uv tool upgrade ruff")
+
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.collect_tool_checks",
+            return_value=[outdated],
+        ),
+    ):
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("installed via uv tool")
+    assert_that(result.output).contains("Upgrade: uv pip install --upgrade 'ruff>=1.0.0'")
+    assert_that(result.output).does_not_contain("uv tool upgrade ruff")
 
 
-def test_render_incompatible_prints_channel_and_strategy_hint() -> None:
+def test_doctor_incompatible_prints_channel_and_strategy_hint() -> None:
     """Incompatible lines also keep the strategy upgrade command."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
     tool = _make_tool(version="1.0.0", min_version="0.9.0")
-    result = ToolCheckResult(
+    incompatible = ToolCheckResult(
         tool=tool,
         status=ToolStatus.INCOMPATIBLE,
         installed_version="0.1.0",
@@ -395,16 +407,164 @@ def test_render_incompatible_prints_channel_and_strategy_hint() -> None:
             update_command="uv pip install --upgrade 'ruff>=1.0.0'",
         ),
     )
-    buf = StringIO()
-    console = Console(file=buf, force_terminal=False, width=120)
-    _render_tool_line(console, result, verbose=False, is_dev=False)
-    text = buf.getvalue()
-    assert_that(text).contains("installed via pip")
-    assert_that(text).contains("Upgrade: pip install --upgrade 'ruff>=1.0.0'")
-    assert_that(text).does_not_contain("uv pip")
+
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.collect_tool_checks",
+            return_value=[incompatible],
+        ),
+    ):
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("installed via pip")
+    assert_that(result.output).contains("Upgrade: pip install --upgrade 'ruff>=1.0.0'")
+    assert_that(result.output).does_not_contain("uv pip")
 
 
 # ── _output_json ─────────────────────────────────────────────────────
+
+
+def test_output_json_includes_advisory_for_outdated_tool() -> None:
+    """JSON output carries structured update advisories for outdated tools."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    advisory = VersionAdvisory(
+        tool="ruff",
+        installed="0.5.0",
+        latest_known="1.0.0",
+        channel=UpdateChannel.UV_TOOL,
+        update_command="uv tool upgrade ruff",
+    )
+    result = ToolCheckResult(
+        tool=tool,
+        status=ToolStatus.OUTDATED,
+        installed_version="0.5.0",
+        upgrade_hint="uv pip install --upgrade 'ruff>=1.0.0'",
+        advisory=advisory,
+    )
+    ctx = _make_context()
+
+    output = StringIO()
+    with patch("click.echo", side_effect=output.write):
+        _output_json([result], ctx, None, 0, 0, 1, 0, 0)
+
+    data = json.loads(output.getvalue())
+    tool_json = data["tools"]["ruff"]
+    assert_that(tool_json).contains_key("advisory")
+    assert tool_json["advisory"] is not None
+    assert_that(tool_json["advisory"]["channel"]).is_equal_to("uv_tool")
+    assert_that(tool_json["advisory"]["update_command"]).is_equal_to(
+        "uv tool upgrade ruff",
+    )
+
+
+def test_doctor_json_includes_advisory_from_probe() -> None:
+    """``doctor --json`` surfaces advisories produced by tool checks."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("subprocess.run") as mock_run,
+        patch(
+            "shutil.which",
+            return_value="/Users/me/.local/share/uv/tools/ruff/bin/ruff",
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor.collect_full_environment",
+            return_value=None,
+        ),
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = runner.invoke(doctor_command, ["--json"])
+
+    data = json.loads(result.output)
+    advisory = data["tools"]["ruff"]["advisory"]
+    assert_that(advisory).is_not_none()
+    assert_that(advisory["channel"]).is_equal_to("uv_tool")
+    assert_that(advisory["update_command"]).is_equal_to("uv tool upgrade ruff")
+
+
+def test_check_tool_invalid_update_channel_falls_back_to_path() -> None:
+    """An invalid manifest ``update_channel`` is ignored like a missing override."""
+    tool = _make_tool(
+        name="hadolint",
+        version="2.12.0",
+        min_version="2.10.0",
+        install_type="binary",
+        update_channel="not-a-real-channel",
+    )
+    ctx = _make_context(has_brew=True)
+
+    with (
+        patch("shutil.which", return_value="/opt/homebrew/bin/hadolint"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="Haskell Dockerfile Linter 2.10.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("homebrew")
+
+
+def test_check_tool_cargo_home_bin_is_cargo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A crate under ``CARGO_HOME/bin`` is classified as cargo, not unknown."""
+    cargo_home = tmp_path / "cargo-home"
+    tool_bin = cargo_home / "bin" / "cargo-audit"
+    tool_bin.parent.mkdir(parents=True)
+    tool_bin.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+
+    tool = _make_tool(
+        name="cargo_audit",
+        version="0.22.0",
+        min_version="0.20.0",
+        install_type="cargo",
+        install_package="cargo-audit",
+        version_command=("cargo", "audit", "--version"),
+    )
+    ctx = _make_context()
+
+    with (
+        patch(
+            "shutil.which",
+            side_effect=_which_map(
+                {
+                    "cargo": str(cargo_home / "bin" / "cargo"),
+                    "cargo-audit": str(tool_bin),
+                },
+            ),
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="cargo-audit 0.20.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("cargo")
+    assert_that(result.advisory.update_command).is_equal_to(
+        "cargo install --force cargo-audit",
+    )
 
 
 def test_output_json_produces_valid_json() -> None:

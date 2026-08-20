@@ -433,7 +433,7 @@ def _is_cargo_path(*, resolved: Path, path_lower: str) -> bool:
         try:
             return resolved.is_relative_to(
                 Path(cargo_home).expanduser().resolve() / "bin",
-            ) or resolved.is_relative_to(Path(cargo_home).expanduser().resolve())
+            )
         except (OSError, ValueError, RuntimeError):
             return False
     return False
@@ -466,15 +466,15 @@ def _is_bun_path(
 
 def _is_pip_path(*, path_lower: str, parts_lower: set[str]) -> bool:
     """Return True when the path looks like a pip/venv install."""
-    markers = (
-        "site-packages",
-        "dist-packages",
-        ".venv",
-        "virtualenv",
-    )
-    if any(marker in path_lower for marker in markers):
+    if "/.venv/bin/" in path_lower or path_lower.rstrip("/").endswith("/.venv/bin"):
         return True
-    if "venv" in parts_lower:
+    if "site-packages" in parts_lower and "bin" in parts_lower:
+        return True
+    if "dist-packages" in parts_lower and "bin" in parts_lower:
+        return True
+    if "venv" in parts_lower and "bin" in parts_lower:
+        return True
+    if "virtualenv" in parts_lower and "bin" in parts_lower:
         return True
     # python -m / Scripts on Windows
     if sys.platform == "win32" and "scripts" in parts_lower:

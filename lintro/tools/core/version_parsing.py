@@ -19,7 +19,7 @@ from lintro.tools.core.update_channels import (
 )
 from lintro.tools.core.version_checking import (
     VERSION_CHECK_TIMEOUT,
-    build_version_advisory,
+    build_outdated_version_advisory,
 )
 from lintro.tools.core.version_checking import (
     get_install_hints as _get_install_hints_impl,
@@ -349,7 +349,7 @@ def check_tool_version(
             except (OSError, KeyError, RuntimeError, ValueError):
                 channel_override = None
 
-            info.advisory = build_version_advisory(
+            info.advisory = build_outdated_version_advisory(
                 tool=tool_name,
                 installed=info.current_version,
                 latest_known=latest_known,

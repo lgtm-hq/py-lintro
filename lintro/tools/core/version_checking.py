@@ -313,7 +313,7 @@ def get_install_hints() -> dict[str, str]:
     return hints
 
 
-def build_version_advisory(
+def build_outdated_version_advisory(
     *,
     tool: str,
     installed: str,
@@ -326,8 +326,10 @@ def build_version_advisory(
     """Build a version advisory when installed is below the known pin.
 
     Uses pinned manifest / tool-versions expectations only — no network
-    calls. When path detection yields ``UNKNOWN``, falls back to a soft
-    mapping from the manifest ``install.type``.
+    calls. When no binary path is available, falls back to a soft mapping
+    from the manifest ``install.type``. Path-based ``UNKNOWN`` / ``STANDALONE``
+    detections are kept honest — manifest ``install.type`` must not invent a
+    pip/npm/cargo update command beside a system binary.
 
     Args:
         tool: Canonical tool name.
@@ -335,7 +337,7 @@ def build_version_advisory(
         latest_known: Pinned expected/recommended version.
         binary_path: Path to the installed binary for channel detection.
         install_package: Manifest package name override.
-        install_type: Manifest install type used as a soft channel fallback.
+        install_type: Manifest install type used when *binary_path* is absent.
         channel_override: Explicit channel (e.g. from manifest).
 
     Returns:
@@ -351,7 +353,7 @@ def build_version_advisory(
     if override is None and binary_path is None:
         override = update_channel_ops.channel_from_install_type(install_type)
 
-    advisory = update_channel_ops.build_version_advisory(
+    return update_channel_ops.build_version_advisory(
         tool=tool,
         installed=installed,
         latest_known=latest_known,
@@ -359,26 +361,6 @@ def build_version_advisory(
         install_package=install_package,
         channel_override=override,
     )
-
-    # Path said UNKNOWN/STANDALONE but manifest install.type is known —
-    # prefer that for a usable update command.
-    if (
-        advisory.channel in (UpdateChannel.UNKNOWN, UpdateChannel.STANDALONE)
-        and channel_override is None
-        and install_type is not None
-    ):
-        fallback = update_channel_ops.channel_from_install_type(install_type)
-        if fallback is not None:
-            return update_channel_ops.build_version_advisory(
-                tool=tool,
-                installed=installed,
-                latest_known=latest_known,
-                binary_path=binary_path,
-                install_package=install_package,
-                channel_override=fallback,
-            )
-
-    return advisory
 
 
 def _is_at_least(*, installed: str, latest_known: str) -> bool:

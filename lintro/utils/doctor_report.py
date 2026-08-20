@@ -44,7 +44,7 @@ from lintro.tools.core.update_channels import (
     VersionAdvisory,
     resolve_channel_binary_path,
 )
-from lintro.tools.core.version_checking import build_version_advisory
+from lintro.tools.core.version_checking import build_outdated_version_advisory
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -263,7 +263,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 probe_argv0=main_cmd,
                 which=shutil.which,
             )
-            advisory = build_version_advisory(
+            advisory = build_outdated_version_advisory(
                 tool=tool.name,
                 installed=version,
                 latest_known=tool.version,

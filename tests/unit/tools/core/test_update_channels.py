@@ -18,7 +18,7 @@ from lintro.tools.core.update_channels import (
     resolve_update_command,
 )
 from lintro.tools.core.version_checking import (
-    build_version_advisory as build_outdated_advisory,
+    build_outdated_version_advisory,
 )
 
 
@@ -347,9 +347,9 @@ def test_build_version_advisory_includes_command() -> None:
     assert_that(advisory.to_dict()).contains_key("channel", "update_command")
 
 
-def test_build_outdated_advisory_returns_none_when_current() -> None:
-    """version_checking.build_version_advisory skips up-to-date tools."""
-    advisory = build_outdated_advisory(
+def test_build_outdated_version_advisory_returns_none_when_current() -> None:
+    """build_outdated_version_advisory skips up-to-date tools."""
+    advisory = build_outdated_version_advisory(
         tool="ruff",
         installed="0.9.0",
         latest_known="0.9.0",
@@ -358,9 +358,9 @@ def test_build_outdated_advisory_returns_none_when_current() -> None:
     assert_that(advisory).is_none()
 
 
-def test_build_outdated_advisory_falls_back_to_install_type() -> None:
-    """Unknown paths fall back to manifest install.type for a command."""
-    advisory = build_outdated_advisory(
+def test_build_outdated_version_advisory_unknown_path_stays_honest() -> None:
+    """UNKNOWN path detection must not invent a pip command from install.type."""
+    advisory = build_outdated_version_advisory(
         tool="ruff",
         installed="0.6.9",
         latest_known="0.9.0",
@@ -370,8 +370,80 @@ def test_build_outdated_advisory_falls_back_to_install_type() -> None:
     )
     assert_that(advisory).is_not_none()
     assert advisory is not None
+    assert_that(advisory.channel).is_equal_to(UpdateChannel.UNKNOWN)
+    assert_that(advisory.update_command).is_none()
+
+
+def test_build_outdated_version_advisory_standalone_path_stays_honest() -> None:
+    """STANDALONE system binaries must not get a pip/npm/cargo update command."""
+    advisory = build_outdated_version_advisory(
+        tool="ruff",
+        installed="0.6.9",
+        latest_known="0.9.0",
+        binary_path="/usr/bin/ruff",
+        install_type="pip",
+        install_package="ruff",
+    )
+    assert_that(advisory).is_not_none()
+    assert advisory is not None
+    assert_that(advisory.channel).is_equal_to(UpdateChannel.STANDALONE)
+    assert_that(advisory.update_command).is_none()
+
+
+def test_build_outdated_version_advisory_falls_back_without_binary_path() -> None:
+    """When no binary path exists, manifest install.type may suggest a channel."""
+    advisory = build_outdated_version_advisory(
+        tool="ruff",
+        installed="0.6.9",
+        latest_known="0.9.0",
+        binary_path=None,
+        install_type="pip",
+        install_package="ruff",
+    )
+    assert_that(advisory).is_not_none()
+    assert advisory is not None
     assert_that(advisory.channel).is_equal_to(UpdateChannel.PIP)
     assert_that(advisory.update_command).contains("uv pip install --upgrade")
+
+
+def test_detect_update_channel_rejects_bare_site_packages_path() -> None:
+    """A site-packages tree without a bin/ segment is not a pip install."""
+    channel = detect_update_channel(
+        "/usr/lib/python3.12/site-packages/ruff/__init__.py",
+    )
+    assert_that(channel).is_not_equal_to(UpdateChannel.PIP)
+
+
+def test_detect_update_channel_rejects_cargo_home_registry_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Paths under CARGO_HOME but outside bin/ are not cargo installs."""
+    cargo_home = tmp_path / "cargo-home"
+    registry_path = cargo_home / "registry" / "cache" / "some-crate"
+    registry_path.mkdir(parents=True)
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+    channel = detect_update_channel(registry_path / "artifact")
+    assert_that(channel).is_not_equal_to(UpdateChannel.CARGO)
+
+
+def test_detect_update_channel_cargo_home_bin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CARGO_HOME/bin is honored for channel detection."""
+    cargo_home = tmp_path / "cargo-home"
+    tool_bin = cargo_home / "bin" / "taplo"
+    tool_bin.parent.mkdir(parents=True)
+    tool_bin.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("CARGO_HOME", str(cargo_home))
+    assert_that(detect_update_channel(tool_bin)).is_equal_to(UpdateChannel.CARGO)
+
+
+def test_detect_update_channel_rejects_unrelated_venv_path_part() -> None:
+    """Bare ``venv`` path components without bin/ are not pip installs."""
+    channel = detect_update_channel("/opt/my-venv-config/settings.toml")
+    assert_that(channel).is_not_equal_to(UpdateChannel.PIP)
 
 
 def test_format_advisory_line_includes_channel() -> None:
