@@ -109,7 +109,8 @@ local scripts.
 ### `scripts/release/` - Release Artifact Generators
 
 **Purpose**: Scripts invoked by the release Version-PR workflow to refresh committed
-derived artifacts (CHANGELOG formatting, SPDX license data).
+derived artifacts (CHANGELOG formatting, SECURITY.md support table, SPDX license
+data, and non-fatal release-image pin sync).
 
 **Responsibilities**:
 
@@ -119,7 +120,8 @@ derived artifacts (CHANGELOG formatting, SPDX license data).
 **Examples**:
 
 - `generate_spdx_data.py` - Embed official SPDX license list into the package
-- `prepare_version_artifacts.py` - Version-PR hook for changelog + SPDX refresh
+- `prepare_version_artifacts.py` - Version-PR hook: CHANGELOG, SECURITY.md, SPDX,
+  then non-fatal pin sync
 
 ## 🚫 Anti-Patterns to Avoid
 
