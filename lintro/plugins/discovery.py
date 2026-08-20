@@ -317,6 +317,13 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
         return False, frozenset()
 
     if plugins_cfg:
+        enabled_flag = plugins_cfg.get("enabled")
+        if enabled_flag is False:
+            # Project ``plugins.enabled: false`` must disable external plugins
+            # even when the global tier supplies a ``trusted`` allowlist. Deep
+            # merge keeps inherited keys, but an explicit disable wins.
+            return False, None
+
         raw_trusted = plugins_cfg.get("trusted")
         if isinstance(raw_trusted, str):
             raw_trusted = [raw_trusted]
@@ -325,7 +332,6 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
             trusted = frozenset(str(name) for name in raw_trusted)
             config_enabled = True
 
-        enabled_flag = plugins_cfg.get("enabled")
         if isinstance(enabled_flag, bool):
             config_enabled = config_enabled or enabled_flag
 
