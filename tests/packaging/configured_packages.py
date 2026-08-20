@@ -12,6 +12,35 @@ import tomllib
 from pathlib import Path
 
 
+def build_system_setuptools_pin(project_root: Path) -> str:
+    """Return the ``setuptools==…`` pin from ``[build-system] requires``.
+
+    Args:
+        project_root: Repository root containing ``pyproject.toml``.
+
+    Returns:
+        The pinned requirement string used by the wheel build.
+
+    Raises:
+        ValueError: If ``[build-system] requires`` has no setuptools pin.
+    """
+    with (project_root / "pyproject.toml").open("rb") as handle:
+        requires = tomllib.load(handle)["build-system"]["requires"]
+    pin = next(
+        (
+            requirement
+            for requirement in requires
+            if requirement.startswith("setuptools==")
+        ),
+        "",
+    )
+    if not pin:
+        raise ValueError(
+            "Could not read setuptools pin from pyproject.toml [build-system]",
+        )
+    return pin
+
+
 def configured_packages(project_root: Path) -> set[str]:
     """Return package names setuptools would ship for this repository.
 

@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from tests.packaging.configured_packages import configured_packages
+from tests.packaging.configured_packages import (
+    build_system_setuptools_pin,
+    configured_packages,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,18 +25,7 @@ def _build_system_setuptools_pin() -> str:
     Returns:
         The pinned requirement string used by the wheel build.
     """
-    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
-        requires = tomllib.load(handle)["build-system"]["requires"]
-    pin = next(
-        (
-            requirement
-            for requirement in requires
-            if requirement.startswith("setuptools==")
-        ),
-        "",
-    )
-    assert_that(pin).is_not_empty()
-    return pin
+    return build_system_setuptools_pin(project_root=PROJECT_ROOT)
 
 
 def test_configured_packages_includes_lintro_and_excludes_tests() -> None:
@@ -78,7 +70,8 @@ def test_verify_imports_script_discovers_packages_without_project_venv() -> None
     script = script_path.read_text(encoding="utf-8")
     assert_that(script).contains("uv run --no-project --with")
     assert_that(script).contains("BOOTSTRAP_SKIP_SYNC")
-    assert_that(script).contains("setuptools==[0-9.]+")
+    assert_that(script).contains("build_system_setuptools_pin")
+    assert_that(script).does_not_contain("grep -m1")
     assert_that(script).does_not_contain("uv run python tests/packaging")
 
 
@@ -145,6 +138,22 @@ def test_test_extra_and_tox_pin_setuptools() -> None:
     assert_that(extras).contains(pin)
     tox = (PROJECT_ROOT / "tox.ini").read_text(encoding="utf-8")
     assert_that(tox).contains(pin)
+
+
+def test_build_system_setuptools_pin_requires_build_system_table(
+    tmp_path: Path,
+) -> None:
+    """Pin extraction fails closed when ``[build-system]`` has no setuptools.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["wheel"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="setuptools pin"):
+        build_system_setuptools_pin(project_root=tmp_path)
 
 
 def test_configured_packages_raises_when_setuptools_missing(

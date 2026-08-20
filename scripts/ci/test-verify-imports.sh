@@ -54,9 +54,18 @@ fi
 # the wheel build uses). Discovery must not use the project .venv: the
 # built-package workflow sets BOOTSTRAP_SKIP_SYNC=1 and never uv-syncs.
 # --no-project --with setuptools==<build-system pin> is enough.
-SETUPTOOLS_PIN="$(
-	grep -m1 -oE 'setuptools==[0-9.]+' "$PROJECT_ROOT/pyproject.toml"
-)"
+# Pin parsing uses stdlib tomllib on [build-system] requires.
+if ! SETUPTOOLS_PIN="$(
+	cd "$PROJECT_ROOT"
+	PYTHONPATH="$PROJECT_ROOT" python3 -c '
+from pathlib import Path
+from tests.packaging.configured_packages import build_system_setuptools_pin
+print(build_system_setuptools_pin(project_root=Path(".").resolve()))
+'
+)"; then
+	log_error "Could not read setuptools pin from pyproject.toml [build-system]"
+	exit 1
+fi
 if [ -z "$SETUPTOOLS_PIN" ]; then
 	log_error "Could not read setuptools pin from pyproject.toml [build-system]"
 	exit 1
