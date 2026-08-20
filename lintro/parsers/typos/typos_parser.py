@@ -11,7 +11,27 @@ from __future__ import annotations
 
 import json
 
+from loguru import logger
+
 from lintro.parsers.typos.typos_issue import TyposIssue
+
+
+def _strict_int(value: object) -> int | None:
+    """Return ``value`` when it is a real ``int``, else ``None``.
+
+    JSON ``true``/``false`` decode to ``bool``, which is an ``int`` subclass
+    and would otherwise slip through an ``isinstance`` check and produce
+    nonsense such as ``line=True``.
+
+    Args:
+        value: Decoded JSON value to validate.
+
+    Returns:
+        The integer value, or None when it is missing or not a plain int.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def _build_message(typo: str, corrections: list[str]) -> str:
@@ -58,7 +78,15 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             continue
         if not isinstance(record, dict):
             continue
-        if record.get("type") != "typo":
+        record_type = record.get("type")
+        if record_type != "typo":
+            # typos also emits diagnostic records (``error``, ``binary_file``,
+            # ``file_not_found``, ...). They are not lint findings, so they are
+            # not turned into issues; they are logged instead. A run that only
+            # produced diagnostics also exits non-zero, and the plugin fails
+            # closed on a non-zero exit with no parsed findings, so nothing is
+            # silently lost.
+            logger.debug(f"typos: ignoring non-typo record of type {record_type!r}")
             continue
 
         path = record.get("path")
@@ -73,27 +101,35 @@ def parse_typos_output(output: str | None) -> list[TyposIssue]:
             else []
         )
 
-        # ``type(...) is int`` rather than ``isinstance``: JSON ``true``
-        # decodes to ``bool``, which is an ``int`` subclass and would otherwise
-        # produce ``line=True``. Out-of-range values fall back to 0 rather than
-        # yielding a zero/negative display column.
-        line_num = record.get("line_num")
-        line_no = line_num if type(line_num) is int and line_num > 0 else 0
+        # Values outside the valid range are treated as "unknown" (0), which
+        # is what the formatter renders as a dash.
+        line_value = _strict_int(record.get("line_num"))
+        line_no = line_value if line_value is not None and line_value > 0 else 0
 
-        byte_offset = record.get("byte_offset")
-        offset = byte_offset if type(byte_offset) is int and byte_offset >= 0 else 0
+        offset_value = _strict_int(record.get("byte_offset"))
+        if offset_value is not None and offset_value >= 0:
+            offset = offset_value
+            # typos reports a 0-based byte offset; present it as a 1-based
+            # column for display parity with other tools.
+            column = offset + 1
+        else:
+            # An absent or invalid offset stays "unknown" rather than pointing
+            # at the first character of the line.
+            offset = 0
+            column = 0
 
         issues.append(
             TyposIssue(
                 file=path,
                 line=line_no,
-                # typos reports a 0-based byte offset; present it as a
-                # 1-based column for display parity with other tools.
-                column=offset + 1,
+                column=column,
                 message=_build_message(typo=typo, corrections=corrections),
                 typo=typo,
                 corrections=corrections,
                 byte_offset=offset,
+                # typos can only auto-replace a finding when it offers at least
+                # one correction; a word banned through config has none.
+                fixable=bool(corrections),
             ),
         )
     return issues

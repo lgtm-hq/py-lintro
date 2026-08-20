@@ -44,11 +44,14 @@ parser-selection decision.
   into a single argv that exceeds the OS limit and fails with `E2BIG`. Paths are split
   into budget-sized batches by `lintro/tools/core/argv_batching.py` (shared with
   TruffleHog) and the per-batch results are merged. A batch that exits non-zero
-  *without* a parseable report is tracked separately from the merged findings, so a
+  _without_ a parseable report is tracked separately from the merged findings, so a
   genuine failure in one batch is never hidden by typos another batch reported.
 - **Parser**: `lintro/parsers/typos/` (`parse_typos_output`, `TyposIssue`). Each finding
   captures the file, line, a 1-based column derived from the reported byte offset, the
-  misspelled word, and its suggested corrections. The composed message has the form
+  misspelled word, and its suggested corrections. `fixable` is set from whether typos
+  offered any correction, and `column` is a 1-based **byte** index (typos reports byte
+  offsets and the source line is not available to the parser), left at 0 when typos
+  reported no usable offset. The composed message has the form
   `"<typo>" should be "<correction>"`, with several corrections comma-separated. When
   typos offers no corrections at all, the message instead reads `"<word>" is disallowed`
   (this happens for words banned through configuration rather than matched against the
@@ -69,8 +72,10 @@ parser-selection decision.
 }
 ```
 
-Only `type == "typo"` records are turned into issues; other diagnostic object types are
-ignored.
+Only `type == "typo"` records are turned into issues; other diagnostic object types
+(`error`, `binary_file`, `file_not_found`, ...) are logged at debug level rather than
+converted into findings. They are not lost: a run that emits only diagnostics also exits
+non-zero, and the plugin fails closed on a non-zero exit with no parsed findings.
 
 ## Parser choice: native JSON vs shared SARIF
 

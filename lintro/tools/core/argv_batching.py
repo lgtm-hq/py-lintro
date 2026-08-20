@@ -11,11 +11,28 @@ budget and split a path list into batches that fit inside it.
 from __future__ import annotations
 
 import os
+import sys
 
 # Reserved bytes for argv/environment accounting slack.
 ARGV_SAFETY_HEADROOM_BYTES: int = 4096
 # POSIX-guaranteed ARG_MAX minimum, used when the real limit is unavailable.
 ARGV_FALLBACK_LIMIT_BYTES: int = 131072
+# Linux charges one pointer slot per argv/envp entry on top of the string
+# bytes. Assume 64-bit pointers, which is the conservative choice.
+ARGV_POINTER_BYTES: int = 8
+
+
+def _fsbytes(value: str) -> bytes:
+    """Encode a string the way the OS will when it reaches ``execve``.
+
+    Args:
+        value: Text destined for argv or the environment block.
+
+    Returns:
+        The encoded bytes, using the filesystem encoding with surrogate
+        round-tripping so undecodable names are measured, not rejected.
+    """
+    return value.encode(sys.getfilesystemencoding(), "surrogateescape")
 
 
 def argv_byte_budget() -> int:
@@ -36,7 +53,13 @@ def argv_byte_budget() -> int:
     if not isinstance(arg_max, int) or arg_max <= 0:
         arg_max = ARGV_FALLBACK_LIMIT_BYTES
 
-    env_bytes = sum(len(k) + len(v) + 2 for k, v in os.environ.items())
+    # ``execve`` counts bytes, not characters, so measure the environment the
+    # same way ``chunk_paths`` measures paths: encoded, plus the "=" and NUL
+    # the kernel stores per entry, plus one pointer slot per envp entry.
+    env_bytes = sum(
+        len(_fsbytes(key)) + len(_fsbytes(value)) + 2 + ARGV_POINTER_BYTES
+        for key, value in os.environ.items()
+    )
     budget = arg_max - env_bytes - ARGV_SAFETY_HEADROOM_BYTES
     # Always leave room for at least a moderately long single path per batch.
     return max(budget, ARGV_SAFETY_HEADROOM_BYTES)
@@ -73,8 +96,9 @@ def chunk_paths(
     current: list[str] = []
     current_bytes = 0
     for path in paths:
-        # +1 for the argv NUL terminator the kernel accounts per argument.
-        path_bytes = len(path.encode("utf-8", "surrogatepass")) + 1
+        # +1 for the argv NUL terminator and one pointer slot, both of which
+        # the kernel accounts per argument.
+        path_bytes = len(_fsbytes(path)) + 1 + ARGV_POINTER_BYTES
         if current and current_bytes + path_bytes > remaining:
             batches.append(current)
             current = []
@@ -88,6 +112,7 @@ def chunk_paths(
 
 __all__ = [
     "ARGV_FALLBACK_LIMIT_BYTES",
+    "ARGV_POINTER_BYTES",
     "ARGV_SAFETY_HEADROOM_BYTES",
     "argv_byte_budget",
     "chunk_paths",

@@ -17,7 +17,8 @@ def test_typos_issue_defaults() -> None:
     assert_that(issue.column).is_equal_to(0)
     assert_that(issue.level).is_equal_to("error")
     assert_that(issue.corrections).is_equal_to([])
-    assert_that(issue.fixable).is_true()
+    # No corrections means typos has nothing to write, so not auto-fixable.
+    assert_that(issue.fixable).is_false()
 
 
 def test_typos_issue_display_row() -> None:
@@ -30,6 +31,7 @@ def test_typos_issue_display_row() -> None:
         typo="teh",
         corrections=["the"],
         byte_offset=18,
+        fixable=True,
     )
 
     row = issue.to_display_row()

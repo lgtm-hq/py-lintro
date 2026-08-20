@@ -2166,6 +2166,56 @@ lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
 lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
 ```
 
+#### Typos Configuration
+
+[typos](https://github.com/crate-ci/typos) is a fast, low-false-positive spell checker
+for source code and documentation. It checks all text files and can auto-correct
+misspellings.
+
+**Installation:**
+
+```bash
+brew install typos-cli      # Homebrew
+cargo install typos-cli     # crates.io
+```
+
+**File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
+
+```toml
+# Accept project-specific vocabulary that the default dictionary flags
+[default.extend-words]
+unparseable = "unparseable"
+
+# Skip files/directories that deliberately contain non-English or fixture text
+[files]
+extend-exclude = ["tests/fixtures/"]
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `timeout` | integer | Per-invocation timeout in seconds (default: 30) |
+
+typos' word list and file scope are configured through its native `typos.toml` file
+rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
+`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
+also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
+keeps `lintro format` away from the common binary formats (images, archives, compiled
+objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
+header can still reach `--write-changes` — so add the extensions you care about to
+`[files] extend-exclude` when a project stores unusual binary assets.
+
+**Usage Examples:**
+
+```bash
+# Check spelling across the project
+lintro check --tools typos
+
+# Auto-correct misspellings in place
+lintro format --tools typos
+```
+
 ### Rust Tools
 
 #### Clippy Configuration
@@ -2656,56 +2706,6 @@ lintro format --tools taplo --tool-options taplo:indent_string="    "
 
 # Use custom schema for validation
 lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
-```
-
-#### Typos Configuration
-
-[typos](https://github.com/crate-ci/typos) is a fast, low-false-positive spell checker
-for source code and documentation. It checks all text files and can auto-correct
-misspellings.
-
-**Installation:**
-
-```bash
-brew install typos-cli      # Homebrew
-cargo install typos-cli     # crates.io
-```
-
-**File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
-
-```toml
-# Accept project-specific vocabulary that the default dictionary flags
-[default.extend-words]
-unparseable = "unparseable"
-
-# Skip files/directories that deliberately contain non-English or fixture text
-[files]
-extend-exclude = ["tests/fixtures/"]
-```
-
-**Available Options:**
-
-| Option    | Type    | Description                       |
-| --------- | ------- | --------------------------------- |
-| `timeout` | integer | Per-invocation timeout in seconds |
-
-typos' word list and file scope are configured through its native `typos.toml` file
-rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
-`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
-also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
-keeps `lintro format` away from the common binary formats (images, archives, compiled
-objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
-header can still reach `--write-changes` — so add the extensions you care about to
-`[files] extend-exclude` when a project stores unusual binary assets.
-
-**Usage Examples:**
-
-```bash
-# Check spelling across the project
-lintro check --tools typos
-
-# Auto-correct misspellings in place
-lintro format --tools typos
 ```
 
 ### Infrastructure Tools

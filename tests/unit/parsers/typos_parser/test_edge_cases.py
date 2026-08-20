@@ -45,8 +45,9 @@ def test_non_integer_location_defaults_to_zero() -> None:
 
     assert_that(issues).is_length(1)
     assert_that(issues[0].line).is_equal_to(0)
-    # byte_offset falls back to 0 -> column 1.
-    assert_that(issues[0].column).is_equal_to(1)
+    # An unusable byte_offset means "unknown", not "first character".
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(0)
 
 
 def test_corrections_coerced_to_strings() -> None:
@@ -82,7 +83,7 @@ def test_boolean_location_values_do_not_leak_through() -> None:
     assert_that(issues).is_length(1)
     assert_that(issues[0].line).is_equal_to(0)
     assert_that(issues[0].byte_offset).is_equal_to(0)
-    assert_that(issues[0].column).is_equal_to(1)
+    assert_that(issues[0].column).is_equal_to(0)
 
 
 def test_negative_location_values_fall_back_to_zero() -> None:
@@ -97,4 +98,32 @@ def test_negative_location_values_fall_back_to_zero() -> None:
     assert_that(issues).is_length(1)
     assert_that(issues[0].line).is_equal_to(0)
     assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(0)
+
+
+def test_zero_byte_offset_is_column_one() -> None:
+    """A real zero offset is the first byte of the line, not "unknown"."""
+    output = make_typo_record(line_num=4, byte_offset=0)
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues[0].byte_offset).is_equal_to(0)
     assert_that(issues[0].column).is_equal_to(1)
+
+
+def test_findings_without_corrections_are_not_fixable() -> None:
+    """A word with no suggested correction cannot be auto-replaced."""
+    output = make_typo_record(typo="asdfg", corrections=[])
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues[0].fixable).is_false()
+
+
+def test_findings_with_corrections_are_fixable() -> None:
+    """A finding with a suggested correction is auto-fixable."""
+    output = make_typo_record(typo="teh", corrections=["the"])
+
+    issues = parse_typos_output(output)
+
+    assert_that(issues[0].fixable).is_true()

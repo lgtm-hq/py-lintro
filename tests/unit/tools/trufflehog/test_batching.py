@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.tools.core.argv_batching import ARGV_POINTER_BYTES
 from lintro.tools.definitions.trufflehog import (
     TrufflehogPlugin,
     _argv_byte_budget,
@@ -66,16 +67,17 @@ def test_chunk_oversized_single_path_still_batched() -> None:
 
 def test_chunk_groups_multiple_paths_per_budgeted_batch() -> None:
     """Paths pack into as few batches as the budget allows, boundary honored."""
-    # Each path is 8 bytes + 1 NUL terminator = 9 bytes. With a fixed budget of
-    # 20 (fixed_arg_bytes chosen so budget == 20), two paths (18 bytes) fit but
-    # a third (27 bytes) overflows -> new batch.
+    # Each path costs 8 bytes + 1 NUL terminator + one pointer slot
+    # (ARGV_POINTER_BYTES) = 17 bytes. With a budget of 40, two paths
+    # (34 bytes) fit but a third (51 bytes) overflows -> new batch.
     paths = ["/aa/b.py", "/cc/d.py", "/ee/f.py", "/gg/h.py"]
-    budget_target = 20
+    per_path = len("/aa/b.py") + 1 + ARGV_POINTER_BYTES
+    budget_target = per_path * 2 + 6
     fixed = _argv_byte_budget() - budget_target
 
     batches = _chunk_source_paths(paths, fixed_arg_bytes=fixed)
 
-    # 2 paths per batch (9 + 9 = 18 <= 20; adding a third 27 > 20).
+    # 2 paths per batch (17 + 17 = 34 <= 40; adding a third 51 > 40).
     assert_that(batches).is_length(2)
     assert_that(batches[0]).is_length(2)
     assert_that(batches[1]).is_length(2)
