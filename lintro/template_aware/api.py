@@ -10,10 +10,11 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from loguru import logger
+from pydantic import ValidationError
 
 from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.models.core.tool_result import ToolResult
@@ -86,23 +87,12 @@ class TemplateAwareSession:
             if result.initial_issues
             else result.initial_issues
         )
-        return ToolResult(
-            name=result.name,
-            success=result.success,
-            output=result.output,
-            issues_count=result.issues_count,
-            formatted_output=result.formatted_output,
+        # ``replace`` keeps metadata, timed_out, duration_seconds, and any
+        # future ToolResult fields. Never reconstruct with ``ai_metadata``.
+        return replace(
+            result,
             issues=issues,
-            initial_issues_count=result.initial_issues_count,
-            fixed_issues_count=result.fixed_issues_count,
-            remaining_issues_count=result.remaining_issues_count,
             initial_issues=initial_issues,
-            pytest_summary=result.pytest_summary,
-            ai_metadata=result.ai_metadata,
-            cwd=result.cwd,
-            skipped=result.skipped,
-            skip_reason=result.skip_reason,
-            parse_failures_count=result.parse_failures_count,
         )
 
     def cleanup(self) -> None:
@@ -125,7 +115,7 @@ def get_template_aware_config() -> TemplateAwareConfig:
         from lintro.plugins.execution_preparation import get_lintro_config
 
         return get_lintro_config().template_aware
-    except Exception as exc:  # noqa: BLE001 - feature must stay inert on errors
+    except (LookupError, ValidationError, ValueError) as exc:
         logger.debug("template_aware config unavailable: {}", exc)
         return TemplateAwareConfig()
 
@@ -173,45 +163,51 @@ def prepare_templates_for_tool(
 
     temp_dir = tempfile.TemporaryDirectory(prefix="lintro-template-aware-")
     session = TemplateAwareSession(temp_dir=temp_dir)
-    temp_root = Path(temp_dir.name)
+    prepared = False
+    try:
+        temp_root = Path(temp_dir.name)
 
-    for index, template_file in enumerate(template_files):
-        template_path = Path(template_file)
-        try:
-            rendered_text, source_map = render_template(
-                template_path=template_path,
-                config=cfg,
+        for index, template_file in enumerate(template_files):
+            template_path = Path(template_file)
+            try:
+                rendered_text, source_map = render_template(
+                    template_path=template_path,
+                    config=cfg,
+                )
+            except OSError as exc:
+                logger.warning(
+                    "Skipping template {}: {}",
+                    template_path,
+                    exc,
+                )
+                continue
+
+            # Disambiguate collisions when multiple templates share a basename.
+            rendered_name = rendered_filename_for(template_path)
+            dest_dir = temp_root / f"t{index}"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_path = dest_dir / rendered_name
+            dest_path.write_text(rendered_text, encoding="utf-8")
+            rendered_abs = str(dest_path.resolve())
+
+            session.source_maps[rendered_abs] = SourceMap(
+                original_path=str(template_path.resolve()),
+                rendered_path=rendered_abs,
+                rendered_to_original=source_map.rendered_to_original,
             )
-        except OSError as exc:
-            logger.warning(
-                "Skipping template {}: {}",
+            session.rendered_files.append(rendered_abs)
+            logger.debug(
+                "template_aware: rendered {} → {} for tool {}",
                 template_path,
-                exc,
+                rendered_abs,
+                tool_name,
             )
-            continue
 
-        # Disambiguate collisions when multiple templates share a basename.
-        rendered_name = rendered_filename_for(template_path)
-        dest_dir = temp_root / f"t{index}"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_path = dest_dir / rendered_name
-        dest_path.write_text(rendered_text, encoding="utf-8")
-        rendered_abs = str(dest_path.resolve())
-
-        session.source_maps[rendered_abs] = SourceMap(
-            original_path=str(template_path.resolve()),
-            rendered_path=rendered_abs,
-            rendered_to_original=source_map.rendered_to_original,
-        )
-        session.rendered_files.append(rendered_abs)
-        logger.debug(
-            "template_aware: rendered {} → {} for tool {}",
-            template_path,
-            rendered_abs,
-            tool_name,
-        )
-
-    return session
+        prepared = True
+        return session
+    finally:
+        if not prepared:
+            session.cleanup()
 
 
 def merge_rendered_files(

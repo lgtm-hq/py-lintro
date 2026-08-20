@@ -208,6 +208,33 @@ def test_defaults_strategy_reads_copier_yml(tmp_path: Path) -> None:
     assert_that(rendered).contains("Acme")
 
 
+def test_cookiecutter_defaults_wrap_namespace(tmp_path: Path) -> None:
+    """cookiecutter.json is exposed as ``{{ cookiecutter.project_slug }}``.
+
+    Args:
+        tmp_path: Temporary cookiecutter-style project.
+    """
+    (tmp_path / "cookiecutter.json").write_text(
+        '{"project_slug": "cookie_demo", "author": "Ada"}\n',
+        encoding="utf-8",
+    )
+    template = tmp_path / "main.py.jinja"
+    template.write_text(
+        "NAME = '{{ cookiecutter.project_slug }}'\n",
+        encoding="utf-8",
+    )
+    config = TemplateAwareConfig(
+        enabled=True,
+        engine=TemplateEngine.COOKIECUTTER,
+        stub_strategy=StubStrategy.DEFAULTS,
+    )
+
+    rendered, _source_map = render_template(template_path=template, config=config)
+
+    assert_that(rendered).contains("cookie_demo")
+    assert_that(rendered).does_not_contain("{{")
+
+
 def test_context_file_strategy(tmp_path: Path) -> None:
     """Context-file strategy uses the supplied answers file."""
     answers = tmp_path / "answers.yml"
@@ -318,3 +345,203 @@ def test_render_translate_round_trip(tmp_path: Path) -> None:
         assert_that(translated.line).is_equal_to(2)
     finally:
         session.cleanup()
+
+
+def test_int_sentinel_uses_token_equality_not_substring(tmp_path: Path) -> None:
+    """``port`` matches as a token; ``import`` / ``report`` stay string sentinels.
+
+    Args:
+        tmp_path: Temporary directory for the template file.
+    """
+    template = tmp_path / "app.py.jinja"
+    template.write_text(
+        "from {{ import }} import x\nreport = {{ report }}\nport = {{ port }}\n",
+        encoding="utf-8",
+    )
+    config = TemplateAwareConfig(enabled=True, stub_strategy=StubStrategy.SENTINEL)
+
+    rendered, _source_map = render_template(template_path=template, config=config)
+
+    assert_that(rendered).contains(f"from {SENTINEL_STR} import x")
+    assert_that(rendered).contains(f"report = {SENTINEL_STR}")
+    assert_that(rendered).contains(f"port = {SENTINEL_INT}")
+
+
+def test_translate_issue_remaps_end_line_via_replace(tmp_path: Path) -> None:
+    """RuffIssue ``end_line`` is remapped with ``dataclasses.replace``, not a cast.
+
+    Args:
+        tmp_path: Temporary directory for source-map paths.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    original = tmp_path / "main.py.jinja"
+    rendered = tmp_path / "main.py"
+    original.write_text("a = 1\nb = 2\n", encoding="utf-8")
+    rendered.write_text("a = 1\nb = 2\n", encoding="utf-8")
+    source_map = build_source_map(
+        original_text=original.read_text(encoding="utf-8"),
+        rendered_text=rendered.read_text(encoding="utf-8"),
+        original_path=str(original.resolve()),
+        rendered_path=str(rendered.resolve()),
+    )
+    issue = RuffIssue(
+        file=str(rendered.resolve()),
+        line=1,
+        end_line=2,
+        message="demo",
+        code="F401",
+    )
+
+    translated = translate_issue(
+        issue=issue,
+        source_maps={str(rendered.resolve()): source_map},
+    )
+
+    assert_that(translated.file).is_equal_to(str(original.resolve()))
+    assert_that(translated.line).is_equal_to(1)
+    assert_that(translated.end_line).is_equal_to(2)
+    assert_that(issue.file).is_equal_to(str(rendered.resolve()))
+
+
+def test_translate_result_preserves_metadata_and_timed_out(
+    tmp_path: Path,
+) -> None:
+    """Active-session ``translate_result`` remaps issues without ``ai_metadata``.
+
+    Args:
+        tmp_path: Temporary directory for a rendered template.
+    """
+    from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    template = tmp_path / "svc.py.jinja"
+    template.write_text("value = '{{ project_name }}'\n", encoding="utf-8")
+    config = TemplateAwareConfig(enabled=True)
+
+    session = prepare_templates_for_tool(
+        tool_name="ruff",
+        paths=[str(tmp_path)],
+        exclude_patterns=[],
+        config=config,
+    )
+    try:
+        rendered = session.rendered_files[0]
+        metadata = {"fixed_count": 0, "verified_count": 1}
+        result = ToolResult(
+            name="ruff",
+            success=True,
+            issues_count=1,
+            issues=[
+                RuffIssue(
+                    file=rendered,
+                    line=1,
+                    end_line=1,
+                    message="unused",
+                    code="F401",
+                ),
+            ],
+            metadata=metadata,
+            timed_out=True,
+            cwd="/project",
+        )
+
+        translated = session.translate_result(result)
+
+        assert_that(translated.issues).is_length(1)
+        assert_that(translated.issues[0].file).ends_with("svc.py.jinja")
+        assert_that(translated.metadata).is_equal_to(metadata)
+        assert_that(translated.timed_out).is_true()
+        assert_that(translated.cwd).is_equal_to("/project")
+        assert_that(hasattr(translated, "ai_metadata")).is_false()
+    finally:
+        session.cleanup()
+
+
+def test_prepare_templates_cleans_temp_dir_on_unexpected_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-OSError render failures still release the temporary directory.
+
+    Args:
+        tmp_path: Temporary directory containing a template.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import tempfile
+
+    template = tmp_path / "boom.py.jinja"
+    template.write_text("x = '{{ name }}'\n", encoding="utf-8")
+    created: list[str] = []
+    real_td = tempfile.TemporaryDirectory
+
+    def _tracking_temporary_directory(
+        *args: object,
+        **kwargs: object,
+    ) -> tempfile.TemporaryDirectory[str]:
+        temp_dir = real_td(*args, **kwargs)
+        created.append(temp_dir.name)
+        return temp_dir
+
+    monkeypatch.setattr(
+        "lintro.template_aware.api.tempfile.TemporaryDirectory",
+        _tracking_temporary_directory,
+    )
+
+    def _boom(**_kwargs: object) -> tuple[str, object]:
+        raise RuntimeError("unexpected render failure")
+
+    monkeypatch.setattr("lintro.template_aware.api.render_template", _boom)
+
+    with pytest.raises(RuntimeError, match="unexpected render failure"):
+        prepare_templates_for_tool(
+            tool_name="ruff",
+            paths=[str(tmp_path)],
+            exclude_patterns=[],
+            config=TemplateAwareConfig(enabled=True),
+        )
+
+    assert_that(created).is_not_empty()
+    assert_that(Path(created[0]).exists()).is_false()
+
+
+def test_get_template_aware_config_swallows_expected_load_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LookupError / ValidationError disable the feature; other errors surface.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from pydantic import ValidationError
+
+    from lintro.template_aware.api import get_template_aware_config
+
+    def _missing_config() -> object:
+        raise LookupError("missing")
+
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.get_lintro_config",
+        _missing_config,
+    )
+    disabled = get_template_aware_config()
+    assert_that(disabled.enabled).is_false()
+
+    def _validation_error() -> object:
+        raise ValidationError.from_exception_data("TemplateAwareConfig", [])
+
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.get_lintro_config",
+        _validation_error,
+    )
+    still_disabled = get_template_aware_config()
+    assert_that(still_disabled.enabled).is_false()
+
+    def _programming_error() -> object:
+        raise RuntimeError("config loader exploded")
+
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.get_lintro_config",
+        _programming_error,
+    )
+    assert_that(get_template_aware_config).raises(RuntimeError).when_called_with()

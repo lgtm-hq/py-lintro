@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
+from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_discovery import (
     discover_files,
@@ -220,6 +221,69 @@ def verify_tool_version(
     )
 
 
+def _is_fix_action(action: str | Action | None) -> bool:
+    """Return whether ``action`` is a fix/format run.
+
+    Args:
+        action: Action enum, alias string, or None.
+
+    Returns:
+        True when the action rewrites sources (fix/fmt/format).
+    """
+    if action is None:
+        return False
+    try:
+        return normalize_action(action) == Action.FIX
+    except (TypeError, ValueError):
+        return False
+
+
+def _paths_for_execution_cwd(
+    *,
+    host_files: list[str],
+    user_paths: list[str],
+) -> list[str]:
+    """Choose paths used to anchor cwd and version checks.
+
+    Temp-dir renders must not participate: their common ancestor with host
+    files is ``/`` on POSIX, which bypasses project config.
+
+    Args:
+        host_files: Discovered host-language files (pre-merge).
+        user_paths: User-supplied scan paths (fallback when host_files is empty).
+
+    Returns:
+        Path list to pass to ``get_execution_cwd``.
+    """
+    if host_files:
+        return host_files
+    return list(user_paths)
+
+
+def _path_for_tool_argv(path: str, cwd: str) -> str:
+    """Return a tool argv path that stays valid when cwd is the project.
+
+    Host files stay cwd-relative. Paths outside cwd (temp renders) stay
+    absolute so the linter can still open them.
+
+    Args:
+        path: File path from the merged execution list.
+        cwd: Project working directory for the tool subprocess.
+
+    Returns:
+        Relative path when ``path`` is under ``cwd``, otherwise an absolute path.
+    """
+    abs_path = os.path.abspath(path)
+    abs_cwd = os.path.abspath(cwd)
+    try:
+        common = os.path.commonpath([abs_path, abs_cwd])
+    except ValueError:
+        return abs_path
+    if os.path.normpath(common) == os.path.normpath(abs_cwd):
+        return os.path.relpath(abs_path, abs_cwd)
+    return abs_path
+
+
 def prepare_execution(
     paths: list[str],
     options: dict[str, object],
@@ -228,6 +292,7 @@ def prepare_execution(
     include_venv: bool,
     current_options: dict[str, object],
     no_files_message: str = "No files to check.",
+    action: str | Action | None = None,
 ) -> dict[str, Any]:
     """Prepare execution context with common boilerplate steps.
 
@@ -239,6 +304,10 @@ def prepare_execution(
     - Compute working directory and relative paths
     - Compute timeout for execution
 
+    Template-aware preprocessing runs for check only. Fix/format does not
+    rewrite ``*.jinja`` sources in this PR, so templates are skipped to avoid
+    reporting a successful fix that never landed on disk.
+
     Args:
         paths: Input paths to process.
         options: Runtime options to merge with defaults.
@@ -247,6 +316,7 @@ def prepare_execution(
         include_venv: Whether to include venv files.
         current_options: Current plugin options.
         no_files_message: Message when no files are found.
+        action: Check vs fix/format. Fix skips template-aware rendering.
 
     Returns:
         Dictionary with files, rel_files, cwd, timeout, and optional early_result.
@@ -270,7 +340,7 @@ def prepare_execution(
     # Discover files matching tool patterns, restricting to the git-diff
     # changed set when a base ref was resolved for this run.
     diff_base = merged_options.get("diff_base")
-    files = discover_files(
+    host_files = discover_files(
         paths=paths,
         definition=definition,
         exclude_patterns=exclude_patterns,
@@ -281,23 +351,29 @@ def prepare_execution(
 
     # Opt-in template-aware preprocessing: stub-render *.jinja templates
     # routed to this tool and append the rendered host-language files.
+    # Fix/format is skipped: formatters would write the temp stub, not the
+    # original ``*.jinja`` (see docs/template-aware.md).
     from lintro.template_aware import (
+        TemplateAwareSession,
         merge_rendered_files,
         prepare_templates_for_tool,
     )
 
-    template_session = prepare_templates_for_tool(
-        tool_name=definition.name,
-        paths=paths,
-        exclude_patterns=exclude_patterns,
-        include_venv=include_venv,
-    )
+    if _is_fix_action(action):
+        template_session = TemplateAwareSession()
+    else:
+        template_session = prepare_templates_for_tool(
+            tool_name=definition.name,
+            paths=paths,
+            exclude_patterns=exclude_patterns,
+            include_venv=include_venv,
+        )
     # Track ownership so a mid-flight failure cleans the temp dir, while a
     # successful return transfers the session to the caller for later finalize.
     session_owned = True
     try:
         files = merge_rendered_files(
-            discovered_files=files,
+            discovered_files=host_files,
             session=template_session,
         )
 
@@ -333,7 +409,12 @@ def prepare_execution(
         # Derived before the version check on purpose: the check must resolve the
         # same binary the run will use, which for project-local tools depends on
         # this directory (#1727).
-        cwd = get_execution_cwd(files)
+        #
+        # Use the pre-merge host list (falling back to user paths) so temp-dir
+        # renders cannot pull commonpath to ``/``.
+        cwd = get_execution_cwd(
+            _paths_for_execution_cwd(host_files=host_files, user_paths=paths),
+        )
 
         # Check version requirements (only when files exist to check)
         version_result = verify_tool_version(definition, cwd=cwd)
@@ -342,7 +423,7 @@ def prepare_execution(
             session_owned = False
             return {"early_result": version_result}
 
-        rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
+        rel_files = [_path_for_tool_argv(path=path, cwd=cwd) for path in files]
 
         # Get timeout (keep as float to preserve precision)
         timeout_value = merged_options.get("timeout")

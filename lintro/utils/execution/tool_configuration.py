@@ -253,6 +253,7 @@ def configure_tool_for_execution(
     # Reset accumulated state from prior runs (defensive; the copy already
     # reflects the template's baseline state).
     tool.reset_options()
+    tool._run_action = action
 
     # Build CLI overrides from --tool-options
     cli_overrides: dict[str, object] = {}

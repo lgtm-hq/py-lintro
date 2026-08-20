@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
 from lintro.config.template_aware_config import TemplateAwareConfig
+from lintro.enums.action import Action
 from lintro.plugins.execution_preparation import prepare_execution
 from lintro.plugins.protocol import ToolDefinition
 from lintro.template_aware.prerenderer import SENTINEL_STR
@@ -31,7 +34,7 @@ def test_prepare_execution_includes_rendered_templates(
     )
     monkeypatch.setattr(
         "lintro.plugins.execution_preparation.verify_tool_version",
-        lambda _definition: None,
+        lambda _definition, **_kwargs: None,
     )
 
     definition = ToolDefinition(
@@ -93,7 +96,7 @@ def test_prepare_execution_inert_when_disabled(
     )
     monkeypatch.setattr(
         "lintro.plugins.execution_preparation.verify_tool_version",
-        lambda _definition: None,
+        lambda _definition, **_kwargs: None,
     )
 
     definition = ToolDefinition(
@@ -137,7 +140,7 @@ def test_prepare_execution_templates_only_still_runs(
     )
     monkeypatch.setattr(
         "lintro.plugins.execution_preparation.verify_tool_version",
-        lambda _definition: None,
+        lambda _definition, **_kwargs: None,
     )
 
     definition = ToolDefinition(
@@ -159,7 +162,122 @@ def test_prepare_execution_templates_only_still_runs(
     try:
         assert_that(result).does_not_contain_key("early_result")
         assert_that(result["files"]).is_not_empty()
+        cwd = os.path.abspath(result["cwd"])
+        assert_that(cwd).does_not_start_with(tempfile.gettempdir())
+        assert_that(cwd).is_equal_to(os.path.abspath(str(tmp_path)))
     finally:
         session = result.get("template_session")
         if session is not None:
             session.cleanup()
+
+
+def _ruff_definition() -> ToolDefinition:
+    """Minimal ruff ToolDefinition for prepare_execution tests.
+
+    Returns:
+        ToolDefinition named ruff with ``*.py`` patterns.
+    """
+    return ToolDefinition(
+        name="ruff",
+        description="ruff",
+        file_patterns=["*.py"],
+        default_timeout=30,
+    )
+
+
+def test_prepare_execution_cwd_stays_in_project_with_mixed_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Merged host+temp files still anchor cwd to the project, not ``/``.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "mod.py.jinja").write_text("x = '{{ name }}'\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "lintro.template_aware.api.get_template_aware_config",
+        lambda: TemplateAwareConfig(enabled=True),
+    )
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda _definition, **_kwargs: None,
+    )
+
+    result = prepare_execution(
+        paths=[str(tmp_path)],
+        options={},
+        definition=_ruff_definition(),
+        exclude_patterns=[],
+        include_venv=False,
+        current_options={},
+    )
+
+    try:
+        files = result["files"]
+        assert_that(
+            any("lintro-template-aware-" in path for path in files),
+        ).is_true()
+        cwd = os.path.abspath(result["cwd"])
+        assert_that(cwd).is_equal_to(os.path.abspath(str(tmp_path)))
+        assert_that(cwd).is_not_equal_to("/")
+        rendered_rel = [
+            path
+            for path in result["rel_files"]
+            if "lintro-template-aware-" in path
+        ]
+        assert_that(rendered_rel).is_not_empty()
+        assert_that(os.path.isabs(rendered_rel[0])).is_true()
+    finally:
+        session = result.get("template_session")
+        if session is not None:
+            session.cleanup()
+
+
+def test_prepare_execution_skips_templates_for_fix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix/format does not stub-render templates or report them as cleaned.
+
+    Args:
+        tmp_path: Temporary project directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    template = tmp_path / "mod.py.jinja"
+    original = "x = '{{ name }}'\n"
+    template.write_text(original, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "lintro.template_aware.api.get_template_aware_config",
+        lambda: TemplateAwareConfig(enabled=True),
+    )
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda _definition, **_kwargs: None,
+    )
+
+    result = prepare_execution(
+        paths=[str(tmp_path)],
+        options={},
+        definition=_ruff_definition(),
+        exclude_patterns=[],
+        include_venv=False,
+        current_options={},
+        action=Action.FIX,
+    )
+
+    files = result["files"]
+    assert_that(
+        any("lintro-template-aware-" in path for path in files),
+    ).is_false()
+    session = result.get("template_session")
+    assert_that(session is None or not session.active).is_true()
+    assert_that(template.read_text(encoding="utf-8")).is_equal_to(original)
+    if session is not None:
+        session.cleanup()

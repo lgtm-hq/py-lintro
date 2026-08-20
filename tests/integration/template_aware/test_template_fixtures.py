@@ -73,12 +73,9 @@ def test_cookiecutter_template_integration(tmp_path: Path) -> None:
     package = tmp_path / "{{ cookiecutter.project_slug }}"
     package.mkdir()
     template = package / "__init__.py.jinja"
-    # cookiecutter vars are typically referenced as cookiecutter.X; our
-    # defaults loader flattens cookiecutter.json keys at the top level, so
-    # templates under lintro use flat names (or nested via attr access on
-    # a provided cookiecutter mapping). Use flat keys matching the JSON.
     template.write_text(
-        '"""Package {{ project_slug }} by {{ author }}."""\n__version__ = "0.1.0"\n',
+        '"""Package {{ cookiecutter.project_slug }} by {{ cookiecutter.author }}."""\n'
+        '__version__ = "0.1.0"\n',
         encoding="utf-8",
     )
     config = TemplateAwareConfig(
