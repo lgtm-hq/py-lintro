@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -133,8 +134,9 @@ def test_mtime_bump_invalidates_cache(tmp_path: Path) -> None:
     )
 
     # Bump mtime so the cache key no longer matches.
-    time.sleep(0.05)
     binary.write_text("v2")
+    bumped_mtime = snap.binary_mtime + 100.0
+    os.utime(binary, (bumped_mtime, bumped_mtime))
 
     call_count = {"n": 0}
 
@@ -583,6 +585,44 @@ def test_force_fresh_set_during_probe_survives_caller_force(tmp_path: Path) -> N
 
     assert_that(call_count["n"]).is_equal_to(2)
     assert_that(second["ruff"].version).is_equal_to("0.2.0")
+
+
+def test_probe_all_tools_discards_memory_cache_when_cache_root_changes(
+    tmp_path: Path,
+) -> None:
+    """Memory snapshots from one cache root must not merge into another."""
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    call_count = {"n": 0}
+
+    def fake_probe(name: str, *, search_root: Path | None = None) -> ToolSnapshot:
+        call_count["n"] += 1
+        binary = (search_root or tmp_path) / f"{name}.bin"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("x")
+        version = "0.1.0" if search_root == root_a else "0.9.0"
+        return _fake_snapshot(
+            name,
+            version=version,
+            binary_path=str(binary),
+            binary_mtime=binary.stat().st_mtime,
+        )
+
+    with patch("lintro.tools.core.snapshots.probe_tool", side_effect=fake_probe):
+        with patch(
+            "lintro.plugins.discovery.discover_all_tools",
+            return_value=None,
+        ):
+            with patch(
+                "lintro.plugins.registry.ToolRegistry.get_names",
+                return_value=["ruff"],
+            ):
+                first = probe_all_tools(cache_root=root_a)
+                second = probe_all_tools(cache_root=root_b)
+
+    assert_that(first["ruff"].version).is_equal_to("0.1.0")
+    assert_that(second["ruff"].version).is_equal_to("0.9.0")
+    assert_that(call_count["n"]).is_equal_to(2)
 
 
 def test_lookup_snapshot_accepts_hyphen_or_underscore() -> None:

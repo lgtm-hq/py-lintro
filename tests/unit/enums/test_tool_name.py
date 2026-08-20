@@ -83,3 +83,11 @@ def test_tool_name_aliases_include_hyphen_and_underscore() -> None:
         ("astro-check", "astro_check"),
     )
     assert_that(tool_name_aliases("ruff")).is_equal_to(("ruff",))
+
+
+def test_tool_name_aliases_empty_input() -> None:
+    """Empty or whitespace-only names yield a single empty alias."""
+    from lintro.enums.tool_name import tool_name_aliases
+
+    assert_that(tool_name_aliases("")).is_equal_to(("",))
+    assert_that(tool_name_aliases("   ")).is_equal_to(("",))

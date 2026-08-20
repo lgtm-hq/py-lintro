@@ -133,6 +133,42 @@ def list_tools_command(
     )
 
 
+def _snapshot_result_status(
+    snap: ToolSnapshot | None,
+) -> ToolResultStatus:
+    """Map a capability snapshot to the list-tools status vocabulary.
+
+    Args:
+        snap: Cached probe result, or None when no snapshot exists.
+
+    Returns:
+        ToolResultStatus: ``unknown`` when absent or versionless, else
+        ``ok``/``unavailable``.
+    """
+    if snap is None:
+        return ToolResultStatus.UNKNOWN
+    if not snap.available:
+        return ToolResultStatus.UNAVAILABLE
+    if not snap.version:
+        return ToolResultStatus.UNKNOWN
+    return ToolResultStatus.OK
+
+
+def _snapshot_status_display(snap: ToolSnapshot | None) -> str:
+    """Format the human-readable Status column for one tool.
+
+    Args:
+        snap: Cached probe result, or None when no snapshot exists.
+
+    Returns:
+        str: ``unknown``, ``unavailable``, or ``ok (<version>)``.
+    """
+    status = _snapshot_result_status(snap)
+    if status is ToolResultStatus.OK and snap is not None:
+        return f"ok ({snap.version})"
+    return str(status)
+
+
 def list_tools(
     output: str | None,
     show_conflicts: bool,
@@ -144,7 +180,8 @@ def list_tools(
     Table output includes a Status column (``ok (<version>)``, ``unavailable``,
     or ``unknown``). JSON objects include ``status`` using
     :class:`~lintro.enums.tool_result_status.ToolResultStatus` when a
-    capability snapshot is present (``ok`` or ``unavailable``).
+    capability snapshot is present (``ok``, ``unavailable``, or ``unknown``).
+    Missing snapshots omit ``available`` and report ``status: unknown``.
 
     Args:
         output: Output file path.
@@ -178,17 +215,17 @@ def list_tools(
                 "priority": get_tool_priority(tool_name),
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
-                "available": bool(snap.available) if snap else False,
-                "version": snap.version if snap else None,
-                "probe_error": snap.probe_error if snap else None,
             }
             if snap is not None:
+                tool_info["available"] = snap.available
+                tool_info["version"] = snap.version
+                tool_info["probe_error"] = snap.probe_error
                 tool_info["runtime_capabilities"] = snap.capabilities.to_dict()
-                if snap.available:
-                    tool_info["status"] = ToolResultStatus.OK
-                else:
-                    tool_info["status"] = ToolResultStatus.UNAVAILABLE
+                tool_info["status"] = _snapshot_result_status(snap)
+                if not snap.available:
                     tool_info["remediation_hint"] = snap.remediation_hint
+            else:
+                tool_info["status"] = ToolResultStatus.UNKNOWN
 
             # Only include file_patterns in verbose mode (consistent with table output)
             if verbose:
@@ -237,13 +274,7 @@ def list_tools(
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
         snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
-        if snap is None:
-            status_display = "unknown"
-        elif snap.available:
-            version = snap.version or "?"
-            status_display = f"ok ({version})"
-        else:
-            status_display = str(ToolResultStatus.UNAVAILABLE)
+        status_display = _snapshot_status_display(snap)
 
         # Capabilities
         tool_capabilities = _tool_capabilities(
@@ -347,7 +378,6 @@ def _generate_plain_text_output(
     Returns:
         List of output lines.
     """
-    from lintro.enums.tool_result_status import ToolResultStatus
     from lintro.tools.core.snapshots import lookup_snapshot
 
     output_lines: list[str] = []
@@ -372,12 +402,7 @@ def _generate_plain_text_output(
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
         snap = lookup_snapshot(snapshots=snapshots, name=tool_name)
-        if snap is None:
-            runtime_status = "unknown"
-        elif snap.available:
-            runtime_status = f"ok ({snap.version or '?'})"
-        else:
-            runtime_status = str(ToolResultStatus.UNAVAILABLE)
+        runtime_status = _snapshot_status_display(snap)
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
         output_lines.append(f"  Status: {runtime_status}")

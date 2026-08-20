@@ -119,7 +119,7 @@ def serialize_tool_result(
     )
     data: dict[str, Any] = {
         "tool": result.name,
-        "success": getattr(result, "success", True),
+        "success": getattr(result, "success", False),
         "issues_count": len(merged_issues),
         "skipped": getattr(result, "skipped", False),
         "skip_reason": getattr(result, "skip_reason", None),

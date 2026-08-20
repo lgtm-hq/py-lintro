@@ -34,10 +34,10 @@ def _clear_tool_snapshot_cache() -> Iterator[None]:
     """Clear capability-probe caches so tests do not share stale snapshots."""
     from lintro.tools.core.snapshots import clear_snapshot_cache, set_force_fresh_probes
 
-    clear_snapshot_cache()
+    clear_snapshot_cache(include_disk=False)
     set_force_fresh_probes(False)
     yield
-    clear_snapshot_cache()
+    clear_snapshot_cache(include_disk=False)
     set_force_fresh_probes(False)
 
 
