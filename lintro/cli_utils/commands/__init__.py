@@ -14,7 +14,11 @@ if TYPE_CHECKING:
     )
     from lintro.cli_utils.commands.format import (
         format_code as format_code,
+    )
+    from lintro.cli_utils.commands.format import (
         format_code_legacy as format_code_legacy,
+    )
+    from lintro.cli_utils.commands.format import (
         format_command as format_command,
     )
     from lintro.cli_utils.commands.init import init_command as init_command

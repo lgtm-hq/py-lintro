@@ -97,12 +97,24 @@ def test_short_help_entries_fit_the_render_limit() -> None:
         )
 
 
+def _plain_text(text: str) -> str:
+    """Collapse Rich table glyphs so wrapped descriptions can be matched.
+
+    Args:
+        text: Rich-formatted help text or a description string.
+
+    Returns:
+        Whitespace-normalized alphanumeric words.
+    """
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text).split())
+
+
 def test_root_help_lists_canonical_names_aliases_and_descriptions() -> None:
     """``lintro --help`` shows each canonical name, alias, and description."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert_that(result.exit_code).is_equal_to(0)
-    normalized = " ".join(result.output.split())
+    haystack = _plain_text(result.output)
     for name, canonical in _CANONICAL_NAMES.items():
         assert_that(result.output).contains(name)
-        assert_that(normalized).contains(_COMMAND_SHORT_HELP[canonical])
+        assert_that(haystack).contains(_plain_text(_COMMAND_SHORT_HELP[canonical]))
