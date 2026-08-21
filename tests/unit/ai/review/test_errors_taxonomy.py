@@ -199,9 +199,9 @@ def test_classify_unknown_falls_back() -> None:
 
 def test_provider_required_classifies_as_unavailable() -> None:
     """An unset provider is unavailable, not a malformed model response."""
-    from lintro.ai.provider_enum import provider_required_error
-
-    error = AIProviderRequiredError(provider_required_error())
+    error = AIProviderRequiredError(
+        "ai.provider is required when ai.lint or ai.review is enabled.",
+    )
     kind = classify_provider_error(provider="unset", error=error)
 
     assert_that(kind).is_equal_to(ReviewErrorKind.PROVIDER_UNAVAILABLE)

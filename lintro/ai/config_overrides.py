@@ -19,7 +19,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.exceptions import AIConfigOverrideError
-from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 __all__ = [
@@ -360,7 +360,7 @@ def _accepted_values(field: str) -> str:
         Accepted values, or empty when the field is free-form.
     """
     if field == "provider":
-        return ", ".join(provider.value for provider in AIProvider)
+        return accepted_provider_values()
     if field == "transport":
         return ", ".join(transport.value for transport in AITransport)
     if field == "enabled":

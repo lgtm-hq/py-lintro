@@ -38,13 +38,14 @@ def test_render_timeout_includes_actionable_hints() -> None:
 
 def test_render_unset_provider_is_not_invalid_response() -> None:
     """A missing provider is a configuration failure, not a parse failure."""
-    from lintro.ai.provider_enum import provider_required_error
-
     buf = StringIO()
     console = Console(file=buf, width=120, force_terminal=True)
 
     render_review_error(
-        error=AIProviderRequiredError(provider_required_error()),
+        error=AIProviderRequiredError(
+            "ai.provider is required when ai.lint or ai.review is enabled. "
+            "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+        ),
         console=console,
     )
     output = buf.getvalue()
