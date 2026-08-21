@@ -123,6 +123,10 @@ class IdiomReviewPlugin(BaseToolPlugin):
         Returns:
             ToolResult with idiom findings, or a skipped result when the
             tool is not opted in or no AI provider is available.
+
+        Raises:
+            AIProviderRequiredError: When AI is enabled but ``ai.provider``
+                is unset. This is a configuration error, not a skip.
         """
         merged: dict[str, object] = dict(self.options)
         merged.update(options)
@@ -144,7 +148,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
         # tool definition, so a top-level ``lintro.ai`` import would drag the
         # AI stack into every ``chk`` invocation (#1305).
         from lintro.ai.availability import is_ai_available
-        from lintro.ai.exceptions import AIError
+        from lintro.ai.exceptions import AIError, AIProviderRequiredError
 
         # Graceful no-credentials path — never require live API access.
         if not is_ai_available():
@@ -164,6 +168,8 @@ class IdiomReviewPlugin(BaseToolPlugin):
 
         try:
             return self._run_review(files=ctx.files, options=merged)
+        except AIProviderRequiredError:
+            raise
         except AIError as exc:
             # Depleted credits / auth / rate limits degrade gracefully.
             logger.warning("[idiom-review] AI unavailable, skipping: {}", exc)

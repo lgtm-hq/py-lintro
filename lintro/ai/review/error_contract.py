@@ -84,6 +84,7 @@ UNAVAILABLE_KINDS: Final[frozenset[ReviewErrorKind]] = frozenset(
         ReviewErrorKind.RATE_LIMITED,
         ReviewErrorKind.SERVER_ERROR,
         ReviewErrorKind.TIMEOUT,
+        ReviewErrorKind.PROVIDER_UNAVAILABLE,
     },
 )
 

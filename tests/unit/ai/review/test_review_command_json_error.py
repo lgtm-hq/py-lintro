@@ -146,7 +146,9 @@ def test_json_unset_provider_exits_two(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
     payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
     assert_that(payload["error"]["provider"]).is_equal_to("unset")
+    assert_that(payload["error"]["provider_unavailable"]).is_true()
     assert_that(payload["error"]["message"]).contains("`ai.provider` in config")
     assert_that(payload["error"]["message"]).contains("LINTRO_AI_PROVIDER")
     assert_that(payload["error"]["message"]).contains("--provider")

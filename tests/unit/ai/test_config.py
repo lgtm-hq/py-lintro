@@ -110,6 +110,15 @@ def test_provider_deferred_when_ai_enabled() -> None:
     assert_that(config.provider).is_none()
 
 
+def test_provider_field_description_lists_accepted_values() -> None:
+    """Schema help lists providers alphabetically from the shared helper."""
+    description = AIConfig.model_fields["provider"].description
+    assert_that(description).contains("`ai.provider` in config")
+    assert_that(description).contains("LINTRO_AI_PROVIDER")
+    assert_that(description).contains("--provider")
+    assert_that(description).contains("anthropic, cursor, openai")
+
+
 # -- Boolean overrides -----------------------------------------------------
 
 

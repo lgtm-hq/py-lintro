@@ -651,7 +651,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     Raises:
         McpError: For every failure mode the tool contract defines.
     """
-    from lintro.ai.exceptions import AIError
+    from lintro.ai.exceptions import AIError, AIProviderRequiredError
     from lintro.ai.providers import get_provider
     from lintro.ai.review import (
         classify_changed_files,
@@ -706,7 +706,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
 
     try:
         provider = get_provider(effective_ai_config, workspace_root=workspace)
-    except ValueError as exc:
+    except (AIProviderRequiredError, ValueError) as exc:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
             message=str(exc),

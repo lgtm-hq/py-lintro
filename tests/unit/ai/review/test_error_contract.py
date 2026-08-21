@@ -223,6 +223,7 @@ def test_retryable_kinds_membership() -> None:
         # or the response it got back is what failed, not the account.
         (ReviewErrorKind.CONTEXT_LENGTH, False),
         (ReviewErrorKind.INVALID_RESPONSE, False),
+        (ReviewErrorKind.PROVIDER_UNAVAILABLE, True),
         (ReviewErrorKind.UNKNOWN, False),
     ],
 )
@@ -252,6 +253,7 @@ def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
         ReviewErrorKind.TIMEOUT,
         ReviewErrorKind.CONTEXT_LENGTH,
         ReviewErrorKind.INVALID_RESPONSE,
+        ReviewErrorKind.PROVIDER_UNAVAILABLE,
         ReviewErrorKind.UNKNOWN,
     }
 

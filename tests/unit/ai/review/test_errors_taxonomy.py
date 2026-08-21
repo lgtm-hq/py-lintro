@@ -7,6 +7,7 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
+    AIProviderRequiredError,
     AIRateLimitError,
 )
 from lintro.ai.review.errors_taxonomy import (
@@ -194,6 +195,17 @@ def test_classify_unknown_falls_back() -> None:
     kind = classify_provider_error(provider="anthropic", error=error)
 
     assert_that(kind).is_equal_to(ReviewErrorKind.UNKNOWN)
+
+
+def test_provider_required_classifies_as_unavailable() -> None:
+    """An unset provider is unavailable, not a malformed model response."""
+    from lintro.ai.provider_enum import provider_required_error
+
+    error = AIProviderRequiredError(provider_required_error())
+    kind = classify_provider_error(provider="unset", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.PROVIDER_UNAVAILABLE)
+    assert_that(kind).is_not_equal_to(ReviewErrorKind.INVALID_RESPONSE)
 
 
 def test_value_error_classifies_as_invalid_response() -> None:

@@ -15,7 +15,7 @@ import lintro.ai.availability as availability_module
 import lintro.ai.providers as providers_module
 import lintro.tools.idiom_review.engine as engine_module
 from lintro.ai.config import AIConfig
-from lintro.ai.exceptions import AIAuthenticationError
+from lintro.ai.exceptions import AIAuthenticationError, AIProviderRequiredError
 from lintro.config.lintro_config import LintroConfig
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.registry import ToolRegistry
@@ -211,7 +211,7 @@ def test_unset_provider_fails_before_the_engine(
         ),
     )
 
-    with pytest.raises(ValueError, match="ai.provider is required"):
+    with pytest.raises(AIProviderRequiredError, match="ai.provider is required"):
         IdiomReviewPlugin().check(
             [_write_py(tmp_path)],
             {"enabled": True, "min_confidence": "low"},

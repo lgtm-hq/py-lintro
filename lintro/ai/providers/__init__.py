@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
+from lintro.ai.exceptions import (
+    AINotAvailableError,  # noqa: F401 -- public re-export
+    AIProviderRequiredError,
+)
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.provider_enum import (
     accepted_provider_values,
@@ -48,12 +51,12 @@ def get_provider(
         BaseAIProvider: Configured provider instance.
 
     Raises:
-        ValueError: If no provider is set, or the provider name is not
-            recognized. The unset-provider message names ``ai.provider``,
-            ``LINTRO_AI_PROVIDER``, and ``--provider``.
+        AIProviderRequiredError: If no provider is set. The message names
+            ``ai.provider``, ``LINTRO_AI_PROVIDER``, and ``--provider``.
+        ValueError: If the provider name is not recognized.
     """
     if config.provider is None:
-        raise ValueError(provider_required_error())
+        raise AIProviderRequiredError(provider_required_error())
     try:
         provider_enum = AIProvider(str(config.provider).lower())
     except ValueError as exc:
