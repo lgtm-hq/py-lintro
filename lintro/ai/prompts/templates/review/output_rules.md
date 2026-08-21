@@ -29,7 +29,10 @@
   is automatically downgraded to P2 and the correction is recorded against the run, so
   an uncalibrated P1 buys you nothing but a logged downgrade.
 - **Calibrate severity.** P1 means merge-blocking defect: expect 0–2 on a typical PR and
-  none at all on most. When you are torn between P1 and P2, choose P2.
+  none at all on most. When you are torn between P1 and P2, choose P2. When you are torn
+  between P2 and P3, choose P3 — a single borderline P2 flips the derived verdict from
+  nits_only to changes_requested. Assign P2 only when a caller, test, or documented
+  contract is actually wrong. Name that rubric boundary in every finding `description`.
 - Set `kind` to `question` when you suspect something but cannot show it — an
   assumption you want the author to confirm, context you lack. Questions carry no
   severity, never affect the verdict, and are capped at **3 per review**. Use them

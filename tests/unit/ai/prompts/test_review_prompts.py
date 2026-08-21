@@ -214,6 +214,16 @@ def test_review_system_carries_p1_calibration_language() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P1 and P2? Choose P2.")
 
 
+def test_review_system_carries_p2_p3_boundary_rubric() -> None:
+    """The system prompt pins the P2 vs P3 boundary that flips the verdict (#1968)."""
+    assert_that(REVIEW_SYSTEM).contains("P2 vs P3 boundary")
+    assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
+    assert_that(REVIEW_SYSTEM).contains("P2 examples:")
+    assert_that(REVIEW_SYSTEM).contains("P3 examples:")
+    assert_that(REVIEW_SYSTEM).contains("documented contract")
+    assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
+
+
 def test_review_system_keeps_correctness_adjacent_style_in_scope() -> None:
     """Linter-catchable style is out of scope, code smells are not."""
     assert_that(REVIEW_SYSTEM).contains("Style/formatting issues linters would catch")
@@ -224,6 +234,7 @@ def test_output_schema_declares_the_corpus_finding_fields() -> None:
     """The model-facing schema advertises every #1925 field."""
     for field in ("kind", "failure_scenario", "evidence_style", "occurrences"):
         assert_that(REVIEW_OUTPUT_SCHEMA).contains(field)
+    assert_that(REVIEW_OUTPUT_SCHEMA).contains("severity-rubric boundary")
 
 
 def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
@@ -234,3 +245,6 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("automatically downgraded to P2")
     assert_that(rules).contains("occurrences")
     assert_that(rules).contains("do not report the same problem twice")
+    assert_that(rules).contains("choose P3")
+    assert_that(rules).contains("nits_only to changes_requested")
+    assert_that(rules).contains("Name that rubric boundary")

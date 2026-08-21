@@ -746,6 +746,12 @@ lintro doctor              # presence checks (free)
 lintro doctor --ai-liveness # adds the liveness probe (one minimal API call on `api`)
 ```
 
+The merge-readiness verdict is derived in code from open-finding severities (never
+asked of the model): any P1 → blocked; else any P2 → changes requested; else any P3 →
+nits only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
+otherwise flip that verdict run-to-run: borderline findings must be P3, and every
+finding `description` must name the rubric boundary it used.
+
 `lintro review` distinguishes the two red states by exit code, so a wrapper can never
 mistake one for the other:
 
