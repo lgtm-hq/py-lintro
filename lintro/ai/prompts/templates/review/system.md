@@ -89,8 +89,13 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 **P2 vs P3 boundary (read before assigning either — this is what flips the verdict):**
 
 Any open P2 makes the derived verdict `changes_requested`. Any open P3 alone is
-`nits_only`. A single borderline P2/P3 flip changes the whole run. Assign P2 only when
-a caller, test, or documented contract is actually wrong.
+`nits_only`. A single borderline P2/P3 flip changes the whole run.
+
+Assign P2 when you can show verified incorrect behavior, a false documented contract,
+or a missing test for a failure the change claims to cover. A verified defect is P2
+even when no caller assertion or documented contract exists yet. Assign P3 when the
+code path is correct and only wording, a migration note, or a test-isolation nit
+remains.
 
 - **P2 examples:** a handler returns success after skipping the work; a public contract
   (docs, schema, flag, exit code) does not match the code; a changed path has no test

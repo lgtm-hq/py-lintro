@@ -43,6 +43,15 @@ _USER_PROMPT_KWARGS = {
     "output_schema": REVIEW_OUTPUT_SCHEMA,
 }
 
+_P2_ELIGIBILITY = (
+    "Assign P2 when you can show verified incorrect behavior, a false documented "
+    "contract, or a missing test for a failure the change claims to cover."
+)
+_P2_WITHOUT_CONTRACT = (
+    "A verified defect is P2 even when no caller assertion or documented contract "
+    "exists yet."
+)
+
 
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
     """User prompt template renders without KeyError for all placeholders."""
@@ -220,7 +229,8 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
     assert_that(REVIEW_SYSTEM).contains("P2 examples:")
     assert_that(REVIEW_SYSTEM).contains("P3 examples:")
-    assert_that(REVIEW_SYSTEM).contains("documented contract")
+    assert_that(REVIEW_SYSTEM).contains(_P2_ELIGIBILITY)
+    assert_that(REVIEW_SYSTEM).contains(_P2_WITHOUT_CONTRACT)
     assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
 
 
@@ -247,4 +257,16 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("do not report the same problem twice")
     assert_that(rules).contains("choose P3")
     assert_that(rules).contains("nits_only to changes_requested")
+    assert_that(rules).contains(_P2_ELIGIBILITY)
+    assert_that(rules).contains(_P2_WITHOUT_CONTRACT)
     assert_that(rules).contains("Name that rubric boundary")
+
+
+def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
+    """System prompt and rendered output rules use the same P2 eligibility rule."""
+    rules = format_output_rules(checklist_count=1)
+
+    assert_that(REVIEW_SYSTEM).contains(_P2_ELIGIBILITY)
+    assert_that(rules).contains(_P2_ELIGIBILITY)
+    assert_that(REVIEW_SYSTEM).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(rules).contains(_P2_WITHOUT_CONTRACT)
