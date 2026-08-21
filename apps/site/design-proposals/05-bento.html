@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 05: Bento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --card: #ffffff;
+    --ink: #1c1917;
+    --muted: #78716c;
+    --terra: #c2410c;
+    --terra-soft: #ffede4;
+    --sage-soft: #e9f3e5;
+    --sky-soft: #e5effa;
+    --lilac-soft: #efebfb;
+    --line: #e7e2da;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center;
+    padding: 22px 0;
+  }
+  .brand {
+    font-family: 'Inter Tight', sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -0.03em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--terra); }
+  .nav-links { display: flex; gap: 4px; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
+    padding: 7px 16px; border-radius: 999px;
+  }
+  .nav-links a:hover, .nav-links a.on { color: var(--ink); background: var(--bg); }
+  .nav-cta {
+    font-size: 14px; font-weight: 600; color: #fff; background: var(--ink);
+    text-decoration: none; padding: 10px 20px; border-radius: 999px;
+  }
+  .nav-cta:hover { background: var(--terra); }
+
+  /* ---------- hero card ---------- */
+  .hero {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    padding: 76px 64px 70px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(600px 300px at 15% 0%, var(--terra-soft), transparent 60%),
+      radial-gradient(600px 300px at 85% 0%, var(--sky-soft), transparent 60%);
+    pointer-events: none;
+  }
+  .hero > * { position: relative; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--terra);
+    background: var(--terra-soft);
+    border-radius: 999px; padding: 7px 16px;
+    font-weight: 500;
+  }
+  h1 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(48px, 6.4vw, 88px);
+    font-weight: 800; letter-spacing: -0.045em; line-height: 1.0;
+    margin-top: 26px;
+  }
+  h1 em { font-style: normal; color: var(--terra); }
+  .hero .sub {
+    max-width: 560px; margin: 24px auto 0;
+    font-size: 19px; color: var(--muted);
+  }
+  .hero .actions { margin-top: 38px; display: flex; gap: 12px; justify-content: center; }
+  .btn {
+    font-size: 15px; font-weight: 600; text-decoration: none;
+    padding: 14px 26px; border-radius: 999px;
+  }
+  .btn-terra { background: var(--terra); color: #fff; box-shadow: 0 10px 24px -10px rgba(194,65,12,0.5); }
+  .btn-soft { background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
+
+  /* ---------- bento grid ---------- */
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .cell {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    padding: 30px;
+    overflow: hidden;
+    position: relative;
+  }
+  .cell .k {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted);
+    display: inline-block;
+    margin-bottom: 14px;
+  }
+  .cell h3 { font-family: 'Inter Tight', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .cell p { font-size: 14.5px; color: var(--muted); }
+
+  .cell-term { grid-column: span 7; padding: 0; display: flex; flex-direction: column; }
+  .cell-term .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .cell-term .head span { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .cell-term pre {
+    flex: 1;
+    background: #1c1917;
+    color: #e7e5e4;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.8;
+    padding: 22px 26px;
+    margin: 0;
+    border-radius: 0 0 24px 24px;
+  }
+  .cell-term .ok { color: #4ade80; }
+  .cell-term .dim { color: #78716c; }
+  .cell-term .pass { background: var(--terra); color: #fff; padding: 1px 10px; border-radius: 6px; }
+
+  .cell-stat { grid-column: span 5; display: flex; flex-direction: column; justify-content: space-between; background: var(--ink); color: #fff; border-color: var(--ink); }
+  .cell-stat .big {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(64px, 7vw, 96px); font-weight: 800; letter-spacing: -0.04em; line-height: 1;
+  }
+  .cell-stat .big i { font-style: normal; color: #fb923c; }
+  .cell-stat p { color: #a8a29e; margin-top: 10px; }
+
+  .cell-conf { grid-column: span 4; background: var(--sage-soft); border-color: #d8e8d0; }
+  .cell-conf .file {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.7);
+    border: 1px solid #d8e8d0;
+    border-radius: 12px;
+    font-family: var(--mono); font-size: 13px;
+    padding: 10px 14px; margin-top: 10px;
+  }
+  .cell-conf .file .ok { margin-left: auto; color: #16a34a; font-weight: 500; }
+
+  .cell-fmt { grid-column: span 4; background: var(--sky-soft); border-color: #d3e3f5; }
+  .cell-fmt .fmts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .cell-fmt .fmts span {
+    font-family: var(--mono); font-size: 12.5px;
+    background: rgba(255,255,255,0.75);
+    border: 1px solid #d3e3f5;
+    padding: 6px 12px; border-radius: 999px;
+  }
+
+  .cell-speed { grid-column: span 4; background: var(--lilac-soft); border-color: #e0d9f5; }
+  .cell-speed .bars { display: flex; align-items: flex-end; gap: 8px; height: 90px; margin-top: 18px; }
+  .cell-speed .bars i {
+    flex: 1; border-radius: 8px 8px 4px 4px;
+    background: #c4b5fd;
+  }
+  .cell-speed .bars i:last-child { background: #7c3aed; }
+  .cell-speed .cap { font-family: var(--mono); font-size: 11.5px; color: #6d28d9; margin-top: 10px; }
+
+  .cell-tools { grid-column: span 12; }
+  .cell-tools .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .cell-tools .chips span {
+    font-family: var(--mono); font-size: 13px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 999px;
+  }
+  .cell-tools .chips span:hover { border-color: var(--terra); color: var(--terra); }
+
+  /* ---------- cta ---------- */
+  .cta {
+    margin-top: 16px;
+    background: var(--ink);
+    border-radius: 28px;
+    padding: 72px 64px;
+    text-align: center;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .cta::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(700px 320px at 50% 120%, rgba(194,65,12,0.45), transparent 65%);
+  }
+  .cta > * { position: relative; }
+  .cta h2 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(38px, 5vw, 62px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.02;
+  }
+  .cta h2 em { font-style: normal; color: #fb923c; }
+  .cta .install {
+    display: inline-flex; align-items: center; gap: 16px;
+    margin-top: 34px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 14px;
+    font-family: var(--mono); font-size: 15px;
+    padding: 16px 22px;
+    color: #e7e5e4;
+  }
+  .cta .install .copy { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #fb923c; }
+  .cta .actions { margin-top: 26px; display: flex; gap: 12px; justify-content: center; }
+  .cta .btn-soft { background: transparent; color: #fff; border-color: rgba(255,255,255,0.25); }
+
+  footer { padding: 34px 0 44px; }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; }
+  footer .f-brand { font-family: 'Inter Tight', sans-serif; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  footer nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-left: 22px; }
+  footer nav a:hover { color: var(--terra); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand"><span class="dot"></span>lintro</span>
+    <div class="nav-links">
+      <a href="#" class="on">Home</a><a href="#">Docs</a><a href="#">Tools</a><a href="#">Coverage</a>
+    </div>
+    <a class="nav-cta" href="#">GitHub ↗</a>
+  </nav>
+
+  <header class="hero">
+    <span class="pill">● 32 tools · one CLI · zero ceremony</span>
+    <h1>Every check your repo needs, <em>in one place.</em></h1>
+    <p class="sub">Lintro unifies linting, formatting, and testing behind a single command — with the native configs you already have.</p>
+    <div class="actions">
+      <a class="btn btn-terra" href="#">Get started →</a>
+      <a class="btn btn-soft" href="#">$ lintro check .</a>
+    </div>
+  </header>
+
+  <section class="bento">
+    <div class="cell cell-term">
+      <div class="head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>lintro check . — grid output</span></div>
+      <pre><span class="dim">$</span> lintro check .
+<span class="ok">✓</span> ruff       <span class="dim">0 issues</span>
+<span class="ok">✓</span> black      <span class="dim">0 issues</span>
+<span class="ok">✓</span> mypy       <span class="dim">0 issues</span>
+<span class="ok">✓</span> prettier   <span class="dim">0 issues</span>
+<span class="ok">✓</span> yamllint   <span class="dim">0 issues</span>
+<span class="dim">──────────────────────────</span>
+<span class="pass">PASS</span>  32 tools · 0 issues · 1.8s</pre>
+    </div>
+    <div class="cell cell-stat">
+      <span class="k" style="color:#a8a29e">The pitch</span>
+      <div>
+        <div class="big">32<i>+</i></div>
+        <p>linters, formatters &amp; test runners behind a single command you learn once.</p>
+      </div>
+    </div>
+    <div class="cell cell-conf">
+      <span class="k" style="color:#3f6212">Native configs</span>
+      <h3>Your configs, detected.</h3>
+      <div class="file"><span>pyproject.toml</span><span class="ok">✓ found</span></div>
+      <div class="file"><span>.prettierrc</span><span class="ok">✓ found</span></div>
+      <div class="file"><span>.yamllint</span><span class="ok">✓ found</span></div>
+    </div>
+    <div class="cell cell-fmt">
+      <span class="k" style="color:#1d4ed8">Reports</span>
+      <h3>One run, six formats.</h3>
+      <div class="fmts"><span>grid</span><span>json</span><span>sarif</span><span>html</span><span>csv</span><span>markdown</span></div>
+    </div>
+    <div class="cell cell-speed">
+      <span class="k" style="color:#6d28d9">Performance</span>
+      <h3>Parallel by default.</h3>
+      <div class="bars"><i style="height:38%"></i><i style="height:55%"></i><i style="height:72%"></i><i style="height:100%"></i></div>
+      <p class="cap">1.8s — full 32-tool run</p>
+    </div>
+    <div class="cell cell-tools">
+      <span class="k">The tool matrix</span>
+      <h3>Everything you already use, wrapped.</h3>
+      <div class="chips">
+        <span>ruff</span><span>black</span><span>mypy</span><span>bandit</span><span>pydoclint</span><span>prettier</span><span>oxc</span><span>stylelint</span><span>yamllint</span><span>pytest</span><span>hadolint</span><span>actionlint</span><span>tsc</span><span>vue-tsc</span><span>svelte-check</span><span>astro-check</span><span>vale</span><span>markdownlint</span><span>trufflehog</span><span>osv-scanner</span><span>pip-audit</span><span>clippy</span><span>cargo-deny</span><span>golangci-lint</span><span>commitlint</span><span>dotenv-linter</span><span>html-validate</span><span>+ more</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2>Clean code starts <em>tonight.</em></h2>
+    <div class="install"><span>$ uv pip install lintro</span><span class="copy">copy</span></div>
+    <div class="actions">
+      <a class="btn btn-terra" href="#">Read the docs →</a>
+      <a class="btn btn-soft" href="#">View coverage</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span class="f-brand"><span class="dot" style="width:10px;height:10px;border-radius:50%;background:var(--terra);display:inline-block"></span>lintro</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+  </div>
+</footer>
+</body>
+</html>

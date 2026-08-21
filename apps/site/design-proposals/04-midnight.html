@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 04: Midnight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #06070c;
+    --bg-2: #0a0c14;
+    --ink: #e8eaf2;
+    --muted: #8b90a5;
+    --violet: #7c5cff;
+    --cyan: #4cc9f0;
+    --line: rgba(255,255,255,0.08);
+    --glass: rgba(255,255,255,0.035);
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  /* aurora */
+  .aurora { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .aurora::before {
+    content: ''; position: absolute;
+    top: -420px; left: 50%; transform: translateX(-50%);
+    width: 1100px; height: 800px;
+    background: radial-gradient(closest-side, rgba(124,92,255,0.28), transparent 70%);
+    filter: blur(20px);
+  }
+  .aurora::after {
+    content: ''; position: absolute;
+    top: 240px; left: 8%;
+    width: 700px; height: 600px;
+    background: radial-gradient(closest-side, rgba(76,201,240,0.12), transparent 70%);
+    filter: blur(30px);
+  }
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 30%, transparent 75%);
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; position: relative; z-index: 1; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 14px; z-index: 10;
+    margin-top: 14px;
+    display: flex; align-items: center;
+    padding: 10px 12px 10px 20px;
+    background: rgba(10,12,20,0.6);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  .brand {
+    font-family: 'Inter Tight', sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -0.02em;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand .glyph {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--violet), var(--cyan));
+    display: grid; place-items: center;
+    font-family: var(--mono); font-size: 13px; font-weight: 500; color: #fff;
+  }
+  .nav-links { display: flex; gap: 4px; margin: 0 auto; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500;
+    padding: 7px 14px; border-radius: 999px;
+  }
+  .nav-links a:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
+  .nav-cta {
+    font-size: 14px; font-weight: 600; color: #fff; text-decoration: none;
+    background: linear-gradient(135deg, var(--violet), #5a3ee0);
+    padding: 9px 18px; border-radius: 999px;
+    box-shadow: 0 0 24px rgba(124,92,255,0.45);
+  }
+
+  /* ---------- hero ---------- */
+  .hero { text-align: center; padding: 120px 0 90px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 16px;
+    background: var(--glass);
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; box-shadow: 0 0 10px #34d399; }
+  h1 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(52px, 7vw, 96px);
+    font-weight: 700; letter-spacing: -0.04em; line-height: 1.02;
+    margin-top: 28px;
+  }
+  h1 .grad {
+    background: linear-gradient(100deg, #fff 10%, var(--violet) 55%, var(--cyan) 90%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero .sub {
+    max-width: 600px; margin: 26px auto 0;
+    font-size: 19px; color: var(--muted);
+  }
+  .hero .actions { margin-top: 40px; display: flex; gap: 14px; justify-content: center; }
+  .btn {
+    font-size: 15px; font-weight: 600; text-decoration: none;
+    padding: 14px 26px; border-radius: 12px;
+  }
+  .btn-glow {
+    color: #fff;
+    background: linear-gradient(135deg, var(--violet), #5a3ee0);
+    box-shadow: 0 0 32px rgba(124,92,255,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .btn-glass {
+    color: var(--ink);
+    background: var(--glass);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+  }
+
+  /* ---------- terminal ---------- */
+  .term-shell { position: relative; max-width: 780px; margin: 10px auto 0; }
+  .term-shell::before {
+    content: ''; position: absolute; inset: -1px;
+    border-radius: 18px;
+    background: linear-gradient(120deg, rgba(124,92,255,0.6), rgba(76,201,240,0.25), transparent 60%);
+    z-index: -1;
+    filter: blur(0.5px);
+  }
+  .term-shell::after {
+    content: ''; position: absolute; inset: 0;
+    border-radius: 18px;
+    box-shadow: 0 40px 90px -30px rgba(124,92,255,0.35);
+    z-index: -2;
+  }
+  .term {
+    background: rgba(8,9,15,0.92);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px;
+    overflow: hidden;
+    text-align: left;
+    backdrop-filter: blur(20px);
+  }
+  .term .bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .term .bar span { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .term pre {
+    font-family: var(--mono); font-size: 14px; line-height: 1.85;
+    padding: 22px 26px 26px;
+    color: #c9cede;
+  }
+  .term .p { color: var(--violet); }
+  .term .ok { color: #34d399; }
+  .term .dim { color: #565b70; }
+  .term .pass { color: #06070c; background: linear-gradient(90deg, var(--cyan), #34d399); padding: 1px 10px; border-radius: 6px; font-weight: 500; }
+
+  /* ---------- tool strip ---------- */
+  .strip { padding: 80px 0 0; text-align: center; }
+  .strip .label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 24px; }
+  .chips span {
+    font-family: var(--mono); font-size: 13px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 16px;
+    background: var(--glass);
+  }
+  .chips span:hover { color: var(--ink); border-color: rgba(124,92,255,0.5); }
+
+  /* ---------- features ---------- */
+  .features { padding: 100px 0 20px; }
+  .sec-head { text-align: center; margin-bottom: 56px; }
+  .sec-head .label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--violet);
+  }
+  .sec-head h2 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(34px, 4vw, 52px); font-weight: 700; letter-spacing: -0.03em;
+    margin-top: 14px;
+  }
+  .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .feat {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 30px;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .feat:hover { border-color: rgba(124,92,255,0.45); transform: translateY(-3px); }
+  .feat .icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: grid; place-items: center;
+    font-family: var(--mono); font-size: 17px;
+    background: linear-gradient(135deg, rgba(124,92,255,0.25), rgba(76,201,240,0.15));
+    border: 1px solid rgba(124,92,255,0.35);
+    color: #cfc3ff;
+  }
+  .feat h3 { font-family: 'Inter Tight', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 20px 0 10px; }
+  .feat p { font-size: 15px; color: var(--muted); }
+  .feat a {
+    display: inline-block; margin-top: 18px;
+    font-size: 14px; font-weight: 500; color: var(--cyan); text-decoration: none;
+  }
+
+  /* ---------- stats ---------- */
+  .stats {
+    margin-top: 80px;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--line); border-radius: 18px;
+    background: var(--glass); backdrop-filter: blur(10px);
+    overflow: hidden;
+  }
+  .stat { padding: 34px 26px; text-align: center; border-right: 1px solid var(--line); }
+  .stat:last-child { border-right: 0; }
+  .stat .v {
+    font-family: 'Inter Tight', sans-serif; font-size: 44px; font-weight: 700; letter-spacing: -0.03em;
+    background: linear-gradient(180deg, #fff, #9ea3ba);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .stat .l { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+
+  /* ---------- cta ---------- */
+  .cta { text-align: center; padding: 120px 0 100px; position: relative; }
+  .cta::before {
+    content: ''; position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%);
+    width: 700px; height: 420px;
+    background: radial-gradient(closest-side, rgba(124,92,255,0.22), transparent 70%);
+    pointer-events: none;
+  }
+  .cta h2 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(40px, 5vw, 64px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.05;
+    position: relative;
+  }
+  .cta .install {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 16px;
+    margin-top: 36px;
+    font-family: var(--mono); font-size: 15px;
+    color: #c9cede;
+    background: rgba(8,9,15,0.9);
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 22px;
+  }
+  .cta .install .p { color: var(--violet); }
+  .cta .install .copy { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); }
+  .cta .actions { position: relative; margin-top: 28px; display: flex; gap: 14px; justify-content: center; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 30px 0 44px;
+  }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; }
+  footer .f-brand { font-family: 'Inter Tight', sans-serif; font-weight: 600; color: var(--muted); }
+  footer nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-left: 24px; }
+  footer nav a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"></div>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<div class="wrap">
+  <nav>
+    <span class="brand"><span class="glyph">▸</span>lintro</span>
+    <div class="nav-links">
+      <a href="#">Docs</a><a href="#">Tools</a><a href="#">Reports</a><a href="#">Changelog</a>
+    </div>
+    <a class="nav-cta" href="#">GitHub ↗</a>
+  </nav>
+
+  <header class="hero">
+    <span class="pill"><span class="dot"></span>v0.40 — now with 32 integrated tools</span>
+    <h1>Code quality,<br><span class="grad">beautifully unified.</span></h1>
+    <p class="sub">One CLI for every linter, formatter, and test runner in your stack. Native configs in, gorgeous reports out.</p>
+    <div class="actions">
+      <a class="btn btn-glow" href="#">Get started →</a>
+      <a class="btn btn-glass" href="#">$ lintro check .</a>
+    </div>
+
+    <div class="term-shell">
+      <div class="term">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>~/project — zsh</span></div>
+        <pre><span class="p">$</span> lintro check .
+<span class="ok">✓</span> ruff       <span class="dim">0 issues</span>
+<span class="ok">✓</span> black      <span class="dim">0 issues</span>
+<span class="ok">✓</span> mypy       <span class="dim">0 issues</span>
+<span class="ok">✓</span> prettier   <span class="dim">0 issues</span>
+<span class="ok">✓</span> yamllint   <span class="dim">0 issues</span>
+<span class="dim">──────────────────────────────</span>
+<span class="pass">PASS</span>  32 tools · 0 issues · 1.8s</pre>
+      </div>
+    </div>
+  </header>
+
+  <section class="strip">
+    <p class="label">Plays well with your stack</p>
+    <div class="chips">
+      <span>ruff</span><span>black</span><span>mypy</span><span>bandit</span><span>prettier</span><span>oxc</span><span>stylelint</span><span>yamllint</span><span>pytest</span><span>hadolint</span><span>actionlint</span><span>tsc</span><span>vale</span><span>trufflehog</span><span>clippy</span><span>golangci-lint</span><span>+16 more</span>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="sec-head">
+      <p class="label">Why lintro</p>
+      <h2>Serious tooling, zero ceremony.</h2>
+    </div>
+    <div class="feat-grid">
+      <article class="feat">
+        <div class="icon">◈</div>
+        <h3>Unified surface</h3>
+        <p>One command for 32 ecosystem tools. Check, fix, and test with an interface that never changes underneath you.</p>
+        <a href="#">Explore the tool matrix →</a>
+      </article>
+      <article class="feat">
+        <div class="icon">⌘</div>
+        <h3>Native configs</h3>
+        <p>Your pyproject.toml, .prettierrc, and .yamllint are detected and respected. Enforce one setting everywhere when you want to.</p>
+        <a href="#">Read the config guide →</a>
+      </article>
+      <article class="feat">
+        <div class="icon">▤</div>
+        <h3>Any report format</h3>
+        <p>Grid for humans, JSON and SARIF for machines, HTML for stakeholders. Six formats from a single run.</p>
+        <a href="#">See CI integration →</a>
+      </article>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">32+</div><div class="l">tools wrapped</div></div>
+      <div class="stat"><div class="v">6</div><div class="l">report formats</div></div>
+      <div class="stat"><div class="v">1.8s</div><div class="l">parallel run</div></div>
+      <div class="stat"><div class="v">0</div><div class="l">config migrations</div></div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2>Ship cleaner code tonight.</h2>
+    <div class="install"><span><span class="p">$</span> uv pip install lintro</span><span class="copy">copy</span></div>
+    <div class="actions">
+      <a class="btn btn-glow" href="#">Read the docs →</a>
+      <a class="btn btn-glass" href="#">View coverage</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span class="f-brand">lintro — unified code quality</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+  </div>
+</footer>
+</body>
+</html>

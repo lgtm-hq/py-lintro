@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 06: Blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --blue: #123a8f;
+    --blue-deep: #0e2f78;
+    --ink: #eaf1ff;
+    --dim: #9db4e8;
+    --yellow: #ffd23f;
+    --line: rgba(234,241,255,0.35);
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background:
+      linear-gradient(rgba(234,241,255,0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(234,241,255,0.055) 1px, transparent 1px),
+      linear-gradient(rgba(234,241,255,0.10) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(234,241,255,0.10) 1px, transparent 1px),
+      var(--blue);
+    background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px; line-height: 1.6;
+  }
+  .mono { font-family: var(--mono); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+
+  /* drawing frame around whole page */
+  .frame {
+    border: 2px solid var(--line);
+    margin: 18px;
+    position: relative;
+  }
+  .crosshair { position: absolute; width: 18px; height: 18px; pointer-events: none; }
+  .crosshair::before, .crosshair::after { content: ''; position: absolute; background: var(--yellow); }
+  .crosshair::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
+  .crosshair::after { top: 50%; left: 0; height: 1.5px; width: 100%; transform: translateY(-50%); }
+  .ch-tl { top: -9px; left: -9px; } .ch-tr { top: -9px; right: -9px; }
+  .ch-bl { bottom: -9px; left: -9px; } .ch-br { bottom: -9px; right: -9px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center;
+    border-bottom: 2px solid var(--line);
+    padding: 0 28px; height: 68px;
+    font-family: var(--mono); font-size: 13px;
+  }
+  .brand {
+    font-weight: 600; font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .brand .sq {
+    width: 22px; height: 22px; border: 2px solid var(--yellow);
+    display: grid; place-items: center;
+    color: var(--yellow); font-size: 12px;
+  }
+  .nav-links { display: flex; gap: 2px; margin-left: auto; }
+  .nav-links a {
+    color: var(--dim); text-decoration: none; text-transform: uppercase; letter-spacing: 0.1em; font-size: 12px;
+    padding: 8px 14px; border: 1px dashed transparent;
+  }
+  .nav-links a:hover { color: var(--ink); border-color: var(--line); }
+  .nav-cta {
+    margin-left: 16px;
+    color: var(--blue); background: var(--yellow);
+    text-decoration: none; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px;
+    padding: 9px 16px;
+  }
+
+  /* ---------- hero ---------- */
+  .hero {
+    display: grid; grid-template-columns: 1.05fr 0.95fr;
+    gap: 48px;
+    padding: 72px 28px 64px;
+    border-bottom: 2px solid var(--line);
+    position: relative;
+  }
+  .fig-tag {
+    position: absolute; top: 18px; left: 28px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--yellow);
+  }
+  .fig-tag-r {
+    position: absolute; top: 18px; right: 28px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(40px, 5vw, 64px);
+    line-height: 1.06;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    margin-top: 26px;
+  }
+  h1 .y { color: var(--yellow); }
+  h1 .u { border-bottom: 3px dashed var(--yellow); }
+  .hero .spec {
+    margin-top: 30px;
+    font-size: 17.5px; color: var(--dim);
+    max-width: 48ch;
+  }
+  .hero .spec b { color: var(--ink); font-weight: 600; }
+  .dimline {
+    margin-top: 36px;
+    display: flex; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+  }
+  .dimline::before, .dimline::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .hero .actions { margin-top: 28px; display: flex; gap: 14px; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+    text-decoration: none; padding: 14px 22px;
+  }
+  .btn-y { background: var(--yellow); color: var(--blue); }
+  .btn-o { border: 2px dashed var(--line); color: var(--ink); }
+  .btn-o:hover { border-color: var(--yellow); color: var(--yellow); }
+
+  /* schematic terminal */
+  .schem {
+    border: 2px solid var(--line);
+    background: var(--blue-deep);
+    align-self: center;
+    position: relative;
+  }
+  .schem .corner { position: absolute; width: 14px; height: 14px; border: 2px solid var(--yellow); }
+  .schem .c1 { top: -8px; left: -8px; border-right: 0; border-bottom: 0; }
+  .schem .c2 { top: -8px; right: -8px; border-left: 0; border-bottom: 0; }
+  .schem .c3 { bottom: -8px; left: -8px; border-right: 0; border-top: 0; }
+  .schem .c4 { bottom: -8px; right: -8px; border-left: 0; border-top: 0; }
+  .schem .shead {
+    display: flex; justify-content: space-between;
+    border-bottom: 1px dashed var(--line);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+    padding: 12px 18px;
+  }
+  .schem pre {
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.85;
+    padding: 20px 22px;
+    color: var(--ink);
+  }
+  .schem .ok { color: #7ee787; }
+  .schem .dim { color: var(--dim); }
+  .schem .pass { background: var(--yellow); color: var(--blue); font-weight: 600; padding: 0 8px; }
+  .schem .annot {
+    border-top: 1px dashed var(--line);
+    font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 10px 18px;
+    display: flex; justify-content: space-between;
+  }
+
+  /* ---------- section headers ---------- */
+  .sec {
+    border-bottom: 2px solid var(--line);
+    padding: 56px 28px;
+    position: relative;
+  }
+  .sec-head {
+    display: flex; align-items: baseline; gap: 20px; margin-bottom: 40px;
+  }
+  .sec-head .fig {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--yellow);
+    border: 1px dashed var(--yellow);
+    padding: 5px 12px;
+  }
+  .sec-head h2 {
+    font-family: var(--mono); font-weight: 600; font-size: clamp(24px, 3vw, 34px);
+    text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .sec-head .rev { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.14em; text-transform: uppercase; }
+
+  /* features as spec cards */
+  .specs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  .spec-card {
+    border: 2px solid var(--line);
+    background: rgba(14,47,120,0.55);
+    padding: 26px;
+    position: relative;
+  }
+  .spec-card .pn {
+    position: absolute; top: -11px; left: 18px;
+    background: var(--blue); padding: 0 10px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; color: var(--yellow); text-transform: uppercase;
+  }
+  .spec-card h3 {
+    font-family: var(--mono); font-size: 18px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    margin-bottom: 12px;
+  }
+  .spec-card p { font-size: 14.5px; color: var(--dim); }
+  .spec-card .tol {
+    margin-top: 20px; padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase;
+    display: flex; justify-content: space-between;
+  }
+  .spec-card .tol b { color: var(--ink); font-weight: 500; }
+
+  /* BOM table */
+  table.bom { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  .bom th {
+    text-align: left; font-weight: 500; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim);
+    border-bottom: 2px solid var(--line); padding: 10px 14px 10px 0;
+  }
+  .bom td { border-bottom: 1px dashed var(--line); padding: 11px 14px 11px 0; }
+  .bom td:last-child, .bom th:last-child { text-align: right; padding-right: 0; }
+  .bom .item { color: var(--yellow); }
+  .bom .ok { color: #7ee787; }
+
+  /* stats as dimension callouts */
+  .dims { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+  .dim-box { border: 2px dashed var(--line); padding: 24px; text-align: center; position: relative; }
+  .dim-box .v { font-family: var(--mono); font-weight: 600; font-size: 44px; color: var(--yellow); line-height: 1; }
+  .dim-box .l { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin-top: 12px; }
+
+  /* ---------- cta ---------- */
+  .cta { padding: 72px 28px; text-align: center; border-bottom: 2px solid var(--line); }
+  .cta h2 {
+    font-family: var(--mono); font-weight: 600;
+    font-size: clamp(30px, 4vw, 48px); text-transform: uppercase; letter-spacing: 0.02em;
+  }
+  .cta h2 .y { color: var(--yellow); }
+  .cta .install {
+    display: inline-flex; align-items: center; gap: 18px;
+    margin-top: 32px;
+    border: 2px solid var(--yellow);
+    background: var(--blue-deep);
+    font-family: var(--mono); font-size: 16px;
+    padding: 16px 24px;
+  }
+  .cta .install .copy { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--yellow); }
+  .cta .actions { margin-top: 26px; display: flex; gap: 14px; justify-content: center; }
+
+  /* ---------- title block footer ---------- */
+  .titleblock { padding: 0 28px 28px; }
+  .tb {
+    margin-top: 28px;
+    border: 2px solid var(--line);
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    font-family: var(--mono);
+  }
+  .tb > div { border-right: 1px solid var(--line); padding: 14px 18px; }
+  .tb > div:last-child { border-right: 0; }
+  .tb .l { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); }
+  .tb .v { font-size: 13px; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tb .v.y { color: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="frame">
+  <span class="crosshair ch-tl"></span><span class="crosshair ch-tr"></span>
+  <span class="crosshair ch-bl"></span><span class="crosshair ch-br"></span>
+
+  <nav>
+    <span class="brand"><span class="sq">L</span>Lintro</span>
+    <div class="nav-links">
+      <a href="#">Docs</a><a href="#">Tools</a><a href="#">Reports</a><a href="#">Coverage</a>
+    </div>
+    <a class="nav-cta" href="#">GitHub ↗</a>
+  </nav>
+
+  <header class="hero">
+    <span class="fig-tag">Fig. 01 — System overview</span>
+    <span class="fig-tag-r">Scale 1:1 · Sheet A-101</span>
+    <div>
+      <h1>One CLI.<br><span class="y">32 tools.</span><br><span class="u">Zero ceremony.</span></h1>
+      <p class="spec">Specification: a unified interface for <b>linting, formatting, and testing</b>. Reads existing native configs — <b>.prettierrc</b>, <b>pyproject.toml</b>, <b>.yamllint</b> — with no migration required.</p>
+      <div class="dimline"><span>tolerance ±0 configs</span></div>
+      <div class="actions">
+        <a class="btn btn-y" href="#">$ lintro check .</a>
+        <a class="btn btn-o" href="#">View drawings (docs)</a>
+      </div>
+    </div>
+    <div class="schem">
+      <span class="corner c1"></span><span class="corner c2"></span>
+      <span class="corner c3"></span><span class="corner c4"></span>
+      <div class="shead"><span>Detail A — Grid output</span><span>Rev C</span></div>
+      <pre><span class="dim">$</span> lintro check .
+<span class="ok">✓</span> ruff       <span class="dim">0 issues</span>
+<span class="ok">✓</span> black      <span class="dim">0 issues</span>
+<span class="ok">✓</span> mypy       <span class="dim">0 issues</span>
+<span class="ok">✓</span> prettier   <span class="dim">0 issues</span>
+<span class="ok">✓</span> yamllint   <span class="dim">0 issues</span>
+<span class="dim">──────────────────────────</span>
+<span class="pass">PASS</span> 32 tools · 0 issues · 1.8s</pre>
+      <div class="annot"><span>← output shown actual size</span><span>do not scale drawing</span></div>
+    </div>
+  </header>
+
+  <section class="sec">
+    <div class="sec-head">
+      <span class="fig">Fig. 02</span>
+      <h2>Design intent</h2>
+      <span class="rev">Rev C — approved for release</span>
+    </div>
+    <div class="specs">
+      <article class="spec-card">
+        <span class="pn">Part № 01</span>
+        <h3>Unified surface</h3>
+        <p>Single command interface bonded to 32 ecosystem tools. Interface tolerance held constant across every repository.</p>
+        <div class="tol"><span>Interface</span><b>check · fix · test</b></div>
+      </article>
+      <article class="spec-card">
+        <span class="pn">Part № 02</span>
+        <h3>Native configs</h3>
+        <p>Existing configuration files detected in place and respected as-found. Optional enforcement layer applies one setting everywhere.</p>
+        <div class="tol"><span>Migration</span><b>none required</b></div>
+      </article>
+      <article class="spec-card">
+        <span class="pn">Part № 03</span>
+        <h3>Report formats</h3>
+        <p>One run emits grid, JSON, SARIF, HTML, CSV, or Markdown. Humans and machines read from the same source of truth.</p>
+        <div class="tol"><span>Formats</span><b>6 per run</b></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <span class="fig">Fig. 03</span>
+      <h2>Bill of materials</h2>
+      <span class="rev">08 of 32 items shown</span>
+    </div>
+    <table class="bom">
+      <tr><th>Item</th><th>Part name</th><th>Function</th><th>Material / config</th><th>Status</th></tr>
+      <tr><td class="item">001</td><td>ruff</td><td>Python lint + fix</td><td>pyproject.toml</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">002</td><td>black</td><td>Python format</td><td>pyproject.toml</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">003</td><td>mypy</td><td>Type check</td><td>mypy.ini</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">004</td><td>prettier</td><td>JS/TS format</td><td>.prettierrc</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">005</td><td>hadolint</td><td>Dockerfile lint</td><td>.hadolint.yaml</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">006</td><td>pytest</td><td>Test runner</td><td>pytest.ini</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">007</td><td>trufflehog</td><td>Secret scan</td><td>—</td><td class="ok">✓ fitted</td></tr>
+      <tr><td class="item">…</td><td>+ 25 more</td><td>Full assembly</td><td>—</td><td class="ok">→ docs</td></tr>
+    </table>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <span class="fig">Fig. 04</span>
+      <h2>Critical dimensions</h2>
+      <span class="rev">All values nominal</span>
+    </div>
+    <div class="dims">
+      <div class="dim-box"><div class="v">32+</div><div class="l">tools wrapped</div></div>
+      <div class="dim-box"><div class="v">6</div><div class="l">report formats</div></div>
+      <div class="dim-box"><div class="v">1.8s</div><div class="l">parallel run</div></div>
+      <div class="dim-box"><div class="v">0</div><div class="l">migrations</div></div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2>Approve &amp; <span class="y">release.</span></h2>
+    <div class="install"><span>$ uv pip install lintro</span><span class="copy">copy</span></div>
+    <div class="actions">
+      <a class="btn btn-y" href="#">Read the docs →</a>
+      <a class="btn btn-o" href="#">View coverage</a>
+    </div>
+  </section>
+
+  <footer class="titleblock">
+    <div class="tb">
+      <div><div class="l">Project</div><div class="v y">Lintro — Unified Code Quality CLI</div></div>
+      <div><div class="l">Drawn by</div><div class="v">lgtm-hq</div></div>
+      <div><div class="l">License</div><div class="v">MIT · 2026</div></div>
+      <div><div class="l">Sheet</div><div class="v">1 of 1 · Rev C</div></div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

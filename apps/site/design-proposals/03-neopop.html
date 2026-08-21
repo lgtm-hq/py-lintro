@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 03: Neo-Pop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fff6e5;
+    --ink: #141414;
+    --yellow: #ffd02f;
+    --pink: #ff8fd3;
+    --blue: #7db4ff;
+    --green: #7ee787;
+    --purple: #c9a7ff;
+    --mono: 'Space Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--paper);
+    background-image: radial-gradient(#14141412 1.5px, transparent 1.5px);
+    background-size: 22px 22px;
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+    overflow-x: hidden;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 28px; }
+
+  .card {
+    background: #fff;
+    border: 3px solid var(--ink);
+    box-shadow: 7px 7px 0 var(--ink);
+  }
+
+  /* ---------- nav ---------- */
+  nav {
+    margin-top: 22px;
+    display: flex; align-items: center; gap: 20px;
+    padding: 14px 20px;
+    background: #fff; border: 3px solid var(--ink); box-shadow: 7px 7px 0 var(--ink);
+  }
+  .brand {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 26px; letter-spacing: -0.02em; text-transform: uppercase;
+    background: var(--yellow);
+    border: 3px solid var(--ink);
+    padding: 2px 12px;
+    transform: rotate(-1.5deg);
+  }
+  .nav-links { display: flex; gap: 6px; margin-left: auto; }
+  .nav-links a {
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    color: var(--ink); text-decoration: none;
+    padding: 8px 14px; border: 3px solid transparent;
+  }
+  .nav-links a:hover { border-color: var(--ink); background: var(--pink); box-shadow: 3px 3px 0 var(--ink); }
+  .nav-cta {
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    color: #fff; background: var(--ink); text-decoration: none;
+    padding: 10px 16px; border: 3px solid var(--ink);
+  }
+  .nav-cta:hover { background: var(--green); color: var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+
+  /* ---------- hero ---------- */
+  .hero { position: relative; padding: 84px 0 72px; text-align: center; }
+  .sticker {
+    position: absolute;
+    font-family: var(--mono); font-weight: 700; font-size: 13px; text-transform: uppercase;
+    border: 3px solid var(--ink); padding: 8px 14px;
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .st-1 { top: 40px; left: 4%; background: var(--pink); transform: rotate(-8deg); }
+  .st-2 { top: 30px; right: 6%; background: var(--blue); transform: rotate(6deg); }
+  .st-3 { bottom: 44px; left: 5%; background: var(--green); transform: rotate(4deg); }
+  .st-4 { bottom: 36px; right: 2%; background: var(--purple); transform: rotate(-5deg); }
+  .hero .pill {
+    display: inline-block;
+    font-family: var(--mono); font-size: 13px; font-weight: 700; text-transform: uppercase;
+    background: #fff; border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
+    padding: 8px 18px; margin-bottom: 30px;
+  }
+  h1 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(56px, 8.5vw, 118px);
+    line-height: 0.94;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+  }
+  h1 .hl-y { background: var(--yellow); padding: 0 14px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  h1 .hl-p { background: var(--pink); padding: 0 14px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  h1 .hl-b { background: var(--blue); padding: 0 14px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  .hero .sub {
+    max-width: 560px; margin: 30px auto 0;
+    font-size: 19px; font-weight: 500;
+  }
+  .hero .actions { margin-top: 36px; display: flex; gap: 18px; justify-content: center; }
+  .btn {
+    font-family: var(--mono); font-weight: 700; font-size: 15px;
+    text-decoration: none; color: var(--ink);
+    border: 3px solid var(--ink); padding: 16px 26px;
+    box-shadow: 6px 6px 0 var(--ink);
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  .btn:hover { transform: translate(3px, 3px); box-shadow: 3px 3px 0 var(--ink); }
+  .btn-y { background: var(--yellow); }
+  .btn-w { background: #fff; }
+
+  /* ---------- marquee ---------- */
+  .marquee {
+    background: var(--ink); color: var(--paper);
+    border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink);
+    padding: 14px 0; overflow: hidden; white-space: nowrap;
+    font-family: var(--mono); font-weight: 700; font-size: 15px; text-transform: uppercase;
+    transform: rotate(-1deg) scale(1.02);
+    margin: 20px 0 0;
+  }
+  .marquee span { margin: 0 16px; }
+  .marquee .y { color: var(--yellow); }
+  .marquee .p { color: var(--pink); }
+  .marquee .b { color: var(--blue); }
+  .marquee .g { color: var(--green); }
+
+  /* ---------- terminal + features ---------- */
+  .duo {
+    display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 36px;
+    padding: 80px 0;
+    align-items: center;
+  }
+  .termcard { transform: rotate(-1deg); }
+  .termcard .titlebar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--yellow);
+    border-bottom: 3px solid var(--ink);
+    padding: 10px 16px;
+    font-family: var(--mono); font-weight: 700; font-size: 13px;
+  }
+  .dot { width: 14px; height: 14px; border: 3px solid var(--ink); border-radius: 50%; }
+  .dot.r { background: #ff5f56; } .dot.y { background: #ffbd2e; } .dot.g { background: #27c93f; }
+  .termcard pre {
+    background: var(--ink); color: #f5f5f5;
+    font-family: var(--mono); font-size: 14px; line-height: 1.8;
+    padding: 24px;
+  }
+  .termcard .ok { color: var(--green); }
+  .termcard .dim { color: #888; }
+  .termcard .pass { background: var(--green); color: var(--ink); font-weight: 700; padding: 0 8px; }
+  .duo .copy .tag {
+    display: inline-block;
+    font-family: var(--mono); font-weight: 700; font-size: 12.5px; text-transform: uppercase;
+    background: var(--purple); border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
+    padding: 6px 14px; margin-bottom: 22px; transform: rotate(-1.5deg);
+  }
+  .duo .copy h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(36px, 4.2vw, 54px); line-height: 1; text-transform: uppercase; letter-spacing: -0.01em;
+    margin-bottom: 20px;
+  }
+  .duo .copy p { font-size: 18px; font-weight: 500; max-width: 44ch; }
+
+  /* ---------- feature cards ---------- */
+  .feat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; padding-bottom: 80px; }
+  .feat { padding: 28px; position: relative; }
+  .feat .badge {
+    position: absolute; top: -18px; right: 18px;
+    font-family: var(--mono); font-weight: 700; font-size: 12px;
+    background: var(--ink); color: #fff;
+    padding: 5px 12px; border: 3px solid var(--ink);
+    transform: rotate(3deg);
+  }
+  .feat h3 {
+    font-family: 'Archivo Black', sans-serif; font-size: 26px; text-transform: uppercase;
+    margin: 10px 0 12px;
+  }
+  .feat p { font-size: 15.5px; font-weight: 500; }
+  .feat .icon {
+    width: 52px; height: 52px;
+    display: grid; place-items: center;
+    font-size: 26px;
+    border: 3px solid var(--ink);
+    background: rgba(255,255,255,0.65);
+  }
+  .f-y { background: var(--yellow); } .f-p { background: var(--pink); } .f-b { background: var(--blue); }
+
+  /* ---------- stats strip ---------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border: 3px solid var(--ink); background: #fff; box-shadow: 7px 7px 0 var(--ink);
+    margin-bottom: 80px;
+  }
+  .stat { padding: 30px 24px; text-align: center; border-right: 3px solid var(--ink); }
+  .stat:last-child { border-right: 0; }
+  .stat .v { font-family: 'Archivo Black', sans-serif; font-size: 52px; line-height: 1; }
+  .stat:nth-child(1) .v { color: #e8a000; }
+  .stat:nth-child(2) .v { color: #e0559e; }
+  .stat:nth-child(3) .v { color: #3b6fd4; }
+  .stat:nth-child(4) .v { color: #2f9e44; }
+  .stat .l { font-family: var(--mono); font-weight: 700; font-size: 12px; text-transform: uppercase; margin-top: 10px; }
+
+  /* ---------- cta ---------- */
+  .cta { text-align: center; padding: 20px 0 90px; }
+  .cta h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: clamp(40px, 5.5vw, 72px); text-transform: uppercase; line-height: 0.98;
+  }
+  .cta h2 span { background: var(--green); padding: 0 14px; }
+  .cta .install {
+    display: inline-flex; align-items: center; gap: 18px;
+    margin-top: 34px;
+    background: var(--ink); color: var(--green);
+    font-family: var(--mono); font-weight: 700; font-size: 17px;
+    border: 3px solid var(--ink); box-shadow: 7px 7px 0 rgba(20,20,20,0.35);
+    padding: 18px 26px;
+  }
+  .cta .install .copy {
+    font-size: 11px; text-transform: uppercase; color: var(--ink);
+    background: var(--yellow); padding: 4px 10px; border: 2px solid var(--yellow);
+  }
+  .cta .actions { margin-top: 30px; display: flex; gap: 18px; justify-content: center; }
+
+  footer {
+    border-top: 3px solid var(--ink);
+    background: #fff;
+    padding: 26px 0;
+  }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; }
+  footer .f-brand { font-family: 'Archivo Black', sans-serif; text-transform: uppercase; font-size: 18px; }
+  footer nav a {
+    font-family: var(--mono); font-weight: 700; font-size: 12.5px; text-transform: uppercase;
+    color: var(--ink); text-decoration: none; margin-left: 20px;
+  }
+  footer nav a:hover { background: var(--yellow); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand">lintro!</span>
+    <div class="nav-links">
+      <a href="#">Docs</a><a href="#">Tools</a><a href="#">Reports</a><a href="#">Coverage</a>
+    </div>
+    <a class="nav-cta" href="#">★ GitHub</a>
+  </nav>
+
+  <header class="hero">
+    <span class="sticker st-1">★ 32 tools inside</span>
+    <span class="sticker st-2">0 config migration</span>
+    <span class="sticker st-3">free &amp; MIT</span>
+    <span class="sticker st-4">CI-ready</span>
+    <span class="pill">● one cli to lint them all</span>
+    <h1>
+      <span class="hl-y">Lint</span> <span class="hl-p">everything.</span><br>
+      <span class="hl-b">Fear</span> nothing.
+    </h1>
+    <p class="sub">Lintro smashes 32 linters, formatters &amp; test runners into one glorious command. Your configs stay. The chaos goes.</p>
+    <div class="actions">
+      <a class="btn btn-y" href="#">$ lintro check .</a>
+      <a class="btn btn-w" href="#">Read the docs →</a>
+    </div>
+  </header>
+</div>
+
+<div class="marquee" aria-hidden="true">
+  <span>ruff</span><span class="y">✦</span><span>black</span><span class="p">✦</span><span>mypy</span><span class="b">✦</span><span>prettier</span><span class="g">✦</span><span>bandit</span><span class="y">✦</span><span>pytest</span><span class="p">✦</span><span>yamllint</span><span class="b">✦</span><span>hadolint</span><span class="g">✦</span><span>oxc</span><span class="y">✦</span><span>stylelint</span><span class="p">✦</span><span>tsc</span><span class="b">✦</span><span>vale</span><span class="g">✦</span><span>trufflehog</span><span class="y">✦</span><span>clippy</span><span class="p">✦</span><span>actionlint</span><span class="b">✦</span>
+</div>
+
+<div class="wrap">
+  <section class="duo">
+    <div class="card termcard">
+      <div class="titlebar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span style="margin-left:8px">lintro — grid output</span>
+      </div>
+      <pre><span class="dim">$</span> lintro check .
+<span class="ok">✓</span> ruff       0 issues
+<span class="ok">✓</span> black      0 issues
+<span class="ok">✓</span> mypy       0 issues
+<span class="ok">✓</span> prettier   0 issues
+<span class="ok">✓</span> yamllint   0 issues
+<span class="dim">──────────────────────────</span>
+<span class="pass">PASS</span> 32 tools · 0 issues · 1.8s</pre>
+    </div>
+    <div class="copy">
+      <span class="tag">→ how it works</span>
+      <h2>One run.<br>Six report<br>formats.</h2>
+      <p>Grid for your terminal, JSON &amp; SARIF for machines, HTML for the boss. Same run — pick a format with one flag. Parallel execution keeps it under two seconds.</p>
+    </div>
+  </section>
+
+  <section class="feat-row">
+    <article class="card feat f-y">
+      <span class="badge">01</span>
+      <div class="icon">🎯</div>
+      <h3>Unified</h3>
+      <p>One command surface for 32 ecosystem tools. Learn it once, use it on every repo you'll ever touch.</p>
+    </article>
+    <article class="card feat f-p">
+      <span class="badge">02</span>
+      <div class="icon">🤝</div>
+      <h3>Native</h3>
+      <p>Respects pyproject.toml, .prettierrc, .yamllint — whatever you already have. No migration theatre, ever.</p>
+    </article>
+    <article class="card feat f-b">
+      <span class="badge">03</span>
+      <div class="icon">📊</div>
+      <h3>Reports</h3>
+      <p>Grid, JSON, SARIF, HTML, CSV, Markdown. One run, any format your CI or your PM could dream of.</p>
+    </article>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><div class="v">32+</div><div class="l">tools wrapped</div></div>
+    <div class="stat"><div class="v">6</div><div class="l">report formats</div></div>
+    <div class="stat"><div class="v">1.8s</div><div class="l">avg. full run</div></div>
+    <div class="stat"><div class="v">0</div><div class="l">configs migrated</div></div>
+  </section>
+
+  <section class="cta">
+    <h2>Ready to <span>pass</span>?</h2>
+    <div class="install">
+      <span>$ uv pip install lintro</span>
+      <span class="copy">copy</span>
+    </div>
+    <div class="actions">
+      <a class="btn btn-y" href="#">Get started →</a>
+      <a class="btn btn-w" href="#">★ Star on GitHub</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span class="f-brand">lintro!</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+  </div>
+</footer>
+</body>
+</html>

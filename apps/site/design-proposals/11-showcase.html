@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lintro — Option 11: Showcase</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --ink: #0e1116;
+    --muted: #5b6472;
+    --line: #e3e6ec;
+    --accent: #4f46e5;
+    --accent-soft: #eceafe;
+    --green: #059669;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    font-size: 16px; line-height: 1.6;
+    overflow-x: hidden;
+  }
+  .mono { font-family: var(--mono); }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex; align-items: center;
+    padding: 18px 0;
+  }
+  .brand {
+    font-family: 'Inter Tight', sans-serif; font-weight: 800; font-size: 21px; letter-spacing: -0.03em;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .brand .mk {
+    width: 24px; height: 24px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent), #9333ea);
+    display: grid; place-items: center;
+    color: #fff; font-family: var(--mono); font-size: 12px; font-weight: 600;
+  }
+  .nav-links { display: flex; gap: 4px; margin: 0 auto; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none; font-size: 14.5px; font-weight: 500;
+    padding: 8px 14px; border-radius: 8px;
+  }
+  .nav-links a:hover { color: var(--ink); background: #eceef2; }
+  .nav-cta {
+    font-size: 14px; font-weight: 600; color: #fff; background: var(--ink);
+    text-decoration: none; padding: 10px 18px; border-radius: 9px;
+  }
+  .nav-cta:hover { background: var(--accent); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: relative;
+    padding: 90px 0 40px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: center;
+  }
+  .hero::before {
+    content: ''; position: absolute; inset: -80px -200px 0;
+    background:
+      radial-gradient(560px 420px at 78% 30%, rgba(79,70,229,0.14), transparent 65%),
+      radial-gradient(480px 380px at 95% 70%, rgba(5,150,105,0.10), transparent 65%),
+      radial-gradient(500px 400px at 55% 85%, rgba(245,158,11,0.08), transparent 65%);
+    pointer-events: none;
+  }
+  .hero > * { position: relative; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    color: var(--accent); background: var(--accent-soft);
+    border: 1px solid #ddd6fe;
+    padding: 6px 14px; border-radius: 999px;
+  }
+  .pill .d { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .hero h1 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(44px, 4.8vw, 68px);
+    font-weight: 800; letter-spacing: -0.04em; line-height: 1.02;
+    margin-top: 22px;
+  }
+  .hero h1 .g {
+    background: linear-gradient(100deg, var(--accent), #9333ea 70%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .hero .sub { margin-top: 22px; font-size: 18px; color: var(--muted); max-width: 46ch; }
+  .hero .actions { margin-top: 32px; display: flex; gap: 12px; }
+  .btn {
+    font-size: 15px; font-weight: 600; text-decoration: none;
+    padding: 14px 24px; border-radius: 11px;
+  }
+  .btn-a { background: var(--accent); color: #fff; box-shadow: 0 12px 28px -12px rgba(79,70,229,0.55); }
+  .btn-o { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+  .hero .proof { margin-top: 26px; font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; gap: 18px; }
+  .hero .proof b { color: var(--green); font-weight: 500; }
+
+  /* floating UI stack */
+  .stage { position: relative; height: 520px; perspective: 1400px; }
+  .float {
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 40px 80px -32px rgba(14,17,22,0.28), 0 4px 16px -8px rgba(14,17,22,0.1);
+    overflow: hidden;
+  }
+  .float-term {
+    width: 480px; left: 0; top: 30px;
+    transform: rotateY(-14deg) rotateX(4deg) rotateZ(1.5deg);
+    transform-style: preserve-3d;
+  }
+  .float-term .tb {
+    display: flex; gap: 7px; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: #fbfbfd;
+  }
+  .float-term .tb i { width: 10px; height: 10px; border-radius: 50%; }
+  .float-term .tb .r { background: #ff5f57; } .float-term .tb .y { background: #febc2e; } .float-term .tb .g { background: #28c840; }
+  .float-term .tb span { margin-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .float-term pre {
+    background: #0e1116; color: #d4d9e3;
+    font-family: var(--mono); font-size: 12.8px; line-height: 1.8;
+    padding: 18px 20px;
+  }
+  .float-term .ok { color: #34d399; }
+  .float-term .dim { color: #5b6472; }
+  .float-term .pass { background: #34d399; color: #06281c; font-weight: 600; padding: 0 8px; border-radius: 5px; }
+  .float-report {
+    width: 340px; right: -10px; top: 210px;
+    transform: rotateY(-20deg) rotateX(6deg) rotateZ(-2deg);
+    padding: 20px;
+  }
+  .float-report .rh {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  }
+  .float-report .rh b { color: var(--accent); font-weight: 600; }
+  .float-report .row {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 12.5px;
+    padding: 9px 0; border-bottom: 1px dashed var(--line);
+  }
+  .float-report .row:last-child { border-bottom: 0; }
+  .float-report .ok { color: var(--green); font-weight: 500; }
+  .float-chip {
+    right: 40px; top: 60px;
+    padding: 12px 18px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    transform: rotateY(-18deg) rotateZ(3deg);
+  }
+  .float-chip .ok { color: var(--green); }
+
+  /* ---------- logo cloud ---------- */
+  .cloud { padding: 56px 0 8px; text-align: center; }
+  .cloud .label { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+  .cloud .names {
+    margin-top: 22px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 34px;
+    font-family: 'Inter Tight', sans-serif; font-weight: 700; font-size: 21px; letter-spacing: -0.01em;
+    color: #b6bcc8;
+  }
+  .cloud .names span { transition: color 0.15s ease; }
+  .cloud .names span:hover { color: var(--ink); }
+
+  /* ---------- sections ---------- */
+  .sec { padding: 100px 0 0; }
+  .sec-label {
+    font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  .sec h2 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(32px, 3.8vw, 50px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.05;
+    margin-top: 14px; max-width: 20ch;
+  }
+  .sec .sec-sub { margin-top: 16px; color: var(--muted); font-size: 17px; max-width: 56ch; }
+
+  /* steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; }
+  .step {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    padding: 26px;
+  }
+  .step .n {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  .step h3 { font-family: 'Inter Tight', sans-serif; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; margin: 14px 0 8px; }
+  .step p { font-size: 14.5px; color: var(--muted); }
+  .step code {
+    display: block; margin-top: 16px;
+    font-family: var(--mono); font-size: 12.5px;
+    background: #0e1116; color: #d4d9e3;
+    border-radius: 9px; padding: 12px 14px;
+  }
+  .step code .p { color: #a5b4fc; }
+
+  /* example cards (greptile-style) */
+  .examples { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 48px; }
+  .ex {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    overflow: hidden;
+  }
+  .ex .ex-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .ex .ex-head b { font-family: 'Inter Tight', sans-serif; font-size: 15px; font-weight: 700; }
+  .ex .ex-head span { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .ex .diff {
+    font-family: var(--mono); font-size: 12px; line-height: 1.9;
+    padding: 16px 20px;
+    background: #fbfbfd;
+  }
+  .diff .del { color: #dc2626; background: #fef2f2; display: block; padding: 0 8px; border-radius: 4px; }
+  .diff .add { color: #059669; background: #ecfdf5; display: block; padding: 0 8px; border-radius: 4px; }
+  .ex .verdict {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 14px 20px 18px;
+    font-size: 13.5px; color: var(--muted);
+  }
+  .ex .verdict .avatar {
+    width: 22px; height: 22px; border-radius: 7px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent), #9333ea);
+    display: grid; place-items: center;
+    color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 600;
+  }
+  .ex .verdict b { color: var(--ink); }
+
+  /* stats band */
+  .band {
+    margin-top: 100px;
+    background: var(--ink); color: #fff;
+    border-radius: 24px;
+    padding: 56px 56px;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;
+    position: relative; overflow: hidden;
+  }
+  .band::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(500px 260px at 85% 0%, rgba(79,70,229,0.35), transparent 65%);
+  }
+  .band > div { position: relative; }
+  .band .v { font-family: 'Inter Tight', sans-serif; font-size: 46px; font-weight: 800; letter-spacing: -0.03em; }
+  .band .v i { font-style: normal; color: #a5b4fc; }
+  .band .l { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #9aa3b5; margin-top: 8px; }
+
+  /* cta */
+  .cta { text-align: center; padding: 110px 0 100px; }
+  .cta h2 {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: clamp(38px, 4.6vw, 62px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.03;
+  }
+  .cta h2 .g { background: linear-gradient(100deg, var(--accent), #9333ea); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .cta .install {
+    display: inline-flex; align-items: center; gap: 16px;
+    margin-top: 34px;
+    background: #0e1116; color: #d4d9e3;
+    font-family: var(--mono); font-size: 15px;
+    border-radius: 12px; padding: 16px 22px;
+    box-shadow: 0 24px 50px -20px rgba(14,17,22,0.4);
+  }
+  .cta .install .p { color: #a5b4fc; }
+  .cta .install .copy { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #34d399; }
+  .cta .actions { margin-top: 26px; display: flex; gap: 12px; justify-content: center; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 28px 0 40px;
+  }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; }
+  footer .f-brand { font-family: 'Inter Tight', sans-serif; font-weight: 700; }
+  footer nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-left: 22px; }
+  footer nav a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <span class="brand"><span class="mk">▸</span>lintro</span>
+    <div class="nav-links">
+      <a href="#">Docs</a><a href="#">Tools</a><a href="#">Reports</a><a href="#">Coverage</a>
+    </div>
+    <a class="nav-cta" href="#">GitHub ↗</a>
+  </nav>
+
+  <header class="hero">
+    <div>
+      <span class="pill"><span class="d"></span>v0.40 — 32 tools integrated</span>
+      <h1>Every check.<br>One command.<br><span class="g">Zero ceremony.</span></h1>
+      <p class="sub">Lintro unifies linting, formatting, and testing behind a single CLI — respecting the native configs you already have, reporting in the format your pipeline needs.</p>
+      <div class="actions">
+        <a class="btn btn-a" href="#">Get started →</a>
+        <a class="btn btn-o" href="#">$ lintro check .</a>
+      </div>
+      <div class="proof"><span><b>✓</b> MIT licensed</span><span><b>✓</b> Python 3.11+</span><span><b>✓</b> npm &amp; Docker</span></div>
+    </div>
+    <div class="stage" aria-hidden="true">
+      <div class="float float-chip"><span class="ok">✓</span> SARIF uploaded to GitHub</div>
+      <div class="float float-term">
+        <div class="tb"><i class="r"></i><i class="y"></i><i class="g"></i><span>lintro check . — grid</span></div>
+        <pre><span class="dim">$</span> lintro check .
+<span class="ok">✓</span> ruff       <span class="dim">0 issues</span>
+<span class="ok">✓</span> black      <span class="dim">0 issues</span>
+<span class="ok">✓</span> mypy       <span class="dim">0 issues</span>
+<span class="ok">✓</span> prettier   <span class="dim">0 issues</span>
+<span class="ok">✓</span> yamllint   <span class="dim">0 issues</span>
+<span class="dim">──────────────────────────</span>
+<span class="pass">PASS</span> 32 tools · 0 issues · 1.8s</pre>
+      </div>
+      <div class="float float-report">
+        <div class="rh"><span>lintro-report.html</span><b>share ↗</b></div>
+        <div class="row"><span>ruff</span><span class="ok">pass</span></div>
+        <div class="row"><span>black</span><span class="ok">pass</span></div>
+        <div class="row"><span>mypy</span><span class="ok">pass</span></div>
+        <div class="row"><span>prettier</span><span class="ok">pass</span></div>
+        <div class="row"><span>yamllint</span><span class="ok">pass</span></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="cloud">
+    <p class="label">Wraps the tools your team already trusts</p>
+    <div class="names">
+      <span>ruff</span><span>black</span><span>mypy</span><span>prettier</span><span>pytest</span><span>oxc</span><span>stylelint</span><span>hadolint</span><span>vale</span><span>trufflehog</span><span>clippy</span><span>tsc</span>
+    </div>
+  </section>
+
+  <section class="sec">
+    <p class="sec-label">[ How it works ]</p>
+    <h2>Three steps between you and a clean repo.</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="n">STEP 01</span>
+        <h3>Install once</h3>
+        <p>One package from PyPI or npm. No Python required for the npm build — it ships self-contained.</p>
+        <code><span class="p">$</span> uv pip install lintro</code>
+      </div>
+      <div class="step">
+        <span class="n">STEP 02</span>
+        <h3>Run one command</h3>
+        <p>Lintro detects your tools and native configs automatically. Nothing to migrate, nothing to relearn.</p>
+        <code><span class="p">$</span> lintro check .</code>
+      </div>
+      <div class="step">
+        <span class="n">STEP 03</span>
+        <h3>Report anywhere</h3>
+        <p>Grid in your terminal, SARIF in GitHub code scanning, HTML for stakeholders — from the same run.</p>
+        <code><span class="p">$</span> lintro check --output-format sarif</code>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <p class="sec-label">[ Catch them all ]</p>
+    <h2>Real issues, caught before review.</h2>
+    <p class="sec-sub">From style violations to security risks — every tool reports through one consistent interface, with autofix where the tool supports it.</p>
+    <div class="examples">
+      <div class="ex">
+        <div class="ex-head"><b>ruff</b><span>src/api.py</span></div>
+        <div class="diff">
+          <span class="del">- import os, sys</span>
+          <span class="add">+ import os</span>
+        </div>
+        <div class="verdict"><span class="avatar">L</span><span><b>lintro</b> — Unused import removed. <b>Autofixed</b> via ruff --fix.</span></div>
+      </div>
+      <div class="ex">
+        <div class="ex-head"><b>mypy</b><span>src/models.py</span></div>
+        <div class="diff">
+          <span class="del">- def get(self, id):</span>
+          <span class="add">+ def get(self, id: int) -&gt; Row:</span>
+        </div>
+        <div class="verdict"><span class="avatar">L</span><span><b>lintro</b> — Missing type annotations flagged before CI.</span></div>
+      </div>
+      <div class="ex">
+        <div class="ex-head"><b>trufflehog</b><span>.env.example</span></div>
+        <div class="diff">
+          <span class="del">- API_KEY=sk_live_9f2…</span>
+          <span class="add">+ API_KEY=&lt;redacted&gt;</span>
+        </div>
+        <div class="verdict"><span class="avatar">L</span><span><b>lintro</b> — Live secret detected. Commit <b>blocked</b> in pre-commit.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div><div class="v">32<i>+</i></div><div class="l">tools wrapped</div></div>
+    <div><div class="v">6</div><div class="l">report formats</div></div>
+    <div><div class="v">1.8<i>s</i></div><div class="l">parallel run</div></div>
+    <div><div class="v">0</div><div class="l">config migrations</div></div>
+  </section>
+
+  <section class="cta">
+    <h2>Ship code you're<br><span class="g">proud to merge.</span></h2>
+    <div class="install"><span><span class="p">$</span> uv pip install lintro</span><span class="copy">copy</span></div>
+    <div class="actions">
+      <a class="btn btn-a" href="#">Read the docs →</a>
+      <a class="btn btn-o" href="#">View coverage</a>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span class="f-brand">lintro</span>
+    <nav><a href="#">Docs</a><a href="#">GitHub</a><a href="#">PyPI</a><a href="#">MIT © 2026</a></nav>
+  </div>
+</footer>
+</body>
+</html>
