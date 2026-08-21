@@ -99,10 +99,38 @@ repos:
         files: ^src/
 ```
 
-## Alternative: isolated Python environment
+## Hermetic hooks: the `lintro-pre-commit` mirror (recommended)
 
-If you prefer that pre-commit manage the lintro installation itself — no system install
-required — use the `-python` hook variants:
+If you want pre-commit to manage lintro itself — no system install required — use the
+dedicated mirror repository
+[`lgtm-hq/lintro-pre-commit`](https://github.com/lgtm-hq/lintro-pre-commit):
+
+```yaml
+repos:
+  - repo: https://github.com/lgtm-hq/lintro-pre-commit
+    rev: v0.69.0 # matches the pinned lintro version
+    hooks:
+      - id: lintro-check
+      # - id: lintro-format  # opt in for auto-formatting
+```
+
+The mirror is a tiny repo whose only job is to pin the published `lintro` wheel.
+pre-commit installs that wheel from [PyPI](https://pypi.org/project/lintro/) into its
+isolated environment, so the hook provisions in **seconds** and never builds py-lintro
+from source. This is the endorsed hermetic path — the same model
+[astral-sh/ruff-pre-commit](https://github.com/astral-sh/ruff-pre-commit) uses.
+
+The mirror's `rev:` tracks the lintro version it pins. For each **stable** py-lintro
+release, CI waits for the published wheel on PyPI, bumps the mirror pin, and tags the
+mirror automatically once `MIRROR_REPO_TOKEN` is configured. Prerelease tags are skipped.
+
+## Alternative: isolated Python environment from this repo
+
+The `-python` hook variants also run in a pre-commit-managed Python env, but they
+install lintro by building **py-lintro from source** at the pinned `rev` (pre-commit
+clones this repository and runs a source build). That is slower and heavier than the
+mirror above; prefer the mirror for hermetic hooks and reach for these variants only if
+you specifically need to run against unreleased py-lintro code at a given `rev`:
 
 ```yaml
 repos:
@@ -112,18 +140,16 @@ repos:
       - id: lintro-check-python
 ```
 
-These use `language: python`, so pre-commit builds an isolated virtual environment and
-installs lintro from the pinned `rev`. This is hermetic and reproducible, but comes with
-an important limitation:
+Both the mirror and the `-python` variants use `language: python`, so they share one
+important limitation:
 
 > **Native tools do not run in the isolated env.** Only lintro's Python-based tools
 > (ruff, yamllint, ...) are available there. Native binaries such as `hadolint`,
 > `shellcheck`, or `prettier` are not installed into the hook environment, and lintro
 > will skip them. If you rely on those checks, use the default system hooks instead.
 
-The first run of a `-python` hook is also slower because pre-commit provisions the
-environment (installing lintro and its dependencies from the repo); subsequent runs are
-cached.
+The first run of an isolated hook is also slower because pre-commit provisions the
+environment; subsequent runs are cached.
 
 ## Notes
 
@@ -133,5 +159,5 @@ cached.
 - Always pin `rev:` to a released tag (not a branch) so hook runs are reproducible;
   `pre-commit autoupdate` can bump it for you.
 - With `language: system`, the `rev:` selects which hook _definitions_ are used; the
-  lintro _version_ that runs is whatever is installed on the machine. With the `-python`
-  variants, `rev:` also pins the lintro version itself.
+  lintro _version_ that runs is whatever is installed on the machine. With the mirror
+  and the `-python` variants, `rev:` also pins the lintro version itself.

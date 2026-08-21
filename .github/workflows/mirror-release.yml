@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Release - Mirror Version Bump
+
+# On each published py-lintro release, bump the lintro pin in the
+# lgtm-hq/lintro-pre-commit mirror, merge the version-bump PR, and tag the
+# mirror with the matching version so pre-commit consumers install the new
+# wheel. See docs/pre-commit.md and issue #1171.
+
+'on':
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to mirror (e.g. v0.69.0)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: mirror-release
+  cancel-in-progress: false
+
+jobs:
+  mirror-bump:
+    name: Bump lintro-pre-commit mirror
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # read: checkout py-lintro CI scripts (mirror writes use MIRROR_REPO_TOKEN)
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            uploads.github.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
+      - name: Checkout lintro scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+          path: lintro
+
+      - name: Resolve release version
+        id: resolve
+        run: lintro/scripts/ci/mirror/resolve-version.sh
+
+      - name: Wait for PyPI wheel
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        env:
+          LINTRO_VERSION: ${{ steps.resolve.outputs.version }}
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/mirror/wait-for-pypi-wheel.sh lintro "$LINTRO_VERSION"
+
+      - name: Checkout lintro-pre-commit mirror
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lintro-pre-commit
+          token: ${{ secrets.MIRROR_REPO_TOKEN }}
+          path: mirror
+
+      - name: Publish mirror release
+        if: >-
+          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
+          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+          MIRROR_DIR: mirror
+          BUMP_SCRIPT: >-
+            ${{ github.workspace }}/lintro/scripts/ci/mirror/bump_pin.py
+          LINTRO_VERSION: ${{ steps.resolve.outputs.version }}
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/mirror/publish-mirror-release.sh "$LINTRO_VERSION"
