@@ -76,6 +76,11 @@ def check(
     # Determine project configuration strategy
     cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
 
+    # Optional per-tool early skip (e.g. tsc JS-only without checkJs).
+    early_skip = plugin._pre_run_skip(ctx, paths, cwd_path, merged_options)
+    if early_skip is not None:
+        return early_skip
+
     # Check if dependencies need installing
     from lintro.utils.node_deps import install_node_deps, should_install_deps
 
@@ -282,7 +287,12 @@ def _check_single_project(
             # directly instead of creating a temp tsconfig that overrides
             # include.
             tsconfig_info = resolve_extends_chain(base_tsconfig)
-            if has_explicit_scoping(tsconfig_info):
+            if has_explicit_scoping(
+                tsconfig_info,
+            ) and plugin._use_native_tsconfig_scoping(
+                info=tsconfig_info,
+                files=ctx.files,
+            ):
                 project_path = str(base_tsconfig)
                 logger.info(
                     "[{}] Respecting native tsconfig scoping: {}",
@@ -392,7 +402,14 @@ def _check_multi_project(
             temp_tsconfig: Path | None = None
             project_path: str | None = None
 
-            if tsconfig_info is not None and has_explicit_scoping(tsconfig_info):
+            if (
+                tsconfig_info is not None
+                and has_explicit_scoping(tsconfig_info)
+                and plugin._use_native_tsconfig_scoping(
+                    info=tsconfig_info,
+                    files=project_files,
+                )
+            ):
                 project_path = str(tsconfig_info.path)
             elif tsconfig_info is not None:
                 rel_files = [os.path.relpath(f, project_dir) for f in project_files]

@@ -42,5 +42,22 @@ class TsconfigInfo:
     is_composite: bool = False
     """Whether ``compilerOptions.composite`` is ``true``."""
 
+    compiler_options: dict[str, Any] = field(default_factory=dict)
+    """Effective ``compilerOptions`` after the ``extends`` chain is merged.
+
+    Per-key child values override parents (TypeScript semantics). Later
+    entries in a TS 5.0+ array ``extends`` list override earlier ones.
+    ``parse_tsconfig`` stores the local file's options only; use
+    :func:`~lintro.utils.tsconfig.resolve_extends_chain` for the effective set.
+    """
+
+    unresolved_extends: bool = False
+    """Whether any ``extends`` target in the chain could not be resolved.
+
+    Callers that skip work based on inherited compiler options must fail
+    closed when this is ``True`` (the missing parent may live in an
+    as-yet-uninstalled package).
+    """
+
     raw_config: dict[str, Any] = field(default_factory=dict)
     """The parsed JSONC content of the tsconfig file itself."""
