@@ -349,17 +349,20 @@ def check_tool_version(
             except (OSError, KeyError, RuntimeError, ValueError):
                 channel_override = None
 
+            channel_path = resolve_channel_binary_path(
+                tool_name=tool_name,
+                install_bin=install_bin,
+                probe_path=info.binary_path,
+                probe_argv0=command[0] if command else None,
+                which=shutil.which,
+            )
+            if channel_path is not None:
+                info.binary_path = str(channel_path)
             info.advisory = build_outdated_version_advisory(
                 tool=tool_name,
                 installed=info.current_version,
                 latest_known=latest_known,
-                binary_path=resolve_channel_binary_path(
-                    tool_name=tool_name,
-                    install_bin=install_bin,
-                    probe_path=info.binary_path,
-                    probe_argv0=command[0] if command else None,
-                    which=shutil.which,
-                ),
+                binary_path=channel_path,
                 install_package=install_package,
                 install_type=install_type,
                 channel_override=channel_override,

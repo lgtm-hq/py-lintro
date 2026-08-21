@@ -354,6 +354,47 @@ def test_check_tool_pip_only_host_does_not_emit_uv() -> None:
     assert_that(result.advisory.update_command).is_none()
 
 
+def test_check_tool_venv_pip_only_does_not_emit_uv() -> None:
+    """A ``.venv`` binary on a pip-only host must not emit ``uv pip``."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    ctx = RuntimeContext(
+        install_context=InstallContext.PIP,
+        platform_label="Linux x86_64",
+        environment=InstallEnvironment(
+            install_context=InstallContext.PIP,
+            available_managers=frozenset({PackageManager.PIP}),
+        ),
+        is_ci=False,
+    )
+
+    def fake_which(name: str) -> str | None:
+        if name == "ruff":
+            return "/proj/.venv/bin/ruff"
+        return None
+
+    with (
+        patch("shutil.which", side_effect=fake_which),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = check_tool(tool=tool, context=ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert_that(result.upgrade_hint).is_equal_to(
+        "pip install --upgrade 'ruff>=1.0.0'",
+    )
+    assert result.advisory is not None
+    assert_that(result.advisory.channel).is_equal_to(UpdateChannel.PIP)
+    assert_that(result.advisory.update_command).is_equal_to(
+        "pip install --upgrade 'ruff>=1.0.0'",
+    )
+    assert_that(result.advisory.update_command).does_not_contain("uv ")
+
+
 def test_doctor_outdated_prints_channel_and_strategy_hint() -> None:
     """Outdated lines show the channel as diagnostic and the strategy command."""
     runner = CliRunner()
@@ -385,6 +426,8 @@ def test_doctor_outdated_prints_channel_and_strategy_hint() -> None:
 
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("installed via uv tool")
+    assert_that(result.output.count("installed via uv tool")).is_equal_to(1)
+    assert_that(result.output).does_not_contain("Update advisories")
     assert_that(result.output).contains(
         "Upgrade: uv pip install --upgrade 'ruff>=1.0.0'",
     )

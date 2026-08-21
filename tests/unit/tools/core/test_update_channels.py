@@ -155,6 +155,18 @@ def test_detect_update_channel_rejects_unrelated_cellar_path() -> None:
     assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
 
 
+def test_detect_update_channel_rejects_unrelated_homebrew_checkout() -> None:
+    """A project directory named ``homebrew`` is not a Homebrew prefix."""
+    channel = detect_update_channel("/home/me/src/homebrew/bin/tool")
+    assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
+
+
+def test_detect_update_channel_rejects_unrelated_rustup_dir() -> None:
+    """A project directory named ``rustup`` is not a rustup toolchain tree."""
+    channel = detect_update_channel("/home/me/src/rustup/bin/tool")
+    assert_that(channel).is_not_equal_to(UpdateChannel.RUSTUP)
+
+
 def test_detect_update_channel_rejects_project_toolchains_path() -> None:
     """Project ``toolchains`` dirs are not treated as rustup."""
     channel = detect_update_channel(
@@ -170,12 +182,21 @@ def test_detect_update_channel_homebrew_bin_prefix() -> None:
 
 
 def test_detect_update_channel_respects_override() -> None:
-    """Explicit channel overrides beat path heuristics."""
+    """Manifest channel override applies when path heuristics are UNKNOWN."""
+    channel = detect_update_channel(
+        "/opt/mystery/bin/ruff",
+        channel_override=UpdateChannel.UV_TOOL,
+    )
+    assert_that(channel).is_equal_to(UpdateChannel.UV_TOOL)
+
+
+def test_detect_update_channel_override_does_not_clobber_homebrew_path() -> None:
+    """A Homebrew Cellar path beats a stale manifest update_channel."""
     channel = detect_update_channel(
         "/opt/homebrew/Cellar/ruff/0.9.0/bin/ruff",
         channel_override=UpdateChannel.UV_TOOL,
     )
-    assert_that(channel).is_equal_to(UpdateChannel.UV_TOOL)
+    assert_that(channel).is_equal_to(UpdateChannel.HOMEBREW)
 
 
 def test_detect_update_channel_tool_override_table(
@@ -299,8 +320,13 @@ def test_resolve_update_command(
     package: str | None,
     latest: str,
     expected: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Map channels to update command templates."""
+    monkeypatch.setattr(
+        "lintro.tools.core.update_channels.shutil.which",
+        lambda name: "/usr/bin/uv" if name == "uv" else None,
+    )
     command = resolve_update_command(
         channel=channel,
         tool_name=tool,
@@ -308,6 +334,34 @@ def test_resolve_update_command(
         latest_known=latest,
     )
     assert_that(command).is_equal_to(expected)
+
+
+def test_resolve_update_command_pip_without_uv_uses_pip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PIP templates must not assume ``uv`` is on PATH."""
+    monkeypatch.setattr(
+        "lintro.tools.core.update_channels.shutil.which",
+        lambda name: None,
+    )
+    command = resolve_update_command(
+        channel=UpdateChannel.PIP,
+        tool_name="ruff",
+        install_package="ruff",
+        latest_known="0.9.0",
+    )
+    assert_that(command).is_equal_to("pip install --upgrade 'ruff>=0.9.0'")
+
+
+def test_resolve_update_command_semgrep_omits_project_venv_pip() -> None:
+    """Semgrep must not emit a project-venv pip upgrade command."""
+    command = resolve_update_command(
+        channel=UpdateChannel.PIP,
+        tool_name="semgrep",
+        install_package="semgrep",
+        latest_known="1.0.0",
+    )
+    assert_that(command).is_none()
 
 
 def test_resolve_update_command_uses_project_local_npm() -> None:
@@ -390,8 +444,14 @@ def test_build_outdated_version_advisory_standalone_path_stays_honest() -> None:
     assert_that(advisory.update_command).is_none()
 
 
-def test_build_outdated_version_advisory_falls_back_without_binary_path() -> None:
+def test_build_outdated_version_advisory_falls_back_without_binary_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When no binary path exists, manifest install.type may suggest a channel."""
+    monkeypatch.setattr(
+        "lintro.tools.core.update_channels.shutil.which",
+        lambda name: None,
+    )
     advisory = build_outdated_version_advisory(
         tool="ruff",
         installed="0.6.9",
@@ -403,7 +463,9 @@ def test_build_outdated_version_advisory_falls_back_without_binary_path() -> Non
     assert_that(advisory).is_not_none()
     assert advisory is not None
     assert_that(advisory.channel).is_equal_to(UpdateChannel.PIP)
-    assert_that(advisory.update_command).contains("uv pip install --upgrade")
+    assert_that(advisory.update_command).is_equal_to(
+        "pip install --upgrade 'ruff>=0.9.0'",
+    )
 
 
 def test_detect_update_channel_rejects_bare_site_packages_path() -> None:

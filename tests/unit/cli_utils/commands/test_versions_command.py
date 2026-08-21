@@ -102,6 +102,7 @@ def test_versions_json_advisory_from_check_tool_version() -> None:
         "cargo install --force cargo-audit",
     )
     assert_that(info.advisory.update_command).does_not_contain("rustup")
+    assert_that(info.binary_path).is_equal_to("/Users/me/.cargo/bin/cargo-audit")
 
     with patch(
         "lintro.cli_utils.commands.versions.get_all_tool_versions",

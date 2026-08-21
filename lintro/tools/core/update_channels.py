@@ -64,28 +64,28 @@ def detect_update_channel(
 
     Resolves symlinks before matching path heuristics so Homebrew Cellar
     installs (often linked from ``/usr/local/bin`` or ``/opt/homebrew/bin``)
-    are classified correctly. Per-tool overrides win over heuristics.
+    are classified correctly. The in-code ``TOOL_CHANNEL_OVERRIDES`` table
+    wins when heuristics are known-wrong. Manifest ``channel_override`` is a
+    fallback used only when path detection is ``UNKNOWN`` or ``STANDALONE``.
 
     Args:
         binary_path: Absolute or relative path to the tool binary.
         tool_name: Canonical tool name used for override lookup.
-        channel_override: Explicit channel (e.g. from manifest); wins first.
+        channel_override: Explicit channel from the manifest; applied when
+            path heuristics do not identify a manager.
 
     Returns:
         Detected :class:`UpdateChannel`. Unknown paths degrade to
         ``UNKNOWN`` (or ``STANDALONE`` for common system bin prefixes).
     """
-    override = _coerce_channel(channel_override)
-    if override is not None:
-        return override
-
     if tool_name:
         mapped = TOOL_CHANNEL_OVERRIDES.get(tool_name)
         if mapped is not None:
             return mapped
 
     if not binary_path:
-        return UpdateChannel.UNKNOWN
+        override = _coerce_channel(channel_override)
+        return override if override is not None else UpdateChannel.UNKNOWN
 
     resolved = _resolve_binary_path(binary_path)
     if resolved is None:
@@ -122,9 +122,17 @@ def detect_update_channel(
         return UpdateChannel.PIP
 
     if _is_standalone_path(path_lower=path_lower):
-        return UpdateChannel.STANDALONE
+        detected = UpdateChannel.STANDALONE
+    else:
+        detected = UpdateChannel.UNKNOWN
 
-    return UpdateChannel.UNKNOWN
+    override = _coerce_channel(channel_override)
+    if override is not None and detected in (
+        UpdateChannel.UNKNOWN,
+        UpdateChannel.STANDALONE,
+    ):
+        return override
+    return detected
 
 
 def resolve_update_command(
@@ -161,9 +169,12 @@ def resolve_update_command(
     if channel == UpdateChannel.UV_TOOL:
         return f"uv tool upgrade {package}"
     if channel == UpdateChannel.PIP:
+        if tool_name == "semgrep":
+            return None
+        pip_prefix = "uv pip install" if shutil.which("uv") else "pip install"
         if version:
-            return f"uv pip install --upgrade '{package}>={version}'"
-        return f"uv pip install --upgrade {package}"
+            return f"{pip_prefix} --upgrade '{package}>={version}'"
+        return f"{pip_prefix} --upgrade {package}"
     if channel == UpdateChannel.NPM:
         spec = f"{package}@{version}" if version else package
         if project_local_node:
@@ -310,7 +321,6 @@ def _is_homebrew_path(*, path_lower: str, parts_lower: set[str]) -> bool:
         "/opt/homebrew/",
         "/home/linuxbrew/",
         "/usr/local/homebrew/",
-        "/homebrew/",
         "/usr/local/cellar/",
         "/opt/homebrew/cellar/",
     )
@@ -441,9 +451,9 @@ def _is_cargo_path(*, resolved: Path, path_lower: str) -> bool:
 
 def _is_rustup_path(*, path_lower: str, parts_lower: set[str]) -> bool:
     """Return True when the path is under a rustup toolchain tree."""
-    if "rustup" in parts_lower:
+    if ".rustup" in parts_lower:
         return True
-    return "/.rustup/toolchains/" in path_lower
+    return "/.rustup/" in path_lower
 
 
 def _is_bun_path(

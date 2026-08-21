@@ -611,21 +611,6 @@ def doctor_command(
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
 
-    advisories = [
-        r.advisory
-        for r in prod_results
-        if r.advisory is not None
-        and r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
-    ]
-    if advisories:
-        display_console.print()
-        display_console.print("  [bold]Update advisories[/bold]")
-        for advisory in advisories:
-            line = Text("    ")
-            line.append("⚠ ", style="yellow")
-            line.append(format_advisory_line(advisory))
-            display_console.print(line)
-
     # Summary
     display_console.print()
     summary_parts: list[str] = []
