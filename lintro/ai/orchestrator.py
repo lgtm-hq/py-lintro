@@ -135,8 +135,11 @@ async def run_ai_enhancement_async(
 
         # P5-4: Verbose — log provider, model, and workspace at info level
         if ai_config.verbose:
+            provider_name = (
+                ai_config.provider.value if ai_config.provider is not None else "unset"
+            )
             loguru_logger.info(
-                f"AI: provider={ai_config.provider.value}, "
+                f"AI: provider={provider_name}, "
                 f"model={ai_config.model or 'default'}, "
                 f"workspace_root={workspace_root}",
             )

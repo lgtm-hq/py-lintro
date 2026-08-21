@@ -16,6 +16,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessState, check_liveness_sync
 from lintro.ai.paths import resolve_workspace_root
+from lintro.ai.provider_enum import accepted_provider_values, provider_required_error
 from lintro.ai.registry import AIProvider
 from lintro.ai.transcript import TRANSCRIPT_DIR, is_transcript_enabled
 from lintro.enums.tool_status import ToolStatus
@@ -62,9 +63,13 @@ def check_ai_liveness(config: AIConfig) -> list[AICheckResult]:
 
     Returns:
         A single-element list describing the probe, or an empty list when no AI
-        feature is enabled or no transport is configured.
+        feature is enabled or provider/transport is unset.
     """
-    if not config.any_feature_enabled or config.transport is None:
+    if (
+        not config.any_feature_enabled
+        or config.transport is None
+        or config.provider is None
+    ):
         return []
     if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
         # Structurally impossible pairing. check_ai_configuration already reports
@@ -119,6 +124,19 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
     if not config.any_feature_enabled:
         return results
 
+    if config.provider is None:
+        results.append(
+            AICheckResult(
+                name="ai.provider",
+                status=ToolStatus.INCOMPATIBLE,
+                message=provider_required_error(),
+                hint=(
+                    "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or "
+                    f"--provider. Accepted: {accepted_provider_values()}"
+                ),
+            ),
+        )
+
     if config.transport is None:
         results.append(
             AICheckResult(
@@ -130,6 +148,8 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
                 hint="Add `transport: api` or `transport: cli` under `ai:` in config",
             ),
         )
+
+    if config.provider is None or config.transport is None:
         return results
 
     if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:

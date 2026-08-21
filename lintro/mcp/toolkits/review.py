@@ -570,7 +570,9 @@ def _no_changes_payload(
 
     metadata = ReviewMetadata(
         model=ai_config.model or "",
-        provider=str(ai_config.provider),
+        provider=(
+            str(ai_config.provider) if ai_config.provider is not None else "unset"
+        ),
         context_window=0,
         depth=depth,
         chunks_total=0,

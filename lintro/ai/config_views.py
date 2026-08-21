@@ -23,7 +23,7 @@ from lintro.ai.registry import AIProvider
 class AIProviderConfig:
     """Read-only view of provider-related AI settings."""
 
-    provider: AIProvider
+    provider: AIProvider | None
     transport: AITransport | None
     cli_bare: CliBareMode
     model: str | None

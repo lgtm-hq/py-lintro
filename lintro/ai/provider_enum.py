@@ -17,3 +17,26 @@ class AIProvider(StrEnum):
     ANTHROPIC = auto()
     OPENAI = auto()
     CURSOR = auto()
+
+
+def accepted_provider_values() -> str:
+    """Return accepted provider names in alphabetical order.
+
+    Returns:
+        Comma-separated provider names with no implied ranking.
+    """
+    return ", ".join(sorted(member.value for member in AIProvider))
+
+
+def provider_required_error() -> str:
+    """Return the migration error used when AI is on but no provider is set.
+
+    Returns:
+        A message naming the three ways to set ``ai.provider`` and the
+        accepted providers in alphabetical order.
+    """
+    return (
+        "ai.provider is required when ai.lint or ai.review is enabled. "
+        "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+        f"Accepted providers: {accepted_provider_values()}."
+    )

@@ -151,7 +151,14 @@ class AIConfig(BaseModel):
             "when ai.enabled is also true (the two are ANDed)."
         ),
     )
-    provider: AIProvider = AIProvider.ANTHROPIC
+    provider: AIProvider | None = Field(
+        default=None,
+        description=(
+            "Required when any AI feature (ai.lint or ai.review) is enabled. "
+            "Set via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            "Accepted providers: anthropic, cursor, openai."
+        ),
+    )
     transport: AITransport | None = Field(
         default=None,
         description=(

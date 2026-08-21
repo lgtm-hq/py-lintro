@@ -62,6 +62,20 @@ def test_render_ai_status_disabled() -> None:
     )
 
 
+def test_render_ai_status_unset_provider() -> None:
+    """An enabled config with no provider names the three-way migration path."""
+    from lintro.ai.provider_enum import provider_required_error
+
+    lines = render_ai_status(
+        ai_config=AIConfig(enabled=True, lint=True, review=False),
+        is_ci=False,
+    )
+
+    assert_that(lines[0]).is_equal_to("[yellow]enabled (provider unset)[/yellow]")
+    assert_that(lines[1]).contains(provider_required_error())
+    assert_that(lines).contains("  provider: unset")
+
+
 def test_render_ai_status_unknown_provider() -> None:
     """An unsupported provider renders the red unknown-provider lines."""
     lines = render_ai_status(

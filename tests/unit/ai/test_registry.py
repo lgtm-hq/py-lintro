@@ -7,6 +7,10 @@ from dataclasses import FrozenInstanceError, asdict
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.provider_enum import (
+    accepted_provider_values,
+    provider_required_error,
+)
 from lintro.ai.registry import (
     DEFAULT_PRICING,
     PROVIDERS,
@@ -47,6 +51,20 @@ def test_aiprovider_invalid_value_raises():
     """Constructing AIProvider with an unknown value raises ValueError."""
     with pytest.raises(ValueError, match="not a valid"):
         AIProvider("gemini")
+
+
+def test_accepted_provider_values_are_alphabetical() -> None:
+    """User-visible provider lists carry no ranking."""
+    assert_that(accepted_provider_values()).is_equal_to("anthropic, cursor, openai")
+
+
+def test_provider_required_error_names_the_three_set_paths() -> None:
+    """The migration error names config, env, and flag, then accepted values."""
+    message = provider_required_error()
+    assert_that(message).contains("`ai.provider` in config")
+    assert_that(message).contains("LINTRO_AI_PROVIDER")
+    assert_that(message).contains("--provider")
+    assert_that(message).contains("anthropic, cursor, openai")
 
 
 # -- ModelPricing ----------------------------------------------------------
