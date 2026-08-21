@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.125.0] - 2026-08-21
+
+### Added
+
+- **build**: replace Makefile with just command runner (#1174) (d9c1ba1)
+
+### Changed
+
+- **bench**: add hyperfine CLI overhead benchmark suite (#1572) (280e783)
+
 ## [0.124.0] - 2026-08-20
 
 ### Added
