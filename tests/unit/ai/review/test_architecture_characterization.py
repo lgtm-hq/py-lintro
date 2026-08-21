@@ -187,7 +187,9 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    mock_config = MagicMock(
+        ai={"enabled": True, "review": True, "provider": "openai"},
+    )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -432,7 +434,9 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
     runner = CliRunner()
     mock_context = MagicMock()
     mock_context.changed_files = []
-    mock_config = MagicMock(ai={"enabled": True, "review": True})
+    mock_config = MagicMock(
+        ai={"enabled": True, "review": True, "provider": "openai"},
+    )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()

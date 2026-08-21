@@ -21,7 +21,7 @@ import os
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import click
 from loguru import logger
@@ -29,9 +29,13 @@ from rich.console import Console
 
 from lintro.ai.availability import require_ai
 from lintro.ai.config import AIConfig
-from lintro.ai.exceptions import AIConfigOverrideError, AIError
+from lintro.ai.exceptions import (
+    AIConfigOverrideError,
+    AIError,
+    AIProviderRequiredError,
+)
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_enum import AIProvider, provider_required_error
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -81,6 +85,67 @@ if TYPE_CHECKING:
 
 #: Default paths scanned by ``--advisory-only`` when no ``--path`` is given.
 ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
+
+
+def _fail_review_command(
+    exc: AIError | ValueError,
+    *,
+    output_format: str,
+    provider_label: str,
+    post: bool,
+    resolved_pr: int | None,
+    effective_repo: str | None,
+    console: Console | None = None,
+) -> NoReturn:
+    """Render a review failure and exit with the review-error contract.
+
+    Used for both early provider validation and mid-run provider failures so
+    JSON, terminal, and GitHub error rendering stay on one path.
+
+    Args:
+        exc: The failure that prevented a review from running.
+        output_format: CLI ``--output`` value (``json`` or ``terminal``).
+        provider_label: Provider name, or ``unset`` when construction failed.
+        post: Whether ``--post`` requested a GitHub comment.
+        resolved_pr: PR number when posting is requested.
+        effective_repo: ``owner/repo`` when posting is requested.
+        console: Terminal console; created on demand for non-JSON output.
+
+    Raises:
+        SystemExit: Always, with the review-error exit code.
+    """
+    if post and resolved_pr is not None and effective_repo:
+        from lintro.ai.review.github import post_review_error_to_github
+
+        with suppress(Exception):
+            post_review_error_to_github(
+                error=exc,
+                provider=provider_label,
+                pr_number=resolved_pr,
+                repo=effective_repo,
+            )
+    from lintro.ai.review.error_contract import (
+        REVIEW_ERROR_EXIT_CODE,
+        render_error_contract_json,
+    )
+
+    if output_format == "json":
+        click.echo(
+            render_error_contract_json(
+                provider=provider_label,
+                error=exc,
+            ),
+        )
+    else:
+        render_review_error(
+            error=exc,
+            console=console if console is not None else Console(),
+        )
+    # Same exit code in both output formats: no review was produced, which
+    # must never be confusable with "reviewed, found P1 issues" (exit 1).
+    # A wrapper that cannot tell the two apart reports a green check for a
+    # review that never ran (#1826).
+    raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
 
 
 @click.command("review")
@@ -356,6 +421,18 @@ def review_command(
                 "--post requires --repo or GITHUB_REPOSITORY environment variable.",
             )
 
+    # Fail on a missing provider before git/gh work so an invalid base or a
+    # non-repo cwd cannot hide the required-provider migration error.
+    if ai_config.provider is None:
+        _fail_review_command(
+            AIProviderRequiredError(provider_required_error()),
+            output_format=output_format,
+            provider_label="unset",
+            post=post,
+            resolved_pr=resolved_pr,
+            effective_repo=effective_repo,
+        )
+
     paths = list(path_filter) if path_filter else None
     context_pr = resolved_pr if post else pr
     context_repo = effective_repo if context_pr is not None else None
@@ -506,36 +583,15 @@ def review_command(
             ),
         )
     except (AIError, ValueError) as exc:
-        provider_label = str(provider.name) if provider is not None else "unset"
-        if post and resolved_pr is not None and effective_repo:
-            from lintro.ai.review.github import post_review_error_to_github
-
-            with suppress(Exception):
-                post_review_error_to_github(
-                    error=exc,
-                    provider=provider_label,
-                    pr_number=resolved_pr,
-                    repo=effective_repo,
-                )
-        from lintro.ai.review.error_contract import (
-            REVIEW_ERROR_EXIT_CODE,
-            render_error_contract_json,
+        _fail_review_command(
+            exc,
+            output_format=output_format,
+            provider_label=(str(provider.name) if provider is not None else "unset"),
+            post=post,
+            resolved_pr=resolved_pr,
+            effective_repo=effective_repo,
+            console=console,
         )
-
-        if output_format == "json":
-            click.echo(
-                render_error_contract_json(
-                    provider=provider_label,
-                    error=exc,
-                ),
-            )
-        else:
-            render_review_error(error=exc, console=console)
-        # Same exit code in both output formats: no review was produced, which
-        # must never be confusable with "reviewed, found P1 issues" (exit 1).
-        # A wrapper that cannot tell the two apart reports a green check for a
-        # review that never ran (#1826).
-        raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
 
     result = enrich_review_result(result=result, question_map=question_map)
 
