@@ -639,7 +639,8 @@ pip, node package manager). Outdated and incompatible tools may also include an
 `update_command`. Execute `upgrade_hint` to change installs; `update_command` is
 diagnostic and can disagree with `upgrade_hint` when the binary path and the manifest
 strategy name different managers. `lintro versions --json` and MCP `lintro_versions`
-include the same `advisory` and a `binary_path` resolved past cargo/bash wrappers.
+include the same `advisory` (the object, or `null` when the tool is current) and a
+`binary_path` resolved past cargo/bash wrappers.
 
 The human `lintro versions` table labels a tool **OUTDATED** when it meets the minimum
 but trails the recommended pin (`below_recommended`). JSON `version_check_passed` stays

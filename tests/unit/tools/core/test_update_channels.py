@@ -140,6 +140,29 @@ def test_detect_update_channel_rustc_with_tool_name_stays_rustup() -> None:
     assert_that(channel).is_equal_to(UpdateChannel.RUSTUP)
 
 
+def test_resolve_channel_binary_path_clippy_uses_cargo_clippy() -> None:
+    """Clippy's on-PATH shim is ``cargo-clippy``, not ``clippy``."""
+    found = resolve_channel_binary_path(
+        tool_name="clippy",
+        install_component="clippy",
+        probe_path="/Users/me/.cargo/bin/cargo",
+        probe_argv0="cargo",
+        which=lambda name: (
+            "/Users/me/.cargo/bin/cargo-clippy" if name == "cargo-clippy" else None
+        ),
+    )
+    assert_that(found).is_equal_to("/Users/me/.cargo/bin/cargo-clippy")
+
+
+def test_wrapper_probe_names_include_env() -> None:
+    """Installer discoverability and channel resolution share wrapper argv0s."""
+    from lintro.tools.core.tool_installer import _INDIRECT_PROBE_COMMANDS
+    from lintro.tools.core.update_channels import WRAPPER_PROBE_NAMES
+
+    assert_that(WRAPPER_PROBE_NAMES).contains("sh", "bash", "cargo", "env")
+    assert_that(_INDIRECT_PROBE_COMMANDS).is_equal_to(WRAPPER_PROBE_NAMES)
+
+
 def test_resolve_channel_binary_path_prefers_install_bin_over_wrapper() -> None:
     """Wrapper argv[0] must not win over the tool's own binary on PATH."""
     found = resolve_channel_binary_path(

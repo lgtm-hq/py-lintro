@@ -363,13 +363,16 @@ _RUSTUP_SHIM_NAMES: frozenset[str] = frozenset(
 )
 
 #: Version-probe argv[0] values that are host wrappers, not the tool binary.
-_WRAPPER_PROBE_NAMES: frozenset[str] = frozenset({"sh", "bash", "cargo", "env"})
+#: Shared with :mod:`lintro.tools.core.tool_installer` so discoverability
+#: and channel resolution cannot drift.
+WRAPPER_PROBE_NAMES: frozenset[str] = frozenset({"sh", "bash", "cargo", "env"})
 
 
 def resolve_channel_binary_path(
     *,
     tool_name: str,
     install_bin: str | None = None,
+    install_component: str | None = None,
     probe_path: str | Path | None = None,
     probe_argv0: str | None = None,
     which: Callable[[str], str | None] | None = None,
@@ -383,6 +386,7 @@ def resolve_channel_binary_path(
     Args:
         tool_name: Canonical tool name.
         install_bin: Manifest ``install.bin`` when it differs from the name.
+        install_component: Manifest ``install.component`` (rustup shims).
         probe_path: Path resolved from the version-probe argv[0].
         probe_argv0: Version-probe argv[0] (may be a relative command name).
         which: PATH lookup, defaulting to :func:`shutil.which`.
@@ -394,18 +398,25 @@ def resolve_channel_binary_path(
     argv0 = ""
     if argv0_source is not None:
         argv0 = Path(argv0_source).name.lower().removesuffix(".exe")
-    if argv0 not in _WRAPPER_PROBE_NAMES:
+    if argv0 not in WRAPPER_PROBE_NAMES:
         return probe_path
 
     finder = which or shutil.which
     candidates: list[str] = []
-    if install_bin:
-        candidates.append(install_bin)
+    for name in (install_bin, install_component):
+        if name and name not in candidates:
+            candidates.append(name)
     hyphen = tool_name.replace("_", "-")
     underscore = tool_name.replace("-", "_")
     for name in (hyphen, underscore, tool_name):
         if name not in candidates:
             candidates.append(name)
+    if not hyphen.startswith("cargo-"):
+        cargo_alias = f"cargo-{hyphen}"
+        if cargo_alias not in candidates:
+            candidates.append(cargo_alias)
+    if hyphen == "clippy" and "clippy-driver" not in candidates:
+        candidates.append("clippy-driver")
     for name in candidates:
         found = finder(name)
         if found:

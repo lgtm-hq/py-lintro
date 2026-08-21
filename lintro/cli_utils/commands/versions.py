@@ -53,9 +53,12 @@ def versions_command(verbose: bool, json_output: bool) -> None:
                 "error_message": version_info.error_message,
                 "install_hint": version_info.install_hint,
                 "binary_path": version_info.binary_path,
+                "advisory": (
+                    version_info.advisory.to_dict()
+                    if version_info.advisory is not None
+                    else None
+                ),
             }
-            if version_info.advisory is not None:
-                entry["advisory"] = version_info.advisory.to_dict()
             output[tool_name] = entry
         click.echo(json.dumps(output, indent=2))
         return

@@ -707,9 +707,8 @@ def _output_json(
             "path": r.path,
             "install_hint": r.install_hint,
             "upgrade_hint": r.upgrade_hint,
+            "advisory": r.advisory.to_dict() if r.advisory is not None else None,
         }
-        if r.advisory is not None:
-            tool_entry["advisory"] = r.advisory.to_dict()
         tools_json[r.tool.name] = tool_entry
         if r.status == ToolStatus.MISSING and r.tool.tier != "dev":
             issues.append(

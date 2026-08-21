@@ -317,7 +317,7 @@ def test_check_tool_vue_tsc_bash_wrapper_uses_vue_tsc_binary() -> None:
     assert_that(result.advisory.update_command).is_equal_to(
         "npm install -D vue-tsc@3.3.10",
     )
-    assert_that(result.path).is_equal_to("/bin/bash")
+    assert_that(result.path).is_equal_to("/proj/node_modules/.bin/vue-tsc")
 
 
 def test_check_tool_pip_only_host_does_not_emit_uv() -> None:
@@ -503,6 +503,25 @@ def test_output_json_includes_advisory_for_outdated_tool() -> None:
     assert_that(tool_json["advisory"]["update_command"]).is_equal_to(
         "uv tool upgrade ruff",
     )
+
+
+def test_output_json_includes_null_advisory_when_current() -> None:
+    """Doctor JSON always includes advisory so CLI and MCP share one shape."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    result = ToolCheckResult(
+        tool=tool,
+        status=ToolStatus.OK,
+        installed_version="1.0.0",
+    )
+    ctx = _make_context()
+
+    output = StringIO()
+    with patch("click.echo", side_effect=output.write):
+        _output_json([result], ctx, None, 0, 0, 0, 0, 0)
+
+    data = json.loads(output.getvalue())
+    assert_that(data["tools"]["ruff"]).contains_key("advisory")
+    assert_that(data["tools"]["ruff"]["advisory"]).is_none()
 
 
 def test_doctor_json_includes_advisory_from_probe() -> None:

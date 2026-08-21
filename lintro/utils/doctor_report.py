@@ -216,6 +216,17 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 upgrade_hint=upgrade_hint,
             )
 
+    channel_path = resolve_channel_binary_path(
+        tool_name=tool.name,
+        install_bin=tool.install_bin,
+        install_component=tool.install_component,
+        probe_path=tool_path,
+        probe_argv0=main_cmd,
+        which=shutil.which,
+    )
+    if channel_path is not None:
+        tool_path = str(channel_path)
+
     try:
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             command,
@@ -256,18 +267,11 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
         )
         advisory = None
         if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
-            channel_path = resolve_channel_binary_path(
-                tool_name=tool.name,
-                install_bin=tool.install_bin,
-                probe_path=tool_path,
-                probe_argv0=main_cmd,
-                which=shutil.which,
-            )
             advisory = build_outdated_version_advisory(
                 tool=tool.name,
                 installed=version,
                 latest_known=tool.version,
-                binary_path=channel_path,
+                binary_path=tool_path,
                 install_package=tool.install_package,
                 install_type=tool.install_type,
                 channel_override=tool.update_channel,
