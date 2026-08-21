@@ -28,7 +28,9 @@ def versions_command(verbose: bool, json_output: bool) -> None:
     """Display version information for all supported tools.
 
     Shows each tool's current version, minimum required version, and status.
-    Use --verbose to see installation hints for tools that don't meet requirements.
+    Tools that meet the minimum but trail the recommended pin show OUTDATED
+    (JSON ``version_check_passed`` remains true). Use --verbose to see
+    installation hints for tools that don't meet requirements.
 
     \u000c
 

@@ -641,6 +641,11 @@ diagnostic and can disagree with `upgrade_hint` when the binary path and the man
 strategy name different managers. `lintro versions --json` and MCP `lintro_versions`
 include the same `advisory` and a `binary_path` resolved past cargo/bash wrappers.
 
+The human `lintro versions` table labels a tool **OUTDATED** when it meets the minimum
+but trails the recommended pin (`below_recommended`). JSON `version_check_passed` stays
+`true` in that case; only the table status string changed from PASS. The process still
+exits 0.
+
 ### Node.js Package Manager Policy {#node-package-manager-policy}
 
 `lintro install` used to pick bun whenever bun happened to be on `PATH`, and to install

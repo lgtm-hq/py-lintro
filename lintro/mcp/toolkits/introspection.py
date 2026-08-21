@@ -80,7 +80,9 @@ _LIST_TOOLS_DESCRIPTION: Final[str] = (
 _VERSIONS_DESCRIPTION: Final[str] = (
     "Report the installed version of every external tool against the minimum "
     "and recommended versions lintro expects, flagging each as ok, outdated, "
-    "incompatible, or missing. Read-only."
+    "incompatible, or missing. Each entry includes binary_path and a structured "
+    "advisory (channel plus optional update_command) when the tool is behind. "
+    "Read-only."
 )
 
 _DOCTOR_DESCRIPTION: Final[str] = (

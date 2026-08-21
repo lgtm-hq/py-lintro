@@ -16,7 +16,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from lintro.enums.update_channel import UpdateChannel
-from lintro.tools.core.install_strategies.package_names import BREW_FORMULA_NAMES
+from lintro.tools.core.install_strategies.package_names import (
+    brew_formula_name,
+    ecosystem_package_name,
+)
 
 # Per-tool channel overrides when path heuristics are wrong or unavailable.
 # Keys are canonical tool names; values are UpdateChannel members (or their
@@ -96,7 +99,7 @@ def detect_update_channel(
 
     # Homebrew before node_modules: brew formulae for JS tools live under
     # Cellar/.../libexec/lib/node_modules/...
-    if _is_homebrew_path(path_lower=path_lower, parts_lower=parts_lower):
+    if _is_homebrew_path(path_lower=path_lower):
         return UpdateChannel.HOMEBREW
 
     if _is_uv_tool_path(resolved=resolved, path_lower=path_lower):
@@ -252,9 +255,11 @@ def format_advisory_line(advisory: VersionAdvisory) -> str:
         f"{advisory.tool} {advisory.installed} installed, "
         f"{advisory.latest_known} expected"
     )
-    channel_label = advisory.channel.value.replace("_", " ")
-    if advisory.channel in (UpdateChannel.UNKNOWN, UpdateChannel.STANDALONE):
+    if advisory.channel == UpdateChannel.UNKNOWN:
         return f"{base} — update channel unknown"
+    if advisory.channel == UpdateChannel.STANDALONE:
+        return f"{base} — installed as a standalone binary"
+    channel_label = advisory.channel.value.replace("_", " ")
     return f"{base} — installed via {channel_label}"
 
 
@@ -315,18 +320,23 @@ def _resolve_binary_path(binary_path: str | Path) -> Path | None:
         return None
 
 
-def _is_homebrew_path(*, path_lower: str, parts_lower: set[str]) -> bool:
-    """Return True when the path is under a Homebrew prefix."""
+def _is_homebrew_path(*, path_lower: str) -> bool:
+    """Return True when the path is under a Homebrew prefix.
+
+    Intel Homebrew often links from ``/usr/local/bin``. That prefix is shared
+    with many non-brew installs, so it is classified as ``STANDALONE`` unless
+    symlink resolution reaches Cellar or ``/usr/local/Homebrew``. Apple
+    Silicon ``/opt/homebrew/`` is a dedicated prefix and matches directly.
+    """
     markers = (
         "/opt/homebrew/",
         "/home/linuxbrew/",
         "/usr/local/homebrew/",
         "/usr/local/cellar/",
         "/opt/homebrew/cellar/",
+        "/.linuxbrew/",
     )
-    if any(marker in path_lower for marker in markers):
-        return True
-    return "linuxbrew" in parts_lower
+    return any(marker in path_lower for marker in markers)
 
 
 def _is_uv_tool_path(*, resolved: Path, path_lower: str) -> bool:
@@ -493,7 +503,12 @@ def _is_pip_path(*, path_lower: str, parts_lower: set[str]) -> bool:
 
 
 def _is_standalone_path(*, path_lower: str) -> bool:
-    """Return True for common system bin prefixes without a known manager."""
+    """Return True for common system bin prefixes without a known manager.
+
+    ``/usr/local/bin`` is intentionally standalone when Homebrew detection
+    did not already match. Treating the whole prefix as Homebrew would
+    mislabel non-brew binaries on Intel Macs and Linux.
+    """
     prefixes = (
         "/usr/local/bin/",
         "/usr/bin/",
@@ -509,10 +524,12 @@ def _package_for_channel(
     install_package: str | None,
 ) -> str:
     """Choose the package name used in the update command."""
-    if install_package:
-        return install_package
     if channel == UpdateChannel.HOMEBREW:
-        return BREW_FORMULA_NAMES.get(tool_name, tool_name.replace("_", "-"))
-    if channel in (UpdateChannel.CARGO, UpdateChannel.NPM, UpdateChannel.BUN):
-        return tool_name.replace("_", "-")
-    return tool_name
+        return brew_formula_name(
+            tool_name=tool_name,
+            install_package=install_package,
+        )
+    return ecosystem_package_name(
+        tool_name=tool_name,
+        install_package=install_package,
+    )

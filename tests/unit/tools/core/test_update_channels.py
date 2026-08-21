@@ -34,6 +34,10 @@ from lintro.tools.core.version_checking import (
             UpdateChannel.HOMEBREW,
         ),
         (
+            "/home/me/.linuxbrew/Cellar/shellcheck/0.11.0/bin/shellcheck",
+            UpdateChannel.HOMEBREW,
+        ),
+        (
             "/opt/homebrew/Cellar/prettier/3.9.5/libexec/lib/node_modules/"
             "prettier/bin/prettier.cjs",
             UpdateChannel.HOMEBREW,
@@ -86,6 +90,7 @@ from lintro.tools.core.version_checking import (
     ids=[
         "homebrew-cellar",
         "linuxbrew",
+        "linuxbrew-user-prefix",
         "homebrew-npm-formula",
         "uv-tool",
         "cargo",
@@ -159,6 +164,18 @@ def test_detect_update_channel_rejects_unrelated_homebrew_checkout() -> None:
     """A project directory named ``homebrew`` is not a Homebrew prefix."""
     channel = detect_update_channel("/home/me/src/homebrew/bin/tool")
     assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
+
+
+def test_detect_update_channel_rejects_unrelated_linuxbrew_checkout() -> None:
+    """A project directory named ``linuxbrew`` is not a Homebrew prefix."""
+    channel = detect_update_channel("/home/me/src/linuxbrew/bin/tool")
+    assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
+
+
+def test_detect_update_channel_usr_local_bin_is_standalone() -> None:
+    """``/usr/local/bin`` is standalone unless the link resolves into Cellar."""
+    channel = detect_update_channel("/usr/local/bin/hadolint")
+    assert_that(channel).is_equal_to(UpdateChannel.STANDALONE)
 
 
 def test_detect_update_channel_rejects_unrelated_rustup_dir() -> None:
@@ -252,11 +269,25 @@ def test_detect_update_channel_uv_tool_dir_env(
             "uv tool upgrade ruff",
         ),
         (
+            UpdateChannel.UV_TOOL,
+            "osv_scanner",
+            None,
+            "2.4.0",
+            "uv tool upgrade osv-scanner",
+        ),
+        (
             UpdateChannel.PIP,
             "ruff",
             "ruff",
             "0.9.0",
             "uv pip install --upgrade 'ruff>=0.9.0'",
+        ),
+        (
+            UpdateChannel.PIP,
+            "osv_scanner",
+            None,
+            "2.4.0",
+            "uv pip install --upgrade 'osv-scanner>=2.4.0'",
         ),
         (
             UpdateChannel.NPM,
@@ -305,7 +336,9 @@ def test_detect_update_channel_uv_tool_dir_env(
         "brew",
         "brew-formula-alias",
         "uv-tool",
+        "uv-tool-hyphenated",
         "pip",
+        "pip-hyphenated",
         "npm",
         "bun",
         "cargo",
@@ -536,3 +569,17 @@ def test_format_advisory_line_unknown_channel() -> None:
     line = format_advisory_line(advisory)
     assert_that(line).contains("update channel unknown")
     assert_that(line).does_not_contain("brew")
+
+
+def test_format_advisory_line_standalone_channel() -> None:
+    """Standalone system binaries are labeled standalone, not unknown."""
+    advisory = VersionAdvisory(
+        tool="hadolint",
+        installed="2.10",
+        latest_known="2.12",
+        channel=UpdateChannel.STANDALONE,
+        update_command=None,
+    )
+    line = format_advisory_line(advisory)
+    assert_that(line).contains("installed as a standalone binary")
+    assert_that(line).does_not_contain("update channel unknown")

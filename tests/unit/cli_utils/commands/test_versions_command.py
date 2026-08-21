@@ -68,6 +68,27 @@ def test_versions_human_output_renders_advisory_line() -> None:
     assert_that(result.output).contains("OUTDATED")
 
 
+def test_versions_human_status_is_outdated_when_below_recommended() -> None:
+    """Meeting the minimum but trailing the pin shows OUTDATED, not PASS."""
+    current = ToolVersionInfo(
+        name="ruff",
+        min_version="0.6.0",
+        recommended_version="0.9.0",
+        current_version="0.9.0",
+        version_check_passed=True,
+        below_recommended=False,
+    )
+    with patch(
+        "lintro.cli_utils.commands.versions.get_all_tool_versions",
+        return_value={"ruff": current, "black": _outdated_ruff()},
+    ):
+        result = CliRunner().invoke(versions_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("PASS")
+    assert_that(result.output).contains("OUTDATED")
+
+
 def test_versions_json_advisory_from_check_tool_version() -> None:
     """JSON advisories come from version probes, not a prebuilt fixture."""
 
