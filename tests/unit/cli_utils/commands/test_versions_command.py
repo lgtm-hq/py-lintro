@@ -116,3 +116,38 @@ def test_versions_json_advisory_from_check_tool_version() -> None:
     assert_that(data["cargo_audit"]["advisory"]["update_command"]).is_equal_to(
         "cargo install --force cargo-audit",
     )
+    assert_that(data["cargo_audit"]["binary_path"]).is_equal_to(
+        "/Users/me/.cargo/bin/cargo-audit",
+    )
+
+
+def test_versions_json_binary_path_resolved_when_current() -> None:
+    """Wrapper probes still export the tool binary when the version is current."""
+
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "cargo": "/Users/me/.cargo/bin/cargo",
+            "cargo-audit": "/Users/me/.cargo/bin/cargo-audit",
+        }
+        return mapping.get(name)
+
+    with (
+        patch("shutil.which", side_effect=fake_which),
+        patch(
+            "lintro.tools.core.version_parsing.subprocess.run",
+        ) as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="cargo-audit 99.0.0\n",
+            stderr="",
+        )
+        info = check_tool_version(
+            "cargo_audit",
+            ["cargo", "audit"],
+            append_version=True,
+        )
+
+    assert_that(info.version_check_passed).is_true()
+    assert_that(info.advisory).is_none()
+    assert_that(info.binary_path).is_equal_to("/Users/me/.cargo/bin/cargo-audit")

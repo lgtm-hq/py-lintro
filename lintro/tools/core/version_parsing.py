@@ -325,39 +325,39 @@ def check_tool_version(
             if rec_version and rec_version != VERSION_UNKNOWN
             else min_version
         )
+        install_type = None
+        install_package = None
+        install_bin = None
+        channel_override = None
+        try:
+            from lintro.tools.core.tool_registry import ManifestRegistry
+
+            registry = ManifestRegistry.load()
+            if tool_name in registry:
+                manifest_tool = registry.get(tool_name)
+                install_type = manifest_tool.install_type
+                install_package = manifest_tool.install_package
+                install_bin = manifest_tool.install_bin
+                channel_override = manifest_tool.update_channel
+        except (OSError, KeyError, RuntimeError, ValueError):
+            pass
+
+        channel_path = resolve_channel_binary_path(
+            tool_name=tool_name,
+            install_bin=install_bin,
+            probe_path=info.binary_path,
+            probe_argv0=command[0] if command else None,
+            which=shutil.which,
+        )
+        if channel_path is not None:
+            info.binary_path = str(channel_path)
+
         if (
             info.current_version
             and latest_known
             and latest_known != VERSION_UNKNOWN
             and (not info.version_check_passed or info.below_recommended)
         ):
-            install_type = None
-            install_package = None
-            install_bin = None
-            try:
-                from lintro.tools.core.tool_registry import ManifestRegistry
-
-                registry = ManifestRegistry.load()
-                if tool_name in registry:
-                    manifest_tool = registry.get(tool_name)
-                    install_type = manifest_tool.install_type
-                    install_package = manifest_tool.install_package
-                    install_bin = manifest_tool.install_bin
-                    channel_override = manifest_tool.update_channel
-                else:
-                    channel_override = None
-            except (OSError, KeyError, RuntimeError, ValueError):
-                channel_override = None
-
-            channel_path = resolve_channel_binary_path(
-                tool_name=tool_name,
-                install_bin=install_bin,
-                probe_path=info.binary_path,
-                probe_argv0=command[0] if command else None,
-                which=shutil.which,
-            )
-            if channel_path is not None:
-                info.binary_path = str(channel_path)
             info.advisory = build_outdated_version_advisory(
                 tool=tool_name,
                 installed=info.current_version,

@@ -344,6 +344,8 @@ def test_versions_reports_installed_against_expected(
     # and the same label lintro_list_tools would report for it.
     assert_that(entries["yamllint"]["status"]).is_equal_to("outdated")
     assert_that(entries["yamllint"]["satisfies_minimum"]).is_true()
+    assert_that(entries["ruff"]).contains_key("binary_path", "advisory")
+    assert_that(entries["black"]["advisory"]).is_none()
     assert_that(payload["summary"]).is_equal_to(
         {"incompatible": 1, "missing": 1, "ok": 1, "outdated": 1, "total": 4},
     )

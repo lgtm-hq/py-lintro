@@ -333,6 +333,10 @@ def _versions_payload() -> dict[str, Any]:
                 "status": status,
                 "error": info.error_message,
                 "install_hint": info.install_hint,
+                "binary_path": info.binary_path,
+                "advisory": (
+                    info.advisory.to_dict() if info.advisory is not None else None
+                ),
             },
         )
 

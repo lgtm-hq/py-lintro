@@ -634,9 +634,12 @@ lintro doctor --json               # machine-readable output for CI
 The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
 `upgrade_hint`. `upgrade_hint` is the install-strategy command (pin conflicts, uv vs
-pip, node package manager). Outdated tools may also include an `advisory` object with
-the detected update channel and a channel-template `update_command`; that template is
-diagnostic and does not replace `upgrade_hint`.
+pip, node package manager). Outdated and incompatible tools may also include an
+`advisory` object with the detected update channel and a path-heuristic
+`update_command`. Execute `upgrade_hint` to change installs; `update_command` is
+diagnostic and can disagree with `upgrade_hint` when the binary path and the manifest
+strategy name different managers. `lintro versions --json` and MCP `lintro_versions`
+include the same `advisory` and a `binary_path` resolved past cargo/bash wrappers.
 
 ### Node.js Package Manager Policy {#node-package-manager-policy}
 
