@@ -265,13 +265,15 @@ def check_tool_version(
         from lintro.tools.core.tool_registry import ManifestRegistry
 
         registry = ManifestRegistry.load()
-        if tool_name in registry:
-            manifest_tool = registry.get(tool_name)
-            install_type = manifest_tool.install_type
-            install_package = manifest_tool.install_package
-            install_bin = manifest_tool.install_bin
-            install_component = manifest_tool.install_component
-            channel_override = manifest_tool.update_channel
+        for lookup_name in lookup_names:
+            if lookup_name in registry:
+                manifest_tool = registry.get(lookup_name)
+                install_type = manifest_tool.install_type
+                install_package = manifest_tool.install_package
+                install_bin = manifest_tool.install_bin
+                install_component = manifest_tool.install_component
+                channel_override = manifest_tool.update_channel
+                break
     except (OSError, KeyError, RuntimeError, ValueError):
         pass
 
@@ -283,8 +285,7 @@ def check_tool_version(
         probe_argv0=command[0] if command else None,
         which=shutil.which,
     )
-    if channel_path is not None:
-        info.binary_path = str(channel_path)
+    info.binary_path = str(channel_path) if channel_path is not None else None
 
     try:
         # Run the tool with --version flag (unless caller already included it)

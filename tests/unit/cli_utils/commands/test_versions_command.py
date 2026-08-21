@@ -256,3 +256,33 @@ def test_check_tool_version_clippy_resolves_cargo_clippy() -> None:
         )
 
     assert_that(info.binary_path).is_equal_to("/Users/me/.cargo/bin/cargo-clippy")
+
+
+def test_check_tool_version_hyphenated_name_uses_manifest_bin() -> None:
+    """Hyphenated plugin names still resolve manifest ``install.bin``."""
+
+    def fake_which(name: str) -> str | None:
+        mapping = {
+            "bash": "/bin/bash",
+            "vue-tsc": "/proj/node_modules/.bin/vue-tsc",
+        }
+        return mapping.get(name)
+
+    with (
+        patch("shutil.which", side_effect=fake_which),
+        patch(
+            "lintro.tools.core.version_parsing.subprocess.run",
+        ) as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="Version 3.0.0\n",
+            stderr="",
+        )
+        info = check_tool_version(
+            "vue-tsc",
+            ["bash", "scripts/ci/resolve-vue-tsc-version.sh"],
+            append_version=False,
+        )
+
+    assert_that(info.binary_path).is_equal_to("/proj/node_modules/.bin/vue-tsc")
