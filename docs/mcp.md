@@ -298,7 +298,15 @@ what lintro requires.
       "below_recommended": false,
       "status": "outdated",
       "error": "Version 0.9.0 is below minimum requirement 0.15.9",
-      "install_hint": "uv pip install 'ruff>=0.15.9'"
+      "install_hint": "uv pip install 'ruff>=0.15.9'",
+      "binary_path": "/proj/.venv/bin/ruff",
+      "advisory": {
+        "tool": "ruff",
+        "installed": "0.9.0",
+        "latest_known": "0.15.9",
+        "channel": "pip",
+        "update_command": "uv pip install --upgrade 'ruff>=0.15.9'"
+      }
     }
   ],
   "summary": { "ok": 28, "outdated": 7, "missing": 2, "total": 37 }

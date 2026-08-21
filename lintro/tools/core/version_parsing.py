@@ -1,6 +1,7 @@
 """Version parsing utilities for tool version checking and validation."""
 
 import re
+import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -12,8 +13,13 @@ from lintro.enums.tool_name import ToolName, normalize_tool_name
 
 # Import actual implementations from version_checking with aliases
 # to avoid name conflicts
+from lintro.tools.core.update_channels import (
+    VersionAdvisory,
+    resolve_channel_binary_path,
+)
 from lintro.tools.core.version_checking import (
     VERSION_CHECK_TIMEOUT,
+    build_outdated_version_advisory,
 )
 from lintro.tools.core.version_checking import (
     get_install_hints as _get_install_hints_impl,
@@ -119,6 +125,8 @@ class ToolVersionInfo:
     version_check_passed: bool = field(default=False)
     below_recommended: bool = field(default=False)
     error_message: str | None = field(default=None)
+    binary_path: str | None = field(default=None)
+    advisory: VersionAdvisory | None = field(default=None)
 
 
 def parse_version(version_str: str) -> Version:
@@ -245,7 +253,39 @@ def check_tool_version(
         install_hint=install_hint,
         # If no requirements, assume check passes
         version_check_passed=not has_requirements,
+        binary_path=shutil.which(command[0]) if command else None,
     )
+
+    install_type = None
+    install_package = None
+    install_bin = None
+    install_component = None
+    channel_override = None
+    try:
+        from lintro.tools.core.tool_registry import ManifestRegistry
+
+        registry = ManifestRegistry.load()
+        for lookup_name in lookup_names:
+            if lookup_name in registry:
+                manifest_tool = registry.get(lookup_name)
+                install_type = manifest_tool.install_type
+                install_package = manifest_tool.install_package
+                install_bin = manifest_tool.install_bin
+                install_component = manifest_tool.install_component
+                channel_override = manifest_tool.update_channel
+                break
+    except (OSError, KeyError, RuntimeError, ValueError):
+        pass
+
+    channel_path = resolve_channel_binary_path(
+        tool_name=tool_name,
+        install_bin=install_bin,
+        install_component=install_component,
+        probe_path=info.binary_path,
+        probe_argv0=command[0] if command else None,
+        which=shutil.which,
+    )
+    info.binary_path = str(channel_path) if channel_path is not None else None
 
     try:
         # Run the tool with --version flag (unless caller already included it)
@@ -310,6 +350,27 @@ def check_tool_version(
                     info.below_recommended = True
             except ValueError:
                 pass
+
+        latest_known = (
+            rec_version
+            if rec_version and rec_version != VERSION_UNKNOWN
+            else min_version
+        )
+        if (
+            info.current_version
+            and latest_known
+            and latest_known != VERSION_UNKNOWN
+            and (not info.version_check_passed or info.below_recommended)
+        ):
+            info.advisory = build_outdated_version_advisory(
+                tool=tool_name,
+                installed=info.current_version,
+                latest_known=latest_known,
+                binary_path=channel_path,
+                install_package=install_package,
+                install_type=install_type,
+                channel_override=channel_override,
+            )
 
     except (subprocess.TimeoutExpired, OSError) as e:
         info.error_message = f"Failed to run version check: {e}"

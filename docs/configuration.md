@@ -633,7 +633,20 @@ lintro doctor --json               # machine-readable output for CI
 
 The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
-`upgrade_hint`.
+`upgrade_hint`. `upgrade_hint` is the install-strategy command (pin conflicts, uv vs
+pip, node package manager). Doctor, `lintro versions --json`, and MCP `lintro_versions`
+always include `advisory` (`null` when the tool is current). When present, that object
+has the detected update channel and a path-heuristic `update_command`. Execute
+`upgrade_hint` to change installs; `update_command` is diagnostic and can disagree with
+`upgrade_hint` when the binary path and the manifest strategy name different managers.
+`binary_path` is the tool binary resolved past cargo/bash wrappers. A `standalone` or
+`unknown` path does not inherit a pip/npm/cargo `update_command` from manifest
+`install.type`.
+
+The human `lintro versions` table labels a tool **OUTDATED** when it meets the minimum
+but trails the recommended pin (`below_recommended`). JSON `version_check_passed` stays
+`true` in that case; only the table status string changed from PASS. The process still
+exits 0.
 
 ### Node.js Package Manager Policy {#node-package-manager-policy}
 
