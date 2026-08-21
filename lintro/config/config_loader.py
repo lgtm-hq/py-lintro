@@ -32,6 +32,7 @@ from lintro.config.review_config import (
 )
 from lintro.config.score_config import ScoreConfig
 from lintro.enums.config_key import ConfigKey
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.path_utils import find_file_upward
 
 try:
@@ -607,6 +608,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
 
     Returns:
         dict[str, Any]: Converted configuration in .lintro-config.yaml format.
+
+    Raises:
+        ValueError: If a nested ``execution`` or ``enforce`` value is not a
+            mapping.
     """
     result: dict[str, Any] = {
         "enforce": {},
@@ -657,21 +662,29 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == "execution":
             # Nested ``[tool.lintro.execution]`` is the structured form of
             # the same keys accepted flat under ``[tool.lintro]``.
-            if isinstance(value, dict):
-                result["execution"].update(
-                    {
-                        nested_key.replace("-", "_"): nested_value
-                        for nested_key, nested_value in value.items()
-                    },
+            if not isinstance(value, dict):
+                actual = "null" if value is None else type(value).__name__
+                raise ValueError(
+                    f"execution must be a mapping, got {actual}.",
                 )
+            result["execution"].update(
+                {
+                    nested_key.replace("-", "_"): nested_value
+                    for nested_key, nested_value in value.items()
+                },
+            )
         elif key_lower == "enforce":
-            if isinstance(value, dict):
-                result["enforce"].update(
-                    {
-                        nested_key.replace("-", "_"): nested_value
-                        for nested_key, nested_value in value.items()
-                    },
+            if not isinstance(value, dict):
+                actual = "null" if value is None else type(value).__name__
+                raise ValueError(
+                    f"enforce must be a mapping, got {actual}.",
                 )
+            result["enforce"].update(
+                {
+                    nested_key.replace("-", "_"): nested_value
+                    for nested_key, nested_value in value.items()
+                },
+            )
         elif key in execution_keys or key.replace("-", "_") in execution_keys:
             # Execution config
             result["execution"][key.replace("-", "_")] = value
@@ -733,40 +746,50 @@ def load_config(
 
     Returns:
         LintroConfig: Loaded configuration.
+
+    Raises:
+        ConfigurationError: When a parsed config value is invalid (for
+            example a null ``tools.<name>`` entry or a non-mapping
+            ``execution`` / ``enforce`` table).
     """
     data: dict[str, Any] = {}
     resolved_path: str | None = None
 
-    # Try explicit path first
-    if config_path:
-        path = Path(config_path)
-        if path.exists():
-            data = _load_yaml_file(path)
-            resolved_path = str(path.resolve())
-            logger.debug(f"Loaded config from explicit path: {resolved_path}")
-        else:
-            logger.warning(f"Config file not found: {config_path}")
+    try:
+        # Try explicit path first
+        if config_path:
+            path = Path(config_path)
+            if path.exists():
+                data = _load_yaml_file(path)
+                resolved_path = str(path.resolve())
+                logger.debug(f"Loaded config from explicit path: {resolved_path}")
+            else:
+                logger.warning(f"Config file not found: {config_path}")
 
-    # Try searching for .lintro-config.yaml
-    if not data:
-        found_path = _find_config_file()
-        if found_path:
-            data = _load_yaml_file(found_path)
-            resolved_path = str(found_path.resolve())
-            logger.debug(f"Loaded config from: {resolved_path}")
+        # Try searching for .lintro-config.yaml
+        if not data:
+            found_path = _find_config_file()
+            if found_path:
+                data = _load_yaml_file(found_path)
+                resolved_path = str(found_path.resolve())
+                logger.debug(f"Loaded config from: {resolved_path}")
 
-    # Fall back to pyproject.toml
-    if not data and allow_pyproject_fallback:
-        pyproject_data, pyproject_path = _load_pyproject_fallback()
-        if pyproject_data:
-            data = _convert_pyproject_to_config(pyproject_data)
-            resolved_path = str(pyproject_path.resolve()) if pyproject_path else None
-            logger.debug(
-                "Using [tool.lintro] from pyproject.toml. "
-                "Consider migrating to .lintro-config.yaml",
-            )
+        # Fall back to pyproject.toml
+        if not data and allow_pyproject_fallback:
+            pyproject_data, pyproject_path = _load_pyproject_fallback()
+            if pyproject_data:
+                data = _convert_pyproject_to_config(pyproject_data)
+                resolved_path = (
+                    str(pyproject_path.resolve()) if pyproject_path else None
+                )
+                logger.debug(
+                    "Using [tool.lintro] from pyproject.toml. "
+                    "Consider migrating to .lintro-config.yaml",
+                )
 
-    return build_config_from_dict(data, resolved_path=resolved_path)
+        return build_config_from_dict(data, resolved_path=resolved_path)
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
 
 
 def build_config_from_dict(

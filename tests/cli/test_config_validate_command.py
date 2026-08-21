@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
+from lintro.config.config_loader import clear_config_cache
 from lintro.enums.validation_code import ValidationCode
 
 
@@ -21,6 +23,18 @@ def cli_runner() -> CliRunner:
         CliRunner: A Click test runner instance.
     """
     return CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_cache() -> Iterator[None]:
+    """Clear the config cache around every test in this module.
+
+    Yields:
+        None: Control returns to the test body.
+    """
+    clear_config_cache()
+    yield
+    clear_config_cache()
 
 
 def test_validate_valid_config_exits_zero(cli_runner: CliRunner) -> None:
@@ -269,14 +283,11 @@ def test_config_show_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:
     Args:
         cli_runner: Click test runner instance.
     """
-    from lintro.config.config_loader import clear_config_cache
-
     with cli_runner.isolated_filesystem():
         Path(".lintro-config.yaml").write_text(
             "tools:\n  ruff:\n",
             encoding="utf-8",
         )
-        clear_config_cache()
 
         result = cli_runner.invoke(cli, ["config", "show"])
 
@@ -293,15 +304,12 @@ def test_check_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:
     Args:
         cli_runner: Click test runner instance.
     """
-    from lintro.config.config_loader import clear_config_cache
-
     with cli_runner.isolated_filesystem():
         Path(".lintro-config.yaml").write_text(
             "tools:\n  ruff:\n",
             encoding="utf-8",
         )
         Path("sample.py").write_text("x = 1\n", encoding="utf-8")
-        clear_config_cache()
 
         result = cli_runner.invoke(cli, ["check", "sample.py"])
 

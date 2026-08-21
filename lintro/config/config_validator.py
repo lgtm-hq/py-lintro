@@ -246,6 +246,9 @@ def _check_tool_names(
 ) -> None:
     """Warn about unknown tool names and reject non-mapping/non-bool entries.
 
+    Non-string keys (YAML ``3.14:`` or ``true:``) are reported as
+    INVALID_TYPE instead of raising ``AttributeError`` on ``.lower()``.
+
     Args:
         data: The ``tools`` mapping.
         warnings: List to append unknown-tool findings to.
@@ -253,6 +256,15 @@ def _check_tool_names(
     """
     known = known_tool_names()
     for name, tool_data in data.items():
+        if not isinstance(name, str):
+            errors.append(
+                ValidationMessage(
+                    code=ValidationCode.INVALID_TYPE,
+                    message=(f"tool name must be a string, got {type(name).__name__}."),
+                    location="tools",
+                ),
+            )
+            continue
         if name.lower() not in known:
             warnings.append(
                 ValidationMessage(
@@ -523,7 +535,17 @@ def _check_raw_pyproject_lintro(
                 continue
             _check_tool_names(value, warnings, errors)
             continue
-        if key_lower in typed_sections and isinstance(value, dict):
+        if key_lower in typed_sections:
+            if not isinstance(value, dict):
+                actual = "null" if value is None else type(value).__name__
+                errors.append(
+                    ValidationMessage(
+                        code=ValidationCode.INVALID_TYPE,
+                        message=(f"'{key_lower}' must be a mapping, got {actual}."),
+                        location=f"tool.lintro.{key_lower}",
+                    ),
+                )
+                continue
             _check_unknown_keys(
                 value,
                 typed_sections[key_lower],

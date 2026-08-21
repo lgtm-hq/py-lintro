@@ -19,6 +19,7 @@ from rich.table import Table
 from lintro.cli_utils.commands.init import init_command
 from lintro.config import LintroConfig, get_config
 from lintro.config.config_validator import ValidationResult, validate_config_file
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.unified_config import (
     _load_native_tool_config,
     get_ordered_tools,
@@ -182,7 +183,7 @@ def _run_config_report(
     console = Console()
     try:
         config = get_config(reload=True)
-    except ValueError as exc:
+    except ConfigurationError as exc:
         click.echo(str(exc), err=True)
         raise SystemExit(1) from exc
 

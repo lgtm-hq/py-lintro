@@ -21,6 +21,7 @@ from lintro.config.config_loader import (
 )
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
+from lintro.exceptions.errors import ConfigurationError
 from lintro.plugins import discovery
 
 
@@ -205,6 +206,31 @@ def test_parse_tools_config_rejects_null_entry() -> None:
     """A null ``tools.<name>`` value must raise ValueError."""
     with pytest.raises(ValueError, match="tools.ruff must be a mapping or boolean"):
         _parse_tools_config({"ruff": None})
+
+
+def test_convert_scalar_execution_raises() -> None:
+    """A scalar ``[tool.lintro] execution`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="execution must be a mapping"):
+        _convert_pyproject_to_config({"execution": False})
+
+
+def test_convert_scalar_enforce_raises() -> None:
+    """A scalar ``[tool.lintro] enforce`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="enforce must be a mapping"):
+        _convert_pyproject_to_config({"enforce": 1})
+
+
+def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:
+    """Runtime load must wrap a null tool entry as ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  ruff:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tools.ruff must be a mapping"):
+        load_config(config_path=str(config_file))
 
 
 def test_load_yaml_config_with_defaults(tmp_path: Path) -> None:

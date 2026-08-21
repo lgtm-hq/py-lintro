@@ -14,6 +14,7 @@ import click
 from lintro.api import core as api
 from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 
 # Constants
@@ -272,7 +273,7 @@ def check_command(
             fail_under=fail_under,
             no_art=no_art,
         )
-    except ValueError as exc:
+    except ConfigurationError as exc:
         click.echo(str(exc), err=True)
         raise SystemExit(1) from exc
 

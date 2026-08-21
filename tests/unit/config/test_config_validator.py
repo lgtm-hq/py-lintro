@@ -481,6 +481,45 @@ def test_scalar_tool_entry_is_error(write_config: Callable[..., Path]) -> None:
     assert_that(result.errors[0].message).contains("mapping or boolean")
 
 
+def test_non_string_tool_key_is_error(write_config: Callable[..., Path]) -> None:
+    """A numeric ``tools:`` key must be INVALID_TYPE, not a traceback.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config("tools:\n  3.14:\n    enabled: true\n")
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].message).contains("tool name must be a string")
+
+
+def test_pyproject_scalar_execution_is_error(
+    write_config: Callable[..., Path],
+) -> None:
+    """A scalar ``[tool.lintro] execution = false`` entry is INVALID_TYPE.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+execution = false
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].code).is_equal_to(ValidationCode.INVALID_TYPE)
+    assert_that(result.errors[0].message).contains("execution")
+    assert_that(result.errors[0].location).is_equal_to("tool.lintro.execution")
+
+
 def test_string_tool_entry_is_error(write_config: Callable[..., Path]) -> None:
     """A string tool value such as ``tools.ruff: yes`` is INVALID_TYPE.
 
