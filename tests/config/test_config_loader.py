@@ -14,10 +14,13 @@ from lintro.config.config_loader import (
     _parse_execution_config,
     _parse_tool_config,
     _parse_tools_config,
+    _pyproject_lintro_catalog,
     clear_config_cache,
     get_default_config,
     load_config,
 )
+from lintro.config.enforce_config import EnforceConfig
+from lintro.config.execution_config import ExecutionConfig
 from lintro.plugins import discovery
 
 
@@ -170,6 +173,38 @@ def test_execution_settings() -> None:
 
     assert_that(result["execution"]["tool_order"]).is_equal_to("alphabetical")
     assert_that(result["execution"]["fail_fast"]).is_true()
+
+
+def test_convert_nested_execution_and_enforce_tables() -> None:
+    """Nested ``[tool.lintro.execution]`` / ``enforce`` tables must be merged."""
+    result = _convert_pyproject_to_config(
+        {
+            "execution": {"fail_fast": True, "max_fix_retries": 5},
+            "enforce": {"line_length": 100},
+        },
+    )
+
+    assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["execution"]["max_fix_retries"]).is_equal_to(5)
+    assert_that(result["enforce"]["line_length"]).is_equal_to(100)
+
+
+def test_pyproject_catalog_keys_match_model_fields() -> None:
+    """Catalog execution/enforce keys must come from the Pydantic models."""
+    catalog = _pyproject_lintro_catalog()
+
+    assert_that(catalog.execution_keys).is_equal_to(
+        frozenset(ExecutionConfig.model_fields),
+    )
+    assert_that(catalog.enforce_keys).is_equal_to(
+        frozenset(EnforceConfig.model_fields),
+    )
+
+
+def test_parse_tools_config_rejects_null_entry() -> None:
+    """A null ``tools.<name>`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="tools.ruff must be a mapping or boolean"):
+        _parse_tools_config({"ruff": None})
 
 
 def test_load_yaml_config_with_defaults(tmp_path: Path) -> None:
@@ -443,3 +478,16 @@ def test_plugin_cannot_shadow_reserved_config_keys(
     assert_that(result["execution"]["fail_fast"]).is_true()
     assert_that(result["enforce"]["line_length"]).is_equal_to(100)
     assert_that(result["tools"]).is_empty()
+
+
+def test_nested_pyproject_execution_fail_fast_is_applied() -> None:
+    """Valid nested ``[tool.lintro.execution] fail_fast`` must reach LintroConfig."""
+    import tomllib
+
+    from lintro.config.config_loader import build_config_from_dict
+
+    parsed = tomllib.loads("[tool.lintro.execution]\nfail_fast = true\n")
+    converted = _convert_pyproject_to_config(parsed["tool"]["lintro"])
+    config = build_config_from_dict(converted)
+
+    assert_that(config.execution.fail_fast).is_true()

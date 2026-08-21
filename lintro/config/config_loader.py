@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from loguru import logger
 
@@ -282,6 +282,10 @@ def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig
 def _parse_tools_config(data: dict[str, Any]) -> dict[str, LintroToolConfig]:
     """Parse all tool configurations.
 
+    Each ``tools.<name>`` value must be a mapping (including ``{}``) or a
+    boolean. A bare YAML entry such as ``tools.ruff:`` is null and is
+    rejected.
+
     Args:
         data: Raw 'tools' section from config.
 
@@ -488,18 +492,38 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     return ScoreConfig(**filtered)
 
 
-def _pyproject_lintro_catalog() -> tuple[set[str], dict[str, str], set[str]]:
+class _PyprojectLintroCatalog(NamedTuple):
+    """Name catalog shared by the pyproject converter and validator.
+
+    Attributes:
+        known_tools: Tool names including hyphen/underscore aliases.
+        tool_aliases: Alias-to-canonical tool name map.
+        reserved_keys: Non-tool keys reserved under ``[tool.lintro]``.
+        execution_keys: ``ExecutionConfig`` field names.
+        enforce_keys: ``EnforceConfig`` field names.
+    """
+
+    known_tools: set[str]
+    tool_aliases: dict[str, str]
+    reserved_keys: set[str]
+    execution_keys: frozenset[str]
+    enforce_keys: frozenset[str]
+
+
+def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
     """Return known tools, aliases, and reserved keys for ``[tool.lintro]``.
 
     Shared by the pyproject converter and the config validator so YAML
     ``tools:`` entries and TOML tool tables accept the same name set
     (``ToolName``, legacy aliases, and installed plugins). Plugin names come
     from :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`, which
-    does not trigger a discovery pass.
+    does not trigger a discovery pass. Execution and enforce key sets come
+    from the Pydantic models so the converter and validator cannot drift.
 
     Returns:
-        tuple[set[str], dict[str, str], set[str]]: Known tool names (including
-            aliases), alias-to-canonical map, and reserved non-tool keys.
+        _PyprojectLintroCatalog: Known tool names (including aliases),
+            alias-to-canonical map, reserved non-tool keys, and the
+            execution/enforce field sets.
     """
     # Inline imports: ToolName is a static StrEnum that does not trigger
     # the plugin registry. Discovery is imported here to avoid a circular
@@ -513,23 +537,14 @@ def _pyproject_lintro_catalog() -> tuple[set[str], dict[str, str], set[str]]:
     }
     tool_aliases = dict(LEGACY_TOOL_SECTION_ALIASES)
 
-    execution_keys = {
-        "enabled_tools",
-        "tool_order",
-        "fail_fast",
-        "parallel",
-        "max_workers",
-        "auto_install_deps",
-        "max_fix_retries",
-        "artifacts",
-    }
-    enforce_keys = {"line_length", "target_python"}
+    execution_keys = frozenset(ExecutionConfig.model_fields)
+    enforce_keys = frozenset(EnforceConfig.model_fields)
     externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
         PYPROJECT_ORDERING_KEYS,
     )
     reserved_keys = (
-        execution_keys
-        | enforce_keys
+        set(execution_keys)
+        | set(enforce_keys)
         | externally_handled_sections
         | {
             "ai",
@@ -558,7 +573,13 @@ def _pyproject_lintro_catalog() -> tuple[set[str], dict[str, str], set[str]]:
                 tool_aliases.setdefault(variant, plugin_name)
 
     known_tools.update(tool_aliases.keys())
-    return known_tools, tool_aliases, reserved_keys
+    return _PyprojectLintroCatalog(
+        known_tools=known_tools,
+        tool_aliases=tool_aliases,
+        reserved_keys=reserved_keys,
+        execution_keys=execution_keys,
+        enforce_keys=enforce_keys,
+    )
 
 
 def known_config_tool_names() -> frozenset[str]:
@@ -571,8 +592,8 @@ def known_config_tool_names() -> frozenset[str]:
     Returns:
         frozenset[str]: Recognized tool identifiers.
     """
-    known_tools, _aliases, _reserved = _pyproject_lintro_catalog()
-    return frozenset(known_tools)
+    catalog = _pyproject_lintro_catalog()
+    return frozenset(catalog.known_tools)
 
 
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
@@ -598,22 +619,11 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "output": {},
     }
 
-    known_tools, tool_aliases, _reserved_keys = _pyproject_lintro_catalog()
-
-    # Known execution settings
-    execution_keys = {
-        "enabled_tools",
-        "tool_order",
-        "fail_fast",
-        "parallel",
-        "max_workers",
-        "auto_install_deps",
-        "max_fix_retries",
-        "artifacts",
-    }
-
-    # Known enforce settings (formerly global)
-    enforce_keys = {"line_length", "target_python"}
+    catalog = _pyproject_lintro_catalog()
+    known_tools = catalog.known_tools
+    tool_aliases = catalog.tool_aliases
+    execution_keys = catalog.execution_keys
+    enforce_keys = catalog.enforce_keys
 
     # Keys and sections that are valid under [tool.lintro] but are parsed by
     # other loaders, not by this converter. Listing them keeps the unknown-key
@@ -644,6 +654,24 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
                     continue
                 nested_canonical = tool_aliases.get(nested_lower, nested_lower)
                 result["tools"].setdefault(nested_canonical, nested_value)
+        elif key_lower == "execution":
+            # Nested ``[tool.lintro.execution]`` is the structured form of
+            # the same keys accepted flat under ``[tool.lintro]``.
+            if isinstance(value, dict):
+                result["execution"].update(
+                    {
+                        nested_key.replace("-", "_"): nested_value
+                        for nested_key, nested_value in value.items()
+                    },
+                )
+        elif key_lower == "enforce":
+            if isinstance(value, dict):
+                result["enforce"].update(
+                    {
+                        nested_key.replace("-", "_"): nested_value
+                        for nested_key, nested_value in value.items()
+                    },
+                )
         elif key in execution_keys or key.replace("-", "_") in execution_keys:
             # Execution config
             result["execution"][key.replace("-", "_")] = value

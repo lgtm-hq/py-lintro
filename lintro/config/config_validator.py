@@ -487,7 +487,9 @@ def _check_raw_pyproject_lintro(
         warnings: List to append unknown-key/tool findings to.
         errors: List to append type findings to.
     """
-    known_tools, _aliases, reserved_keys = _pyproject_lintro_catalog()
+    catalog = _pyproject_lintro_catalog()
+    known_tools = catalog.known_tools
+    reserved_keys = catalog.reserved_keys
     known = frozenset(known_tools)
 
     nested_tool_tables = ("tool", "tools")
@@ -647,7 +649,7 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         ValidationResult: Structured validation outcome.
     """
     explicit = path is not None
-    if explicit:
+    if path is not None:
         config_path = Path(path)
         if not config_path.exists():
             return ValidationResult(

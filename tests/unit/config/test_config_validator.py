@@ -280,6 +280,49 @@ def test_malformed_yaml_is_error(write_config: Callable[..., Path]) -> None:
     assert_that(result.errors[0].message).contains("parse")
 
 
+def test_pyproject_nested_execution_invalid_max_fix_retries(
+    write_config: Callable[..., Path],
+) -> None:
+    """Invalid nested ``[tool.lintro.execution]`` values must be INVALID.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro.execution]
+max_fix_retries = "not-an-int"
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].message).contains("max_fix_retries")
+
+
+def test_pyproject_nested_execution_fail_fast_valid(
+    write_config: Callable[..., Path],
+) -> None:
+    """A valid nested ``[tool.lintro.execution] fail_fast`` must validate.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro.execution]
+fail_fast = true
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_true()
+
+
 def test_pyproject_typed_error_is_reported(
     write_config: Callable[..., Path],
 ) -> None:

@@ -145,6 +145,11 @@ tools:
     auto_install: true # Override global auto_install for this tool only
 ```
 
+Each `tools.<name>` value must be a mapping (`ruff: {}` or `ruff: {enabled: true}`)
+or a boolean (`ruff: true` / `ruff: false`). A bare `tools.ruff:` is YAML null and is
+rejected by `check`, `format`, and `config show` with exit 1. Use
+`lintro config validate` for a structured report.
+
 ### Configuration Report Command
 
 Use `lintro config` to view the current configuration status for all tools:
@@ -597,6 +602,10 @@ enabled = false
 [tool.lintro.tool.trufflehog]
 enabled = false
 ```
+
+`[tool.lintro.execution]` and `[tool.lintro.enforce]` nested tables are equivalent to
+the YAML `execution:` / `enforce:` sections. Flat keys such as `fail_fast` under
+`[tool.lintro]` also work.
 
 `pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
 configuration source and these tables are not consulted.

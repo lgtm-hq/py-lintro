@@ -263,6 +263,55 @@ def test_config_show_subcommand(cli_runner: CliRunner) -> None:
         assert_that(data["tool_execution_order"][0]).contains("tool", "priority")
 
 
+def test_config_show_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:
+    """``config show`` must exit 1 on a null ``tools.<name>:`` entry.
+
+    Args:
+        cli_runner: Click test runner instance.
+    """
+    from lintro.config.config_loader import clear_config_cache
+
+    with cli_runner.isolated_filesystem():
+        Path(".lintro-config.yaml").write_text(
+            "tools:\n  ruff:\n",
+            encoding="utf-8",
+        )
+        clear_config_cache()
+
+        result = cli_runner.invoke(cli, ["config", "show"])
+
+        assert_that(result.exit_code).is_equal_to(1)
+        assert_that(result.output).contains(
+            "tools.ruff must be a mapping or boolean",
+        )
+        assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_check_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:
+    """``check`` must exit 1 on a null ``tools.<name>:`` entry.
+
+    Args:
+        cli_runner: Click test runner instance.
+    """
+    from lintro.config.config_loader import clear_config_cache
+
+    with cli_runner.isolated_filesystem():
+        Path(".lintro-config.yaml").write_text(
+            "tools:\n  ruff:\n",
+            encoding="utf-8",
+        )
+        Path("sample.py").write_text("x = 1\n", encoding="utf-8")
+        clear_config_cache()
+
+        result = cli_runner.invoke(cli, ["check", "sample.py"])
+
+        assert_that(result.exit_code).is_equal_to(1)
+        assert_that(result.output).contains(
+            "tools.ruff must be a mapping or boolean",
+        )
+        assert_that(result.output).does_not_contain("Traceback")
+
+
 def test_config_group_json_flag_forwards_to_show(cli_runner: CliRunner) -> None:
     """``config --json show`` should emit the same JSON report as ``show --json``.
 

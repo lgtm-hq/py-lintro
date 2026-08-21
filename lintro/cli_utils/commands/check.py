@@ -245,32 +245,36 @@ def check_command(
     )
 
     # Run the AI-aware pipeline: execute, AI-enhance, render.
-    exit_code: int = run_lint_with_ai(
-        action=DEFAULT_ACTION,
-        paths=path_list,
-        tools=tools,
-        tool_options=combined_tool_options,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        output_file=output,
-        incremental=incremental,
-        diff_base=diff_base,
-        debug=debug,
-        stream=stream,
-        no_log=no_log,
-        auto_install=auto_install,
-        yes=yes,
-        ai_fix=ai_fix,
-        ignore_conflicts=ignore_conflicts,
-        transport=transport,
-        score=score,
-        fail_under=fail_under,
-        no_art=no_art,
-    )
+    try:
+        exit_code: int = run_lint_with_ai(
+            action=DEFAULT_ACTION,
+            paths=path_list,
+            tools=tools,
+            tool_options=combined_tool_options,
+            exclude=exclude,
+            include_venv=include_venv,
+            group_by=group_by,
+            output_format=output_format,
+            verbose=verbose,
+            raw_output=raw_output,
+            output_file=output,
+            incremental=incremental,
+            diff_base=diff_base,
+            debug=debug,
+            stream=stream,
+            no_log=no_log,
+            auto_install=auto_install,
+            yes=yes,
+            ai_fix=ai_fix,
+            ignore_conflicts=ignore_conflicts,
+            transport=transport,
+            score=score,
+            fail_under=fail_under,
+            no_art=no_art,
+        )
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1) from exc
 
     # Exit with code only; CLI uses this as process exit code and avoids any
     # additional trailing output after the logger's ASCII art.

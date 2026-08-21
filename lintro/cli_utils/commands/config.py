@@ -174,9 +174,17 @@ def _run_config_report(
         verbose: Show detailed configuration including native tool configs.
         json_output: Output configuration as JSON.
         export_path: Path to export effective configuration as YAML file.
+
+    Raises:
+        SystemExit: When the config cannot be parsed (for example a null
+            ``tools.<name>:`` entry). Exits 1 with the parse error.
     """
     console = Console()
-    config = get_config(reload=True)
+    try:
+        config = get_config(reload=True)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1) from exc
 
     if export_path:
         _export_yaml(config=config, export_path=export_path, console=console)
