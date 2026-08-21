@@ -70,3 +70,24 @@ def test_normalize_tool_name_invalid_raises() -> None:
     """normalize_tool_name raises ValueError for unknown tool."""
     with pytest.raises(ValueError, match="Unknown tool name"):
         normalize_tool_name("nonexistent")
+
+
+def test_tool_name_aliases_include_hyphen_and_underscore() -> None:
+    """tool_name_aliases returns both spellings without duplicates."""
+    from lintro.enums.tool_name import tool_name_aliases
+
+    assert_that(tool_name_aliases("astro_check")).is_equal_to(
+        ("astro_check", "astro-check"),
+    )
+    assert_that(tool_name_aliases("astro-check")).is_equal_to(
+        ("astro-check", "astro_check"),
+    )
+    assert_that(tool_name_aliases("ruff")).is_equal_to(("ruff",))
+
+
+def test_tool_name_aliases_empty_input() -> None:
+    """Empty or whitespace-only names yield a single empty alias."""
+    from lintro.enums.tool_name import tool_name_aliases
+
+    assert_that(tool_name_aliases("")).is_equal_to(("",))
+    assert_that(tool_name_aliases("   ")).is_equal_to(("",))

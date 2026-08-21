@@ -52,6 +52,29 @@ class ToolName(StrEnum):
     YAMLLINT = auto()
 
 
+def tool_name_aliases(name: str) -> tuple[str, ...]:
+    """Return hyphen and underscore spellings for a tool name.
+
+    Registry keys mix the two forms (``astro-check`` vs ``astro_check``).
+    Callers that look up tools or snapshots should try every alias.
+
+    Args:
+        name: Raw tool name (any spelling or case).
+
+    Returns:
+        Deduplicated lowercase candidates, requested spelling first.
+    """
+    lowered = name.strip().lower()
+    aliases: list[str] = [lowered]
+    underscored = lowered.replace("-", "_")
+    hyphenated = lowered.replace("_", "-")
+    if underscored not in aliases:
+        aliases.append(underscored)
+    if hyphenated not in aliases:
+        aliases.append(hyphenated)
+    return tuple(aliases)
+
+
 def normalize_tool_name(value: str | ToolName) -> ToolName:
     """Normalize a raw name to ToolName.
 

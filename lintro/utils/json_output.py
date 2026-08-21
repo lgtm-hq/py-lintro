@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
+from lintro.enums.tool_result_status import status_for_tool_result
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.tool_metadata import normalize_tool_metadata
@@ -107,7 +108,10 @@ def serialize_tool_result(
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
         ``output``; plus ``parse_failures_count`` when set,
         ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
-        present, and ``issues`` when any exist.
+        present, and ``issues`` when any exist. ``status`` is always one of
+        ``ok``, ``failed``, ``skipped``, or ``unavailable``
+        (:class:`~lintro.enums.tool_result_status.ToolResultStatus`).
+        Unavailable tools also set ``unavailable: true``.
     """
     merged_issues = merge_detected_and_remaining(
         getattr(result, "initial_issues", None),
@@ -115,13 +119,16 @@ def serialize_tool_result(
     )
     data: dict[str, Any] = {
         "tool": result.name,
-        "success": getattr(result, "success", True),
+        "success": getattr(result, "success", False),
         "issues_count": len(merged_issues),
         "skipped": getattr(result, "skipped", False),
         "skip_reason": getattr(result, "skip_reason", None),
         "timed_out": bool(getattr(result, "timed_out", False)),
         "output": getattr(result, "output", ""),
     }
+    if getattr(result, "unavailable", False):
+        data["unavailable"] = True
+    data["status"] = status_for_tool_result(result)
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
