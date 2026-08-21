@@ -43,12 +43,13 @@ test: mypy
     @echo "  - HTML: htmlcov/index.html"
     @echo "  - XML: coverage.xml"
 
-# Run integration tests
+# Run integration tests (the real runner, not the local-test.sh stub)
 test-integration:
     @echo "Running integration tests..."
-    ./scripts/local/local-test.sh
+    ./scripts/local/run-tests.sh
 
-# Run unit tests only (faster); pass extra pytest args after the recipe name
+# Run unit tests only (faster). Pass pytest flags after `--`
+# so just does not consume them (e.g. `just test-unit -- -v`).
 test-unit *ARGS:
     uv run pytest tests/unit {{ ARGS }}
 
@@ -57,9 +58,10 @@ lint: mypy
     @echo "Running lintro check..."
     uv run lintro check .
 
-# Run linting with specific tools (e.g. `just lint-tools mypy,ruff`)
+# Run linting with specific tools (spaces become commas for --tools)
+# e.g. `just lint-tools mypy ruff` or `just lint-tools mypy,ruff`
 lint-tools +TOOLS:
-    uv run lintro check . --tools {{ TOOLS }}
+    uv run lintro check . --tools "{{ replace(TOOLS, " ", ",") }}"
 
 # Format code with lintro
 format:

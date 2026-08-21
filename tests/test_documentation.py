@@ -524,10 +524,14 @@ def test_justfile_contract() -> None:
     assert_that(justfile).does_not_contain("just.systems/install.sh")
     assert_that(contributing).does_not_contain("just.systems/install.sh")
     assert_that(justfile).contains('"bash", "-euo", "pipefail", "-c"')
-    assert_that(justfile).contains("scripts/local/local-test.sh")
+    assert_that(justfile).contains("scripts/local/run-tests.sh")
+    assert_that(justfile).does_not_contain("scripts/local/local-test.sh")
+    assert_that(justfile).contains('replace(TOOLS, " ", ",")')
     assert_that(justfile).contains("docker build --target full")
     assert_that(justfile).contains("./scripts/ci/site/dev.sh")
     assert_that(justfile).contains("./scripts/ci/site/build.sh")
+    assert_that(contributing).contains("just test-unit --")
+    assert_that(contributing).does_not_contain("just test-unit -v")
 
     def has_recipe(name: str) -> bool:
         return (
@@ -564,7 +568,7 @@ def test_justfile_contract() -> None:
 
     just_bin = shutil.which("just")
     if just_bin is None:
-        return
+        pytest.skip("`just` binary not installed; skipping just --list parse check")
 
     try:
         result = subprocess.run(  # nosec B603 - fixed argv, shell=False
