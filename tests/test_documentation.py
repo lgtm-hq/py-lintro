@@ -542,6 +542,7 @@ def test_justfile_contract() -> None:
         "lint",
         "format",
         "mypy",
+        "bench",
         "test",
         "test-integration",
         "test-unit",

@@ -161,7 +161,7 @@ Lintro runs its tools in parallel and is built for fast local iteration, but we 
 going to quote a speed number we have not measured on _your_ machine. Reproducible
 hyperfine CLI-overhead benchmarks live in [`benchmarks/`](../benchmarks/README.md)
 ([#598](https://github.com/lgtm-hq/py-lintro/issues/598); tracking epic
-[#597](https://github.com/lgtm-hq/py-lintro/issues/597)). Run `make bench` locally and
+[#597](https://github.com/lgtm-hq/py-lintro/issues/597)). Run `just bench` locally and
 prefer relative overhead over absolute milliseconds.
 
 ## Summary

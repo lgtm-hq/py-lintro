@@ -71,6 +71,12 @@ mypy:
     @echo "Running mypy type checking via lintro..."
     uv run lintro check . --tools mypy
 
+# Hyperfine CLI overhead benchmarks (lintro vs direct tools). See #598.
+# Requires hyperfine on PATH: brew/cargo install hyperfine
+bench:
+    @echo "Running hyperfine CLI overhead benchmarks..."
+    ./benchmarks/run-hyperfine.sh
+
 # Build Docker image (full target)
 docker-build:
     @echo "Building Docker image..."
