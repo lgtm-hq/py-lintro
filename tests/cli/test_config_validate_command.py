@@ -200,6 +200,79 @@ def test_validate_invalid_json_reports_error_code(cli_runner: CliRunner) -> None
         )
 
 
+def test_validate_missing_explicit_path_is_not_found(
+    cli_runner: CliRunner,
+) -> None:
+    """``validate --path`` on a missing file is NOT_FOUND, not auto-detect.
+
+    Args:
+        cli_runner: Click test runner instance.
+    """
+    with cli_runner.isolated_filesystem():
+        Path(".lintro-config.yaml").write_text(
+            "tools:\n  ruff:\n    enabled: true\n",
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(
+            cli,
+            ["config", "validate", "--path", "nope.yaml", "--json"],
+        )
+
+        assert_that(result.exit_code).is_equal_to(1)
+        data = json.loads(result.output)
+        assert_that(data["valid"]).is_false()
+        assert_that(data["errors"][0]["code"]).is_equal_to(
+            ValidationCode.NOT_FOUND.value,
+        )
+
+
+def test_unmatched_group_export_on_validate_errors(
+    cli_runner: CliRunner,
+) -> None:
+    """``config --export`` must not be silently dropped on validate.
+
+    Args:
+        cli_runner: Click test runner instance.
+    """
+    with cli_runner.isolated_filesystem():
+        Path(".lintro-config.yaml").write_text(
+            "tools:\n  ruff:\n    enabled: true\n",
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(
+            cli,
+            ["config", "--export", "out.yaml", "validate"],
+        )
+
+        assert_that(result.exit_code).is_not_equal_to(0)
+        assert_that(result.output).contains("--export")
+        assert_that(Path("out.yaml").exists()).is_false()
+
+
+def test_format_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:
+    """``format`` must exit 1 on a null ``tools.<name>:`` entry.
+
+    Args:
+        cli_runner: Click test runner instance.
+    """
+    with cli_runner.isolated_filesystem():
+        Path(".lintro-config.yaml").write_text(
+            "tools:\n  ruff:\n",
+            encoding="utf-8",
+        )
+        Path("sample.py").write_text("x = 1\n", encoding="utf-8")
+
+        result = cli_runner.invoke(cli, ["format", "sample.py"])
+
+        assert_that(result.exit_code).is_equal_to(1)
+        assert_that(result.output).contains(
+            "tools.ruff must be a mapping or boolean",
+        )
+        assert_that(result.output).does_not_contain("Traceback")
+
+
 def test_validate_missing_config_errors(cli_runner: CliRunner) -> None:
     """Validation with no config present should error and exit non-zero.
 

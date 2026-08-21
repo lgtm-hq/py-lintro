@@ -223,7 +223,8 @@ def check_command(
         no_art: bool: Suppress the decorative ASCII art printed after the run.
 
     Raises:
-        SystemExit: Process exit with the aggregated exit code from tools.
+        SystemExit: Process exit with the aggregated exit code from tools,
+            or 1 when the config cannot be parsed.
     """
     # Handle cache clearing
     if no_cache:

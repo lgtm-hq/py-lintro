@@ -129,6 +129,10 @@ def _forward_group_options(
         verbose: Whether ``--verbose`` was given on the group.
         json_output: Whether ``--json`` was given on the group.
         export_path: Value of ``--export`` given on the group, if any.
+
+    Raises:
+        click.UsageError: When a group flag is not accepted by the
+            invoked subcommand (for example ``--export`` with validate).
     """
     provided: dict[str, Any] = {}
     if verbose:
@@ -140,18 +144,32 @@ def _forward_group_options(
     if not provided:
         return
 
+    invoked = ctx.invoked_subcommand
+    if invoked is None:
+        return
+
     group = cast(click.Group, ctx.command)
-    default_map: dict[str, Any] = dict(ctx.default_map or {})
-    for name, command in group.commands.items():
-        param_names = {param.name for param in command.params}
-        overrides = {
-            key: value for key, value in provided.items() if key in param_names
+    command = group.get_command(ctx, invoked)
+    if command is None:
+        return
+
+    param_names = {param.name for param in command.params}
+    leftover = [key for key in provided if key not in param_names]
+    if leftover:
+        flag_names = {
+            "verbose": "--verbose",
+            "json_output": "--json",
+            "export_path": "--export",
         }
-        if not overrides:
-            continue
-        merged: dict[str, Any] = dict(default_map.get(name) or {})
-        merged.update(overrides)
-        default_map[name] = merged
+        shown = ", ".join(flag_names[key] for key in leftover)
+        raise click.UsageError(
+            f"{shown} cannot be used with 'config {invoked}'.",
+        )
+
+    default_map: dict[str, Any] = dict(ctx.default_map or {})
+    merged: dict[str, Any] = dict(default_map.get(invoked) or {})
+    merged.update(provided)
+    default_map[invoked] = merged
     ctx.default_map = default_map
 
 
