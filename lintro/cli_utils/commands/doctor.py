@@ -704,7 +704,7 @@ def _output_json(
         for r in all_results
         if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
     )
-    tools_json: dict[str, dict[str, str | None]] = {}
+    tools_json: dict[str, dict[str, object]] = {}
     issues: list[dict[str, str]] = []
 
     for r in all_results:

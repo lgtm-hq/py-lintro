@@ -541,7 +541,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         config = get_config(reload=True)
-    except Exception as exc:  # noqa: BLE001 - any parse failure is a report line, not a crash
+    except Exception as exc:  # noqa: BLE001
+        # Any parse failure is a report line, not a crash.
         return None, [
             DoctorCheck(
                 category=DoctorCheckCategory.CONFIG,
@@ -567,7 +568,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         warnings = validate_config_consistency()
-    except Exception as exc:  # noqa: BLE001 - a broken native config must not abort the report
+    except Exception as exc:  # noqa: BLE001
+        # A broken native config must not abort the report.
         warnings = [f"consistency check failed: {exc}"]
 
     if warnings:

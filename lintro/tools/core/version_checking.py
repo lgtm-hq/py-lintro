@@ -375,9 +375,6 @@ def _is_at_least(*, installed: str, latest_known: str) -> bool:
 
     Returns:
         True when installed meets or exceeds latest_known.
-
-    Raises:
-        ValueError: If either version string cannot be parsed.
     """
     from lintro.tools.core.version_parsing import compare_versions
 

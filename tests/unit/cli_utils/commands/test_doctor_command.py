@@ -385,7 +385,9 @@ def test_doctor_outdated_prints_channel_and_strategy_hint() -> None:
 
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("installed via uv tool")
-    assert_that(result.output).contains("Upgrade: uv pip install --upgrade 'ruff>=1.0.0'")
+    assert_that(result.output).contains(
+        "Upgrade: uv pip install --upgrade 'ruff>=1.0.0'",
+    )
     assert_that(result.output).does_not_contain("uv tool upgrade ruff")
 
 
