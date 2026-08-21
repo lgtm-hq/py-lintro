@@ -246,10 +246,11 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(
-        f"derived verdict {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}",
+        f"Any open P2 makes the derived verdict "
+        f"{VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}.",
     )
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(
-        f"alone is {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}",
+        f"Any open P3 alone is {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}.",
     )
     assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
 
