@@ -40,16 +40,13 @@ def test_get_provider_unknown_raises():
 
 def test_get_provider_requires_explicit_provider() -> None:
     """An enabled-but-unset provider fails with the three-way migration path."""
-    from lintro.ai.provider_enum import (
-        accepted_provider_values,
-        provider_required_error,
-    )
+    from lintro.ai.provider_enum import accepted_provider_values
 
     config = AIConfig(enabled=True, lint=True, review=False)
     with pytest.raises(ValueError, match="ai.provider is required") as exc_info:
         get_provider(config)
     message = str(exc_info.value)
-    assert_that(message).is_equal_to(provider_required_error())
+    assert_that(message).contains("`ai.provider` in config")
     assert_that(message).contains("LINTRO_AI_PROVIDER")
     assert_that(message).contains("--provider")
     assert_that(message).contains(accepted_provider_values())

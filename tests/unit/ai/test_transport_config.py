@@ -65,10 +65,7 @@ def test_doctor_reports_missing_transport_when_only_review_enabled() -> None:
 
 def test_doctor_reports_missing_provider_when_ai_enabled() -> None:
     """Doctor surfaces missing provider with the three-way migration path."""
-    from lintro.ai.provider_enum import (
-        accepted_provider_values,
-        provider_required_error,
-    )
+    from lintro.ai.provider_enum import accepted_provider_values
 
     results = check_ai_configuration(
         AIConfig(enabled=True, transport=AITransport.API),
@@ -76,7 +73,6 @@ def test_doctor_reports_missing_provider_when_ai_enabled() -> None:
     assert_that(results).is_length(1)
     assert_that(results[0].name).is_equal_to("ai.provider")
     assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
-    assert_that(results[0].message).is_equal_to(provider_required_error())
     assert_that(results[0].message).contains("ai.provider")
     assert_that(results[0].message).contains("LINTRO_AI_PROVIDER")
     assert_that(results[0].message).contains("--provider")

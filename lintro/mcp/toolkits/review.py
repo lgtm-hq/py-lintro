@@ -288,7 +288,8 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
 
     Raises:
         McpError: :attr:`McpErrorCode.TOOL_UNAVAILABLE` when no AI provider is
-            installed or ``ai.review`` is disabled for this workspace;
+            installed, ``ai.provider`` is unset, or ``ai.review`` is disabled
+            for this workspace;
             :attr:`McpErrorCode.INVALID_INPUT` when an ``LINTRO_AI_*`` overlay
             fails validation.
     """
@@ -326,6 +327,18 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
             detail={
                 "tool": "lintro_review",
                 "reason": "review_disabled",
+                "workspace": str(workspace),
+            },
+        )
+    if ai_config.provider is None:
+        from lintro.ai.provider_enum import provider_required_error
+
+        raise McpError(
+            code=McpErrorCode.TOOL_UNAVAILABLE,
+            message=provider_required_error(),
+            detail={
+                "tool": "lintro_review",
+                "reason": "provider_unavailable",
                 "workspace": str(workspace),
             },
         )

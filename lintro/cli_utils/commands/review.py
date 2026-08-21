@@ -430,7 +430,7 @@ def review_command(
         format_resolved_profile_log(resolved_profile),
     )
 
-    provider = get_provider(effective_ai_config, workspace_root=workspace_root)
+    provider = None
     effective_depth = depth if depth is not None else lintro_config.review.depth
     effective_strictness = ReviewStrictness(
         (strictness or lintro_config.review.strictness.value).lower(),
@@ -456,6 +456,7 @@ def review_command(
         progress_tracker = RichReviewProgress(console=console)
 
     try:
+        provider = get_provider(effective_ai_config, workspace_root=workspace_root)
         result = run_review(
             context,
             provider=provider,
@@ -505,13 +506,14 @@ def review_command(
             ),
         )
     except (AIError, ValueError) as exc:
+        provider_label = str(provider.name) if provider is not None else "unset"
         if post and resolved_pr is not None and effective_repo:
             from lintro.ai.review.github import post_review_error_to_github
 
             with suppress(Exception):
                 post_review_error_to_github(
                     error=exc,
-                    provider=str(provider.name),
+                    provider=provider_label,
                     pr_number=resolved_pr,
                     repo=effective_repo,
                 )
@@ -523,7 +525,7 @@ def review_command(
         if output_format == "json":
             click.echo(
                 render_error_contract_json(
-                    provider=str(provider.name),
+                    provider=provider_label,
                     error=exc,
                 ),
             )

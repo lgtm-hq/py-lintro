@@ -197,6 +197,27 @@ def test_engine_is_built_from_the_raw_ai_mapping(
     assert_that(recorded["cache_ttl"]).is_equal_to(99)
 
 
+def test_unset_provider_fails_before_the_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An enabled run with no provider fails closed at construction."""
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(
+        IdiomReviewPlugin,
+        "_get_lintro_config",
+        lambda _self: LintroConfig(
+            ai={"enabled": True, "lint": True},
+        ),
+    )
+
+    with pytest.raises(ValueError, match="ai.provider is required"):
+        IdiomReviewPlugin().check(
+            [_write_py(tmp_path)],
+            {"enabled": True, "min_confidence": "low"},
+        )
+
+
 def test_min_confidence_filters_low_findings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import provider_required_error
+from lintro.ai.provider_enum import (
+    accepted_provider_values,
+    provider_required_error,
+)
 from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.transcript import maybe_start_transcript
 
@@ -54,10 +57,9 @@ def get_provider(
     try:
         provider_enum = AIProvider(str(config.provider).lower())
     except ValueError as exc:
-        supported = ", ".join(sorted(p.value for p in AIProvider))
         raise ValueError(
             f"Unknown AI provider: '{config.provider}'. "
-            f"Supported providers: {supported}",
+            f"Supported providers: {accepted_provider_values()}",
         ) from exc
 
     provider_classes: dict[AIProvider, tuple[str, str]] = {
