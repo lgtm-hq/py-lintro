@@ -1904,6 +1904,143 @@ def test_sbom_callers_grant_contents_read_only(workflow_name: str) -> None:
     assert_that(permissions).contains_entry({"attestations": "write"})
 
 
+# --- Sigstore release signing (#620) ------------------------------------------
+
+_SHA_PINNED_USES = re.compile(r"^[^@\s]+@[0-9a-f]{40}(\s+#.*)?$")
+_SIGN_DIST_SCRIPT = "scripts/ci/sign-dist-sigstore.sh"
+
+
+def test_pypi_upload_attests_build_provenance() -> None:
+    """The PyPI upload job attests dist provenance with the right permissions."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["pypi-upload"]
+
+    # attestations: write is required for the GitHub Attestations API record.
+    assert_that(job["permissions"]).contains_entry({"attestations": "write"})
+    assert_that(job["permissions"]).contains_entry({"id-token": "write"})
+
+    attest_steps = [
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/attest-build-provenance@")
+    ]
+    assert_that(attest_steps).is_length(1)
+    assert_that(_SHA_PINNED_USES.match(attest_steps[0]["uses"])).is_not_none()
+
+
+def test_sign_artifacts_job_is_scoped_and_pinned() -> None:
+    """Sigstore signing runs only on tag events with least-privilege perms."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["sign-artifacts"]
+
+    # Signing must be gated to release (tag) events only, never branch runs.
+    assert_that(job["if"]).contains("github.ref_type == 'tag'")
+    assert_that(job["if"]).contains("!startsWith(github.ref_name, 'actions-v')")
+    assert_that(job["needs"]).contains("pypi-upload")
+
+    # Keyless Sigstore needs an OIDC token but nothing more than read on contents.
+    assert_that(job["permissions"]).is_equal_to(
+        {
+            "contents": "read",
+            "id-token": "write",
+        },
+    )
+
+    # Every third-party action in the job must be SHA-pinned.
+    used = [step["uses"] for step in job["steps"] if "uses" in step]
+    for uses in used:
+        assert_that(_SHA_PINNED_USES.match(uses)).described_as(uses).is_not_none()
+
+    # The job hardens the runner and drives the dedicated signing script.
+    step_names = [str(step.get("name", "")) for step in job["steps"]]
+    assert_that(step_names).contains("Harden runner")
+    run_steps = [str(step.get("run", "")) for step in job["steps"] if "run" in step]
+    assert_that(run_steps).contains(f"./{_SIGN_DIST_SCRIPT}")
+
+    # The referenced script must exist and be executable, otherwise the job
+    # only fails at runtime on the next tag push.
+    script = _REPO_ROOT / _SIGN_DIST_SCRIPT
+    assert_that(script.is_file()).is_true()
+
+
+def test_sign_artifacts_actions_match_workflow_pins() -> None:
+    """Signing job reuses the same action SHAs as the rest of the workflow."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    jobs = workflow["jobs"]
+
+    def _pins(job: dict[str, Any]) -> dict[str, str]:
+        return {
+            str(step["uses"]).split("@", maxsplit=1)[0]: str(step["uses"])
+            for step in job.get("steps", [])
+            if "uses" in step
+        }
+
+    sign_pins = _pins(job=jobs["sign-artifacts"])
+    other_pins: dict[str, str] = {}
+    for name, job in jobs.items():
+        if name == "sign-artifacts":
+            continue
+        other_pins.update(_pins(job=job))
+
+    for action, uses in sign_pins.items():
+        if action in other_pins:
+            assert_that(uses).described_as(action).is_equal_to(other_pins[action])
+
+
+def test_sign_dist_script_pins_sigstore_version() -> None:
+    """The signing script pins sigstore exactly and Renovate tracks that pin."""
+    script = (_REPO_ROOT / _SIGN_DIST_SCRIPT).read_text(encoding="utf-8")
+
+    match = re.search(r"^SIGSTORE_VERSION=(\d+\.\d+\.\d+)$", script, flags=re.MULTILINE)
+    assert_that(match).is_not_none()
+
+    # uvx must consume the pin, never resolve `sigstore` latest at release time.
+    assert_that(script).contains('uvx --from "sigstore==${SIGSTORE_VERSION}"')
+    assert_that(script).does_not_contain("uvx --from sigstore ")
+
+    renovate = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    managers = [
+        manager
+        for manager in renovate["customManagers"]
+        if any(
+            "sign-dist-sigstore" in pattern
+            for pattern in manager.get("managerFilePatterns", [])
+        )
+    ]
+    assert_that(managers).is_length(1)
+    assert_that(managers[0]["datasourceTemplate"]).is_equal_to("pypi")
+    assert_that(managers[0]["depNameTemplate"]).is_equal_to("sigstore")
+
+
+def test_sign_artifacts_harden_runner_allows_sigstore_endpoints() -> None:
+    """Signing job egress allowlist covers Fulcio, Rekor, and TUF endpoints."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["sign-artifacts"]
+
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = harden["with"]["allowed-endpoints"]
+    for endpoint in (
+        "fulcio.sigstore.dev:443",
+        "rekor.sigstore.dev:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        "oauth2.sigstore.dev:443",
+    ):
+        assert_that(allowed).contains(endpoint)
+
+
+def test_github_release_publishes_signed_artifact() -> None:
+    """The release job attaches the signed artifact (dist + .sigstore bundles)."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["github-release"]
+
+    assert_that(job["needs"]).contains("sign-artifacts")
+    assert_that(job["with"]["artifact-name"]).is_equal_to("python-dist-signed")
+
+
 # --- Binary build job timeouts (#1702) ---------------------------------------
 #
 # No job in build-binary.yml set timeout-minutes, so every binary build
