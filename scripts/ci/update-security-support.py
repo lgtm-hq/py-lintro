@@ -25,10 +25,10 @@ text inside each row's first cell is rewritten; the support marks
 ``.github/SECURITY.md``) and the surrounding column alignment are preserved, so
 the output stays ``prettier``/``markdownlint`` compliant without a reflow pass.
 
-It is wired into ``.github/workflows/release-version-pr.yml`` via the reusable
-workflow's ``version-update-script`` orchestrator, which runs after the version
-is stamped and before the version PR is committed. That job has no Node
-toolchain and blocks npm egress, so only the standard library is used here.
+It is invoked by ``scripts/release/prepare_version_artifacts.py``, the
+``version-update-script`` in ``.github/workflows/release-version-pr.yml``, after
+the version is stamped and before the version PR is committed. That job has no
+Node toolchain and blocks npm egress, so only the standard library is used here.
 
 Run standalone to stamp the repository ``SECURITY.md`` files in place::
 

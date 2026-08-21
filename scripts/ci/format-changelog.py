@@ -11,11 +11,11 @@ prose and list items to 88 columns using the exact greedy word-wrap that
 ``prettier`` applies to markdown, producing byte-for-byte identical output while
 requiring nothing beyond the standard library.
 
-It is wired into ``.github/workflows/release-version-pr.yml`` via the reusable
-workflow's ``version-update-script`` input, which runs after the CHANGELOG is
-written and before the version PR is committed. That job has no Node toolchain
-and blocks npm egress, so a pure-standard-library formatter is used here instead
-of shelling out to ``prettier``.
+It is invoked by ``scripts/release/prepare_version_artifacts.py``, the
+``version-update-script`` in ``.github/workflows/release-version-pr.yml``, after
+the CHANGELOG is written and before the version PR is committed. That job has no
+Node toolchain and blocks npm egress, so a pure-standard-library formatter is
+used here instead of shelling out to ``prettier``.
 
 Run standalone to format the repository CHANGELOG in place::
 

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
-"""Finalize the auto-generated release Version-PR before it is committed.
+"""Standalone CHANGELOG, SECURITY.md, and pin-sync composer.
 
-The release Version-PR generator (lgtm-ci ``reusable-release-version-pr``)
-accepts a single repo-side ``version-update-script`` that runs after the version
-is stamped and the ``CHANGELOG.md`` is written, but before the version PR is
-committed. This orchestrator runs the two repo-side finalizers in order:
+The release Version-PR workflow hook is
+``scripts/release/prepare_version_artifacts.py`` (the ``version-update-script``
+in ``release-version-pr.yml``). That orchestrator runs this composition plus
+SPDX license-data refresh. This script remains a local/standalone helper that
+does not fetch SPDX data:
 
 1. Reflow ``CHANGELOG.md`` to lintro's 88-column markdown budget so the release
    PR passes dogfooding-lint (#1117), via
@@ -21,10 +22,9 @@ committed. This orchestrator runs the two repo-side finalizers in order:
    it reports problems as warnings and never blocks a release.
 
 The finalizer scripts have hyphenated filenames, so they are loaded by path
-rather than imported as packages. That job has no Node toolchain and blocks npm
-egress, so only the standard library is used here.
+rather than imported as packages. Only the standard library is used here.
 
-Run standalone to finalize the repository in place::
+Run standalone::
 
     python scripts/ci/finalize-version-pr.py
 """
