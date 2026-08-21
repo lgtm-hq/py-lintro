@@ -121,12 +121,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
             options: Runtime options overriding defaults.
 
         Returns:
-            ToolResult with idiom findings, or a skipped result when the
-            tool is not opted in or no AI provider is available.
-
-        Raises:
-            AIProviderRequiredError: When AI is enabled but ``ai.provider``
-                is unset. This is a configuration error, not a skip.
+            ToolResult with idiom findings, a skipped result when the
+            tool is not opted in or no AI provider is available, or a
+            failed result when ``ai.provider`` is unset.
         """
         merged: dict[str, object] = dict(self.options)
         merged.update(options)
@@ -168,8 +165,12 @@ class IdiomReviewPlugin(BaseToolPlugin):
 
         try:
             return self._run_review(files=ctx.files, options=merged)
-        except AIProviderRequiredError:
-            raise
+        except AIProviderRequiredError as exc:
+            return ToolResult(
+                name=IDIOM_REVIEW_TOOL_NAME,
+                success=False,
+                output=str(exc),
+            )
         except AIError as exc:
             # Depleted credits / auth / rate limits degrade gracefully.
             logger.warning("[idiom-review] AI unavailable, skipping: {}", exc)
