@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.126.0] - 2026-08-21
+
+### Added
+
+- **doctor**: tool update advisories with per-tool update-channel resolver (#1480)
+  (63bec8d)
+
 ## [0.125.0] - 2026-08-21
 
 ### Added
