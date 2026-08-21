@@ -275,7 +275,9 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("automatically downgraded to P2")
     assert_that(rules).contains("occurrences")
     assert_that(rules).contains("do not report the same problem twice")
-    assert_that(rules).contains("choose P3")
+    assert_that(_collapsed(rules)).contains(
+        "When you are torn between P2 and P3, choose P3",
+    )
     assert_that(_collapsed(rules)).contains(
         f"flips the derived verdict from {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]} "
         f"to {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}",
