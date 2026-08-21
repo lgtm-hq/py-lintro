@@ -21,7 +21,7 @@ from lintro.ai.review.error_contract import (
     is_retryable_kind,
     render_error_contract_json,
 )
-from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.errors_taxonomy import KIND_COPY, ReviewErrorKind
 from lintro.ai.review.exceptions import ReviewExecutionError
 
 
@@ -258,6 +258,11 @@ def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
     }
 
     assert_that(covered).is_equal_to(set(ReviewErrorKind))
+
+
+def test_kind_copy_covers_every_error_kind() -> None:
+    """GitHub sticky copy must exist for every kind or ``--post`` KeyErrors."""
+    assert_that(set(KIND_COPY)).is_equal_to(set(ReviewErrorKind))
 
 
 def test_render_json_is_parseable_and_indented(

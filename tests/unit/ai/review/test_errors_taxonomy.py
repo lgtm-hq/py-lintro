@@ -312,6 +312,21 @@ def test_error_comment_surfaces_real_cause_for_depleted_credits() -> None:
     assert_that(body).contains("`anthropic`")
 
 
+def test_error_comment_provider_required_uses_unavailable_copy() -> None:
+    """An unset provider sticky uses PROVIDER_UNAVAILABLE copy, not parse copy."""
+    error = AIProviderRequiredError(
+        "ai.provider is required when ai.lint or ai.review is enabled. "
+        "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+    )
+    body = format_error_comment(error=error, provider="unset")
+
+    assert_that(body).contains("no AI provider is configured")
+    assert_that(body).contains("`ai.provider` in config")
+    assert_that(body).contains("LINTRO_AI_PROVIDER")
+    assert_that(body).contains("--provider")
+    assert_that(body).does_not_contain("malformed")
+
+
 def test_error_comment_unknown_includes_surfaced_cause() -> None:
     """An unknown error still surfaces its cause text in the sticky."""
     error = AIProviderError("some brand new failure mode")
