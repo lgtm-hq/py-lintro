@@ -245,10 +245,12 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(REVIEW_SYSTEM).contains("P3 examples:")
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
-    assert_that(REVIEW_SYSTEM).contains(
-        VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED],
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        f"derived verdict {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}",
     )
-    assert_that(REVIEW_SYSTEM).contains(VERDICT_LABELS[ReviewVerdict.NITS_ONLY])
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        f"alone is {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}",
+    )
     assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
 
 
@@ -274,8 +276,10 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("occurrences")
     assert_that(rules).contains("do not report the same problem twice")
     assert_that(rules).contains("choose P3")
-    assert_that(rules).contains(VERDICT_LABELS[ReviewVerdict.NITS_ONLY])
-    assert_that(rules).contains(VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED])
+    assert_that(_collapsed(rules)).contains(
+        f"flips the derived verdict from {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]} "
+        f"to {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}",
+    )
     assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(rules).contains("Name that rubric boundary")
