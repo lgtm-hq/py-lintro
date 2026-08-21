@@ -97,13 +97,14 @@ even when no caller assertion or documented contract exists yet. Assign P3 when 
 code path is correct and only wording, a migration note, or a test-isolation nit
 remains.
 
-- **P2 examples:** a handler returns success after skipping the work; a public contract
-  (docs, schema, flag, exit code) does not match the code; a changed path has no test
-  for the failure it claims to fix; a config key is documented but never read.
+- **P2 examples:** a handler returns success after skipping the work; a user-facing
+  contract (flag, schema, or exit code) does not match the code; a changed path has
+  no test for the failure it claims to fix; a config key is documented but never
+  read.
 - **P3 examples:** the code path is correct and only wording, a migration note, or a
   test-isolation nit is weak; a visibility assertion would be nicer as a behavior
-  assertion; docs are slightly stale but the implementation matches the intended
-  behavior; optional hardening with no failing scenario.
+  assertion; README or comment wording is slightly stale, with no caller-visible
+  effect; optional hardening with no failing scenario.
 - Torn between P2 and P3? Choose P3.
 - In every finding `description`, name the rubric boundary you used (for example
   "P2 because the documented contract is false" or "P3 because the code path is
