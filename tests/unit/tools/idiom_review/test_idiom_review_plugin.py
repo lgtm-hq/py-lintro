@@ -223,6 +223,10 @@ def test_unset_provider_fails_before_the_engine(
     assert_that(result.output).contains("LINTRO_AI_PROVIDER")
     assert_that(result.output).contains("--provider")
 
+    from lintro.utils.execution.advisory import advisory_tools_errored
+
+    assert_that(advisory_tools_errored([result])).is_true()
+
 
 def test_min_confidence_filters_low_findings(
     tmp_path: Path,

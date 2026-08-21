@@ -19,6 +19,7 @@ from lintro.utils.execution import advisory as advisory_module
 from lintro.utils.execution.advisory import (
     advisory_findings_count,
     advisory_results_to_payload,
+    advisory_tools_errored,
     get_advisory_tool_names,
     render_advisory_results,
     resolve_advisory_tools,
@@ -146,6 +147,24 @@ def test_advisory_findings_count_ignores_skipped_results() -> None:
     assert_that(advisory_findings_count(results)).is_equal_to(2)
 
 
+def test_advisory_tools_errored_ignores_findings_and_skips() -> None:
+    """Findings and skips are not execution errors; a bare failure is."""
+    findings = ToolResult(name="b", success=False, issues_count=2)
+    skipped = ToolResult(
+        name="a",
+        skipped=True,
+        skip_reason="opt-in required",
+    )
+    failed = ToolResult(
+        name="idiom-review",
+        success=False,
+        output="ai.provider is required",
+    )
+
+    assert_that(advisory_tools_errored([findings, skipped])).is_false()
+    assert_that(advisory_tools_errored([findings, skipped, failed])).is_true()
+
+
 def test_render_advisory_results_reports_skip_reason() -> None:
     """A skipped advisory tool renders its reason."""
     rendered = render_advisory_results(
@@ -190,6 +209,8 @@ def test_advisory_results_to_payload_is_json_shaped() -> None:
 
     assert_that(payload).is_length(1)
     assert_that(payload[0]["tool"]).is_equal_to("idiom-review")
+    assert_that(payload[0]["success"]).is_false()
+    assert_that(payload[0]["output"]).is_none()
     assert_that(payload[0]["issues_count"]).is_equal_to(1)
     issues = cast("list[dict[str, str]]", payload[0]["issues"])
     assert_that(issues[0]["file"]).is_equal_to("a.py")

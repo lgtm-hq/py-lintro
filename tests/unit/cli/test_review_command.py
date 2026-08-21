@@ -1362,6 +1362,19 @@ def test_review_help_shows_advisory_flags() -> None:
     assert_that(result.output).contains("--fail-on-findings")
 
 
+def _advisory_error_result() -> ToolResult:
+    """Build an advisory tool result for a configuration/runtime failure."""
+    return ToolResult(
+        name="idiom-review",
+        success=False,
+        output=(
+            "ai.provider is required when ai.lint or ai.review is enabled. "
+            "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            "Accepted providers: anthropic, cursor, openai."
+        ),
+    )
+
+
 def test_advisory_only_exits_zero_with_findings() -> None:
     """Advisory findings are advisory: exit 0 by default."""
     runner = CliRunner()
@@ -1415,6 +1428,31 @@ def test_advisory_only_json_output() -> None:
     payload = json.loads(result.output)
     assert_that(payload["advisory"]).is_length(1)
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+    assert_that(payload["advisory"][0]["success"]).is_false()
+
+
+def test_advisory_only_errored_tool_exits_two() -> None:
+    """An advisory tool that failed to run is not a finding and exits 2."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output)
+    assert_that(payload["advisory"][0]["success"]).is_false()
+    assert_that(payload["advisory"][0]["output"]).contains("`ai.provider` in config")
+    assert_that(payload["advisory"][0]["issues_count"]).is_equal_to(0)
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
@@ -1586,6 +1624,34 @@ def test_full_review_json_merges_advisory_key() -> None:
     payload = json.loads(result.output)
     assert_that(payload["summary"]).is_equal_to("ok")
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+
+
+def test_full_review_errored_advisory_exits_two() -> None:
+    """A full review that produced results still fails if advisory errored."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
 
 
 def test_cli_overrides_lists_only_explicit_flags() -> None:

@@ -73,6 +73,7 @@ from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
     advisory_findings_count,
     advisory_results_to_payload,
+    advisory_tools_errored,
     render_advisory_results,
     resolve_advisory_tools,
     run_advisory_tools,
@@ -656,6 +657,10 @@ def review_command(
         if not posted:
             logger.warning("GitHub review posting skipped or failed")
 
+    if advisory_tools_errored(advisory_results):
+        from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+        raise SystemExit(REVIEW_ERROR_EXIT_CODE)
     exit_code = 1 if result.has_p1_findings else 0
     if fail_on_findings and advisory_findings_count(advisory_results):
         exit_code = 1
@@ -860,6 +865,10 @@ def _run_advisory_only(
         click.echo(
             render_advisory_results(results=results) or "No advisory tools ran.",
         )
+    if advisory_tools_errored(results):
+        from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+        raise SystemExit(REVIEW_ERROR_EXIT_CODE)
     findings = advisory_findings_count(results)
     raise SystemExit(1 if (fail_on_findings and findings) else 0)
 
