@@ -49,3 +49,5 @@ def test_exception_in_tool_creates_failed_result(
     assert_that(name).is_equal_to("raise_tool")
     assert_that(result.success).is_false()
     assert_that(result.output).contains("Parallel execution failed")
+    assert_that(result.duration_seconds).is_not_none()
+    assert_that(result.duration_seconds).is_greater_than_or_equal_to(0.0)

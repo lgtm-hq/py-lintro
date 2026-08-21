@@ -95,6 +95,7 @@ def build_run_context(
     no_art: bool = False,
     dry_run: bool = False,
     group_by: str = "auto",
+    profile: bool = False,
 ) -> RunContext:
     """Create the run-scoped state shared by the execute and render phases.
 
@@ -110,6 +111,7 @@ def build_run_context(
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
         group_by: How to group issues in formatted and JSON output.
+        profile: Whether to collect and emit per-tool performance timings.
 
     Returns:
         RunContext: The shared context for this run.
@@ -168,6 +170,7 @@ def build_run_context(
         clean_stdout_output=clean_stdout_output,
         score_only=score_only,
         group_by=group_by,
+        profile=profile,
     )
 
 
@@ -294,6 +297,7 @@ def _execute_tools_sequential(
     all_results: list[ToolResult] = []
 
     for tool_name in tools_to_run:
+        attempt_started = time.monotonic()
         try:
             tool = tool_manager.get_tool(tool_name)
 
@@ -362,13 +366,15 @@ def _execute_tools_sequential(
             # Show user-friendly error message on console
             logger.console_output(f"Error running {tool_name}: {e}")
 
-            # Create a failed result for this tool
+            # Create a failed result for this tool. Duration is recorded so
+            # crashed tools still appear in the ``--profile`` table/JSON.
             all_results.append(
                 ToolResult(
                     name=tool_name,
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    duration_seconds=time.monotonic() - attempt_started,
                 ),
             )
 
@@ -709,6 +715,7 @@ def run_lint_tools_simple(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
 
@@ -754,6 +761,8 @@ def run_lint_tools_simple(
         no_art: When True, suppress decorative ASCII art regardless of the
             ``output.art`` config value. Art is also suppressed automatically
             when ``output.art`` is ``False`` or stdout is not a TTY.
+        profile: When True, render a per-tool performance profile after the run
+            and include the profile payload in JSON output.
 
     Programming errors raised while a tool executes (``TypeError``,
     ``AttributeError``) propagate to the caller.
@@ -769,6 +778,7 @@ def run_lint_tools_simple(
         no_art=no_art,
         dry_run=dry_run,
         group_by=group_by,
+        profile=profile,
     )
     from lintro.utils.execution.run_renderer import make_result_display
 
