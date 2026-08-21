@@ -85,7 +85,8 @@ def render_ai_status(
     if ai_config.provider is None:
         provider_name = ""
         ai_parts.append("[yellow]enabled (provider unset)[/yellow]")
-        ai_parts.append(f"  [yellow]{provider_required_error()}[/yellow]")
+        if ai_config.any_feature_enabled:
+            ai_parts.append(f"  [yellow]{provider_required_error()}[/yellow]")
     else:
         provider_name = str(ai_config.provider).lower()
     supported = set(AIProvider)
@@ -95,8 +96,7 @@ def render_ai_status(
         ai_parts.append("[red]enabled (unknown provider)[/red]")
         names = accepted_provider_values()
         ai_parts.append(
-            f"  [yellow]'{ai_config.provider}' is not supported. "
-            f"Use: {names}[/yellow]",
+            f"  [yellow]'{ai_config.provider}' is not supported. Use: {names}[/yellow]",
         )
     elif provider_name:
         # Check SDK availability
