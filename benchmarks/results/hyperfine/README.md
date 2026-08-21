@@ -27,7 +27,7 @@ including files from a previous `--suite` that is not part of the current invoca
 then writes fresh JSON):
 
 ```bash
-make bench
+just bench
 # or
 ./benchmarks/run-hyperfine.sh
 # write elsewhere instead:

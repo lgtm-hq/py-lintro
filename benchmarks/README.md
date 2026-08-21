@@ -22,7 +22,7 @@ CI regression tracking for hyperfine JSON is intentionally out of scope here
 #   brew install hyperfine
 #   cargo install hyperfine
 
-make bench
+just bench
 # equivalent:
 ./benchmarks/run-hyperfine.sh
 ```

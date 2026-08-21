@@ -10,17 +10,22 @@ invoking the `lintro` CLI (e.g. `uv run lintro check .`, `uv run lintro format .
 The Cursor Cloud update script runs `uv sync --dev --extra full`, which creates `.venv`
 with all Python dependencies plus the Python-based wrapped tools (ruff, black, mypy,
 bandit, pydoclint, yamllint). `uv` is installed at `~/.local/bin` (add it to `PATH` if a
-fresh shell can't find `uv`).
+fresh shell can't find `uv`). `just` is **not** preinstalled on Cloud VMs; install it
+only if you want the justfile wrappers (see `docs/contributing.md`). After the update
+script, use the `uv run` commands below.
 
 ## Running / linting / testing / building
 
-Standard commands live in the `Makefile` and `docs/contributing.md`; prefer those. All
-commands run through `uv` (do not call bare `python`/`pytest`):
+Standard commands live in the `justfile` and `docs/contributing.md`. All commands run
+through `uv` (do not call bare `python`/`pytest`). Cloud-primary commands (no `just`
+required):
 
 - Run the CLI: `uv run lintro check .`, `uv run lintro format .`,
   `uv run lintro list-tools`.
-- Lint: `make lint` (runs `mypy` then `lintro check .`); type-check only: `make mypy`.
-- Test: `uv run pytest` (or `make test`, which wraps pytest via lintro with coverage).
+- Lint: `uv run lintro check .` (or `just lint` after installing `just`; that also runs
+  mypy first).
+- Type-check only: `uv run lintro check . --tools mypy` (or `just mypy`).
+- Test: `uv run pytest` (or `just test` after installing `just`).
 - Build a wheel/sdist: `uv build`.
 
 ## Non-obvious gotchas
@@ -50,5 +55,6 @@ commands run through `uv` (do not call bare `python`/`pytest`):
 
 ## Docs site (optional secondary product)
 
-`apps/site` is an Astro + Pagefind docs site built with `bun` (`make site-dev`,
-`make site-build`). It is not required to develop or test the CLI.
+`apps/site` is an Astro + Pagefind docs site built with `bun`. After installing `just`,
+use `just site-dev` / `just site-build`; otherwise run `./scripts/ci/site/dev.sh` and
+`./scripts/ci/site/build.sh`. It is not required to develop or test the CLI.
