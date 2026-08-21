@@ -31,12 +31,12 @@
 - **Calibrate severity.** P1 means merge-blocking defect: expect 0–2 on a typical PR and
   none at all on most. When you are torn between P1 and P2, choose P2. When you are torn
   between P2 and P3, choose P3 — a single borderline P2 flips the derived verdict from
-  nits_only to changes_requested. Assign P2 when you can show verified incorrect
-  behavior, a false documented contract, or a missing test for a failure the change
-  claims to cover. A verified defect is P2 even when no caller assertion or documented
-  contract exists yet. Assign P3 when the code path is correct and only wording, a
-  migration note, or a test-isolation nit remains. Name that rubric boundary in every
-  finding `description`.
+  {label_nits_only} to {label_changes_requested}. Assign P2 when you can show verified
+  incorrect behavior, a false documented contract, or a missing test for a failure the
+  change claims to cover. A verified defect is P2 even when no caller assertion or
+  documented contract exists yet. Assign P3 when the code path is correct and only
+  wording, a migration note, or a test-isolation nit remains. Name that rubric boundary
+  in every finding `description`.
 - Set `kind` to `question` when you suspect something but cannot show it — an
   assumption you want the author to confirm, context you lack. Questions carry no
   severity, never affect the verdict, and are capped at **3 per review**. Use them

@@ -312,6 +312,18 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Review readiness verdict
+
+The merge-readiness verdict is derived in code from open-finding severities (never
+asked of the model): any P1 → blocked; else any P2 → changes requested; else any P3 →
+nits only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
+otherwise flip that verdict run-to-run: borderline findings must be P3, and every
+finding `description` must name the rubric boundary it used.
+
+A P2 "changes requested" review still exits 0. Only an open P1 fails the process
+(`exit 1`). Exit 2 means no review was produced at all (credential, quota, or
+lintro-side failure).
+
 ## Configuration
 
 ### Basic Setup
@@ -745,12 +757,6 @@ Probe it directly:
 lintro doctor              # presence checks (free)
 lintro doctor --ai-liveness # adds the liveness probe (one minimal API call on `api`)
 ```
-
-The merge-readiness verdict is derived in code from open-finding severities (never
-asked of the model): any P1 → blocked; else any P2 → changes requested; else any P3 →
-nits only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
-otherwise flip that verdict run-to-run: borderline findings must be P3, and every
-finding `description` must name the rubric boundary it used.
 
 `lintro review` distinguishes the two red states by exit code, so a wrapper can never
 mistake one for the other:

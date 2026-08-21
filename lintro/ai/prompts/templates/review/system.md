@@ -88,8 +88,8 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 
 **P2 vs P3 boundary (read before assigning either — this is what flips the verdict):**
 
-Any open P2 makes the derived verdict `changes_requested`. Any open P3 alone is
-`nits_only`. A single borderline P2/P3 flip changes the whole run.
+Any open P2 makes the derived verdict Changes requested. Any open P3 alone is
+Nits only. A single borderline P2/P3 flip changes the whole run.
 
 Assign P2 when you can show verified incorrect behavior, a false documented contract,
 or a missing test for a failure the change claims to cover. A verified defect is P2

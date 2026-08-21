@@ -21,8 +21,10 @@ from lintro.ai.prompts.review import (
     format_output_rules,
 )
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.verdict import VERDICT_LABELS
 
 _USER_PROMPT_KWARGS = {
     "pr_title": "Test PR",
@@ -51,6 +53,18 @@ _P2_WITHOUT_CONTRACT = (
     "A verified defect is P2 even when no caller assertion or documented contract "
     "exists yet."
 )
+
+
+def _collapsed(text: str) -> str:
+    """Collapse wrapping whitespace so prompt prose can be matched as a sentence.
+
+    Args:
+        text: Wrapped or unwrapped prompt text.
+
+    Returns:
+        The text with each whitespace run reduced to a single space.
+    """
+    return " ".join(text.split())
 
 
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
@@ -229,8 +243,12 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
     assert_that(REVIEW_SYSTEM).contains("P2 examples:")
     assert_that(REVIEW_SYSTEM).contains("P3 examples:")
-    assert_that(REVIEW_SYSTEM).contains(_P2_ELIGIBILITY)
-    assert_that(REVIEW_SYSTEM).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(REVIEW_SYSTEM).contains(
+        VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED],
+    )
+    assert_that(REVIEW_SYSTEM).contains(VERDICT_LABELS[ReviewVerdict.NITS_ONLY])
     assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
 
 
@@ -256,9 +274,10 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("occurrences")
     assert_that(rules).contains("do not report the same problem twice")
     assert_that(rules).contains("choose P3")
-    assert_that(rules).contains("nits_only to changes_requested")
-    assert_that(rules).contains(_P2_ELIGIBILITY)
-    assert_that(rules).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(rules).contains(VERDICT_LABELS[ReviewVerdict.NITS_ONLY])
+    assert_that(rules).contains(VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED])
+    assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(rules).contains("Name that rubric boundary")
 
 
@@ -266,7 +285,7 @@ def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
     """System prompt and rendered output rules use the same P2 eligibility rule."""
     rules = format_output_rules(checklist_count=1)
 
-    assert_that(REVIEW_SYSTEM).contains(_P2_ELIGIBILITY)
-    assert_that(rules).contains(_P2_ELIGIBILITY)
-    assert_that(REVIEW_SYSTEM).contains(_P2_WITHOUT_CONTRACT)
-    assert_that(rules).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
