@@ -243,6 +243,15 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
     assert_that(REVIEW_SYSTEM).contains("P2 examples:")
     assert_that(REVIEW_SYSTEM).contains("P3 examples:")
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "config key is documented but never read",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "README or comment wording is slightly stale",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "user-facing contract (flag, schema, or exit code)",
+    )
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(
