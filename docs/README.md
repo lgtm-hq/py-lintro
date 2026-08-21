@@ -19,6 +19,8 @@ configuring, and contributing to Lintro.
 - **[AI review transports](ai-review-transports.md)** - API vs CLI profiles,
   credentials, timeouts, and cost provenance
 - **[MCP Server](mcp.md)** - Optional stdio MCP server for agent hosts
+- **[Template-Aware Preprocessing](template-aware.md)** - Opt-in linting of `*.py.jinja`
+  / `*.toml.jinja` / `*.yml.jinja` source templates
 - **[Docker Usage](docker.md)** - Using Lintro with Docker
 
 **Integration Guides:**
@@ -70,6 +72,7 @@ configuring, and contributing to Lintro.
 | **Docker setup**        | [Docker Usage → Quick Start](docker.md#quick-start)                       |
 | **GitHub Actions**      | [GitHub Integration → Quick Setup](github-integration.md#quick-setup)     |
 | **AI features**         | [AI Features → Quick Start](ai-features.md#quick-start)                   |
+| **Template-aware lint** | [Template-Aware → Quick Start](template-aware.md#quick-start)             |
 | **Configure tools**     | [Configuration → Tool Configuration](configuration.md#tool-configuration) |
 | **Add new tool**        | [Adding a New Tool Guide](contributing/adding-a-new-tool.md)              |
 | **Project vision**      | [Architecture → Vision](architecture/VISION.md)                           |
