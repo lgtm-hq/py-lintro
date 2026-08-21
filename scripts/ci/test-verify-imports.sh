@@ -50,20 +50,32 @@ if [ ! -f "$PYTHON_BIN" ]; then
 	exit 1
 fi
 
-# Extract all packages from pyproject.toml
-log_info "Extracting packages from pyproject.toml..."
-PACKAGES=$("$PYTHON_BIN" -c "
-import tomllib
+# Extract all packages from pyproject.toml via setuptools (the same finder
+# the wheel build uses). Discovery must not use the project .venv: the
+# built-package workflow sets BOOTSTRAP_SKIP_SYNC=1 and never uv-syncs.
+# --no-project --with setuptools==<build-system pin> is enough.
+# Pin parsing uses stdlib tomllib on [build-system] requires.
+if ! SETUPTOOLS_PIN="$(
+	cd "$PROJECT_ROOT"
+	PYTHONPATH="$PROJECT_ROOT" python3 -c '
 from pathlib import Path
-
-pyproject = Path('$PROJECT_ROOT/pyproject.toml')
-with open(pyproject, 'rb') as f:
-    data = tomllib.load(f)
-
-packages = data.get('tool', {}).get('setuptools', {}).get('packages', [])
-for pkg in sorted(packages):
-    print(pkg)
-")
+from tests.packaging.configured_packages import build_system_setuptools_pin
+print(build_system_setuptools_pin(project_root=Path(".").resolve()))
+'
+)"; then
+	log_error "Could not read setuptools pin from pyproject.toml [build-system]"
+	exit 1
+fi
+if [ -z "$SETUPTOOLS_PIN" ]; then
+	log_error "Could not read setuptools pin from pyproject.toml [build-system]"
+	exit 1
+fi
+log_info "Extracting packages from pyproject.toml (using ${SETUPTOOLS_PIN})..."
+PACKAGES=$(
+	cd "$PROJECT_ROOT"
+	uv run --no-project --with "$SETUPTOOLS_PIN" python \
+		tests/packaging/configured_packages.py
+)
 
 if [ -z "$PACKAGES" ]; then
 	log_error "No packages found in pyproject.toml"

@@ -1,0 +1,208 @@
+"""Tests for setuptools-backed package discovery."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess  # nosec B404 - subprocess runs uv with a fixed argv, shell=False
+import sys
+import tomllib
+from pathlib import Path
+
+import pytest
+from assertpy import assert_that
+
+from tests.packaging.configured_packages import (
+    build_system_setuptools_pin,
+    configured_packages,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _build_system_setuptools_pin() -> str:
+    """Return the ``setuptools==…`` pin from ``[build-system] requires``.
+
+    Returns:
+        The pinned requirement string used by the wheel build.
+    """
+    return build_system_setuptools_pin(project_root=PROJECT_ROOT)
+
+
+def test_configured_packages_includes_lintro_and_excludes_tests() -> None:
+    """The finder must match ``[tool.setuptools.packages.find]``.
+
+    Setuptools, not a hand-rolled walker, decides what ships. The include
+    pattern is ``lintro*`` and tests are excluded, so a drift here would
+    mean CI import verification and the wheel build disagree.
+    """
+    packages = configured_packages(project_root=PROJECT_ROOT)
+
+    assert_that(packages).contains("lintro")
+    assert_that(packages).contains("lintro.parsers")
+    assert_that(packages).contains("lintro.tools.definitions")
+    assert_that([name for name in packages if name.startswith("tests")]).is_empty()
+    assert_that(packages).does_not_contain("lintro.ascii-art")
+    for name in packages:
+        assert_that(
+            all(part.isidentifier() for part in name.split(".")),
+        ).described_as(f"{name} is not a valid import name").is_true()
+
+
+def test_configured_packages_main_prints_one_name_per_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CI helper prints package names for import verification.
+
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
+    """
+    from tests.packaging.configured_packages import main
+
+    main()
+    names = capsys.readouterr().out.splitlines()
+    assert_that(names).contains("lintro")
+    assert_that(names).contains("lintro.parsers")
+
+
+def test_verify_imports_script_discovers_packages_without_project_venv() -> None:
+    """CI pin extraction must run via PYTHONPATH tomllib, not a project venv.
+
+    The built-package workflow sets ``BOOTSTRAP_SKIP_SYNC=1``, so
+    ``uv run python`` against the repo would fail. The shell script parses
+    the ``[build-system]`` pin with the same helper the tests use.
+    """
+    snippet = (
+        "from pathlib import Path\n"
+        "from tests.packaging.configured_packages import "
+        "build_system_setuptools_pin\n"
+        "print(build_system_setuptools_pin(project_root=Path('.').resolve()))\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(PROJECT_ROOT)
+    result = subprocess.run(  # nosec B603 - sys.executable plus a fixed snippet
+        [sys.executable, "-c", snippet],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert_that(result.returncode).described_as(
+        f"pin parse failed\nstdout: {result.stdout}\nstderr: {result.stderr}",
+    ).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to(_build_system_setuptools_pin())
+
+    script = (PROJECT_ROOT / "scripts" / "ci" / "test-verify-imports.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains("uv run --no-project --with")
+    assert_that(script).contains("PYTHONPATH=")
+    assert_that(script).does_not_contain("grep -m1")
+
+
+def test_package_discovery_runs_without_project_venv() -> None:
+    """The CI discovery command must succeed without a project ``.venv``.
+
+    Mirrors ``scripts/ci/test-verify-imports.sh``: ``uv run --no-project``
+    plus the ``[build-system]`` setuptools pin, with ``VIRTUAL_ENV`` cleared.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv is required to run isolated package discovery")
+
+    pin = _build_system_setuptools_pin()
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("UV_PROJECT", None)
+    result = subprocess.run(  # nosec B603 B607 - fixed argv resolved from PATH, shell=False
+        [
+            "uv",
+            "run",
+            "--no-project",
+            "--with",
+            pin,
+            "python",
+            "tests/packaging/configured_packages.py",
+        ],
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert_that(result.returncode).described_as(
+        f"isolated discovery failed\nstdout: {result.stdout}\nstderr: {result.stderr}",
+    ).is_equal_to(0)
+    names = result.stdout.splitlines()
+    assert_that(names).contains("lintro")
+    assert_that(names).contains("lintro.parsers")
+    assert_that([name for name in names if name.startswith("tests")]).is_empty()
+
+
+def test_configured_packages_module_does_not_import_setuptools() -> None:
+    """Importing the helper must not require setuptools at collection time."""
+    import ast
+
+    source = (
+        PROJECT_ROOT / "tests" / "packaging" / "configured_packages.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names = [alias.name.split(".", 1)[0] for alias in node.names]
+            assert_that(names).does_not_contain("setuptools")
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert_that(node.module.split(".", 1)[0]).is_not_equal_to("setuptools")
+
+
+def test_test_extra_and_tox_pin_setuptools() -> None:
+    """The test extra, dev group, and tox env must ship the build-system pin."""
+    pin = _build_system_setuptools_pin()
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+        data = tomllib.load(handle)
+    extras = data["project"]["optional-dependencies"]["test"]
+    dev = data["dependency-groups"]["dev"]
+    assert_that(extras).contains(pin)
+    assert_that(dev).contains(pin)
+    tox = (PROJECT_ROOT / "tox.ini").read_text(encoding="utf-8")
+    assert_that(tox).contains(pin)
+
+
+def test_build_system_setuptools_pin_requires_build_system_table(
+    tmp_path: Path,
+) -> None:
+    """Pin extraction fails closed when ``[build-system]`` has no setuptools.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["wheel"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="setuptools pin"):
+        build_system_setuptools_pin(project_root=tmp_path)
+
+
+def test_configured_packages_raises_when_setuptools_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discovery must fail loudly instead of crashing pytest collection.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _hide_setuptools(name: str, *args: object, **kwargs: object) -> object:
+        if name == "setuptools" or name.startswith("setuptools."):
+            raise ImportError("setuptools hidden for test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _hide_setuptools)
+    with pytest.raises(ModuleNotFoundError, match="setuptools"):
+        configured_packages(project_root=PROJECT_ROOT)
