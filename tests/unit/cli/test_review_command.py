@@ -1567,7 +1567,10 @@ def test_full_review_json_merges_advisory_key() -> None:
         result = runner.invoke(cli, ["review", "--output", "json"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    payload = json.loads(result.output)
+    # Parse stdout only: loguru now binds its handler at invoke time, so CLI
+    # warnings land in the runner's captured stderr and would corrupt
+    # ``result.output`` (which merges both streams).
+    payload = json.loads(result.stdout)
     assert_that(payload["summary"]).is_equal_to("ok")
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
 

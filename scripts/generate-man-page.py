@@ -34,6 +34,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def populate_lazy_commands(ctx: click.Context) -> None:
+    """Force-load lazy subcommands into ``ctx.command.commands``.
+
+    click-man reads ``Group.commands``, which stays empty until
+    ``get_command`` materializes each lazy entry. An empty mapping is
+    falsy, so the COMMANDS section would otherwise be omitted.
+
+    Args:
+        ctx: Click context wrapping the lintro CLI group.
+    """
+    for name in cli.list_commands(ctx):
+        cli.get_command(ctx, name)
+
+
 def render_man_page(date: str | None = None) -> str:
     """Render the lintro man page text.
 
@@ -44,6 +58,7 @@ def render_man_page(date: str | None = None) -> str:
         The rendered man page text.
     """
     ctx = click.Context(cli, info_name="lintro")
+    populate_lazy_commands(ctx)
     return str(generate_man_page(ctx, version=__version__, date=date))
 
 

@@ -21,6 +21,8 @@ def mcp_command(workspace: Path | None) -> None:
     Requires the optional ``lintro[mcp]`` extra. Agents connect over stdio and
     discover tools such as ``lintro_ping``.
 
+    \u000c
+
     Args:
         workspace: Workspace root directory; defaults to the process cwd.
 
