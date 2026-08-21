@@ -527,11 +527,15 @@ def test_justfile_contract() -> None:
     assert_that(justfile).contains("scripts/local/run-tests.sh")
     assert_that(justfile).does_not_contain("scripts/local/local-test.sh")
     assert_that(justfile).contains('replace(TOOLS, " ", ",")')
+    assert_that(justfile).contains("just test-unit --")
+    assert_that(justfile).contains("|| true")
     assert_that(justfile).contains("docker build --target full")
     assert_that(justfile).contains("./scripts/ci/site/dev.sh")
     assert_that(justfile).contains("./scripts/ci/site/build.sh")
     assert_that(contributing).contains("just test-unit --")
     assert_that(contributing).does_not_contain("just test-unit -v")
+    assert_that(contributing).contains("just lintro-check")
+    assert_that(contributing).contains("just lintro-format")
 
     def has_recipe(name: str) -> bool:
         return (

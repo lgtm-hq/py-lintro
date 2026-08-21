@@ -95,20 +95,21 @@ clean:
     rm -rf build/
     rm -rf dist/
     rm -rf *.egg-info/
-    find . -type d -name __pycache__ -exec rm -rf {} +
+    find . -type d -name __pycache__ -exec rm -rf {} + || true
     find . -type f -name "*.pyc" -delete
     find . -type f -name "*.pyo" -delete
     find . -type f -name "*.pyd" -delete
     find . -type f -name ".coverage" -delete
-    find . -type d -name "*.egg-info" -exec rm -rf {} +
-    find . -type d -name "*.egg" -exec rm -rf {} +
-    find . -type d -name ".pytest_cache" -exec rm -rf {} +
-    find . -type d -name "htmlcov" -exec rm -rf {} +
-    find . -type d -name ".tox" -exec rm -rf {} +
+    find . -type d -name "*.egg-info" -exec rm -rf {} + || true
+    find . -type d -name "*.egg" -exec rm -rf {} + || true
+    find . -type d -name ".pytest_cache" -exec rm -rf {} + || true
+    find . -type d -name "htmlcov" -exec rm -rf {} + || true
+    find . -type d -name ".tox" -exec rm -rf {} + || true
 
 # Watch unit tests and re-run on change (requires watchexec)
+# `--` keeps pytest flags from being eaten by just.
 watch-test *ARGS:
-    watchexec -e py -r -- just test-unit {{ ARGS }}
+    watchexec -e py -r -- just test-unit -- {{ ARGS }}
 
 # Show lintro version and available tools
 info:

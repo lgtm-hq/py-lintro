@@ -124,8 +124,9 @@ just clean             # Remove build/test artifacts
 ```
 
 Each recipe delegates to the existing `uv`/`scripts/` commands, so you can always run
-those directly if you prefer not to install `just`. Backwards-compatible aliases
-`just chk` and `just fmt` map to `lint` and `format`.
+those directly if you prefer not to install `just`. Makefile-era aliases
+`just lintro-check` and `just lintro-format` still map to `lint` and `format`;
+`just chk` and `just fmt` are shorter names for the same recipes.
 
 ## More Information
 
