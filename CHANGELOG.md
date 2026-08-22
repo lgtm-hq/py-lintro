@@ -11,6 +11,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **cli**: add `config validate` plus `config init` / `config show` subcommands (#1165)
+
 ### Changed
 
 ### Deprecated
