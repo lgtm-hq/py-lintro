@@ -74,7 +74,7 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 - **P3:** Breaking default needing migration notes, UX wording, minor inaccuracy, or
   test isolation nit
 
-**Severity calibration (read before assigning a P1):**
+**Severity calibration (read before assigning severity):**
 
 - P1 is the merge-blocking bar, not the "I am confident" bar. A typical PR has 0–2; most
   have none. Every open P1 blocks the PR outright, so an inflated one makes the whole
@@ -85,5 +85,29 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 - Torn between P1 and P2? Choose P2.
 - Suspicion you cannot evidence is not a low-severity finding — report it as a
   `question` (max 3 per review).
+
+**P2 vs P3 boundary (read before assigning either — this is what flips the verdict):**
+
+Any open P2 makes the derived verdict Changes requested. Any open P3 alone is
+Nits only. A single borderline P2/P3 flip changes the whole run.
+
+Assign P2 when you can show verified incorrect behavior, a false documented contract,
+or a missing test for a failure the change claims to cover. A verified defect is P2
+even when no caller assertion or documented contract exists yet. Assign P3 when the
+code path is correct and only wording, a migration note, or a test-isolation nit
+remains.
+
+- **P2 examples:** a handler returns success after skipping the work; a user-facing
+  contract (flag, schema, or exit code) does not match the code; a changed path has
+  no test for the failure it claims to fix; a config key is documented but never
+  read.
+- **P3 examples:** the code path is correct and only wording, a migration note, or a
+  test-isolation nit is weak; a visibility assertion would be nicer as a behavior
+  assertion; README or comment wording is slightly stale, with no caller-visible
+  effect; optional hardening with no failing scenario.
+- Torn between P2 and P3? Choose P3.
+- In every finding `description`, name the rubric boundary you used (for example
+  "P2 because the documented contract is false" or "P3 because the code path is
+  correct; this is wording"). Do not assign P2 without that sentence.
 
 Respond ONLY with valid JSON. No markdown fences.

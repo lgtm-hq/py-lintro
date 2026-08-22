@@ -312,6 +312,18 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Review readiness verdict
+
+The merge-readiness verdict is derived in code from open-finding severities (never asked
+of the model): any P1 → blocked; else any P2 → changes requested; else any P3 → nits
+only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
+otherwise flip that verdict run-to-run: borderline findings must be P3, and every
+finding `description` must name the rubric boundary it used.
+
+A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
+`--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
+Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
+
 ## Configuration
 
 ### Basic Setup

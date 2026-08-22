@@ -21,8 +21,10 @@ from lintro.ai.prompts.review import (
     format_output_rules,
 )
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.verdict import VERDICT_LABELS
 
 _USER_PROMPT_KWARGS = {
     "pr_title": "Test PR",
@@ -42,6 +44,27 @@ _USER_PROMPT_KWARGS = {
     "strictness_section": "",
     "output_schema": REVIEW_OUTPUT_SCHEMA,
 }
+
+_P2_ELIGIBILITY = (
+    "Assign P2 when you can show verified incorrect behavior, a false documented "
+    "contract, or a missing test for a failure the change claims to cover."
+)
+_P2_WITHOUT_CONTRACT = (
+    "A verified defect is P2 even when no caller assertion or documented contract "
+    "exists yet."
+)
+
+
+def _collapsed(text: str) -> str:
+    """Collapse wrapping whitespace so prompt prose can be matched as a sentence.
+
+    Args:
+        text: Wrapped or unwrapped prompt text.
+
+    Returns:
+        The text with each whitespace run reduced to a single space.
+    """
+    return " ".join(text.split())
 
 
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
@@ -214,6 +237,33 @@ def test_review_system_carries_p1_calibration_language() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P1 and P2? Choose P2.")
 
 
+def test_review_system_carries_p2_p3_boundary_rubric() -> None:
+    """The system prompt pins the P2 vs P3 boundary that flips the verdict (#1968)."""
+    assert_that(REVIEW_SYSTEM).contains("P2 vs P3 boundary")
+    assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
+    assert_that(REVIEW_SYSTEM).contains("P2 examples:")
+    assert_that(REVIEW_SYSTEM).contains("P3 examples:")
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "config key is documented but never read",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "README or comment wording is slightly stale",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        "user-facing contract (flag, schema, or exit code)",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        f"Any open P2 makes the derived verdict "
+        f"{VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}.",
+    )
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(
+        f"Any open P3 alone is {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]}.",
+    )
+    assert_that(REVIEW_SYSTEM).contains("name the rubric boundary")
+
+
 def test_review_system_keeps_correctness_adjacent_style_in_scope() -> None:
     """Linter-catchable style is out of scope, code smells are not."""
     assert_that(REVIEW_SYSTEM).contains("Style/formatting issues linters would catch")
@@ -224,6 +274,7 @@ def test_output_schema_declares_the_corpus_finding_fields() -> None:
     """The model-facing schema advertises every #1925 field."""
     for field in ("kind", "failure_scenario", "evidence_style", "occurrences"):
         assert_that(REVIEW_OUTPUT_SCHEMA).contains(field)
+    assert_that(REVIEW_OUTPUT_SCHEMA).contains("severity-rubric boundary")
 
 
 def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
@@ -234,3 +285,23 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     assert_that(rules).contains("automatically downgraded to P2")
     assert_that(rules).contains("occurrences")
     assert_that(rules).contains("do not report the same problem twice")
+    assert_that(_collapsed(rules)).contains(
+        "When you are torn between P2 and P3, choose P3",
+    )
+    assert_that(_collapsed(rules)).contains(
+        f"flips the derived verdict from {VERDICT_LABELS[ReviewVerdict.NITS_ONLY]} "
+        f"to {VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED]}",
+    )
+    assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(rules).contains("Name that rubric boundary")
+
+
+def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
+    """System prompt and rendered output rules use the same P2 eligibility rule."""
+    rules = format_output_rules(checklist_count=1)
+
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
+    assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
