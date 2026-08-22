@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.config import AIConfig
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
@@ -39,6 +38,8 @@ from lintro.utils.execution.tool_configuration import (
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING-only: this module is on the core → AI import boundary.
+    from lintro.ai.config import AIConfig
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
@@ -199,7 +200,6 @@ def run_advisory_tools(
     if not tool_names or not paths:
         return []
 
-    from lintro.ai.exceptions import AIProviderRequiredError
     from lintro.utils.tool_options import parse_tool_options
 
     config = lintro_config or get_config()
@@ -227,18 +227,6 @@ def run_advisory_tools(
                 lintro_config=config,
             )
             results.append(tool.check(paths, check_options))
-        except AIProviderRequiredError as exc:
-            logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
-            results.append(
-                ToolResult(
-                    name=tool_name,
-                    success=False,
-                    output=str(exc),
-                    metadata={
-                        ADVISORY_ERROR_METADATA_KEY: (ADVISORY_ERROR_PROVIDER_REQUIRED),
-                    },
-                ),
-            )
         except (
             Exception
         ) as exc:  # noqa: BLE001 - swallow into ToolResult; later tools still run; the review command decides the exit code
