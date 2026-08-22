@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -93,7 +94,9 @@ def test_with_bool_values() -> None:
 def test_tools_config_rejects_non_string_key() -> None:
     """A numeric ``tools:`` key must raise ValueError, not AttributeError."""
     with pytest.raises(ValueError, match="tool name must be a string"):
-        _parse_tools_config({3.14: {"enabled": True}})
+        _parse_tools_config(
+            cast(dict[str, Any], {3.14: {"enabled": True}}),
+        )
 
 
 def test_load_config_non_string_tool_key_raises_configuration_error(
