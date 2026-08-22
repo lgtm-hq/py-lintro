@@ -22,9 +22,10 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 | **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
 The five tiers above form the `LintroConfig` model's core configuration story
-(`lintro/config/lintro_config.py`). Two additional optional sections — `review`
-(diff-review checklist) and `score` (health-score weights, see **Health Score** below) —
-configure specific commands rather than tool resolution.
+(`lintro/config/lintro_config.py`). Additional optional sections — `review` (diff-review
+checklist), `score` (health-score weights, see **Health Score** below), and `watch`
+(`lintro watch` defaults; see [Watch Mode](watch-mode.md)) — configure specific commands
+rather than tool resolution.
 
 ### Key Principles
 

@@ -14,6 +14,7 @@ ROUTE_MAP_DEST = ROOT / "apps" / "site" / "src" / "generated" / "docs-route-map.
 CATEGORY_MAP: dict[str, tuple[str, int]] = {
     "getting-started.md": ("getting-started", 10),
     "configuration.md": ("usage", 20),
+    "watch-mode.md": ("usage", 25),
     "docker.md": ("usage", 30),
     "github-integration.md": ("usage", 40),
     "ai-features.md": ("usage", 50),
@@ -55,6 +56,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "security/index": ("security", None),
     "getting-started/getting-started": ("getting started", "start"),
     "usage/configuration": ("configuration", "setup"),
+    "usage/watch-mode": ("watch mode", "setup"),
     "usage/docker": ("docker", "setup"),
     "usage/github-integration": ("github", "ci"),
     "usage/ai-features": ("ai features", "extend"),
