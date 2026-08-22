@@ -129,9 +129,7 @@ def test_invalid_provider_env_names_the_variable(
 
     message = str(exc_info.value)
     assert_that(message).contains("LINTRO_AI_PROVIDER='cursur'")
-    assert_that(message).contains("anthropic")
-    assert_that(message).contains("openai")
-    assert_that(message).contains("cursor")
+    assert_that(message).contains("anthropic, cursor, openai")
     assert_that(message).does_not_contain("Traceback")
 
 

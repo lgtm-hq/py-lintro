@@ -12,6 +12,9 @@
 
 Advisory findings are scoped to the review's changed files (or ``--path``)
 and never change the exit code unless ``--fail-on-findings`` is passed.
+An advisory tool that failed to run fails ``--advisory-only``; a full
+review still renders the completed review and records the advisory
+failure in the advisory payload.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ import os
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import click
 from loguru import logger
@@ -29,9 +32,13 @@ from rich.console import Console
 
 from lintro.ai.availability import require_ai
 from lintro.ai.config import AIConfig
-from lintro.ai.exceptions import AIConfigOverrideError, AIError
+from lintro.ai.exceptions import (
+    AIConfigOverrideError,
+    AIError,
+    AIProviderRequiredError,
+)
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_enum import AIProvider, provider_required_error
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -67,8 +74,11 @@ from lintro.ai.transport import (
 from lintro.config.config_loader import get_config
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
+    ADVISORY_ERROR_METADATA_KEY,
+    ADVISORY_ERROR_PROVIDER_REQUIRED,
     advisory_findings_count,
     advisory_results_to_payload,
+    advisory_tools_errored,
     render_advisory_results,
     resolve_advisory_tools,
     run_advisory_tools,
@@ -81,6 +91,95 @@ if TYPE_CHECKING:
 
 #: Default paths scanned by ``--advisory-only`` when no ``--path`` is given.
 ADVISORY_DEFAULT_PATHS: tuple[str, ...] = (".",)
+
+
+def _fail_review_command(
+    exc: AIError | ValueError,
+    *,
+    output_format: str,
+    provider_label: str,
+    post: bool,
+    resolved_pr: int | None,
+    effective_repo: str | None,
+    console: Console | None = None,
+) -> NoReturn:
+    """Render a review failure and exit with the review-error contract.
+
+    Used for both early provider validation and mid-run provider failures so
+    JSON, terminal, and GitHub error rendering stay on one path.
+
+    Args:
+        exc: The failure that prevented a review from running.
+        output_format: CLI ``--output`` value (``json`` or ``terminal``).
+        provider_label: Provider name, or ``unset`` when construction failed.
+        post: Whether ``--post`` requested a GitHub comment.
+        resolved_pr: PR number when posting is requested.
+        effective_repo: ``owner/repo`` when posting is requested.
+        console: Terminal console; created on demand for non-JSON output.
+
+    Raises:
+        SystemExit: Always, with the review-error exit code.
+    """
+    if post and resolved_pr is not None and effective_repo:
+        from lintro.ai.review.github import post_review_error_to_github
+
+        with suppress(Exception):
+            post_review_error_to_github(
+                error=exc,
+                provider=provider_label,
+                pr_number=resolved_pr,
+                repo=effective_repo,
+            )
+    from lintro.ai.review.error_contract import (
+        REVIEW_ERROR_EXIT_CODE,
+        render_error_contract_json,
+    )
+
+    if output_format == "json":
+        click.echo(
+            render_error_contract_json(
+                provider=provider_label,
+                error=exc,
+            ),
+        )
+    else:
+        render_review_error(
+            error=exc,
+            console=console if console is not None else Console(),
+        )
+    # Same exit code in both output formats: no review was produced, which
+    # must never be confusable with "reviewed, found P1 issues" (exit 1).
+    # A wrapper that cannot tell the two apart reports a green check for a
+    # review that never ran (#1826).
+    raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
+
+
+def _advisory_failure_error(results: list[ToolResult]) -> AIError:
+    """Build the exception for an advisory tool that failed to run.
+
+    Args:
+        results: Advisory tool results that include at least one error.
+
+    Returns:
+        ``AIProviderRequiredError`` when the failure is a missing provider,
+        otherwise a generic ``AIError`` with the tool's output.
+    """
+    from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
+
+    failed = next(
+        result
+        for result in results
+        if tool_run_status(
+            result=result,
+            issue_count=result.issues_count or 0,
+        )
+        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
+    )
+    message = failed.output or f"{failed.name} failed"
+    metadata = failed.metadata or {}
+    if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
+        return AIProviderRequiredError(message)
+    return AIError(message)
 
 
 @click.command("review")
@@ -304,18 +403,6 @@ def review_command(
         )
 
     require_ai()
-    if advisory_only:
-        # Advisory-only needs no diff context and no review checklist, so it
-        # deliberately bypasses the ai.review gate: the user asked for the
-        # finder tools, not the diff review (#1308).
-        _run_advisory_only(
-            advisory_tools=advisory_tools,
-            tool_options=tool_options,
-            path_filter=path_filter,
-            output_format=output_format,
-            fail_on_findings=fail_on_findings,
-        )
-
     try:
         resolved_ai = apply_cli_overrides(
             AIConfig.resolve_from_mapping(lintro_config.ai),
@@ -327,6 +414,31 @@ def review_command(
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
     ai_config = resolved_ai.config
+    if advisory_only:
+        # Advisory-only needs no diff context and no review checklist, so it
+        # deliberately bypasses the ai.review gate: the user asked for the
+        # finder tools, not the diff review (#1308). --provider still applies.
+        if ai_config.provider is None:
+            _fail_review_command(
+                AIProviderRequiredError(provider_required_error()),
+                output_format=output_format,
+                provider_label="unset",
+                post=False,
+                resolved_pr=None,
+                effective_repo=None,
+            )
+        _run_advisory_only(
+            advisory_tools=advisory_tools,
+            tool_options=tool_options,
+            path_filter=path_filter,
+            output_format=output_format,
+            fail_on_findings=fail_on_findings,
+            provider_label=(
+                ai_config.provider.value if ai_config.provider is not None else "unset"
+            ),
+            ai_config=ai_config,
+        )
+
     if not ai_config.review_enabled:
         raise click.UsageError(
             "AI review is disabled in configuration. Set ai.review: true "
@@ -355,6 +467,18 @@ def review_command(
             raise click.UsageError(
                 "--post requires --repo or GITHUB_REPOSITORY environment variable.",
             )
+
+    # Fail on a missing provider before git/gh work so an invalid base or a
+    # non-repo cwd cannot hide the required-provider migration error.
+    if ai_config.provider is None:
+        _fail_review_command(
+            AIProviderRequiredError(provider_required_error()),
+            output_format=output_format,
+            provider_label="unset",
+            post=post,
+            resolved_pr=resolved_pr,
+            effective_repo=effective_repo,
+        )
 
     paths = list(path_filter) if path_filter else None
     context_pr = resolved_pr if post else pr
@@ -430,7 +554,7 @@ def review_command(
         format_resolved_profile_log(resolved_profile),
     )
 
-    provider = get_provider(effective_ai_config, workspace_root=workspace_root)
+    provider = None
     effective_depth = depth if depth is not None else lintro_config.review.depth
     effective_strictness = ReviewStrictness(
         (strictness or lintro_config.review.strictness.value).lower(),
@@ -456,6 +580,7 @@ def review_command(
         progress_tracker = RichReviewProgress(console=console)
 
     try:
+        provider = get_provider(effective_ai_config, workspace_root=workspace_root)
         result = run_review(
             context,
             provider=provider,
@@ -505,35 +630,15 @@ def review_command(
             ),
         )
     except (AIError, ValueError) as exc:
-        if post and resolved_pr is not None and effective_repo:
-            from lintro.ai.review.github import post_review_error_to_github
-
-            with suppress(Exception):
-                post_review_error_to_github(
-                    error=exc,
-                    provider=str(provider.name),
-                    pr_number=resolved_pr,
-                    repo=effective_repo,
-                )
-        from lintro.ai.review.error_contract import (
-            REVIEW_ERROR_EXIT_CODE,
-            render_error_contract_json,
+        _fail_review_command(
+            exc,
+            output_format=output_format,
+            provider_label=(str(provider.name) if provider is not None else "unset"),
+            post=post,
+            resolved_pr=resolved_pr,
+            effective_repo=effective_repo,
+            console=console,
         )
-
-        if output_format == "json":
-            click.echo(
-                render_error_contract_json(
-                    provider=str(provider.name),
-                    error=exc,
-                ),
-            )
-        else:
-            render_review_error(error=exc, console=console)
-        # Same exit code in both output formats: no review was produced, which
-        # must never be confusable with "reviewed, found P1 issues" (exit 1).
-        # A wrapper that cannot tell the two apart reports a green check for a
-        # review that never ran (#1826).
-        raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
 
     result = enrich_review_result(result=result, question_map=question_map)
 
@@ -544,6 +649,7 @@ def review_command(
             changed_files=context.changed_files,
             workspace_root=workspace_root,
         ),
+        ai_config=effective_ai_config,
     )
 
     output = render_review_output(
@@ -721,6 +827,7 @@ def _execute_advisory(
     advisory_tools: str | None,
     tool_options: str | None,
     paths: list[str],
+    ai_config: AIConfig | None = None,
 ) -> list[ToolResult]:
     """Resolve and run the advisory tools requested for this review.
 
@@ -728,6 +835,7 @@ def _execute_advisory(
         advisory_tools: Raw ``--advisory-tools`` value.
         tool_options: Raw ``--tool-options`` value for advisory tools.
         paths: Paths to scan (typically the review's changed files).
+        ai_config: CLI-resolved AI configuration forwarded to each tool.
 
     Returns:
         One result per advisory tool that ran; empty when none were selected.
@@ -757,6 +865,7 @@ def _execute_advisory(
         paths=paths,
         tool_names=selection.to_run,
         tool_options=tool_options,
+        ai_config=ai_config,
     )
 
 
@@ -767,6 +876,8 @@ def _run_advisory_only(
     path_filter: tuple[str, ...],
     output_format: str,
     fail_on_findings: bool,
+    provider_label: str,
+    ai_config: AIConfig | None = None,
 ) -> None:
     """Run only the advisory tools, render their findings, and exit.
 
@@ -776,6 +887,8 @@ def _run_advisory_only(
         path_filter: ``--path`` values; defaults to the current directory.
         output_format: ``terminal`` or ``json``.
         fail_on_findings: Whether findings should produce exit code 1.
+        provider_label: Resolved provider name for the error contract.
+        ai_config: CLI-resolved AI configuration forwarded to each tool.
 
     Raises:
         SystemExit: Always; carries the resolved exit code.
@@ -790,7 +903,17 @@ def _run_advisory_only(
         advisory_tools=advisory_tools,
         tool_options=tool_options,
         paths=paths,
+        ai_config=ai_config,
     )
+    if advisory_tools_errored(results):
+        _fail_review_command(
+            _advisory_failure_error(results),
+            output_format=output_format,
+            provider_label=provider_label,
+            post=False,
+            resolved_pr=None,
+            effective_repo=None,
+        )
     if output_format == "json":
         click.echo(
             json.dumps(

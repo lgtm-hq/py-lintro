@@ -21,7 +21,7 @@ from lintro.ai.review.error_contract import (
     is_retryable_kind,
     render_error_contract_json,
 )
-from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.errors_taxonomy import KIND_COPY, ReviewErrorKind
 from lintro.ai.review.exceptions import ReviewExecutionError
 
 
@@ -223,6 +223,7 @@ def test_retryable_kinds_membership() -> None:
         # or the response it got back is what failed, not the account.
         (ReviewErrorKind.CONTEXT_LENGTH, False),
         (ReviewErrorKind.INVALID_RESPONSE, False),
+        (ReviewErrorKind.PROVIDER_UNAVAILABLE, True),
         (ReviewErrorKind.UNKNOWN, False),
     ],
 )
@@ -252,10 +253,16 @@ def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
         ReviewErrorKind.TIMEOUT,
         ReviewErrorKind.CONTEXT_LENGTH,
         ReviewErrorKind.INVALID_RESPONSE,
+        ReviewErrorKind.PROVIDER_UNAVAILABLE,
         ReviewErrorKind.UNKNOWN,
     }
 
     assert_that(covered).is_equal_to(set(ReviewErrorKind))
+
+
+def test_kind_copy_covers_every_error_kind() -> None:
+    """GitHub sticky copy must exist for every kind or ``--post`` KeyErrors."""
+    assert_that(set(KIND_COPY)).is_equal_to(set(ReviewErrorKind))
 
 
 def test_render_json_is_parseable_and_indented(

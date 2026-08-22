@@ -62,6 +62,33 @@ def test_render_ai_status_disabled() -> None:
     )
 
 
+def test_render_ai_status_unset_provider() -> None:
+    """An enabled config with no provider names the three-way migration path."""
+    lines = render_ai_status(
+        ai_config=AIConfig(enabled=True, lint=True, review=False),
+        is_ci=False,
+    )
+
+    assert_that(lines[0]).is_equal_to("[yellow]enabled (provider unset)[/yellow]")
+    assert_that(lines[1]).contains("`ai.provider` in config")
+    assert_that(lines[1]).contains("LINTRO_AI_PROVIDER")
+    assert_that(lines[1]).contains("--provider")
+    assert_that(lines[1]).contains("anthropic, cursor, openai")
+    assert_that(lines).contains("  provider: unset")
+
+
+def test_render_ai_status_unset_provider_without_features() -> None:
+    """Master on with both features off is informational, not a migration error."""
+    lines = render_ai_status(
+        ai_config=AIConfig(enabled=True, lint=False, review=False),
+        is_ci=False,
+    )
+
+    assert_that(lines[0]).is_equal_to("[yellow]enabled (provider unset)[/yellow]")
+    assert_that("".join(lines)).does_not_contain("ai.provider is required")
+    assert_that(lines).contains("  provider: unset")
+
+
 def test_render_ai_status_unknown_provider() -> None:
     """An unsupported provider renders the red unknown-provider lines."""
     lines = render_ai_status(

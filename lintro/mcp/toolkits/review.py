@@ -288,7 +288,8 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
 
     Raises:
         McpError: :attr:`McpErrorCode.TOOL_UNAVAILABLE` when no AI provider is
-            installed or ``ai.review`` is disabled for this workspace;
+            installed, ``ai.provider`` is unset, or ``ai.review`` is disabled
+            for this workspace;
             :attr:`McpErrorCode.INVALID_INPUT` when an ``LINTRO_AI_*`` overlay
             fails validation.
     """
@@ -326,6 +327,18 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
             detail={
                 "tool": "lintro_review",
                 "reason": "review_disabled",
+                "workspace": str(workspace),
+            },
+        )
+    if ai_config.provider is None:
+        from lintro.ai.provider_enum import provider_required_error
+
+        raise McpError(
+            code=McpErrorCode.TOOL_UNAVAILABLE,
+            message=provider_required_error(),
+            detail={
+                "tool": "lintro_review",
+                "reason": "provider_unavailable",
                 "workspace": str(workspace),
             },
         )
@@ -570,7 +583,9 @@ def _no_changes_payload(
 
     metadata = ReviewMetadata(
         model=ai_config.model or "",
-        provider=str(ai_config.provider),
+        provider=(
+            str(ai_config.provider) if ai_config.provider is not None else "unset"
+        ),
         context_window=0,
         depth=depth,
         chunks_total=0,
@@ -636,7 +651,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     Raises:
         McpError: For every failure mode the tool contract defines.
     """
-    from lintro.ai.exceptions import AIError
+    from lintro.ai.exceptions import AIError, AIProviderRequiredError
     from lintro.ai.providers import get_provider
     from lintro.ai.review import (
         classify_changed_files,
@@ -691,7 +706,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
 
     try:
         provider = get_provider(effective_ai_config, workspace_root=workspace)
-    except ValueError as exc:
+    except (AIProviderRequiredError, ValueError) as exc:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
             message=str(exc),

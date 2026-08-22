@@ -32,6 +32,7 @@ from lintro.ai.enums import (
     SanitizeMode,
 )
 from lintro.ai.enums.config_source import ConfigSource
+from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
@@ -151,7 +152,14 @@ class AIConfig(BaseModel):
             "when ai.enabled is also true (the two are ANDed)."
         ),
     )
-    provider: AIProvider = AIProvider.ANTHROPIC
+    provider: AIProvider | None = Field(
+        default=None,
+        description=(
+            "Required when any AI feature (ai.lint or ai.review) is enabled. "
+            "Set via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            f"Accepted providers: {accepted_provider_values()}."
+        ),
+    )
     transport: AITransport | None = Field(
         default=None,
         description=(

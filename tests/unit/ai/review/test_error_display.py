@@ -7,7 +7,7 @@ from io import StringIO
 from assertpy import assert_that
 from rich.console import Console
 
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import AIProviderError, AIProviderRequiredError
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewExecutionError
 
@@ -34,6 +34,28 @@ def test_render_timeout_includes_actionable_hints() -> None:
     assert_that(output).contains("api_timeout")
     assert_that(output).contains("inline")
     assert_that(output).does_not_contain("Traceback")
+
+
+def test_render_unset_provider_is_not_invalid_response() -> None:
+    """A missing provider is a configuration failure, not a parse failure."""
+    buf = StringIO()
+    console = Console(file=buf, width=120, force_terminal=True)
+
+    render_review_error(
+        error=AIProviderRequiredError(
+            "ai.provider is required when ai.lint or ai.review is enabled. "
+            "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+        ),
+        console=console,
+    )
+    output = buf.getvalue()
+
+    assert_that(output).contains("provider unset")
+    assert_that(output).contains("ai.provider")
+    assert_that(output).contains("LINTRO_AI_PROVIDER")
+    assert_that(output).contains("--provider")
+    assert_that(output).does_not_contain("invalid response")
+    assert_that(output).does_not_contain("malformed")
 
 
 def test_render_provider_error_without_traceback() -> None:

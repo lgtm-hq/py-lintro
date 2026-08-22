@@ -9,8 +9,13 @@ violations (#1308). This module is the counterpart runner that
 
 It is deliberately a thin, sequential runner rather than a second copy of the
 full :mod:`lintro.utils.tool_executor` pipeline: advisory tools never fix,
-never participate in post-checks, never feed the health score, and never
-affect the exit code unless the user opts in with ``--fail-on-findings``.
+never participate in post-checks, and never feed the health score. Findings
+do not change the exit code unless the user opts in with
+``--fail-on-findings``. An advisory tool that failed to run
+(:attr:`~lintro.enums.tool_run_status.ToolRunStatus.ERRORED` or
+:attr:`~lintro.enums.tool_run_status.ToolRunStatus.TIMED_OUT`) is not a
+finding: ``--advisory-only`` fails closed, while a full review still
+renders the completed review and records the advisory failure.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from loguru import logger
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
+from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
@@ -32,17 +38,27 @@ from lintro.utils.execution.tool_configuration import (
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    # TYPE_CHECKING-only: this module is on the core → AI import boundary.
+    from lintro.ai.config import AIConfig
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
+    "ADVISORY_ERROR_METADATA_KEY",
+    "ADVISORY_ERROR_PROVIDER_REQUIRED",
     "AdvisorySelection",
     "advisory_findings_count",
     "advisory_results_to_payload",
+    "advisory_tools_errored",
     "get_advisory_tool_names",
     "render_advisory_results",
     "resolve_advisory_tools",
     "run_advisory_tools",
 ]
+
+#: Typed ``ToolResult.metadata`` key for an advisory execution failure.
+ADVISORY_ERROR_METADATA_KEY = "advisory_error"
+#: Marker written when the failure is a missing ``ai.provider``.
+ADVISORY_ERROR_PROVIDER_REQUIRED = "provider_required"
 
 
 @dataclass(frozen=True)
@@ -161,6 +177,7 @@ def run_advisory_tools(
     tool_names: list[str],
     tool_options: str | None = None,
     lintro_config: LintroConfig | None = None,
+    ai_config: AIConfig | None = None,
 ) -> list[ToolResult]:
     """Execute the given advisory tools over ``paths``.
 
@@ -171,6 +188,9 @@ def run_advisory_tools(
             (``tool:option=value,...``) applied on top of configuration.
         lintro_config: Optional config override; the global config is loaded
             when omitted.
+        ai_config: CLI-resolved AI configuration (includes ``--provider``).
+            Forwarded into each tool's ``check()`` options so advisory
+            tools see the same overlays as the review command.
 
     Returns:
         One :class:`~lintro.models.core.tool_result.ToolResult` per tool, in
@@ -185,6 +205,9 @@ def run_advisory_tools(
     config = lintro_config or get_config()
     config_manager = UnifiedConfigManager()
     tool_option_dict = parse_tool_options(tool_options)
+    check_options: dict[str, object] = {}
+    if ai_config is not None:
+        check_options["ai_config"] = ai_config
     results: list[ToolResult] = []
     for tool_name in tool_names:
         # Lookup and configuration are inside the guard too: a plugin that
@@ -203,8 +226,10 @@ def run_advisory_tools(
                 post_tools=set(),
                 lintro_config=config,
             )
-            results.append(tool.check(paths, {}))
-        except Exception as exc:  # noqa: BLE001 - advisory runs never abort review
+            results.append(tool.check(paths, check_options))
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - swallow into ToolResult; later tools still run; the review command decides the exit code
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
             results.append(
                 ToolResult(
@@ -229,6 +254,30 @@ def advisory_findings_count(results: list[ToolResult]) -> int:
         result.issues_count or 0
         for result in results
         if not getattr(result, "skipped", False)
+    )
+
+
+def advisory_tools_errored(results: list[ToolResult]) -> bool:
+    """Return whether any advisory tool failed to run.
+
+    Findings also set ``success=False``; those still have issues and are
+    not errors. A skip is not an error. Use
+    :func:`~lintro.enums.tool_run_status.tool_run_status` so this stays
+    aligned with the other result surfaces.
+
+    Args:
+        results: Advisory tool results.
+
+    Returns:
+        True when at least one tool errored or timed out.
+    """
+    return any(
+        tool_run_status(
+            result=result,
+            issue_count=result.issues_count or 0,
+        )
+        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
+        for result in results
     )
 
 
@@ -285,6 +334,8 @@ def advisory_results_to_payload(results: list[ToolResult]) -> list[dict[str, obj
         payload.append(
             {
                 "tool": result.name,
+                "success": bool(result.success),
+                "output": result.output,
                 "skipped": bool(getattr(result, "skipped", False)),
                 "skip_reason": result.skip_reason,
                 "issues_count": result.issues_count or 0,

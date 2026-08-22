@@ -72,7 +72,7 @@ def test_from_mapping_applies_known_keys() -> None:
     assert_that(config.lint).is_true()
     assert_that(config.review).is_false()
     assert_that(config.max_tokens).is_equal_to(1234)
-    assert_that(config.provider).is_equal_to(AIProvider.ANTHROPIC)
+    assert_that(config.provider).is_none()
 
 
 def test_from_mapping_drops_unknown_keys_and_warns_sorted(

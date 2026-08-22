@@ -11,6 +11,7 @@ from rich.text import Text
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
+    AIProviderRequiredError,
     AIRateLimitError,
 )
 from lintro.ai.review.exceptions import ReviewContextError, ReviewExecutionError
@@ -82,6 +83,14 @@ def _format_error(error: AIError | ValueError) -> tuple[str, str, list[str]]:
             "rate limit",
             str(error),
             ["Wait and retry, or switch provider/model in config"],
+        )
+    if isinstance(error, AIProviderRequiredError):
+        return (
+            "provider unset",
+            str(error),
+            [
+                "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider",
+            ],
         )
     if isinstance(error, AIProviderError):
         body = str(error)

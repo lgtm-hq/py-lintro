@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -115,6 +116,7 @@ def test_review_max_cost_flag_beats_transport_profile() -> None:
         ai={
             "enabled": True,
             "review": True,
+            "provider": "openai",
             "transport": "cli",
             "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
         },
@@ -184,6 +186,7 @@ def test_review_profile_cap_provenance_is_config() -> None:
         ai={
             "enabled": True,
             "review": True,
+            "provider": "openai",
             "transport": "cli",
             "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
         },
@@ -297,6 +300,7 @@ def test_review_runs_when_review_enabled_without_lint() -> None:
             enabled=True,
             lint=False,
             review=True,
+            provider=AIProvider.OPENAI,
             transport=AITransport.API,
         ).model_dump(),
     )
@@ -332,7 +336,7 @@ def test_review_json_output_echoes_payload() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -400,7 +404,11 @@ def test_review_passes_transport_override_to_provider() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -463,7 +471,11 @@ def test_review_passes_provider_and_model_overrides_to_provider() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -622,7 +634,11 @@ def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -688,7 +704,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -754,8 +770,8 @@ def _mock_review_pipeline(
     Args:
         mock_collect: Replacement for the context-collection patch.
         mock_config: Replacement lintro config. Defaults to a minimal config
-            with AI enabled; pass one to exercise config-dependent wiring
-            without duplicating the whole patch stack.
+            with AI enabled and an explicit provider; pass one to exercise
+            config-dependent wiring without duplicating the whole patch stack.
 
     Returns:
         Named patchers to enter around a ``CliRunner`` invocation.
@@ -764,7 +780,7 @@ def _mock_review_pipeline(
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     if mock_config is None:
-        mock_config = MagicMock(ai={"enabled": True})
+        mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
         mock_config.review.depth = 1
         mock_config.review.strictness = ReviewStrictness.BALANCED
         mock_config.review.sensitivity = MagicMock()
@@ -1042,7 +1058,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
         completed_chunks=2,
         cause_message="Cursor CLI timed out after 300s",
     )
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -1125,7 +1141,7 @@ def _agent_mode_config(*, tmp_path: Path, mode: CustomAgentMode) -> MagicMock:
     Returns:
         The configured mock.
     """
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -1346,6 +1362,53 @@ def test_review_help_shows_advisory_flags() -> None:
     assert_that(result.output).contains("--fail-on-findings")
 
 
+def _advisory_error_result() -> ToolResult:
+    """Build an advisory tool result for a configuration/runtime failure."""
+    return ToolResult(
+        name="idiom-review",
+        success=False,
+        output=(
+            "ai.provider is required when ai.lint or ai.review is enabled. "
+            "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            "Accepted providers: anthropic, cursor, openai."
+        ),
+        metadata={"advisory_error": "provider_required"},
+    )
+
+
+def test_advisory_only_unset_provider_exits_two_before_tools() -> None:
+    """--advisory-only fails closed on an unset provider before tools run."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.apply_cli_overrides",
+            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True},
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("--provider")
+    assert_that(run_advisory.called).is_false()
+
+
 def test_advisory_only_exits_zero_with_findings() -> None:
     """Advisory findings are advisory: exit 0 by default."""
     runner = CliRunner()
@@ -1399,6 +1462,91 @@ def test_advisory_only_json_output() -> None:
     payload = json.loads(result.output)
     assert_that(payload["advisory"]).is_length(1)
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+    assert_that(payload["advisory"][0]["success"]).is_false()
+
+
+def test_advisory_only_errored_tool_exits_two() -> None:
+    """An advisory tool that failed to run is not a finding and exits 2."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.apply_cli_overrides",
+            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True, "provider": "openai"},
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("`ai.provider` in config")
+    assert_that(payload).does_not_contain_key("advisory")
+    assert_that(payload).does_not_contain_key("findings")
+
+
+def test_advisory_only_provider_flag_reaches_advisory_tools() -> None:
+    """``--provider`` overlays YAML that omits ``ai.provider`` before tools run."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--provider", "openai"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
+
+
+def test_advisory_failure_error_uses_metadata_not_prose() -> None:
+    """Classification keys off the typed marker, not error-message copy."""
+    from lintro.ai.exceptions import AIError, AIProviderRequiredError
+    from lintro.cli_utils.commands.review import _advisory_failure_error
+
+    marked = ToolResult(
+        name="idiom-review",
+        success=False,
+        output="tool failed for an unrelated reason",
+        metadata={"advisory_error": "provider_required"},
+    )
+    assert_that(_advisory_failure_error([marked])).is_instance_of(
+        AIProviderRequiredError,
+    )
+
+    prose_only = ToolResult(
+        name="idiom-review",
+        success=False,
+        output=("ai.provider is required when ai.lint or ai.review is enabled."),
+    )
+    error = _advisory_failure_error([prose_only])
+    assert_that(error).is_instance_of(AIError)
+    assert_that(error.__class__).is_equal_to(AIError)
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
@@ -1572,6 +1720,74 @@ def test_full_review_json_merges_advisory_key() -> None:
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
 
 
+def test_full_review_keeps_results_when_advisory_errors() -> None:
+    """Advisory failure after a finished review does not discard the review."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "ok", "findings": []}),
+        ) as mock_render,
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(cli, ["review", "--output", "json"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("ok")
+    assert_that(payload["findings"]).is_equal_to([])
+    assert_that(payload["advisory"][0]["success"]).is_false()
+    assert_that(payload["advisory"][0]["output"]).contains("ai.provider is required")
+    assert_that(mock_render.called).is_true()
+    assert_that(mock_post.called).is_false()
+
+
+def test_full_review_forwards_effective_ai_config_to_advisory() -> None:
+    """The review command passes the resolved AIConfig into advisory tools."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
+
+
 def test_cli_overrides_lists_only_explicit_flags() -> None:
     """Only options the caller actually passed appear as overrides."""
     overrides = _cli_overrides(
@@ -1617,7 +1833,11 @@ def test_review_post_reports_config_source_and_transport() -> None:
     """
     runner = CliRunner()
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.config_path = "/home/runner/work/repo/repo/.lintro-config.yaml"
     mock_config.review.depth = 1

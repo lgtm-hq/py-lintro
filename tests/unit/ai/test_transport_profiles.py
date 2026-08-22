@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig, AITransportProfiles, CliTransportProfile
 from lintro.ai.enums import AITransport, CostBasis
+from lintro.ai.registry import AIProvider
 from lintro.ai.transport import (
     DEFAULT_API_TIMEOUT,
     DEFAULT_CLI_TIMEOUT,
@@ -152,7 +153,10 @@ def test_cli_auth_mode_reports_api_key_when_bare_billing_engages(
     subscription/unpriceable (#1923).
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    config = AIConfig(transport=AITransport.CLI)
+    config = AIConfig(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.CLI,
+    )
 
     resolved = resolve_transport_settings(config)
 
