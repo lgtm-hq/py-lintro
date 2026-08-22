@@ -11,9 +11,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **review**: P2 vs P3 severity rubric in the review prompt so borderline findings stay
-  nits instead of flipping the derived verdict (#1968)
-
 ### Changed
 
 ### Deprecated
@@ -23,6 +20,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.128.0] - 2026-08-22
+
+### Added
+
+- **ai**: calibrate review P2 vs P3 severity to stabilize verdicts (#2146) (a4c937d)
+- **review**: P2 vs P3 severity rubric in the review prompt so borderline findings stay
+  nits instead of flipping the derived verdict (#1968)
 
 ## [0.127.0] - 2026-08-22
 
