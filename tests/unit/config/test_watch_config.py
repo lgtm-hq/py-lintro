@@ -82,3 +82,27 @@ def test_load_config_reads_watch_section(
     assert_that(cfg.watch.debounce_ms).is_equal_to(750)
     assert_that(cfg.watch.auto_fix).is_true()
     assert_that(cfg.watch.tools).is_equal_to(["ruff"])
+
+
+def test_convert_pyproject_watch_table_is_applied() -> None:
+    """``[tool.lintro.watch]`` must reach ``LintroConfig.watch``."""
+    import tomllib
+
+    from lintro.config.config_loader import (
+        _convert_pyproject_to_config,
+        build_config_from_dict,
+    )
+
+    parsed = tomllib.loads(
+        "[tool.lintro.watch]\n"
+        "debounce_ms = 450\n"
+        "auto_fix = true\n"
+        'tools = ["ruff"]\n',
+    )
+    cfg = build_config_from_dict(
+        _convert_pyproject_to_config(parsed["tool"]["lintro"]),
+    )
+
+    assert_that(cfg.watch.debounce_ms).is_equal_to(450)
+    assert_that(cfg.watch.auto_fix).is_true()
+    assert_that(cfg.watch.tools).is_equal_to(["ruff"])
