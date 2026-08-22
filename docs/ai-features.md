@@ -22,6 +22,7 @@ interactive fix suggestions on top of standard linting results.
 #   # Required when AI is on. No default.
 #   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
 #   provider: anthropic
+#   transport: api
 
 # Run check — AI summary is generated automatically (1 API call)
 lintro check
@@ -332,7 +333,9 @@ ai:
   review: true
   provider: anthropic
   transport: api
+```
 
+```yaml
 # Cursor (CLI-only)
 ai:
   enabled: true
@@ -340,7 +343,9 @@ ai:
   review: true
   provider: cursor
   transport: cli
+```
 
+```yaml
 # OpenAI
 ai:
   enabled: true

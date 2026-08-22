@@ -352,6 +352,7 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or CURSOR_API_KEY / OPENAI_API_KEY
 #   # Required when AI is on. No default.
 #   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
 #   provider: anthropic
+#   transport: api
 ```
 
 See the [AI Features Guide](docs/ai-features.md) for full documentation.

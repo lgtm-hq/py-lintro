@@ -2949,6 +2949,7 @@ ai:
   # Required when AI is on. No default.
   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
   provider: anthropic
+  transport: api
 ```
 
 ### AI CLI Flags
