@@ -26,6 +26,8 @@ extend-ignore-re = [
   "\"provdier\"",                              # unknown AI config key fixture
   "ignored: provdier",                         # ...and the message that key produces
   "html-valdate",                              # unknown-tool fixture
+  "enabled_tools: \\[blak\\]",                 # unknown-tool fixture (suggests black)
+  "unknown tool 'blak'",                       # ...and the message that name produces
   "`langauge` is a misspelling of `language`", # golangci-lint parser fixture
 ]
 
