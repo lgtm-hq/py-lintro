@@ -15,6 +15,7 @@ from lintro.config.config_loader import (
     _parse_tool_config,
     _parse_tools_config,
     _pyproject_lintro_catalog,
+    build_config_from_dict,
     clear_config_cache,
     get_default_config,
     load_config,
@@ -218,6 +219,43 @@ def test_convert_scalar_enforce_raises() -> None:
     """A scalar ``[tool.lintro] enforce`` value must raise ValueError."""
     with pytest.raises(ValueError, match="enforce must be a mapping"):
         _convert_pyproject_to_config({"enforce": 1})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_build_config_from_dict_rejects_null_mapping_section(
+    section: str,
+) -> None:
+    """A YAML-null mapping section must raise ValueError, not AttributeError.
+
+    Args:
+        section: Top-level key that typed parsers assume is a mapping.
+    """
+    with pytest.raises(ValueError, match=f"{section} must be a mapping"):
+        build_config_from_dict({section: None})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_load_config_null_mapping_section_raises_configuration_error(
+    tmp_path: Path,
+    section: str,
+) -> None:
+    """A bare ``section:`` in YAML must raise ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        section: Top-level mapping section spelled as a YAML null.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(f"{section}:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=f"{section} must be a mapping"):
+        load_config(config_path=str(config_file))
 
 
 def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:
@@ -509,8 +547,6 @@ def test_plugin_cannot_shadow_reserved_config_keys(
 def test_nested_pyproject_execution_fail_fast_is_applied() -> None:
     """Valid nested ``[tool.lintro.execution] fail_fast`` must reach LintroConfig."""
     import tomllib
-
-    from lintro.config.config_loader import build_config_from_dict
 
     parsed = tomllib.loads("[tool.lintro.execution]\nfail_fast = true\n")
     converted = _convert_pyproject_to_config(parsed["tool"]["lintro"])

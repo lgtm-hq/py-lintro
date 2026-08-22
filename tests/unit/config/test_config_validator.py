@@ -9,6 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.config.config_validator import (
+    KNOWN_TOP_LEVEL_KEYS,
     ValidationMessage,
     known_tool_names,
     validate_config_file,
@@ -560,24 +561,28 @@ ruff = 0
 
 @pytest.mark.parametrize(
     "section",
-    ["score", "output", "plugins", "licenses", "module_size", "post_checks"],
+    sorted(KNOWN_TOP_LEVEL_KEYS),
 )
 def test_documented_sections_do_not_warn(
     write_config: Callable[..., Path],
     section: str,
 ) -> None:
-    """Sections the loader honors must not be reported as unknown options.
+    """Every known top-level section must validate without UNKNOWN_OPTION.
+
+    Uses an empty mapping so the case does not depend on section-specific
+    nested fields (``score.enabled`` is not a ScoreConfig key).
 
     Args:
         write_config: Fixture writing config content to a temp file.
         section: Top-level section name to place in the config.
     """
-    path = write_config(f"{section}:\n  enabled: true\n")
+    path = write_config(f"{section}: {{}}\n")
 
     result = validate_config_file(path)
 
-    locations = [w.location for w in result.warnings]
-    assert_that(locations).does_not_contain(section)
+    unknown = [w for w in result.warnings if w.code == ValidationCode.UNKNOWN_OPTION]
+    assert_that(result.is_valid).is_true()
+    assert_that(unknown).is_empty()
 
 
 def test_score_section_unknown_key_warns(write_config: Callable[..., Path]) -> None:
@@ -753,6 +758,34 @@ def test_missing_file_uses_not_found_code(tmp_path: Path) -> None:
     result = validate_config_file(tmp_path / "nope.yaml")
 
     assert_that(result.errors[0].code).is_equal_to(ValidationCode.NOT_FOUND)
+
+
+def test_autodetect_list_yaml_falls_through_to_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A list YAML on auto-detect must follow the loader into pyproject.
+
+    ``load_config`` maps non-dict YAML to ``{}`` and continues searching.
+    Validate must not stop on ``INVALID_TYPE`` and skip ``[tool.lintro]``.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "- just\n- a\n- list\n",
+        encoding="utf-8",
+    )
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.lintro]\nfail_fast = true\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = validate_config_file(None)
+
+    assert_that(result.config_path).is_equal_to(pyproject)
+    assert_that(result.is_valid).is_true()
+    assert_that(result.warnings[0].code).is_equal_to(ValidationCode.EMPTY_CONFIG)
 
 
 def test_autodetect_empty_yaml_reports_invalid_pyproject(

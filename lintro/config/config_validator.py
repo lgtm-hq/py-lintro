@@ -376,11 +376,7 @@ def _not_found_result(
 
 
 def _is_empty_document(parsed: Any) -> bool:
-    """Return whether a parsed YAML document is empty for loader purposes.
-
-    ``load_config`` maps ``None`` and non-dicts to ``{}`` then treats a
-    falsy mapping as "nothing found" and continues searching. Validate must
-    not report success for those documents.
+    """Return whether a parsed YAML document is an empty mapping or null.
 
     Args:
         parsed: Value returned by ``yaml.safe_load``.
@@ -389,6 +385,23 @@ def _is_empty_document(parsed: Any) -> bool:
         bool: True when the document is ``None`` or ``{}``.
     """
     return parsed is None or parsed == {}
+
+
+def _is_loader_ignored_yaml(parsed: Any) -> bool:
+    """Return whether ``load_config`` treats this YAML document as not found.
+
+    ``_load_yaml_file`` maps ``None`` and any non-dict to ``{}``, and
+    ``load_config`` then continues searching. Auto-detect validate must
+    follow that fallthrough instead of hard-failing ``INVALID_TYPE`` on a
+    scalar or list and skipping ``[tool.lintro]``.
+
+    Args:
+        parsed: Value returned by ``yaml.safe_load``.
+
+    Returns:
+        bool: True when the document is ``None``, a non-mapping, or ``{}``.
+    """
+    return parsed is None or not isinstance(parsed, dict) or parsed == {}
 
 
 def _empty_yaml_error(config_path: Path) -> ValidationMessage:
@@ -655,11 +668,13 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
     Loads the config (or locates one by searching upward), checks it against
     the known schema, and reports both hard errors and softer warnings.
 
-    Empty YAML (``None`` or ``{}``) is not a successful config: ``load_config``
-    ignores it and continues to ``[tool.lintro]``. Auto-detect therefore
+    Empty or non-mapping YAML (``None``, ``{}``, a list, or a scalar) is
+    not a successful config: ``load_config`` maps those documents to
+    ``{}`` and continues to ``[tool.lintro]``. Auto-detect therefore
     falls through to pyproject the same way; an explicit empty path is
-    reported as ``EMPTY_CONFIG`` so validate never exits 0 while runtime
-    would load a different file.
+    ``EMPTY_CONFIG`` and an explicit non-mapping root is
+    ``INVALID_TYPE``, so validate never exits 0 while runtime would load
+    a different file.
 
     Args:
         path: Explicit path to a config file. When None, the nearest
@@ -711,18 +726,31 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         return result
     parsed, is_pyproject = parsed_pair
 
-    if not is_pyproject and _is_empty_document(parsed):
+    if not is_pyproject and _is_loader_ignored_yaml(parsed):
         if explicit:
-            result.errors.append(_empty_yaml_error(config_path))
+            if _is_empty_document(parsed):
+                result.errors.append(_empty_yaml_error(config_path))
+            else:
+                result.errors.append(
+                    ValidationMessage(
+                        code=ValidationCode.INVALID_TYPE,
+                        message=(
+                            "Config root must be a mapping, got "
+                            f"{type(parsed).__name__}."
+                        ),
+                    ),
+                )
             return result
-        # Auto-detect: treat empty YAML like the loader — continue to
-        # pyproject rather than reporting VALID for a file runtime ignores.
+        # Auto-detect: treat loader-ignored YAML like empty — continue
+        # to pyproject rather than reporting INVALID_TYPE for a file
+        # runtime ignores.
         result.warnings.append(
             ValidationMessage(
                 code=ValidationCode.EMPTY_CONFIG,
                 message=(
-                    f"{config_path} is empty and will be ignored at runtime; "
-                    "continuing to [tool.lintro] in pyproject.toml."
+                    f"{config_path} is empty or not a mapping and will be "
+                    "ignored at runtime; continuing to [tool.lintro] in "
+                    "pyproject.toml."
                 ),
                 location=str(config_path),
             ),

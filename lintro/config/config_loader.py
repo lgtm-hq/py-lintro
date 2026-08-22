@@ -792,6 +792,36 @@ def load_config(
         raise ConfigurationError(str(exc)) from exc
 
 
+def _require_mapping_section(
+    data: dict[str, Any],
+    section: str,
+) -> dict[str, Any]:
+    """Return ``section`` as a mapping, or ``{}`` when the key is absent.
+
+    YAML spells an empty section as ``enforce:`` which deserializes to
+    ``None``. ``dict.get(section, {})`` then returns that ``None``, and
+    the typed parsers call ``.get`` / ``.items`` on it.
+
+    Args:
+        data: Normalized configuration mapping.
+        section: Top-level key that must be a mapping when present.
+
+    Returns:
+        dict[str, Any]: The section mapping, or an empty mapping when
+            the key is omitted.
+
+    Raises:
+        ValueError: When the key is present but is not a mapping.
+    """
+    if section not in data:
+        return {}
+    value = data[section]
+    if isinstance(value, dict):
+        return value
+    actual = "null" if value is None else type(value).__name__
+    raise ValueError(f"{section} must be a mapping, got {actual}")
+
+
 def build_config_from_dict(
     data: dict[str, Any],
     resolved_path: str | None = None,
@@ -810,10 +840,18 @@ def build_config_from_dict(
     Returns:
         LintroConfig: The fully parsed configuration.
     """
-    enforce_config = _parse_enforce_config(data.get("enforce", {}))
-    execution_config = _parse_execution_config(data.get("execution", {}))
-    defaults = _parse_defaults(data.get("defaults", {}))
-    tools_config = _parse_tools_config(data.get("tools", {}))
+    enforce_config = _parse_enforce_config(
+        _require_mapping_section(data=data, section="enforce"),
+    )
+    execution_config = _parse_execution_config(
+        _require_mapping_section(data=data, section="execution"),
+    )
+    defaults = _parse_defaults(
+        _require_mapping_section(data=data, section="defaults"),
+    )
+    tools_config = _parse_tools_config(
+        _require_mapping_section(data=data, section="tools"),
+    )
     # Stored verbatim: parsing belongs to the AI layer (issue #724).
     ai_config = data.get("ai") or {}
     review_config = _parse_review_config(data.get("review", {}))
