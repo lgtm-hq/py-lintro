@@ -611,8 +611,8 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-None of these is preferred. Set `ai.provider` (or `LINTRO_AI_PROVIDER` / `--provider`)
-whenever AI is on.
+None of these is preferred. Set `ai.provider` or `LINTRO_AI_PROVIDER` whenever AI is on.
+`lintro review` also accepts `--provider`.
 
 #### [Anthropic](https://docs.anthropic.com/)
 
@@ -744,13 +744,13 @@ LINTRO_AI_ENABLED=0 lintro check .
 **Every transport needs a credential of its own — CLI transport is not
 credential-free.**
 
-| Provider    | Transport | Credential                                                        |
-| ----------- | --------- | ----------------------------------------------------------------- |
-| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                               |
-| `anthropic` | `cli`     | `claude` login session, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` |
-| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)     |
-| `openai`    | `api`     | `OPENAI_API_KEY`                                                  |
-| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`   |
+| Provider    | Transport | Credential                                                                        |
+| ----------- | --------- | --------------------------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                               |
+| `anthropic` | `cli`     | `claude` login, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `apiKeyHelper` |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)                     |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                                  |
+| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`                   |
 
 `ai.api_key_env` overrides the API-transport variable name if you keep the key somewhere
 else.

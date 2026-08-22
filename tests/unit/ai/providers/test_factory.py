@@ -9,7 +9,6 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
-from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import anthropic as anthropic_mod
 from lintro.ai.providers import get_provider
 from lintro.ai.providers import openai as openai_mod
@@ -37,39 +36,6 @@ def test_get_provider_unknown_raises():
     config = AIConfig.model_construct(provider="unknown")
     with pytest.raises(ValueError, match="Unknown AI provider"):
         get_provider(config)
-
-
-def test_get_provider_unimplemented_lists_alphabetically(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A recognized-but-unimplemented provider lists names alphabetically."""
-    import lintro.ai.providers as providers_mod
-
-    monkeypatch.setattr(
-        providers_mod,
-        "_PROVIDER_CLASSES",
-        {
-            AIProvider.OPENAI: (
-                "lintro.ai.providers.openai",
-                "OpenAIProvider",
-            ),
-            AIProvider.ANTHROPIC: (
-                "lintro.ai.providers.anthropic",
-                "AnthropicProvider",
-            ),
-        },
-    )
-    config = AIConfig.model_construct(provider=AIProvider.CURSOR)
-    with pytest.raises(
-        ValueError,
-        match="recognized but not implemented",
-    ) as exc_info:
-        get_provider(config)
-    message = str(exc_info.value)
-    assert_that(message).contains("Implemented providers: anthropic, openai")
-    assert_that(message).does_not_contain(
-        "Implemented providers: openai, anthropic",
-    )
 
 
 def test_get_provider_requires_explicit_provider() -> None:

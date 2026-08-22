@@ -2979,6 +2979,7 @@ ai:
 | `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
 | `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
 | `provider`              | string | none           | Required when AI is on (`anthropic`, `cursor`, or `openai`)                                  |
+| `transport`             | string | none           | Required when AI is on (`api` or `cli`; `cursor` requires `cli`)                             |
 | `model`                 | string | (default)      | Model override                                                                               |
 | `api_key_env`           | string | (default)      | Custom env var for API key                                                                   |
 | `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                  |

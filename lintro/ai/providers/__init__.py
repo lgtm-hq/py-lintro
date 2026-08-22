@@ -6,7 +6,6 @@ the appropriate AI provider based on configuration.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,35 +33,6 @@ DEFAULT_MODELS: dict[str, str] = {
 DEFAULT_API_KEY_ENVS: dict[str, str] = {
     p.value: e for p, e in PROVIDERS.default_api_key_envs.items()
 }
-
-_PROVIDER_CLASSES: dict[AIProvider, tuple[str, str]] = {
-    AIProvider.ANTHROPIC: (
-        "lintro.ai.providers.anthropic",
-        "AnthropicProvider",
-    ),
-    AIProvider.OPENAI: (
-        "lintro.ai.providers.openai",
-        "OpenAIProvider",
-    ),
-    AIProvider.CURSOR: (
-        "lintro.ai.providers.cursor",
-        "CursorProvider",
-    ),
-}
-
-
-def _implemented_provider_list(
-    provider_classes: Mapping[AIProvider, object],
-) -> str:
-    """Return implemented provider names in alphabetical order.
-
-    Args:
-        provider_classes: Mapping of implemented providers.
-
-    Returns:
-        Comma-separated provider values with no implied ranking.
-    """
-    return ", ".join(sorted(member.value for member in provider_classes))
 
 
 def get_provider(
@@ -94,16 +64,6 @@ def get_provider(
             f"Unknown AI provider: '{config.provider}'. "
             f"Supported providers: {accepted_provider_values()}",
         ) from exc
-
-    entry = _PROVIDER_CLASSES.get(provider_enum)
-    if entry is None:
-        implemented = _implemented_provider_list(
-            provider_classes=_PROVIDER_CLASSES,
-        )
-        raise ValueError(
-            f"AI provider '{provider_enum.value}' is recognized but not "
-            f"implemented. Implemented providers: {implemented}",
-        )
 
     maybe_start_transcript(
         workspace_root=workspace_root or resolve_workspace_root(None),
