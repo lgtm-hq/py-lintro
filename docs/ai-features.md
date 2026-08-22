@@ -1082,6 +1082,9 @@ uv pip install 'lintro[ai]'
 # Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
+# Cursor (CLI-only)
+export CURSOR_API_KEY=...
+
 # OpenAI
 export OPENAI_API_KEY=sk-...
 

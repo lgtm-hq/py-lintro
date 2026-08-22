@@ -6,6 +6,7 @@ the appropriate AI provider based on configuration.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,20 @@ DEFAULT_MODELS: dict[str, str] = {
 DEFAULT_API_KEY_ENVS: dict[str, str] = {
     p.value: e for p, e in PROVIDERS.default_api_key_envs.items()
 }
+
+
+def _implemented_provider_list(
+    provider_classes: Mapping[AIProvider, object],
+) -> str:
+    """Return implemented provider names in alphabetical order.
+
+    Args:
+        provider_classes: Mapping of implemented providers.
+
+    Returns:
+        Comma-separated provider values with no implied ranking.
+    """
+    return ", ".join(sorted(member.value for member in provider_classes))
 
 
 def get_provider(
@@ -82,7 +97,9 @@ def get_provider(
 
     entry = provider_classes.get(provider_enum)
     if entry is None:
-        implemented = ", ".join(sorted(p.value for p in provider_classes))
+        implemented = _implemented_provider_list(
+            provider_classes=provider_classes,
+        )
         raise ValueError(
             f"AI provider '{provider_enum.value}' is recognized but not "
             f"implemented. Implemented providers: {implemented}",

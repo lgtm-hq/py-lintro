@@ -68,16 +68,15 @@ ai:
 
 ## Credentials
 
-| Provider    | Transport | Credential                |
-| ----------- | --------- | ------------------------- |
-| `anthropic` | `api`     | `ANTHROPIC_API_KEY`       |
-| `anthropic` | `cli`     | `CLAUDE_CODE_OAUTH_TOKEN` |
-| `cursor`    | `cli`     | `CURSOR_API_KEY`          |
-| `openai`    | `api`     | `OPENAI_API_KEY`          |
-| `openai`    | `cli`     | `CODEX_API_KEY`           |
+| Provider    | Transport | Credential                                                                        |
+| ----------- | --------- | --------------------------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                               |
+| `anthropic` | `cli`     | `claude` login, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `apiKeyHelper` |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY`                                         |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                                  |
+| `openai`    | `cli`     | `codex login` (`~/.codex/auth.json`) or `CODEX_API_KEY`                           |
 
-`cursor` is CLI-only. CLI transport also accepts a login session for the matching binary
-(`claude`, `agent`, `codex`) — see `docs/ai-features.md`.
+`cursor` is CLI-only. See `docs/ai-features.md` for per-binary login details.
 
 ### Anthropic `--bare` and `LINTRO_CLI_BARE`
 

@@ -9,8 +9,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers import _implemented_provider_list, get_provider
 from lintro.ai.providers import anthropic as anthropic_mod
-from lintro.ai.providers import get_provider
 from lintro.ai.providers import openai as openai_mod
 
 
@@ -36,6 +37,18 @@ def test_get_provider_unknown_raises():
     config = AIConfig.model_construct(provider="unknown")
     with pytest.raises(ValueError, match="Unknown AI provider"):
         get_provider(config)
+
+
+def test_implemented_provider_list_is_alphabetical() -> None:
+    """The unimplemented-provider error lists names alphabetically."""
+    classes = {
+        AIProvider.ANTHROPIC: object(),
+        AIProvider.OPENAI: object(),
+        AIProvider.CURSOR: object(),
+    }
+    assert_that(
+        _implemented_provider_list(provider_classes=classes),
+    ).is_equal_to("anthropic, cursor, openai")
 
 
 def test_get_provider_requires_explicit_provider() -> None:
