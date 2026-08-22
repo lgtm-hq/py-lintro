@@ -2946,7 +2946,9 @@ ai:
   enabled: true
   lint: true # AI summaries / --fix on chk/fmt
   review: false # lintro review (opt-in separately)
-  provider: <anthropic|cursor|openai>
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: anthropic
 ```
 
 ### AI CLI Flags
@@ -3044,7 +3046,9 @@ skipped result rather than failing the run. Findings are cached by content hash 
 # .lintro-config.yaml
 ai:
   enabled: true
-  provider: <anthropic|cursor|openai>
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: anthropic
   transport: api
 tools:
   idiom-review:

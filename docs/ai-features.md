@@ -19,7 +19,9 @@ interactive fix suggestions on top of standard linting results.
 # .lintro-config.yaml
 # ai:
 #   enabled: true
-#   provider: <anthropic|cursor|openai>
+#   # Required when AI is on. No default.
+#   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+#   provider: anthropic
 
 # Run check — AI summary is generated automatically (1 API call)
 lintro check
@@ -200,7 +202,9 @@ degrades gracefully to a skipped result rather than failing the run.
 # .lintro-config.yaml
 ai:
   enabled: true
-  provider: <anthropic|cursor|openai>
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: anthropic
   transport: api
 tools:
   idiom-review:
@@ -321,14 +325,29 @@ review:
 Add the `ai` section to `.lintro-config.yaml`:
 
 ```yaml
+# Anthropic
 ai:
-  enabled: true # master switch (AND-ed with the toggles below)
-  lint: true # AI lint summaries during chk/fmt
-  review: true # the `lintro review` AI diff review
-  provider: <anthropic|cursor|openai> # cursor requires transport: cli
-  transport: api # "api" (SDK) or "cli" (local agent binary); no default
-  # model: claude-sonnet-4-6  # uses provider default if omitted
-  # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
+  enabled: true
+  lint: true
+  review: true
+  provider: anthropic
+  transport: api
+
+# Cursor (CLI-only)
+ai:
+  enabled: true
+  lint: true
+  review: true
+  provider: cursor
+  transport: cli
+
+# OpenAI
+ai:
+  enabled: true
+  lint: true
+  review: true
+  provider: openai
+  transport: api
 ```
 
 ### Feature Toggles
@@ -379,7 +398,7 @@ ai:
 
   # Provider: "anthropic", "cursor", or "openai" ("cursor" is CLI-only).
   # Required when ai.lint or ai.review is enabled. No default.
-  provider: <anthropic|cursor|openai>
+  provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
   # No default — set it explicitly whenever ai.lint or ai.review is enabled.
@@ -663,8 +682,10 @@ support both transports.
 ai:
   enabled: true
   review: true
-  provider: <anthropic|cursor|openai>
-  transport: api # or "cli"; cursor requires cli
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: anthropic
+  transport: api # or "cli"
 ```
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
@@ -974,7 +995,7 @@ When AI is enabled, the pre-execution summary table includes AI configuration:
 │ Setting       │ Value                                      │
 ├───────────────┼────────────────────────────────────────────┤
 │ AI            │ enabled                                    │
-│               │   provider: <anthropic|cursor|openai>      │
+│               │   provider: anthropic                      │
 │               │   model: (provider default if omitted)     │
 │               │   parallel: 5 workers                      │
 │               │   safe-auto-apply: on                      │

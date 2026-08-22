@@ -46,7 +46,9 @@ transport=cli auth=subscription timeout=900 cap=advisory:$0.50 cost_basis=unpric
 ```yaml
 ai:
   enabled: true
-  provider: <anthropic|cursor|openai>
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: cursor
   transport: cli
   transports:
     api:

@@ -349,7 +349,9 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or CURSOR_API_KEY / OPENAI_API_KEY
 # .lintro-config.yaml
 # ai:
 #   enabled: true
-#   provider: <anthropic|cursor|openai>
+#   # Required when AI is on. No default.
+#   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+#   provider: anthropic
 ```
 
 See the [AI Features Guide](docs/ai-features.md) for full documentation.
