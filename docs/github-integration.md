@@ -132,7 +132,7 @@ failures without scraping human-readable stderr prose:
 | Field       | Type            | Meaning                                                                 |
 | ----------- | --------------- | ----------------------------------------------------------------------- |
 | `kind`      | string (enum)   | Canonical classification (see below). Stable across providers.          |
-| `provider`  | string          | Provider identifier, lowercased (e.g. `anthropic`, `openai`, `cursor`). |
+| `provider`  | string          | Provider identifier, lowercased (e.g. `anthropic`, `cursor`, `openai`). |
 | `status`    | integer \| null | Extracted HTTP status (e.g. `401`, `429`, `529`), or `null` when none.  |
 | `retryable` | boolean         | `true` for transient conditions safe to retry unchanged.                |
 | `message`   | string          | The most specific underlying cause text.                                |

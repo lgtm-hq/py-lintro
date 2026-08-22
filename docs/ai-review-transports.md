@@ -8,7 +8,7 @@ and reported numbers mean different things. Configure them under `ai.transports.
 
 | Dimension           | `api`                                       | `cli`                                                                                 |
 | ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Credential          | `ANTHROPIC_API_KEY` (or provider key)       | `CLAUDE_CODE_OAUTH_TOKEN` / `claude` login                                            |
+| Credential          | Provider API key — see matrix below         | Provider CLI login or CLI key — see matrix below                                      |
 | Billing             | Metered API spend                           | Subscription / OAuth session                                                          |
 | Default timeout     | 60s (stream-sized per call)                 | 900s (whole-turn)                                                                     |
 | Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                  |
@@ -17,10 +17,9 @@ and reported numbers mean different things. Configure them under `ai.transports.
 | Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
 | Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
-The credential rows above are Anthropic-specific (the dogfood default). Other CLI
-providers authenticate with their own logins and keys — `codex login` / `CODEX_API_KEY`
-for `openai`, `agent login` / `CURSOR_API_KEY` for `cursor` — see `docs/ai-features.md`,
-which also covers Claude's settings-file `apiKeyHelper` as a reachable API credential.
+Every `(provider, transport)` pair has its own credential. None is a default. Login
+sessions also satisfy CLI transport — see `docs/ai-features.md` for `apiKeyHelper` and
+per-binary login details.
 
 **Bare-billing exception:** under `cli` with Anthropic, when `ai.cli_bare` resolves to
 sending `--bare` (`auto` with a reachable `ANTHROPIC_API_KEY`, or `always`, #1859), the
@@ -47,7 +46,9 @@ transport=cli auth=subscription timeout=900 cap=advisory:$0.50 cost_basis=unpric
 ```yaml
 ai:
   enabled: true
-  provider: anthropic
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
+  provider: cursor
   transport: cli
   transports:
     api:
@@ -60,12 +61,24 @@ ai:
 
 ## When to use which
 
-- Prefer **`cli`** when you have a Claude Code / subscription OAuth session and want
-  dogfood CI without burning a metered API key.
-- Prefer **`api`** when you need enforced spend caps, streaming, or non-Claude providers
-  with API keys.
+- Prefer **`cli`** when you have a local agent login or subscription and want to avoid
+  metered API spend.
+- Prefer **`api`** when you need enforced spend caps, streaming, or an SDK-backed
+  provider.
 
-## Credentials and `LINTRO_CLI_BARE`
+## Credentials
+
+| Provider    | Transport | Credential                                                                        |
+| ----------- | --------- | --------------------------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                               |
+| `anthropic` | `cli`     | `claude` login, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `apiKeyHelper` |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY`                                         |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                                  |
+| `openai`    | `cli`     | `codex login` (`~/.codex/auth.json`) or `CODEX_API_KEY`                           |
+
+`cursor` is CLI-only. See `docs/ai-features.md` for per-binary login details.
+
+### Anthropic `--bare` and `LINTRO_CLI_BARE`
 
 | Variable / setting                | Transport                    | Role                                                   |
 | --------------------------------- | ---------------------------- | ------------------------------------------------------ |
@@ -74,8 +87,8 @@ ai:
 | `ai.cli_bare` / `LINTRO_CLI_BARE` | cli                          | `auto` / `always` / `never` — whether to pass `--bare` |
 
 `--bare` disables OAuth session login and authenticates only against an API key
-(#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
-of scope so the subscription token is actually used.
+(#1838/#1859). When dogfooding Anthropic CLI, pin `LINTRO_CLI_BARE=never` and keep
+`ANTHROPIC_API_KEY` out of scope so the subscription token is actually used.
 
 ## Reported numbers
 

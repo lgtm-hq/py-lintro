@@ -38,7 +38,10 @@ from lintro.ai.exceptions import (
     AIProviderRequiredError,
 )
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import AIProvider, provider_required_error
+from lintro.ai.provider_enum import (
+    accepted_provider_names,
+    provider_required_error,
+)
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -279,7 +282,7 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     "--provider",
     "provider_override",
     type=click.Choice(
-        [member.value for member in AIProvider],
+        accepted_provider_names(),
         case_sensitive=False,
     ),
     default=None,

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import click
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.availability import (
     is_ai_available,
@@ -58,6 +59,24 @@ def test_availability_unknown_provider():
     """Verify that an unknown provider is reported as unavailable."""
     result = is_provider_available("unknown")
     assert_that(result).is_false()
+
+
+def test_availability_unknown_provider_lists_providers_alphabetically() -> None:
+    """Unknown-provider warnings list accepted names alphabetically."""
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        result = is_provider_available("unknown")
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(result).is_false()
+    assert_that(messages).is_not_empty()
+    assert_that(messages[0]).contains("anthropic, cursor, openai")
+    assert_that(messages[0]).does_not_contain("anthropic, openai, cursor")
 
 
 def test_availability_require_raises_when_unavailable():
