@@ -72,7 +72,7 @@ def test_smart_selection_excludes_catch_all_unless_named(
     make_tools: ToolBuilder,
 ) -> None:
     """Catch-all ``*`` tools stay out of default watch batches."""
-    tools = make_tools({"gitleaks": ["*"], "ruff": ["*.py"]})
+    tools = make_tools({"catchall": ["*"], "ruff": ["*.py"]})
 
     assert_that(
         select_tools_for_files(["README.md", "foo.py"], available_tools=tools),
@@ -80,10 +80,10 @@ def test_smart_selection_excludes_catch_all_unless_named(
     assert_that(
         select_tools_for_files(
             ["README.md"],
-            restrict_to=["gitleaks"],
+            restrict_to=["catchall"],
             available_tools=tools,
         ),
-    ).is_equal_to(["gitleaks"])
+    ).is_equal_to(["catchall"])
 
 
 def test_no_match_returns_empty(make_tools: ToolBuilder) -> None:
@@ -248,6 +248,9 @@ def test_live_python_selection_is_executor_compatible() -> None:
     assert_that(selected).contains("ruff")
     assert_that("idiom-review" in selected or "idiom_review" in selected).is_false()
     assert_that(selected).does_not_contain("gitleaks")
+    assert_that(selected).does_not_contain("typos")
+    assert_that(selected).does_not_contain("trufflehog")
+    assert_that(selected).does_not_contain("commitlint")
     assert_that(selected).does_not_contain("pytest")
 
     result = get_tools_to_run(
