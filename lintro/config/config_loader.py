@@ -294,11 +294,16 @@ def _parse_tools_config(data: dict[str, Any]) -> dict[str, LintroToolConfig]:
         dict[str, LintroToolConfig]: Tool configurations keyed by tool name.
 
     Raises:
-        ValueError: If a tool entry is neither a mapping nor a boolean.
+        ValueError: If a tool name is not a string, or a tool entry is
+            neither a mapping nor a boolean.
     """
     tools: dict[str, LintroToolConfig] = {}
 
     for tool_name, tool_data in data.items():
+        if not isinstance(tool_name, str):
+            raise ValueError(
+                f"tool name must be a string, got {type(tool_name).__name__}.",
+            )
         name = tool_name.lower()
         if isinstance(tool_data, dict):
             tools[name] = _parse_tool_config(

@@ -90,6 +90,27 @@ def test_with_bool_values() -> None:
     assert_that(config["prettier"].enabled).is_false()
 
 
+def test_tools_config_rejects_non_string_key() -> None:
+    """A numeric ``tools:`` key must raise ValueError, not AttributeError."""
+    with pytest.raises(ValueError, match="tool name must be a string"):
+        _parse_tools_config({3.14: {"enabled": True}})
+
+
+def test_load_config_non_string_tool_key_raises_configuration_error(
+    tmp_path: Path,
+) -> None:
+    """YAML ``tools.3.14`` must exit as ConfigurationError, not a traceback.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  3.14:\n    enabled: true\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tool name must be a string"):
+        load_config(config_path=str(config_file))
+
+
 def test_tools_config_rejects_scalar_entry() -> None:
     """A known tool whose value is not a mapping or bool must raise.
 
