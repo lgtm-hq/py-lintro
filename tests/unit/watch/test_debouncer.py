@@ -179,6 +179,50 @@ def test_reuse_after_fire_starts_clean(
     assert_that(batches[1]).is_equal_to({"b.py"})
 
 
+def test_overlapping_fires_are_serialized(
+    fake_timer_factory: FakeTimerFactory,
+) -> None:
+    """A second batch waits until the first callback returns."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    order: list[str] = []
+
+    def _slow(batch: set[str]) -> None:
+        order.append(f"start:{sorted(batch)[0]}")
+        started.set()
+        release.wait(timeout=2)
+        order.append(f"end:{sorted(batch)[0]}")
+
+    debouncer = Debouncer(
+        callback=_slow,
+        delay_ms=300,
+        timer_factory=fake_timer_factory,
+    )
+
+    debouncer.on_change("a.py")
+    first = fake_timer_factory.latest
+    worker = threading.Thread(target=first.fire)
+    worker.start()
+    assert_that(started.wait(timeout=2)).is_true()
+
+    debouncer.on_change("b.py")
+    second = fake_timer_factory.latest
+    second_worker = threading.Thread(target=second.fire)
+    second_worker.start()
+    # The second callback must not start while the first still holds the lock.
+    assert_that(order).is_equal_to(["start:a.py"])
+
+    release.set()
+    worker.join(timeout=2)
+    second_worker.join(timeout=2)
+
+    assert_that(order).is_equal_to(
+        ["start:a.py", "end:a.py", "start:b.py", "end:b.py"],
+    )
+
+
 @pytest.mark.parametrize("delay_ms", [0, 1, 300, 1000])
 def test_timer_receives_delay_in_seconds(
     delay_ms: int,

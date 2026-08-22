@@ -35,6 +35,7 @@ from lintro.config.lintro_config import (
     OutputConfig,
     ReviewConfig,
     ScoreConfig,
+    WatchConfig,
 )
 from lintro.enums.validation_code import ValidationCode
 from lintro.utils.config import STRUCTURAL_SECTIONS, _find_pyproject
@@ -68,6 +69,7 @@ KNOWN_TOOL_KEYS: frozenset[str] = frozenset(LintroToolConfig.model_fields)
 KNOWN_REVIEW_KEYS: frozenset[str] = frozenset(ReviewConfig.model_fields)
 KNOWN_SCORE_KEYS: frozenset[str] = frozenset(ScoreConfig.model_fields)
 KNOWN_OUTPUT_KEYS: frozenset[str] = frozenset(OutputConfig.model_fields)
+KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
 
 # Sections whose typed parser calls ``.get``/``.items`` on its input without a
 # type guard. YAML spells an empty section as ``enforce:`` which deserializes
@@ -524,6 +526,7 @@ def _check_raw_pyproject_lintro(
         "review": KNOWN_REVIEW_KEYS,
         "score": KNOWN_SCORE_KEYS,
         "output": KNOWN_OUTPUT_KEYS,
+        "watch": KNOWN_WATCH_KEYS,
     }
 
     for key, value in data.items():
@@ -631,6 +634,7 @@ def _schema_check_normalized(
             ("review", KNOWN_REVIEW_KEYS),
             ("score", KNOWN_SCORE_KEYS),
             ("output", KNOWN_OUTPUT_KEYS),
+            ("watch", KNOWN_WATCH_KEYS),
         ):
             data = parsed.get(section)
             if isinstance(data, dict):

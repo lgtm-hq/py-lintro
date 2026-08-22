@@ -90,6 +90,7 @@ class _FakeDefinition:
 
     file_patterns: list[str]
     can_fix: bool = False
+    is_advisory: bool = False
 
 
 @dataclass

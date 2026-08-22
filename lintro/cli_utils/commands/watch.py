@@ -27,18 +27,18 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
     "Defaults to smart selection based on changed file types.",
 )
 @click.option(
-    "--fix",
+    "--fix/--no-fix",
     "auto_fix",
-    is_flag=True,
     default=None,
-    help="Automatically fix issues on change instead of only checking.",
+    help="Automatically fix issues on change instead of only checking. "
+    "Use --no-fix to force check-only when config sets watch.auto_fix.",
 )
 @click.option(
-    "--clear",
+    "--clear/--no-clear",
     "clear_screen",
-    is_flag=True,
     default=None,
-    help="Clear the screen between runs for cleaner output.",
+    help="Clear the screen between runs for cleaner output. "
+    "Use --no-clear to keep output when config sets watch.clear_screen.",
 )
 @click.option(
     "--debounce",
@@ -132,5 +132,6 @@ def watch_command(
         on_batch=runner.run_batch,
         debounce_ms=effective_debounce,
         ignore_patterns=ignore_patterns,
+        include_venv=include_venv,
         console=console,
     )

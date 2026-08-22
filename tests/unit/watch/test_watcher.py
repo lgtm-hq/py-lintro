@@ -14,9 +14,9 @@ from typing import Any
 from assertpy import assert_that
 
 from lintro.watch.watcher import (
-    DEFAULT_IGNORE_PATTERNS,
     LintroEventHandler,
     _build_ignore_spec,
+    default_ignore_patterns,
     watch_paths,
 )
 
@@ -35,7 +35,10 @@ def _handler(
         A tuple of the handler and the list it appends changed paths to.
     """
     seen: list[str] = []
-    spec = _build_ignore_spec(ignore_patterns or DEFAULT_IGNORE_PATTERNS)
+    patterns = default_ignore_patterns()
+    if ignore_patterns:
+        patterns.extend(ignore_patterns)
+    spec = _build_ignore_spec(patterns)
     handler = LintroEventHandler(on_change=seen.append, ignore_spec=spec)
     return handler, seen
 
@@ -106,10 +109,11 @@ def test_pyc_files_are_ignored(fake_fs_event: EventBuilder) -> None:
 
 
 def test_custom_ignore_patterns_apply(fake_fs_event: EventBuilder) -> None:
-    """Custom ignore patterns replace the defaults."""
+    """Custom ignore patterns extend the built-in defaults."""
     handler, seen = _handler(ignore_patterns=["**/generated/**"])
 
     handler.on_modified(fake_fs_event("/proj/generated/api.py"))
+    handler.on_modified(fake_fs_event("/proj/.git/index"))
     handler.on_modified(fake_fs_event("/proj/src/real.py"))
 
     assert_that(seen).is_equal_to(["/proj/src/real.py"])
@@ -327,3 +331,41 @@ def test_custom_ignore_patterns_extend_defaults(tmp_path: Path) -> None:
 
     assert_that(batches).is_length(1)
     assert_that(batches[0]).is_equal_to({str(normal)})
+
+
+def test_include_venv_forwards_venv_file_events(tmp_path: Path) -> None:
+    """``include_venv`` must not ignore ``.venv`` file events."""
+    venv_file = tmp_path / ".venv" / "lib" / "site.py"
+    venv_file.parent.mkdir(parents=True)
+    venv_file.write_text("x = 1\n")
+    batches: list[set[str]] = []
+    observer = _MockObserver()
+    stop_event = threading.Event()
+    handler_ref: dict[str, Any] = {}
+
+    def _capture_schedule(handler: Any, path: str, recursive: bool = False) -> None:
+        handler_ref["handler"] = handler
+        observer.scheduled.append((path, recursive))
+
+    observer.schedule = _capture_schedule  # type: ignore[method-assign]
+
+    def _fake_start() -> None:
+        observer.started = True
+        handler_ref["handler"].on_modified(
+            type("E", (), {"is_directory": False, "src_path": str(venv_file)})(),
+        )
+        stop_event.set()
+
+    observer.start = _fake_start  # type: ignore[method-assign]
+
+    watch_paths(
+        [str(tmp_path)],
+        on_batch=batches.append,
+        debounce_ms=50_000,
+        include_venv=True,
+        stop_event=stop_event,
+        observer_factory=lambda: observer,
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(venv_file)})

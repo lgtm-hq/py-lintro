@@ -49,7 +49,12 @@ tool's own file patterns, so it stays in sync with the tool registry automatical
 | `*.rs`       | clippy, rustfmt           |
 | `*.yaml`     | yamllint, prettier        |
 
-Use `--tools` to further narrow the set that runs.
+Catch-all scanners (`*` patterns such as gitleaks, trufflehog, commitlint, typos) and
+advisory review finders are skipped unless you name them in `--tools` or `watch.tools`.
+pytest is never selected; use `lintro test`.
+
+Use `--tools` to further narrow the set that runs. `--fix` keeps only tools that can
+format.
 
 ### Debouncing
 
@@ -65,25 +70,29 @@ lintro watch --debounce 500
 ### Ignored Paths
 
 By default, watch mode ignores noisy or irrelevant locations such as `.git/`,
-`__pycache__/`, tool caches, `node_modules/`, virtualenvs, and build output. Override
-the list via configuration (see below).
+`__pycache__/`, tool caches, `node_modules/`, virtualenvs, and build output.
+Configuration `watch.ignore` **extends** those built-ins; it cannot re-enable `.git/` or
+`node_modules/` by replacing the list. An empty `ignore` keeps the defaults.
+`--include-venv` drops the built-in `.venv` / `venv` ignores so those directories can
+produce events.
 
 ## Options
 
-| Flag              | Description                                                |
-| ----------------- | ---------------------------------------------------------- |
-| `--tools`         | Comma-separated allowlist of tools to run.                 |
-| `--fix`           | Run tools in fix mode instead of check-only.               |
-| `--clear`         | Clear the screen between runs for cleaner output.          |
-| `--debounce`      | Debounce interval in milliseconds (default `300`).         |
-| `--exclude`       | Comma-separated exclude patterns passed to the tools.      |
-| `--include-venv`  | Include virtual environment directories.                   |
-| `--output-format` | Output format: `plain`, `grid`, `markdown`, `json`, `csv`. |
+| Flag                     | Description                                                |
+| ------------------------ | ---------------------------------------------------------- |
+| `--tools`                | Comma-separated allowlist of tools to run.                 |
+| `--fix` / `--no-fix`     | Force fix mode on or off (overrides `watch.auto_fix`).     |
+| `--clear` / `--no-clear` | Force screen clear on or off (overrides config).           |
+| `--debounce`             | Debounce interval in milliseconds (default `300`).         |
+| `--exclude`              | Comma-separated exclude patterns passed to the tools.      |
+| `--include-venv`         | Include virtual environment directories.                   |
+| `--output-format`        | Output format: `plain`, `grid`, `markdown`, `json`, `csv`. |
 
 ## Configuration
 
 Watch defaults can be set under a `watch:` section in `.lintro-config.yaml` (or
-`[tool.lintro.watch]` in `pyproject.toml`). CLI flags always override configuration.
+`[tool.lintro.watch]` in `pyproject.toml`). Present CLI flags override configuration;
+`--no-fix` / `--no-clear` force those booleans off.
 
 ```yaml
 # .lintro-config.yaml
@@ -100,13 +109,13 @@ watch:
     - '**/node_modules/**'
 ```
 
-| Key            | Type      | Default | Description                                                  |
-| -------------- | --------- | ------- | ------------------------------------------------------------ |
-| `debounce_ms`  | int       | `300`   | Quiet period before a run (must be `>= 0`).                  |
-| `auto_fix`     | bool      | `false` | Run tools in fix mode.                                       |
-| `clear_screen` | bool      | `false` | Clear the terminal between runs.                             |
-| `tools`        | list[str] | `[]`    | Allowlist of tools (empty = smart selection).                |
-| `ignore`       | list[str] | `[]`    | Gitignore-style ignore patterns (empty = built-in defaults). |
+| Key            | Type      | Default | Description                                         |
+| -------------- | --------- | ------- | --------------------------------------------------- |
+| `debounce_ms`  | int       | `300`   | Quiet period before a run (must be `>= 0`).         |
+| `auto_fix`     | bool      | `false` | Run tools in fix mode.                              |
+| `clear_screen` | bool      | `false` | Clear the terminal between runs.                    |
+| `tools`        | list[str] | `[]`    | Allowlist of tools (empty = smart selection).       |
+| `ignore`       | list[str] | `[]`    | Extra gitignore-style patterns (extends built-ins). |
 
 ## Notes
 
