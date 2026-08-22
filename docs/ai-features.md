@@ -1001,7 +1001,7 @@ When AI is enabled, the pre-execution summary table includes AI configuration:
 ├───────────────┼────────────────────────────────────────────┤
 │ AI            │ enabled                                    │
 │               │   provider: anthropic                      │
-│               │   model: (provider default if omitted)     │
+│               │   model: claude-sonnet-4-6 (default)       │
 │               │   parallel: 5 workers                      │
 │               │   safe-auto-apply: on                      │
 │               │   verify-fixes: off                        │

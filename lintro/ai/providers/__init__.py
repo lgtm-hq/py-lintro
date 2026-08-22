@@ -35,6 +35,21 @@ DEFAULT_API_KEY_ENVS: dict[str, str] = {
     p.value: e for p, e in PROVIDERS.default_api_key_envs.items()
 }
 
+_PROVIDER_CLASSES: dict[AIProvider, tuple[str, str]] = {
+    AIProvider.ANTHROPIC: (
+        "lintro.ai.providers.anthropic",
+        "AnthropicProvider",
+    ),
+    AIProvider.OPENAI: (
+        "lintro.ai.providers.openai",
+        "OpenAIProvider",
+    ),
+    AIProvider.CURSOR: (
+        "lintro.ai.providers.cursor",
+        "CursorProvider",
+    ),
+}
+
 
 def _implemented_provider_list(
     provider_classes: Mapping[AIProvider, object],
@@ -80,25 +95,10 @@ def get_provider(
             f"Supported providers: {accepted_provider_values()}",
         ) from exc
 
-    provider_classes: dict[AIProvider, tuple[str, str]] = {
-        AIProvider.ANTHROPIC: (
-            "lintro.ai.providers.anthropic",
-            "AnthropicProvider",
-        ),
-        AIProvider.OPENAI: (
-            "lintro.ai.providers.openai",
-            "OpenAIProvider",
-        ),
-        AIProvider.CURSOR: (
-            "lintro.ai.providers.cursor",
-            "CursorProvider",
-        ),
-    }
-
-    entry = provider_classes.get(provider_enum)
+    entry = _PROVIDER_CLASSES.get(provider_enum)
     if entry is None:
         implemented = _implemented_provider_list(
-            provider_classes=provider_classes,
+            provider_classes=_PROVIDER_CLASSES,
         )
         raise ValueError(
             f"AI provider '{provider_enum.value}' is recognized but not "
