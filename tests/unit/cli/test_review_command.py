@@ -1372,6 +1372,7 @@ def _advisory_error_result() -> ToolResult:
             "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
             "Accepted providers: anthropic, cursor, openai."
         ),
+        metadata={"advisory_error": "provider_required"},
     )
 
 
@@ -1472,6 +1473,16 @@ def test_advisory_only_errored_tool_exits_two() -> None:
     with (
         patch("lintro.cli_utils.commands.review.require_ai"),
         patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.apply_cli_overrides",
+            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True, "provider": "openai"},
+            ),
+        ),
+        patch(
             "lintro.cli_utils.commands.review.run_advisory_tools",
             return_value=[_advisory_error_result()],
         ),
@@ -1487,6 +1498,55 @@ def test_advisory_only_errored_tool_exits_two() -> None:
     assert_that(payload["error"]["message"]).contains("`ai.provider` in config")
     assert_that(payload).does_not_contain_key("advisory")
     assert_that(payload).does_not_contain_key("findings")
+
+
+def test_advisory_only_provider_flag_reaches_advisory_tools() -> None:
+    """``--provider`` overlays YAML that omits ``ai.provider`` before tools run."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--provider", "openai"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
+
+
+def test_advisory_failure_error_uses_metadata_not_prose() -> None:
+    """Classification keys off the typed marker, not error-message copy."""
+    from lintro.ai.exceptions import AIError, AIProviderRequiredError
+    from lintro.cli_utils.commands.review import _advisory_failure_error
+
+    marked = ToolResult(
+        name="idiom-review",
+        success=False,
+        output="tool failed for an unrelated reason",
+        metadata={"advisory_error": "provider_required"},
+    )
+    assert_that(_advisory_failure_error([marked])).is_instance_of(
+        AIProviderRequiredError,
+    )
+
+    prose_only = ToolResult(
+        name="idiom-review",
+        success=False,
+        output=("ai.provider is required when ai.lint or ai.review is enabled."),
+    )
+    error = _advisory_failure_error([prose_only])
+    assert_that(error).is_instance_of(AIError)
+    assert_that(error.__class__).is_equal_to(AIError)
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
@@ -1660,10 +1720,8 @@ def test_full_review_json_merges_advisory_key() -> None:
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
 
 
-def test_full_review_errored_advisory_exits_two() -> None:
-    """Advisory execution failure emits the error contract, not a review."""
-    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
-
+def test_full_review_keeps_results_when_advisory_errors() -> None:
+    """Advisory failure after a finished review does not discard the review."""
     runner = CliRunner()
     patches = _mock_review_pipeline()
 
@@ -1692,13 +1750,42 @@ def test_full_review_errored_advisory_exits_two() -> None:
     ):
         result = runner.invoke(cli, ["review", "--output", "json"])
 
-    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
-    payload = json.loads(result.output[result.output.index("{") :])
-    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
-    assert_that(payload).does_not_contain_key("findings")
-    assert_that(payload).does_not_contain_key("summary")
-    assert_that(mock_render.called).is_false()
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("ok")
+    assert_that(payload["findings"]).is_equal_to([])
+    assert_that(payload["advisory"][0]["success"]).is_false()
+    assert_that(payload["advisory"][0]["output"]).contains("ai.provider is required")
+    assert_that(mock_render.called).is_true()
     assert_that(mock_post.called).is_false()
+
+
+def test_full_review_forwards_effective_ai_config_to_advisory() -> None:
+    """The review command passes the resolved AIConfig into advisory tools."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
 
 
 def test_cli_overrides_lists_only_explicit_flags() -> None:

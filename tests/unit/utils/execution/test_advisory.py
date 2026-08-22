@@ -8,6 +8,8 @@ from typing import cast
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.config import AIConfig
+from lintro.ai.provider_enum import AIProvider
 from lintro.config.lintro_config import LintroConfig, LintroToolConfig
 from lintro.enums.execution_class import (
     ExecutionClass,
@@ -130,6 +132,33 @@ def test_run_advisory_tools_reports_tool_failures(
     assert_that(results).is_length(1)
     assert_that(results[0].success).is_false()
     assert_that(results[0].output).contains("provider exploded")
+
+
+def test_run_advisory_tools_forwards_ai_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI-resolved AIConfig is passed into each tool's check() options."""
+    captured: dict[str, object] = {}
+
+    class _Capture:
+        def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+            captured.update(options)
+            return ToolResult(name="idiom-review", success=True)
+
+    monkeypatch.setattr(
+        advisory_module,
+        "configure_tool_for_execution",
+        lambda **_kwargs: _Capture(),
+    )
+    ai_config = AIConfig(provider=AIProvider.OPENAI)
+    run_advisory_tools(
+        paths=[str(tmp_path)],
+        tool_names=["idiom-review"],
+        ai_config=ai_config,
+    )
+
+    assert_that(captured["ai_config"]).is_equal_to(ai_config)
 
 
 def test_advisory_findings_count_ignores_skipped_results() -> None:

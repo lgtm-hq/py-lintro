@@ -14,7 +14,8 @@ do not change the exit code unless the user opts in with
 ``--fail-on-findings``. An advisory tool that failed to run
 (:attr:`~lintro.enums.tool_run_status.ToolRunStatus.ERRORED` or
 :attr:`~lintro.enums.tool_run_status.ToolRunStatus.TIMED_OUT`) is not a
-finding and fails the review.
+finding: ``--advisory-only`` fails closed, while a full review still
+renders the completed review and records the advisory failure.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.config import AIConfig
 from lintro.config.config_loader import get_config
 from lintro.enums.action import Action
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
@@ -40,6 +42,8 @@ if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
+    "ADVISORY_ERROR_METADATA_KEY",
+    "ADVISORY_ERROR_PROVIDER_REQUIRED",
     "AdvisorySelection",
     "advisory_findings_count",
     "advisory_results_to_payload",
@@ -49,6 +53,11 @@ __all__ = [
     "resolve_advisory_tools",
     "run_advisory_tools",
 ]
+
+#: Typed ``ToolResult.metadata`` key for an advisory execution failure.
+ADVISORY_ERROR_METADATA_KEY = "advisory_error"
+#: Marker written when the failure is a missing ``ai.provider``.
+ADVISORY_ERROR_PROVIDER_REQUIRED = "provider_required"
 
 
 @dataclass(frozen=True)
@@ -167,6 +176,7 @@ def run_advisory_tools(
     tool_names: list[str],
     tool_options: str | None = None,
     lintro_config: LintroConfig | None = None,
+    ai_config: AIConfig | None = None,
 ) -> list[ToolResult]:
     """Execute the given advisory tools over ``paths``.
 
@@ -177,6 +187,9 @@ def run_advisory_tools(
             (``tool:option=value,...``) applied on top of configuration.
         lintro_config: Optional config override; the global config is loaded
             when omitted.
+        ai_config: CLI-resolved AI configuration (includes ``--provider``).
+            Forwarded into each tool's ``check()`` options so advisory
+            tools see the same overlays as the review command.
 
     Returns:
         One :class:`~lintro.models.core.tool_result.ToolResult` per tool, in
@@ -186,11 +199,15 @@ def run_advisory_tools(
     if not tool_names or not paths:
         return []
 
+    from lintro.ai.exceptions import AIProviderRequiredError
     from lintro.utils.tool_options import parse_tool_options
 
     config = lintro_config or get_config()
     config_manager = UnifiedConfigManager()
     tool_option_dict = parse_tool_options(tool_options)
+    check_options: dict[str, object] = {}
+    if ai_config is not None:
+        check_options["ai_config"] = ai_config
     results: list[ToolResult] = []
     for tool_name in tool_names:
         # Lookup and configuration are inside the guard too: a plugin that
@@ -209,7 +226,19 @@ def run_advisory_tools(
                 post_tools=set(),
                 lintro_config=config,
             )
-            results.append(tool.check(paths, {}))
+            results.append(tool.check(paths, check_options))
+        except AIProviderRequiredError as exc:
+            logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
+            results.append(
+                ToolResult(
+                    name=tool_name,
+                    success=False,
+                    output=str(exc),
+                    metadata={
+                        ADVISORY_ERROR_METADATA_KEY: (ADVISORY_ERROR_PROVIDER_REQUIRED),
+                    },
+                ),
+            )
         except (
             Exception
         ) as exc:  # noqa: BLE001 - swallow into ToolResult; later tools still run; the review command decides the exit code

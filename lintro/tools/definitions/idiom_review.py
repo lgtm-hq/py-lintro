@@ -166,10 +166,18 @@ class IdiomReviewPlugin(BaseToolPlugin):
         try:
             return self._run_review(files=ctx.files, options=merged)
         except AIProviderRequiredError as exc:
+            from lintro.utils.execution.advisory import (
+                ADVISORY_ERROR_METADATA_KEY,
+                ADVISORY_ERROR_PROVIDER_REQUIRED,
+            )
+
             return ToolResult(
                 name=IDIOM_REVIEW_TOOL_NAME,
                 success=False,
                 output=str(exc),
+                metadata={
+                    ADVISORY_ERROR_METADATA_KEY: ADVISORY_ERROR_PROVIDER_REQUIRED,
+                },
             )
         except AIError as exc:
             # Depleted credits / auth / rate limits degrade gracefully.
@@ -197,13 +205,18 @@ class IdiomReviewPlugin(BaseToolPlugin):
             ToolResult with the aggregated, confidence-filtered findings.
         """
         from lintro.ai.budget import CostBudget
+        from lintro.ai.config import AIConfig
         from lintro.ai.interface import resolve_ai_config
         from lintro.ai.paths import resolve_workspace_root
         from lintro.ai.providers import get_provider
         from lintro.tools.idiom_review.engine import IdiomReviewEngine
 
         lintro_config = self._get_lintro_config()
-        ai_config = resolve_ai_config(lintro_config)
+        injected = options.get("ai_config")
+        if isinstance(injected, AIConfig):
+            ai_config = injected
+        else:
+            ai_config = resolve_ai_config(lintro_config)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
         provider = get_provider(ai_config, workspace_root=workspace_root)
         budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)

@@ -12,6 +12,9 @@
 
 Advisory findings are scoped to the review's changed files (or ``--path``)
 and never change the exit code unless ``--fail-on-findings`` is passed.
+An advisory tool that failed to run fails ``--advisory-only``; a full
+review still renders the completed review and records the advisory
+failure in the advisory payload.
 """
 
 from __future__ import annotations
@@ -71,6 +74,8 @@ from lintro.ai.transport import (
 from lintro.config.config_loader import get_config
 from lintro.enums.advisory_tools_value import AdvisoryToolsValue
 from lintro.utils.execution.advisory import (
+    ADVISORY_ERROR_METADATA_KEY,
+    ADVISORY_ERROR_PROVIDER_REQUIRED,
     advisory_findings_count,
     advisory_results_to_payload,
     advisory_tools_errored,
@@ -171,7 +176,8 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
         in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
     )
     message = failed.output or f"{failed.name} failed"
-    if "ai.provider is required" in message:
+    metadata = failed.metadata or {}
+    if metadata.get(ADVISORY_ERROR_METADATA_KEY) == (ADVISORY_ERROR_PROVIDER_REQUIRED):
         return AIProviderRequiredError(message)
     return AIError(message)
 
@@ -430,6 +436,7 @@ def review_command(
             provider_label=(
                 ai_config.provider.value if ai_config.provider is not None else "unset"
             ),
+            ai_config=ai_config,
         )
 
     if not ai_config.review_enabled:
@@ -642,17 +649,8 @@ def review_command(
             changed_files=context.changed_files,
             workspace_root=workspace_root,
         ),
+        ai_config=effective_ai_config,
     )
-    if advisory_tools_errored(advisory_results):
-        _fail_review_command(
-            _advisory_failure_error(advisory_results),
-            output_format=output_format,
-            provider_label=(str(provider.name) if provider is not None else "unset"),
-            post=post,
-            resolved_pr=resolved_pr,
-            effective_repo=effective_repo,
-            console=console,
-        )
 
     output = render_review_output(
         result=result,
@@ -829,6 +827,7 @@ def _execute_advisory(
     advisory_tools: str | None,
     tool_options: str | None,
     paths: list[str],
+    ai_config: AIConfig | None = None,
 ) -> list[ToolResult]:
     """Resolve and run the advisory tools requested for this review.
 
@@ -836,6 +835,7 @@ def _execute_advisory(
         advisory_tools: Raw ``--advisory-tools`` value.
         tool_options: Raw ``--tool-options`` value for advisory tools.
         paths: Paths to scan (typically the review's changed files).
+        ai_config: CLI-resolved AI configuration forwarded to each tool.
 
     Returns:
         One result per advisory tool that ran; empty when none were selected.
@@ -865,6 +865,7 @@ def _execute_advisory(
         paths=paths,
         tool_names=selection.to_run,
         tool_options=tool_options,
+        ai_config=ai_config,
     )
 
 
@@ -876,6 +877,7 @@ def _run_advisory_only(
     output_format: str,
     fail_on_findings: bool,
     provider_label: str,
+    ai_config: AIConfig | None = None,
 ) -> None:
     """Run only the advisory tools, render their findings, and exit.
 
@@ -886,6 +888,7 @@ def _run_advisory_only(
         output_format: ``terminal`` or ``json``.
         fail_on_findings: Whether findings should produce exit code 1.
         provider_label: Resolved provider name for the error contract.
+        ai_config: CLI-resolved AI configuration forwarded to each tool.
 
     Raises:
         SystemExit: Always; carries the resolved exit code.
@@ -900,6 +903,7 @@ def _run_advisory_only(
         advisory_tools=advisory_tools,
         tool_options=tool_options,
         paths=paths,
+        ai_config=ai_config,
     )
     if advisory_tools_errored(results):
         _fail_review_command(

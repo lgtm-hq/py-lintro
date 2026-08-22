@@ -16,6 +16,7 @@ import lintro.ai.providers as providers_module
 import lintro.tools.idiom_review.engine as engine_module
 from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIAuthenticationError
+from lintro.ai.provider_enum import AIProvider
 from lintro.config.lintro_config import LintroConfig
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.registry import ToolRegistry
@@ -222,10 +223,44 @@ def test_unset_provider_fails_before_the_engine(
     assert_that(result.output).contains("`ai.provider` in config")
     assert_that(result.output).contains("LINTRO_AI_PROVIDER")
     assert_that(result.output).contains("--provider")
+    assert_that(result.metadata).is_equal_to(
+        {"advisory_error": "provider_required"},
+    )
 
     from lintro.utils.execution.advisory import advisory_tools_errored
 
     assert_that(advisory_tools_errored([result])).is_true()
+
+
+def test_check_uses_injected_ai_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A CLI-resolved AIConfig in options wins over LintroConfig.ai."""
+    recorded: dict[str, Any] = {}
+
+    class _RecordingEngine(_FakeEngine):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            recorded.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+    injected = AIConfig(provider=AIProvider.OPENAI, max_cost_usd=7.5)
+    monkeypatch.setattr(availability_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(providers_module, "get_provider", lambda cfg, **_kwargs: cfg)
+    monkeypatch.setattr(engine_module, "IdiomReviewEngine", _RecordingEngine)
+    monkeypatch.setattr(
+        IdiomReviewPlugin,
+        "_get_lintro_config",
+        lambda _self: LintroConfig(ai={"enabled": True, "lint": True}),
+    )
+
+    IdiomReviewPlugin().check(
+        [_write_py(tmp_path)],
+        {"enabled": True, "ai_config": injected},
+    )
+
+    assert_that(recorded["ai_config"]).is_equal_to(injected)
+    assert_that(recorded["ai_config"].provider).is_equal_to(AIProvider.OPENAI)
 
 
 def test_min_confidence_filters_low_findings(
