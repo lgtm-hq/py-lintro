@@ -203,3 +203,25 @@ def test_run_batch_forwards_restrict_to(
     runner.run_batch({str(target)})
 
     assert_that(recorder["kwargs"]["tools"]).is_equal_to("ruff")
+
+
+def test_run_batch_catches_executor_value_error(
+    tmp_path: Path,
+) -> None:
+    """A leftover incompatible tool name must not raise out of run_batch."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+    lines: list[str] = []
+
+    def _raise(**_kwargs: Any) -> int:
+        raise ValueError("Tool 'idiom-review' is an advisory AI finder")
+
+    runner = WatchRunner(
+        restrict_to=["ruff"],
+        emit=lines.append,
+        run_tools=_raise,
+    )
+    result = runner.run_batch({str(target)})
+
+    assert_that(result).is_equal_to(1)
+    assert_that(any("advisory AI finder" in line for line in lines)).is_true()

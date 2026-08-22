@@ -19,9 +19,11 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from lintro.config.watch_config import DEFAULT_DEBOUNCE_MS
+
 __all__ = ["Debouncer", "TimerLike"]
 
-DEFAULT_DELAY_MS: int = 300
+DEFAULT_DELAY_MS: int = DEFAULT_DEBOUNCE_MS
 
 
 class TimerLike(Protocol):
@@ -101,6 +103,7 @@ class Debouncer:
         self._pending: set[str] = set()
         self._timer: TimerLike | None = None
         self._lock = threading.Lock()
+        self._run_lock = threading.Lock()
 
     @property
     def pending(self) -> set[str]:
@@ -138,8 +141,7 @@ class Debouncer:
             batch = set(self._pending)
             self._pending.clear()
             self._timer = None
-        if batch:
-            self._callback(batch)
+        self._invoke_callback(batch=batch)
 
     def flush(self) -> None:
         """Immediately emit any pending batch, bypassing the timer.
@@ -157,7 +159,17 @@ class Debouncer:
                 self._timer = None
             batch = set(self._pending)
             self._pending.clear()
-        if batch:
+        self._invoke_callback(batch=batch)
+
+    def _invoke_callback(self, *, batch: set[str]) -> None:
+        """Run the batch callback, serialized with any in-flight run.
+
+        Args:
+            batch: Paths to pass to the callback. Empty batches are ignored.
+        """
+        if not batch:
+            return
+        with self._run_lock:
             self._callback(batch)
 
     def cancel(self) -> None:

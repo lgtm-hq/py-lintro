@@ -11,6 +11,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **cli**: add `lintro watch` / `w` for debounced continuous linting on file changes
+  (#1168)
+
 ### Changed
 
 ### Deprecated

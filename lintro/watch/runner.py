@@ -76,7 +76,11 @@ class WatchRunner:
         if not existing:
             return 0
 
-        selected = select_tools_for_files(existing, restrict_to=self.restrict_to)
+        selected = select_tools_for_files(
+            existing,
+            restrict_to=self.restrict_to,
+            auto_fix=self.auto_fix,
+        )
 
         if self.clear_screen:
             self._clear_screen()
@@ -89,17 +93,23 @@ class WatchRunner:
             return 0
 
         action = Action.FIX if self.auto_fix else Action.CHECK
-        exit_code = self.run_tools(
-            action=action,
-            paths=existing,
-            tools=",".join(selected),
-            tool_options=None,
-            exclude=self.exclude,
-            include_venv=self.include_venv,
-            group_by="file",
-            output_format=self.output_format,
-            verbose=False,
-        )
+        try:
+            exit_code = self.run_tools(
+                action=action,
+                paths=existing,
+                tools=",".join(selected),
+                tool_options=None,
+                exclude=self.exclude,
+                include_venv=self.include_venv,
+                group_by="file",
+                output_format=self.output_format,
+                verbose=False,
+            )
+        except ValueError as exc:
+            # A leftover incompatible name must not abort later batches.
+            self.emit(f"  Error: {exc}")
+            self._last_exit_code = 1
+            return 1
         self._last_exit_code = int(exit_code)
         return self._last_exit_code
 

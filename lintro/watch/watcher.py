@@ -21,6 +21,7 @@ import pathspec
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from lintro.config.watch_config import DEFAULT_DEBOUNCE_MS
 from lintro.watch.debouncer import Debouncer
 
 if TYPE_CHECKING:
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_IGNORE_PATTERNS",
+    "VENV_IGNORE_PATTERNS",
     "LintroEventHandler",
     "ObserverLike",
     "watch_paths",
@@ -95,6 +97,30 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "**/build/**",
     "**/*.pyc",
 ]
+
+VENV_IGNORE_PATTERNS: tuple[str, ...] = (
+    "**/.venv/**",
+    "**/venv/**",
+)
+
+
+def default_ignore_patterns(*, include_venv: bool = False) -> list[str]:
+    """Return the built-in ignore list, optionally keeping virtualenvs.
+
+    Args:
+        include_venv: When True, omit the default ``.venv`` / ``venv``
+            patterns so those directories can produce watch events.
+
+    Returns:
+        A new list of gitignore-style patterns.
+    """
+    if include_venv:
+        return [
+            pattern
+            for pattern in DEFAULT_IGNORE_PATTERNS
+            if pattern not in VENV_IGNORE_PATTERNS
+        ]
+    return list(DEFAULT_IGNORE_PATTERNS)
 
 
 def _build_ignore_spec(patterns: Iterable[str]) -> pathspec.GitIgnoreSpec:
@@ -211,8 +237,9 @@ def watch_paths(
     paths: list[str],
     *,
     on_batch: Callable[[set[str]], object],
-    debounce_ms: int = 300,
+    debounce_ms: int = DEFAULT_DEBOUNCE_MS,
     ignore_patterns: list[str] | None = None,
+    include_venv: bool = False,
     console: Console | None = None,
     stop_event: threading.Event | None = None,
     observer_factory: Callable[[], ObserverLike] | None = None,
@@ -231,6 +258,8 @@ def watch_paths(
         ignore_patterns: Extra gitignore-style patterns to exclude. These are
             appended to :data:`DEFAULT_IGNORE_PATTERNS` (the built-ins always
             apply) rather than replacing them.
+        include_venv: When True, do not ignore ``.venv`` / ``venv`` at the
+            watcher so ``--include-venv`` can see those files.
         console: Optional Rich console for status messages.
         stop_event: Optional externally-controlled stop signal. When omitted,
             a fresh event is created and the loop runs until KeyboardInterrupt.
@@ -240,7 +269,7 @@ def watch_paths(
     # Built-in ignores always apply; caller patterns extend them so a custom
     # entry cannot silently re-enable noisy directories (.git, node_modules,
     # caches, virtualenvs, *.pyc).
-    patterns = list(DEFAULT_IGNORE_PATTERNS)
+    patterns = default_ignore_patterns(include_venv=include_venv)
     if ignore_patterns:
         patterns.extend(ignore_patterns)
     ignore_spec = _build_ignore_spec(patterns)
