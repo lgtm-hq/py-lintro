@@ -19,13 +19,22 @@ class AIProvider(StrEnum):
     CURSOR = auto()
 
 
-def accepted_provider_values() -> str:
+def accepted_provider_names() -> list[str]:
     """Return accepted provider names in alphabetical order.
+
+    Returns:
+        Sorted provider values suitable for help text and ``click.Choice``.
+    """
+    return sorted(member.value for member in AIProvider)
+
+
+def accepted_provider_values() -> str:
+    """Return the user-facing accepted-provider list, alphabetically.
 
     Returns:
         Comma-separated provider names with no implied ranking.
     """
-    return ", ".join(sorted(member.value for member in AIProvider))
+    return ", ".join(accepted_provider_names())
 
 
 def provider_required_error() -> str:

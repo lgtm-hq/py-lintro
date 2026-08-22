@@ -335,7 +335,7 @@ Lintro includes optional AI-powered features that provide actionable summaries a
 interactive fix suggestions. AI features are **BYO (Bring Your Own) API key** — not
 enabled by default.
 
-- **Providers:** Anthropic Claude, OpenAI GPT
+- **Providers:** Anthropic Claude, Cursor, OpenAI GPT
 - **AI Summary** — high-level assessment with pattern analysis (1 API call per run)
 - **Interactive Fix Suggestions** — AI-generated code diffs with risk classification
 - **Post-fix Summary** — contextualizes what was fixed and what remains
@@ -343,13 +343,13 @@ enabled by default.
 ```bash
 # Install with AI support
 uv pip install 'lintro[ai]'
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...   # or CURSOR_API_KEY / OPENAI_API_KEY
 
 # Enable in config
 # .lintro-config.yaml
 # ai:
 #   enabled: true
-#   provider: anthropic
+#   provider: <anthropic|cursor|openai>
 ```
 
 See the [AI Features Guide](docs/ai-features.md) for full documentation.

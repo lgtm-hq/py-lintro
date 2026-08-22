@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.provider_enum import (
+    accepted_provider_names,
     accepted_provider_values,
     provider_required_error,
 )
@@ -51,6 +52,13 @@ def test_aiprovider_invalid_value_raises():
     """Constructing AIProvider with an unknown value raises ValueError."""
     with pytest.raises(ValueError, match="not a valid"):
         AIProvider("gemini")
+
+
+def test_accepted_provider_names_are_alphabetical() -> None:
+    """Choice lists and help text use the same sorted names."""
+    assert_that(accepted_provider_names()).is_equal_to(
+        ["anthropic", "cursor", "openai"],
+    )
 
 
 def test_accepted_provider_values_are_alphabetical() -> None:

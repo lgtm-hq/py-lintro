@@ -82,7 +82,7 @@ def get_provider(
 
     entry = provider_classes.get(provider_enum)
     if entry is None:
-        implemented = ", ".join(p.value for p in provider_classes)
+        implemented = ", ".join(sorted(p.value for p in provider_classes))
         raise ValueError(
             f"AI provider '{provider_enum.value}' is recognized but not "
             f"implemented. Implemented providers: {implemented}",
