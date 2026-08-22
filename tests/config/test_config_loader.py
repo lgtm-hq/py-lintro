@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -14,10 +15,15 @@ from lintro.config.config_loader import (
     _parse_execution_config,
     _parse_tool_config,
     _parse_tools_config,
+    _pyproject_lintro_catalog,
+    build_config_from_dict,
     clear_config_cache,
     get_default_config,
     load_config,
 )
+from lintro.config.enforce_config import EnforceConfig
+from lintro.config.execution_config import ExecutionConfig
+from lintro.exceptions.errors import ConfigurationError
 from lintro.plugins import discovery
 
 
@@ -50,7 +56,7 @@ def test_string_enabled_tools() -> None:
 
 def test_tool_config_empty_data() -> None:
     """Should return default ToolConfig."""
-    config = _parse_tool_config({})
+    config = _parse_tool_config("ruff", {})
 
     assert_that(config.enabled).is_true()
     assert_that(config.config_source).is_none()
@@ -60,7 +66,7 @@ def test_disabled_tool() -> None:
     """Should parse enabled=False."""
     data = {"enabled": False}
 
-    config = _parse_tool_config(data)
+    config = _parse_tool_config("ruff", data)
 
     assert_that(config.enabled).is_false()
 
@@ -83,6 +89,50 @@ def test_with_bool_values() -> None:
 
     assert_that(config["ruff"].enabled).is_true()
     assert_that(config["prettier"].enabled).is_false()
+
+
+def test_tools_config_rejects_non_string_key() -> None:
+    """A numeric ``tools:`` key must raise ValueError, not AttributeError."""
+    with pytest.raises(ValueError, match="tool name must be a string"):
+        _parse_tools_config(
+            cast(dict[str, Any], {3.14: {"enabled": True}}),
+        )
+
+
+def test_load_config_non_string_tool_key_raises_configuration_error(
+    tmp_path: Path,
+) -> None:
+    """YAML ``tools.3.14`` must exit as ConfigurationError, not a traceback.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  3.14:\n    enabled: true\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tool name must be a string"):
+        load_config(config_path=str(config_file))
+
+
+def test_tools_config_rejects_scalar_entry() -> None:
+    """A known tool whose value is not a mapping or bool must raise.
+
+    ``tools.ruff: 0`` used to be dropped, so ruff stayed at the default
+    (enabled). The parser must fail closed instead.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": 0})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
+    assert_that(str(exc_info.value)).contains("mapping or boolean")
+
+
+def test_tools_config_rejects_string_entry() -> None:
+    """A string tool value such as ``"yes"`` must raise."""
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": "yes"})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
 
 
 def test_defaults_empty_data() -> None:
@@ -149,6 +199,100 @@ def test_execution_settings() -> None:
 
     assert_that(result["execution"]["tool_order"]).is_equal_to("alphabetical")
     assert_that(result["execution"]["fail_fast"]).is_true()
+
+
+def test_convert_nested_execution_and_enforce_tables() -> None:
+    """Nested ``[tool.lintro.execution]`` / ``enforce`` tables must be merged."""
+    result = _convert_pyproject_to_config(
+        {
+            "execution": {"fail_fast": True, "max_fix_retries": 5},
+            "enforce": {"line_length": 100},
+        },
+    )
+
+    assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["execution"]["max_fix_retries"]).is_equal_to(5)
+    assert_that(result["enforce"]["line_length"]).is_equal_to(100)
+
+
+def test_pyproject_catalog_keys_match_model_fields() -> None:
+    """Catalog execution/enforce keys must come from the Pydantic models."""
+    catalog = _pyproject_lintro_catalog()
+
+    assert_that(catalog.execution_keys).is_equal_to(
+        frozenset(ExecutionConfig.model_fields),
+    )
+    assert_that(catalog.enforce_keys).is_equal_to(
+        frozenset(EnforceConfig.model_fields),
+    )
+
+
+def test_parse_tools_config_rejects_null_entry() -> None:
+    """A null ``tools.<name>`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="tools.ruff must be a mapping or boolean"):
+        _parse_tools_config({"ruff": None})
+
+
+def test_convert_scalar_execution_raises() -> None:
+    """A scalar ``[tool.lintro] execution`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="execution must be a mapping"):
+        _convert_pyproject_to_config({"execution": False})
+
+
+def test_convert_scalar_enforce_raises() -> None:
+    """A scalar ``[tool.lintro] enforce`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="enforce must be a mapping"):
+        _convert_pyproject_to_config({"enforce": 1})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_build_config_from_dict_rejects_null_mapping_section(
+    section: str,
+) -> None:
+    """A YAML-null mapping section must raise ValueError, not AttributeError.
+
+    Args:
+        section: Top-level key that typed parsers assume is a mapping.
+    """
+    with pytest.raises(ValueError, match=f"{section} must be a mapping"):
+        build_config_from_dict({section: None})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_load_config_null_mapping_section_raises_configuration_error(
+    tmp_path: Path,
+    section: str,
+) -> None:
+    """A bare ``section:`` in YAML must raise ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        section: Top-level mapping section spelled as a YAML null.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(f"{section}:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=f"{section} must be a mapping"):
+        load_config(config_path=str(config_file))
+
+
+def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:
+    """Runtime load must wrap a null tool entry as ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  ruff:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tools.ruff must be a mapping"):
+        load_config(config_path=str(config_file))
 
 
 def test_load_yaml_config_with_defaults(tmp_path: Path) -> None:
@@ -422,3 +566,14 @@ def test_plugin_cannot_shadow_reserved_config_keys(
     assert_that(result["execution"]["fail_fast"]).is_true()
     assert_that(result["enforce"]["line_length"]).is_equal_to(100)
     assert_that(result["tools"]).is_empty()
+
+
+def test_nested_pyproject_execution_fail_fast_is_applied() -> None:
+    """Valid nested ``[tool.lintro.execution] fail_fast`` must reach LintroConfig."""
+    import tomllib
+
+    parsed = tomllib.loads("[tool.lintro.execution]\nfail_fast = true\n")
+    converted = _convert_pyproject_to_config(parsed["tool"]["lintro"])
+    config = build_config_from_dict(converted)
+
+    assert_that(config.execution.fail_fast).is_true()

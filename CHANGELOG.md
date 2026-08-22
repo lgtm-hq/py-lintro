@@ -11,6 +11,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **cli**: add `config validate` plus `config init` / `config show` subcommands (#1165)
+
 ### Changed
 
 ### Deprecated
@@ -18,6 +20,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Removed
 
 ### Fixed
+
+- **config**: auto-detect `config validate` ignores non-mapping YAML the same way
+  `load_config` does and continues to `[tool.lintro]`; a null `enforce` / `execution` /
+  `defaults` / `tools` section or a non-string `tools:` key raises `ConfigurationError`
+  instead of crashing (#1165)
 
 ### Security
 
