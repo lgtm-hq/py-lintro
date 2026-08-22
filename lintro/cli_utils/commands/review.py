@@ -149,6 +149,33 @@ def _fail_review_command(
     raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
 
 
+def _advisory_failure_error(results: list[ToolResult]) -> AIError:
+    """Build the exception for an advisory tool that failed to run.
+
+    Args:
+        results: Advisory tool results that include at least one error.
+
+    Returns:
+        ``AIProviderRequiredError`` when the failure is a missing provider,
+        otherwise a generic ``AIError`` with the tool's output.
+    """
+    from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
+
+    failed = next(
+        result
+        for result in results
+        if tool_run_status(
+            result=result,
+            issue_count=result.issues_count or 0,
+        )
+        in {ToolRunStatus.ERRORED, ToolRunStatus.TIMED_OUT}
+    )
+    message = failed.output or f"{failed.name} failed"
+    if "ai.provider is required" in message:
+        return AIProviderRequiredError(message)
+    return AIError(message)
+
+
 @click.command("review")
 @click.option(
     "--base",
@@ -370,18 +397,6 @@ def review_command(
         )
 
     require_ai()
-    if advisory_only:
-        # Advisory-only needs no diff context and no review checklist, so it
-        # deliberately bypasses the ai.review gate: the user asked for the
-        # finder tools, not the diff review (#1308).
-        _run_advisory_only(
-            advisory_tools=advisory_tools,
-            tool_options=tool_options,
-            path_filter=path_filter,
-            output_format=output_format,
-            fail_on_findings=fail_on_findings,
-        )
-
     try:
         resolved_ai = apply_cli_overrides(
             AIConfig.resolve_from_mapping(lintro_config.ai),
@@ -393,6 +408,30 @@ def review_command(
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
     ai_config = resolved_ai.config
+    if advisory_only:
+        # Advisory-only needs no diff context and no review checklist, so it
+        # deliberately bypasses the ai.review gate: the user asked for the
+        # finder tools, not the diff review (#1308). --provider still applies.
+        if ai_config.provider is None:
+            _fail_review_command(
+                AIProviderRequiredError(provider_required_error()),
+                output_format=output_format,
+                provider_label="unset",
+                post=False,
+                resolved_pr=None,
+                effective_repo=None,
+            )
+        _run_advisory_only(
+            advisory_tools=advisory_tools,
+            tool_options=tool_options,
+            path_filter=path_filter,
+            output_format=output_format,
+            fail_on_findings=fail_on_findings,
+            provider_label=(
+                ai_config.provider.value if ai_config.provider is not None else "unset"
+            ),
+        )
+
     if not ai_config.review_enabled:
         raise click.UsageError(
             "AI review is disabled in configuration. Set ai.review: true "
@@ -604,6 +643,16 @@ def review_command(
             workspace_root=workspace_root,
         ),
     )
+    if advisory_tools_errored(advisory_results):
+        _fail_review_command(
+            _advisory_failure_error(advisory_results),
+            output_format=output_format,
+            provider_label=(str(provider.name) if provider is not None else "unset"),
+            post=post,
+            resolved_pr=resolved_pr,
+            effective_repo=effective_repo,
+            console=console,
+        )
 
     output = render_review_output(
         result=result,
@@ -657,10 +706,6 @@ def review_command(
         if not posted:
             logger.warning("GitHub review posting skipped or failed")
 
-    if advisory_tools_errored(advisory_results):
-        from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
-
-        raise SystemExit(REVIEW_ERROR_EXIT_CODE)
     exit_code = 1 if result.has_p1_findings else 0
     if fail_on_findings and advisory_findings_count(advisory_results):
         exit_code = 1
@@ -830,6 +875,7 @@ def _run_advisory_only(
     path_filter: tuple[str, ...],
     output_format: str,
     fail_on_findings: bool,
+    provider_label: str,
 ) -> None:
     """Run only the advisory tools, render their findings, and exit.
 
@@ -839,6 +885,7 @@ def _run_advisory_only(
         path_filter: ``--path`` values; defaults to the current directory.
         output_format: ``terminal`` or ``json``.
         fail_on_findings: Whether findings should produce exit code 1.
+        provider_label: Resolved provider name for the error contract.
 
     Raises:
         SystemExit: Always; carries the resolved exit code.
@@ -854,6 +901,15 @@ def _run_advisory_only(
         tool_options=tool_options,
         paths=paths,
     )
+    if advisory_tools_errored(results):
+        _fail_review_command(
+            _advisory_failure_error(results),
+            output_format=output_format,
+            provider_label=provider_label,
+            post=False,
+            resolved_pr=None,
+            effective_repo=None,
+        )
     if output_format == "json":
         click.echo(
             json.dumps(
@@ -865,10 +921,6 @@ def _run_advisory_only(
         click.echo(
             render_advisory_results(results=results) or "No advisory tools ran.",
         )
-    if advisory_tools_errored(results):
-        from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
-
-        raise SystemExit(REVIEW_ERROR_EXIT_CODE)
     findings = advisory_findings_count(results)
     raise SystemExit(1 if (fail_on_findings and findings) else 0)
 

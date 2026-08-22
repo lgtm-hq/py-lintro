@@ -1375,6 +1375,39 @@ def _advisory_error_result() -> ToolResult:
     )
 
 
+def test_advisory_only_unset_provider_exits_two_before_tools() -> None:
+    """--advisory-only fails closed on an unset provider before tools run."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.apply_cli_overrides",
+            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True},
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("--provider")
+    assert_that(run_advisory.called).is_false()
+
+
 def test_advisory_only_exits_zero_with_findings() -> None:
     """Advisory findings are advisory: exit 0 by default."""
     runner = CliRunner()
@@ -1449,10 +1482,11 @@ def test_advisory_only_errored_tool_exits_two() -> None:
         )
 
     assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
-    payload = json.loads(result.output)
-    assert_that(payload["advisory"][0]["success"]).is_false()
-    assert_that(payload["advisory"][0]["output"]).contains("`ai.provider` in config")
-    assert_that(payload["advisory"][0]["issues_count"]).is_equal_to(0)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("`ai.provider` in config")
+    assert_that(payload).does_not_contain_key("advisory")
+    assert_that(payload).does_not_contain_key("findings")
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
@@ -1627,7 +1661,7 @@ def test_full_review_json_merges_advisory_key() -> None:
 
 
 def test_full_review_errored_advisory_exits_two() -> None:
-    """A full review that produced results still fails if advisory errored."""
+    """Advisory execution failure emits the error contract, not a review."""
     from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
 
     runner = CliRunner()
@@ -1643,15 +1677,28 @@ def test_full_review_errored_advisory_exits_two() -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patches["run_review"],
-        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "ok", "findings": []}),
+        ) as mock_render,
         patch(
             "lintro.cli_utils.commands.review.run_advisory_tools",
             return_value=[_advisory_error_result()],
         ),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
     ):
-        result = runner.invoke(cli, ["review"])
+        result = runner.invoke(cli, ["review", "--output", "json"])
 
     assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload).does_not_contain_key("findings")
+    assert_that(payload).does_not_contain_key("summary")
+    assert_that(mock_render.called).is_false()
+    assert_that(mock_post.called).is_false()
 
 
 def test_cli_overrides_lists_only_explicit_flags() -> None:

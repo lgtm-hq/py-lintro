@@ -210,7 +210,9 @@ def run_advisory_tools(
                 lintro_config=config,
             )
             results.append(tool.check(paths, {}))
-        except Exception as exc:  # noqa: BLE001 - advisory runs never abort review
+        except (
+            Exception
+        ) as exc:  # noqa: BLE001 - swallow into ToolResult; later tools still run; the review command decides the exit code
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
             results.append(
                 ToolResult(
