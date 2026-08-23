@@ -21,11 +21,14 @@ name: AI Review - Dogfood
 # authenticates only against an API key, which is precisely the credential that
 # does not work for the Anthropic dogfood (#1838).
 #
-# Spend ceiling is the committed `ai.max_cost_usd: 2.00` in `.lintro-config.yaml`
-# (the empirically validated value from #1976/#1977; the 0.50 that landed with
-# #2018 / 9f43a98a was a side-effect, restored here by #2025). Under the CLI
-# transport the call bills the subscription, so the figure is advisory rather
-# than enforced spend control (#1923).
+# Spend ceiling defaults to the committed `ai.max_cost_usd: 2.00` in
+# `.lintro-config.yaml` (the empirically validated value from #1976/#1977; the
+# 0.50 that landed with #2018 / 9f43a98a was a side-effect, restored here by
+# #2025), overridable per-repo via the `LINTRO_AI_MAX_COST_USD` Actions
+# variable (#2024) so large multi-chunk PRs can complete instead of posting a
+# partial review every round. Under the CLI transport the call bills the
+# subscription, so the figure is advisory rather than enforced spend control
+# (#1923).
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -280,3 +283,9 @@ jobs:
           LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
           LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
           LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
+          # Spend ceiling override (#2024). Unset falls through to the
+          # committed `ai.max_cost_usd: 2.00`, which large PRs exhaust after
+          # 3-4 of ~14 chunks — the review then posts a partial result every
+          # round. `0` means uncapped; the CLI transport treats the cap as a
+          # runtime bound, not marginal dollars, under subscription auth.
+          LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}

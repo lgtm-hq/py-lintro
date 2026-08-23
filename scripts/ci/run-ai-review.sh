@@ -59,6 +59,7 @@ set -euo pipefail
 #   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
 #   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
 #   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
+#   LINTRO_AI_MAX_COST_USD  Optional spend ceiling overlay (empty = config default).
 #   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
