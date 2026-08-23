@@ -238,6 +238,22 @@ def test_review_env_falsy_values_disable_review(
     assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.ENV)
 
 
+def test_review_env_does_not_enable_master_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_AI_REVIEW=1`` cannot bypass a disabled master switch."""
+    monkeypatch.setenv("LINTRO_AI_REVIEW", "1")
+
+    resolved = AIConfig.resolve_from_mapping(
+        _mapping(enabled=False, review=False),
+    )
+
+    assert_that(resolved.config.review).is_true()
+    assert_that(resolved.config.enabled).is_false()
+    assert_that(resolved.config.review_enabled).is_false()
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.ENV)
+
+
 def test_invalid_review_env_names_accepted_spellings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

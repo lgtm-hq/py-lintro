@@ -704,6 +704,8 @@ def test_review_is_unavailable_when_the_workspace_disables_it(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
     assert_that(payload["error"]["detail"]["reason"]).is_equal_to("review_disabled")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_ENABLED=1")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_REVIEW=1")
 
 
 def test_review_rejects_a_depth_outside_the_supported_range(repo: Path) -> None:

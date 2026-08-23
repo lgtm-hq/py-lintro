@@ -322,7 +322,8 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
             code=McpErrorCode.TOOL_UNAVAILABLE,
             message=(
                 "AI review is disabled for this workspace. Set ai.enabled: true "
-                "and ai.review: true in .lintro-config.yaml"
+                "and ai.review: true in .lintro-config.yaml, or set "
+                "LINTRO_AI_ENABLED=1 and LINTRO_AI_REVIEW=1"
             ),
             detail={
                 "tool": "lintro_review",
