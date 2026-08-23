@@ -133,7 +133,7 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
 
 
 def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
-    """The review step overlays provider/model/transport from Actions variables."""
+    """The review step overlays AI settings from Actions variables."""
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -149,6 +149,9 @@ def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
         "${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}",
     )
     assert_that(env["LINTRO_AI_MODEL"]).is_equal_to("${{ vars.LINTRO_AI_MODEL }}")
+    assert_that(env["LINTRO_AI_MAX_COST_USD"]).is_equal_to(
+        "${{ vars.LINTRO_AI_MAX_COST_USD }}",
+    )
     assert_that(env).does_not_contain_key("AI_REVIEW_MAX_COST_USD")
 
 
