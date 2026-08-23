@@ -52,9 +52,8 @@ If you want to publish the weekly report to Pages, prefer using a dedicated
 
 **File:** `.github/workflows/ai-review.yml`
 
-py-lintro dogfoods its own `lintro review` command on pull requests that touch
-`lintro/**`. The workflow runs an AI diff review and prints the JSON result to the job
-log.
+py-lintro dogfoods its own `lintro review` command on every eligible pull request. The
+workflow runs an AI diff review and prints the JSON result to the job log.
 
 **Features:**
 
