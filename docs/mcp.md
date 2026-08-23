@@ -216,9 +216,9 @@ Notes and limits:
   tool argument can turn it on.
 - An empty diff is a result, not an error: `findings: []` with zero-valued run metadata.
 - Without the `[ai]` extra, without a usable provider, or when effective review is off
-  (`ai.review: false` without a `LINTRO_AI_REVIEW=1` overlay), the tool is still listed
-  and returns `tool_unavailable` with `detail.reason` so an agent gets a reason rather
-  than a missing capability.
+  (`ai.enabled` and `ai.review` are not both true after config and environment
+  overlays), the tool is still listed and returns `tool_unavailable` with
+  `detail.reason` so an agent gets a reason rather than a missing capability.
 - A failed review carries the same taxonomy `lintro review --output json` prints, under
   `detail.review_error` (`kind`, `provider`, `status`, `retryable`).
 - **Latency**: a depth-3 review runs for minutes. Progress notifications are not sent;
