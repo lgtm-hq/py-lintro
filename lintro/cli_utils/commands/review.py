@@ -292,6 +292,12 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     help="Override ai.model for this invocation.",
 )
 @click.option(
+    "--review/--no-review",
+    "review_override",
+    default=None,
+    help="Override ai.review for this invocation.",
+)
+@click.option(
     "--max-cost-usd",
     "max_cost_usd_override",
     default=None,
@@ -374,6 +380,7 @@ def review_command(
     transport: str | None,
     provider_override: str | None,
     model_override: str | None,
+    review_override: bool | None,
     max_cost_usd_override: str | None,
     list_agents: bool,
     advisory_tools: str | None,
@@ -409,6 +416,7 @@ def review_command(
             provider=provider_override,
             model=model_override,
             transport=transport,
+            review=review_override,
             max_cost_usd=max_cost_usd_override,
         )
     except AIConfigOverrideError as exc:

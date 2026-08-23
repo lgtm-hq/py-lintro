@@ -41,21 +41,29 @@ def test_each_env_var_overrides_its_field(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("LINTRO_AI_MODEL", "cursor-grok-4.6-high")
     monkeypatch.setenv("LINTRO_AI_TRANSPORT", "cli")
     monkeypatch.setenv("LINTRO_AI_ENABLED", "1")
+    monkeypatch.setenv("LINTRO_AI_REVIEW", "true")
     monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "2.5")
 
     resolved = AIConfig.resolve_from_mapping(
-        _mapping(provider="anthropic", model="claude-sonnet", transport="api"),
+        _mapping(
+            provider="anthropic",
+            model="claude-sonnet",
+            transport="api",
+            review=False,
+        ),
     )
 
     assert_that(resolved.config.provider).is_equal_to(AIProvider.CURSOR)
     assert_that(resolved.config.model).is_equal_to("cursor-grok-4.6-high")
     assert_that(resolved.config.transport).is_equal_to(AITransport.CLI)
     assert_that(resolved.config.enabled).is_true()
+    assert_that(resolved.config.review).is_true()
     assert_that(resolved.config.max_cost_usd).is_equal_to(2.5)
     assert_that(resolved.source_of("provider")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("enabled")).is_equal_to(ConfigSource.ENV)
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.ENV)
     assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
 
 
@@ -93,7 +101,13 @@ def test_env_beats_config(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unset_env_falls_through_to_config() -> None:
     """An absent env layer leaves the mapping (or default) in place."""
     resolved = AIConfig.resolve_from_mapping(
-        _mapping(provider="openai", model="gpt-4o", transport="cli", enabled=True),
+        _mapping(
+            provider="openai",
+            model="gpt-4o",
+            transport="cli",
+            enabled=True,
+            review=True,
+        ),
     )
 
     assert_that(resolved.config.provider).is_equal_to(AIProvider.OPENAI)
@@ -103,6 +117,7 @@ def test_unset_env_falls_through_to_config() -> None:
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.CONFIG)
     assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.CONFIG)
     assert_that(resolved.source_of("enabled")).is_equal_to(ConfigSource.CONFIG)
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.CONFIG)
 
 
 def test_empty_mapping_uses_built_in_defaults() -> None:
@@ -114,6 +129,7 @@ def test_empty_mapping_uses_built_in_defaults() -> None:
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.source_of("enabled")).is_equal_to(ConfigSource.DEFAULT)
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.DEFAULT)
     assert_that(resolved.config.max_cost_usd).is_none()
 
@@ -186,6 +202,69 @@ def test_enabled_one_does_not_imply_review(monkeypatch: pytest.MonkeyPatch) -> N
     assert_that(resolved.config.review).is_false()
     assert_that(resolved.config.review_enabled).is_false()
     assert_that(resolved.config.lint_enabled).is_false()
+
+
+@pytest.mark.parametrize("raw", ["1", "true", "TRUE"])
+def test_review_env_truthy_values_enable_review(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+) -> None:
+    """Truthy ``LINTRO_AI_REVIEW`` values override committed config."""
+    monkeypatch.setenv("LINTRO_AI_REVIEW", raw)
+
+    resolved = AIConfig.resolve_from_mapping(
+        _mapping(enabled=True, review=False),
+    )
+
+    assert_that(resolved.config.review).is_true()
+    assert_that(resolved.config.review_enabled).is_true()
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.ENV)
+
+
+@pytest.mark.parametrize("raw", ["0", "false", "FALSE"])
+def test_review_env_falsy_values_disable_review(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+) -> None:
+    """Falsy ``LINTRO_AI_REVIEW`` values override committed config."""
+    monkeypatch.setenv("LINTRO_AI_REVIEW", raw)
+
+    resolved = AIConfig.resolve_from_mapping(
+        _mapping(enabled=True, review=True),
+    )
+
+    assert_that(resolved.config.review).is_false()
+    assert_that(resolved.config.review_enabled).is_false()
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.ENV)
+
+
+def test_invalid_review_env_names_accepted_spellings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_AI_REVIEW`` rejects values outside 1/0/true/false."""
+    monkeypatch.setenv("LINTRO_AI_REVIEW", "yesmaybe")
+
+    with pytest.raises(AIConfigOverrideError) as exc_info:
+        AIConfig.resolve_from_mapping(_mapping(review=False))
+
+    assert_that(str(exc_info.value)).contains("LINTRO_AI_REVIEW='yesmaybe'")
+    assert_that(str(exc_info.value)).contains("1, 0, true, false")
+
+
+def test_review_flag_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The review CLI flag wins over the environment variable."""
+    monkeypatch.setenv("LINTRO_AI_REVIEW", "0")
+
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(
+            _mapping(enabled=True, review=False),
+        ),
+        review=True,
+    )
+
+    assert_that(resolved.config.review).is_true()
+    assert_that(resolved.config.review_enabled).is_true()
+    assert_that(resolved.source_of("review")).is_equal_to(ConfigSource.FLAG)
 
 
 def test_max_cost_usd_env_overrides_config(monkeypatch: pytest.MonkeyPatch) -> None:

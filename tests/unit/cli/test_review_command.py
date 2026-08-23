@@ -63,6 +63,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--transport")
     assert_that(result.output).contains("--provider")
     assert_that(result.output).contains("--model")
+    assert_that(result.output).contains("--review / --no-review")
     assert_that(result.output).contains("--max-cost-usd")
 
 

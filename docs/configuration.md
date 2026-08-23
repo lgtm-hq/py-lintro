@@ -487,6 +487,7 @@ export LINTRO_AI_PROVIDER=cursor
 export LINTRO_AI_MODEL=cursor-grok-4.6-high
 export LINTRO_AI_TRANSPORT=cli
 export LINTRO_AI_ENABLED=1
+export LINTRO_AI_REVIEW=1
 export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 ```
 
@@ -501,6 +502,7 @@ export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 | `LINTRO_AI_MODEL`                | Override `ai.model`                                               | -         |
 | `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
 | `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
+| `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                     | -         |
 | `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
