@@ -292,6 +292,12 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     help="Override ai.model for this invocation.",
 )
 @click.option(
+    "--review/--no-review",
+    "review_override",
+    default=None,
+    help="Override ai.review for this invocation.",
+)
+@click.option(
     "--max-cost-usd",
     "max_cost_usd_override",
     default=None,
@@ -374,6 +380,7 @@ def review_command(
     transport: str | None,
     provider_override: str | None,
     model_override: str | None,
+    review_override: bool | None,
     max_cost_usd_override: str | None,
     list_agents: bool,
     advisory_tools: str | None,
@@ -409,6 +416,7 @@ def review_command(
             provider=provider_override,
             model=model_override,
             transport=transport,
+            review=review_override,
             max_cost_usd=max_cost_usd_override,
         )
     except AIConfigOverrideError as exc:
@@ -441,8 +449,9 @@ def review_command(
 
     if not ai_config.review_enabled:
         raise click.UsageError(
-            "AI review is disabled in configuration. Set ai.review: true "
-            "(and ai.enabled: true) in .lintro-config.yaml",
+            "AI review is disabled. Set ai.review: true, LINTRO_AI_REVIEW=1, "
+            "or pass --review (and enable ai.enabled via config or "
+            "LINTRO_AI_ENABLED=1).",
         )
 
     effective_repo = repo or os.environ.get("GITHUB_REPOSITORY")
@@ -693,6 +702,7 @@ def review_command(
                     transport=transport,
                     provider=provider_override,
                     model=model_override,
+                    review=review_override,
                     max_cost_usd=max_cost_usd_override,
                     timeout=timeout,
                     context_window=context_window,
@@ -717,6 +727,7 @@ def _cli_overrides(
     transport: str | None,
     provider: str | None,
     model: str | None,
+    review: bool | None,
     max_cost_usd: float | str | None,
     timeout: float | None,
     context_window: int | None,
@@ -735,6 +746,7 @@ def _cli_overrides(
         transport: ``--transport`` value, or None when unset.
         provider: ``--provider`` value, or None when unset.
         model: ``--model`` value, or None when unset.
+        review: ``--review/--no-review`` value, or None when unset.
         max_cost_usd: ``--max-cost-usd`` value, or None when unset.
         timeout: ``--timeout`` value, or None when unset.
         context_window: ``--context-window`` value, or None when unset.
@@ -755,6 +767,8 @@ def _cli_overrides(
         overrides.append(f"--provider {provider}")
     if model is not None:
         overrides.append(f"--model {model}")
+    if review is not None:
+        overrides.append("--review" if review else "--no-review")
     if max_cost_usd is not None:
         overrides.append(f"--max-cost-usd {max_cost_usd}")
     if timeout is not None:

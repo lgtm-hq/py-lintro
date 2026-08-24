@@ -63,7 +63,8 @@ class ResolvedAIConfig:
         config: Effective :class:`~lintro.ai.config.AIConfig` after
             env/flag overlays and Pydantic validation.
         sources: Provenance for the override fields (``provider``,
-            ``model``, ``transport``, ``enabled``, ``max_cost_usd``).
+            ``model``, ``transport``, ``enabled``, ``review``,
+            ``max_cost_usd``).
     """
 
     config: AIConfig

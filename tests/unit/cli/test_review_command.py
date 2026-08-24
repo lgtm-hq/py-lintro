@@ -63,6 +63,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--transport")
     assert_that(result.output).contains("--provider")
     assert_that(result.output).contains("--model")
+    assert_that(result.output).contains("--review / --no-review")
     assert_that(result.output).contains("--max-cost-usd")
 
 
@@ -328,6 +329,70 @@ def test_review_runs_when_review_enabled_without_lint() -> None:
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
+
+
+def test_review_flag_enables_lint_only_config() -> None:
+    """``--review`` enables diff review without changing committed config."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+    lint_only_config = MagicMock(
+        ai=AIConfig(
+            enabled=True,
+            lint=True,
+            review=False,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
+    )
+    lint_only_config.review.depth = 1
+    lint_only_config.review.strictness = ReviewStrictness.BALANCED
+    lint_only_config.review.sensitivity = MagicMock()
+    lint_only_config.review.force_semantic_chunking = False
+    lint_only_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patches["require_ai"],
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=lint_only_config,
+        ),
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review", "--review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+
+
+def test_no_review_flag_disables_review_enabled_config() -> None:
+    """``--no-review`` wins over an enabled committed review setting."""
+    runner = CliRunner()
+    mock_config = MagicMock(
+        ai=AIConfig(
+            enabled=True,
+            review=True,
+            provider=AIProvider.OPENAI,
+        ).model_dump(),
+    )
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--no-review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("AI review is disabled")
+    assert_that(result.output).contains("LINTRO_AI_REVIEW=1")
 
 
 def test_review_json_output_echoes_payload() -> None:
@@ -1796,6 +1861,7 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         transport="cli",
         provider=None,
         model=None,
+        review=True,
         max_cost_usd=None,
         timeout=600.0,
         context_window=None,
@@ -1803,7 +1869,9 @@ def test_cli_overrides_lists_only_explicit_flags() -> None:
         paths=None,
     )
 
-    assert_that(overrides).is_equal_to(["--transport cli", "--timeout 600"])
+    assert_that(overrides).is_equal_to(
+        ["--transport cli", "--review", "--timeout 600"],
+    )
 
 
 def test_describe_config_source_names_the_file_without_its_path() -> None:
