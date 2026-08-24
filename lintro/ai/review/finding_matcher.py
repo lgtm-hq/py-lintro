@@ -203,6 +203,10 @@ def _current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            description=finding.description,
+            cause=finding.cause,
+            fix=finding.fix,
+            confidence=finding.confidence,
         )
         for index, finding in enumerate(findings)
     ]
@@ -310,6 +314,10 @@ def _merge_pair(
         occurrences=current.occurrences or prior.occurrences,
         occurrences_total=max(prior.occurrence_total, current.occurrence_total),
         severity_downgraded=current.severity_downgraded,
+        description=current.description or prior.description,
+        cause=current.cause or prior.cause,
+        fix=current.fix or prior.fix,
+        confidence=current.confidence or prior.confidence,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
@@ -356,6 +364,8 @@ def review_findings_from_unposted(
         path = normalize_file_path(record.file)
         if path in reviewed_paths or record.file in reviewed_paths:
             continue
+        if not (record.description or record.cause or record.fix):
+            continue
         extra.append(
             ReviewFinding(
                 severity=record.severity,
@@ -363,10 +373,10 @@ def review_findings_from_unposted(
                 file=record.file,
                 line=record.line,
                 title=record.title,
-                description=record.title,
-                cause="",
-                fix="",
-                confidence="medium",
+                description=record.description or record.title,
+                cause=record.cause,
+                fix=record.fix,
+                confidence=record.confidence or "medium",
                 checklist_ids=record.checklist_ids,
                 kind=record.kind,
                 occurrences=record.occurrences,

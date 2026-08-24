@@ -291,6 +291,7 @@ def _write_incremental_coverage_part(
     prior_state: ReviewState | None,
     force_full: bool,
     sequence: int,
+    policy: ReviewSensitivityPolicy,
     stopped_reason: str = "",
 ) -> None:
     """Checkpoint coverage and this-run findings for a later SIGTERM.
@@ -308,6 +309,7 @@ def _write_incremental_coverage_part(
         prior_state: Prior artifact state, if any.
         force_full: When True, do not inherit prior coverage.
         sequence: Monotonic part number for this run.
+        policy: Sensitivity policy used to filter checkpoint findings.
         stopped_reason: Optional in-flight stop note stored on new records.
     """
     directory_override = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
@@ -329,7 +331,12 @@ def _write_incremental_coverage_part(
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
     seed = ReviewState() if force_full or prior_state is None else prior_state
-    findings = tuple(finding for partial in collected for finding in partial.findings)
+    findings = filter_findings_by_policy(
+        findings=tuple(
+            finding for partial in collected for finding in partial.findings
+        ),
+        policy=policy,
+    )
     match = match_findings(
         previous=seed,
         findings=findings,
@@ -959,6 +966,7 @@ async def run_review_async(
                         prior_state=prior_state,
                         force_full=force_full,
                         sequence=part_seq,
+                        policy=review_sensitivity,
                     )
                 except Exception:
                     logger.warning(

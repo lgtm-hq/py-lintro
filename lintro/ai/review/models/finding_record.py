@@ -56,6 +56,11 @@ class FindingRecord:
             ``addressed / total`` even after some locations are fixed.
         severity_downgraded: True when the P1 evidence gate downgraded the
             severity at the most recent sighting.
+        description: Finding body text, persisted so a SIGTERM resume can
+            still post an actionable inline comment.
+        cause: Root-cause text from the most recent sighting.
+        fix: Fix suggestion from the most recent sighting.
+        confidence: Model confidence from the most recent sighting.
     """
 
     fingerprint: str
@@ -76,6 +81,10 @@ class FindingRecord:
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     occurrences_total: int = 0
     severity_downgraded: bool = False
+    description: str = ""
+    cause: str = ""
+    fix: str = ""
+    confidence: str = ""
 
     @property
     def key(self) -> str:
@@ -156,6 +165,14 @@ class FindingRecord:
             payload["occurrences_total"] = self.occurrence_total
         if self.severity_downgraded:
             payload["severity_downgraded"] = True
+        if self.description:
+            payload["description"] = self.description
+        if self.cause:
+            payload["cause"] = self.cause
+        if self.fix:
+            payload["fix"] = self.fix
+        if self.confidence:
+            payload["confidence"] = self.confidence
         return payload
 
     @classmethod
@@ -196,6 +213,10 @@ class FindingRecord:
             occurrences=parse_occurrences(payload.get("occurrences")),
             occurrences_total=coerce_int(payload.get("occurrences_total")),
             severity_downgraded=bool(payload.get("severity_downgraded", False)),
+            description=str(payload.get("description", "")),
+            cause=str(payload.get("cause", "")),
+            fix=str(payload.get("fix", "")),
+            confidence=str(payload.get("confidence", "")),
         )
 
 

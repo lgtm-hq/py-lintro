@@ -18,6 +18,7 @@ from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -37,6 +38,7 @@ from lintro.ai.review.orchestrator import (
     strip_json_fences,
 )
 from lintro.ai.review.progress import ReviewProgressCallback
+from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.state_store import load_ci_state, write_state_part
 
 
@@ -581,6 +583,92 @@ def test_incremental_checkpoint_keeps_this_run_findings(
     assert_that({finding.title for finding in loaded.findings}).contains(
         "Fail-open default",
     )
+    this_run = next(finding for finding in loaded.findings if finding.file == "a.py")
+    assert_that(this_run.description).contains("Unknown status grants access")
+    assert_that(this_run.cause).contains("else branch returns Active")
+    assert_that(this_run.fix).contains("Default to Expired")
+
+
+def test_incremental_checkpoint_applies_sensitivity_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Focused policy must drop P3 doc-drift findings from the checkpoint."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    payload = {
+        "summary": "Merge with fixes.",
+        "checklist": [{"id": 1, "answer": "yes", "evidence": "a.py:12"}],
+        "findings": [
+            {
+                "severity": "P1",
+                "category": "security",
+                "file": "a.py",
+                "line": 12,
+                "title": "Fail-open default",
+                "description": "Unknown status grants access",
+                "cause": "else branch returns Active",
+                "fix": "Default to Expired",
+                "failure_scenario": "An unknown status grants access",
+                "confidence": "high",
+                "checklist_ids": [1],
+            },
+            {
+                "severity": "P3",
+                "category": ReviewCategory.CONTRACT_DRIFT.value,
+                "file": "README.md",
+                "line": 1,
+                "title": "Doc drift note",
+                "description": "README is stale",
+                "cause": "Docs not updated",
+                "fix": "Update README",
+                "confidence": "low",
+                "checklist_ids": [1],
+            },
+        ],
+    }
+    provider = _mock_provider(content=json.dumps(payload))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            sensitivity=resolve_sensitivity_policy(strictness=ReviewStrictness.FOCUSED),
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    titles = {finding.title for finding in loaded.findings}
+    assert_that(titles).contains("Fail-open default")
+    assert_that(titles).does_not_contain("Doc drift note")
 
 
 def test_parallel_timeout_keeps_completed_sibling() -> None:
