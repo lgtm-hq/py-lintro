@@ -355,7 +355,11 @@ def resolve_cause_text(*, error: Exception) -> str:
         return error.cause_message
     cause = error.__cause__
     if isinstance(cause, BaseException):
-        return str(cause)
+        cause_text = str(cause).strip()
+        if cause_text:
+            return cause_text
+        # asyncio.TimeoutError() stringifies to "" — keep the wrapper
+        # message so "CLI timed out after Ns" still classifies (#2156).
     return str(error)
 
 
@@ -407,6 +411,8 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
         return ReviewErrorKind.RATE_LIMITED
     if isinstance(cause_exc, AIProviderRequiredError):
         return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    if isinstance(cause_exc, TimeoutError):
+        return ReviewErrorKind.TIMEOUT
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

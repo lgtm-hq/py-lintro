@@ -173,10 +173,8 @@ set +e
 # lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=1800
-set -o pipefail
 uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1 | tee "$output_file"
 review_status=$?
-set +o pipefail
 set -e
 
 # Exits 0 only when a review was produced; the classifier writes the annotation

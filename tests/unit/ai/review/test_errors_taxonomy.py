@@ -274,6 +274,21 @@ def test_resolve_cause_text_prefers_cause_message() -> None:
     )
 
 
+def test_resolve_cause_text_skips_empty_timeout_cause() -> None:
+    """asyncio.TimeoutError() stringifies empty; keep the CLI wrapper text."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    assert_that(resolve_cause_text(error=error)).contains("timed out after 1800s")
+
+
+def test_classify_timeout_error_cause_as_timeout() -> None:
+    """A CLI timeout chained from TimeoutError classifies as TIMEOUT."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="cursor", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")

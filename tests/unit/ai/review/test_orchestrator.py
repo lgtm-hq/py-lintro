@@ -22,8 +22,10 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.orchestrator import (
     _review_chunk,
@@ -34,6 +36,7 @@ from lintro.ai.review.orchestrator import (
     strip_json_fences,
 )
 from lintro.ai.review.progress import ReviewProgressCallback
+from lintro.ai.review.state_store import load_ci_state, write_state_part
 
 
 def _sample_response_json(
@@ -263,7 +266,7 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
         del budget
         seen.append("call")
         if len(seen) >= 2:
-            raise AIProviderError("agent CLI timed out after 900s")
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
         return provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -368,8 +371,76 @@ def test_run_review_writes_incremental_coverage_parts(
 
     parts = sorted(tmp_path.glob("part-*.json"))
     assert_that(parts).is_not_empty()
-    payload = parts[0].read_text(encoding="utf-8")
-    assert_that(payload).contains("a.py")
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that(loaded.pr_number).is_equal_to(2166)
+
+
+def test_incremental_state_json_wins_over_downloaded_prior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current-run state.json must beat a leftover downloaded snapshot."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    monkeypatch.setenv("GITHUB_RUN_ID", "current-run")
+    write_state_part(
+        state=ReviewState(
+            coverage=(CoverageRecord(path="stale.py", patch_hash="deadbeef"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=2166,
+            head_sha="old-head",
+            run_id="old-run",
+        ),
+        directory=tmp_path,
+        sequence=99,
+        final=True,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that(loaded.run_id).is_equal_to("current-run")
+    assert_that(loaded.head_sha).is_not_equal_to("old-head")
 
 
 def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:

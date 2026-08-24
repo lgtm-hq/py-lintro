@@ -295,8 +295,8 @@ def _write_incremental_coverage_part(
     """Checkpoint coverage so a later SIGTERM still has something to upload.
 
     Writes only when ``LINTRO_REVIEW_STATE_DIR`` is set (CI artifact dir).
-    Last-writer-wins per ``(path, hash)`` so a later final snapshot can
-    replace this part.
+    ``final=True`` refreshes ``state.json`` so a leftover downloaded
+    snapshot cannot last-writer-win over this run.
 
     Args:
         collected: Chunks finished so far in this run.
@@ -338,7 +338,7 @@ def _write_incremental_coverage_part(
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
-        final=False,
+        final=True,
     )
 
 

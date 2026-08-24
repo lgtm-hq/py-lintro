@@ -134,8 +134,11 @@ jobs:
     # on top of the main review call, and provider-heavy diffs were hitting
     # the old ceiling exactly (#1976 reviews killed at the boundary four
     # times; #1977's oscillated around 45-55 min and was killed at 50 twice).
-    # 1800s is one chunk, not the whole 14-chunk serial run; incremental
-    # coverage parts survive a later job-level SIGTERM (#2156).
+    # 1800s is one chunk, not the whole serial run. A 14-chunk review can
+    # still hit this job budget; incremental ``state.json`` checkpoints
+    # then let the next round resume (#2156). The coupling test only
+    # guarantees the per-chunk CLI timeout fires before a *single-chunk*
+    # job kill.
     timeout-minutes: 75
     # Cursor shards are appended only when the dogfood provider is Cursor.
     # They stay out of the anthropic path so that job cannot reach Cursor
@@ -347,9 +350,10 @@ jobs:
       - name: Upload review-state artifacts
         # Final upload is best-effort. Empirically, a cancelled mid-job
         # step caused later always() uploads to skip (dogfood job
-        # 97293667852, 2026-08-24). Incremental part uploads (#2154)
-        # remain the primary persistence path. if-no-files-found: ignore
-        # so pre-feature runs no-op.
+        # 97293667852, 2026-08-24). Incremental ``state.json`` writes
+        # (#2154/#2156) are runner-local until this step; they survive
+        # SIGTERM of the review process, not a skipped always() upload.
+        # if-no-files-found: ignore so pre-feature runs no-op.
         if: always()
         # yamllint disable-line rule:line-length
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
