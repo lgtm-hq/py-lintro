@@ -11,21 +11,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai-review**: file-level resume, INCOMPLETE verdict, artifact-backed state, and
-  sticky redesign (#2154, #2157)
-
 ### Changed
 
 ### Deprecated
 
 ### Removed
 
-- **ai**: overlay `0` for `LINTRO_AI_MAX_COST_USD` / `--max-cost-usd` is rejected. Use
-  `uncapped`. YAML `0` remains a literal $0 cap.
-
 ### Fixed
 
 ### Security
+
+## [0.131.0] - 2026-08-24
+
+### Added
+
+- **ai-review**: file-level resume, INCOMPLETE verdict, artifact-backed state, and
+  sticky redesign (#2154, #2157)
+
+### Changed
+
+- **ai**: file-level review resume and sticky redesign (82d2ccb)
+- **ai-review**: add inert artifact plumbing for review state (#2161) (99348bc)
+
+### Removed
+
+- **ai**: overlay `0` for `LINTRO_AI_MAX_COST_USD` / `--max-cost-usd` is rejected. Use
+  `uncapped`. YAML `0` remains a literal $0 cap.
 
 ## [0.130.0] - 2026-08-24
 
