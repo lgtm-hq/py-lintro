@@ -50,19 +50,24 @@ name: AI Review - Dogfood
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
 #   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN and
-#      CURSOR_API_KEY) are injected only into the final review step env, after
+#      CURSOR_API_KEY) are injected only into the review step env, after
 #      the trusted base-ref checkout, the pinned CLI installs, and uv sync.
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
 #
-# TWO-PR BOOTSTRAP (#2025): this job checks out only the trusted base ref.
-# GitHub runs the workflow YAML from the PR, so a brand-new script invoked
-# here would be missing on the PR that introduces it. Convention: PR 1 lands
-# the script inert (no workflow step calls it yet); PR 2, after PR 1 is on
-# main, adds the step that invokes it. Never land a new script and its first
-# workflow invocation in the same PR. A second `actions/checkout` (any
-# `path:`) fails the audit in tests/scripts/test_run_ai_review.py.
+# TWO-PR BOOTSTRAP (#2025, rationale corrected #2158): this job checks
+# out only the trusted base ref. Since 8 Dec 2025, GitHub evaluates
+# pull_request_target workflow YAML and GITHUB_SHA from the repository
+# default branch, not from the pull request (changelog 2025-11-07).
+# Combined with the base-sha checkout, a new workflow step cannot see a
+# brand-new script until that script is already on the default branch.
+# Convention: PR 1 lands the script inert (no workflow step calls it
+# yet); PR 2, after PR 1 is on main, adds the step that invokes it.
+# Never land a new script and its first workflow invocation in the same
+# PR. Extending an already-invoked script (run-ai-review.sh) is the
+# allowed same-PR path. A second `actions/checkout` (any `path:`) fails
+# the audit in tests/scripts/test_run_ai_review.py.
 
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
@@ -81,10 +86,12 @@ jobs:
   ai-review:
     name: AI Review
     runs-on: ubuntu-24.04
-    # No continue-on-error, at either level: a job-level continue-on-error
-    # rewrites the conclusion to `success`, which is precisely how a review that
-    # never ran kept reading as a pass (#1826). The check is not required, so a
-    # red conclusion here is visible without being blocking.
+    # No job-level continue-on-error: that rewrites the conclusion to
+    # `success`, which is precisely how a review that never ran kept
+    # reading as a pass (#1826). Locate/download are the only step-level
+    # exceptions (best-effort plumbing; they must not skip the review).
+    # The review step itself still has none. The check is not required,
+    # so a red conclusion here is visible without being blocking.
     #
     # Skip draft PRs and never run for fork PRs. Fork PRs already cannot read
     # secrets, but requiring head.repo == the base repo makes it explicit that
@@ -114,6 +121,9 @@ jobs:
       # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
       # diff, which needs pull-requests: read.
       pull-requests: read
+      # Cross-run artifact listing / download-artifact with run-id uses
+      # the workflow GITHUB_TOKEN (#2158). Upload uses the same token.
+      actions: read
     # COUPLED to ai.transports.cli.timeout (default 900 s,
     # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
     # job budget must cover setup (~7 min) + the full review timeout (15 min) +
@@ -145,6 +155,11 @@ jobs:
         # GitHub releases CDN; those runs blocked it and the action fell
         # back to nodejs.org — allowlisted so Node install is not a silent
         # fallback.
+        # pipelines.actions.githubusercontent.com is the artifact service
+        # (#2158 / test-ci.yml precedent). This job forbids wildcard
+        # endpoints, so `*.blob.core.windows.net` (used by publish jobs)
+        # cannot be copied here. No additional blob-redirect host has
+        # been observed on artifact upload/download in this repo.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -156,6 +171,7 @@ jobs:
             objects.githubusercontent.com:443
             raw.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
             api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
@@ -178,6 +194,42 @@ jobs:
           # GH_TOKEN — so leaving the token in .git/config would only widen
           # what a compromised review step could read.
           persist-credentials: false
+
+      - name: Locate prior review-state run
+        # API listing, not download-artifact's same-run default. Extends
+        # run-ai-review.sh so this is not a new script invocation (#2158).
+        # Empty run-id is the no-op: lintro does not write state yet.
+        # continue-on-error keeps a locator failure from skipping the
+        # review. The file-existence guard covers already-open PRs whose
+        # base.sha still has the pre-plumbing run-ai-review.sh (that
+        # older script treats --locate-prior-state as a PR number).
+        id: prior-state
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -f scripts/ci/review_state_artifacts.py ]]; then
+            scripts/ci/run-ai-review.sh --locate-prior-state
+          else
+            echo "run-id=" >>"${GITHUB_OUTPUT:?}"
+          fi
+
+      - name: Download prior review-state artifacts
+        # Skipped until a prior completed run actually uploaded state.
+        # continue-on-error: a download failure must not skip the review.
+        if: steps.prior-state.outputs.run-id != ''
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ steps.prior-state.outputs.run-id }}
+          pattern: lintro-review-state-pr-${{ github.event.number }}-*
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ai-review-state
 
       - name: Resolve pinned agent-CLI versions
         id: pins
@@ -289,3 +341,19 @@ jobs:
           # round. `0` means uncapped; the CLI transport treats the cap as a
           # runtime bound, not marginal dollars, under subscription auth.
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
+
+      - name: Upload review-state artifacts
+        # Final upload is best-effort. Empirically, a cancelled mid-job
+        # step caused later always() uploads to skip (dogfood job
+        # 97293667852, 2026-08-24). Incremental part uploads (#2154)
+        # remain the primary persistence path. if-no-files-found: ignore
+        # so pre-feature runs no-op.
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # yamllint disable-line rule:line-length
+          name: lintro-review-state-pr-${{ github.event.number }}-attempt-${{ github.run_attempt }}-final
+          path: ai-review-state/
+          if-no-files-found: ignore
+          retention-days: 30

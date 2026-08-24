@@ -5,6 +5,7 @@
 .coverage
 .claude
 .lintro-cache
+ai-review-state/
 
 ### dirs
 Reports/
