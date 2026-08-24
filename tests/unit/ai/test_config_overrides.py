@@ -352,7 +352,7 @@ def test_max_cost_usd_overlay_zero_is_rejected(
 
 
 def test_yaml_zero_is_a_zero_dollar_cap_not_uncapped() -> None:
-    """Committed YAML ``0`` is a $0 cap; only overlay ``0`` is uncapped (#2024)."""
+    """Committed YAML ``0`` is a $0 cap; overlay ``0`` is rejected (#2154)."""
     resolved = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0))
 
     assert_that(resolved.config.max_cost_usd).is_equal_to(0.0)

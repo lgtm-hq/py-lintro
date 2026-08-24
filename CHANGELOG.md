@@ -13,8 +13,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI overlays
-  `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
+- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI can
+  overlay `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
 
 ### Deprecated
 

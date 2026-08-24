@@ -120,9 +120,10 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
 
     ``ai.review: true`` is committed so enabling the master switch does not
     rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is
-    unset after the #2156 rollout (no committed cap; CI overlays
-    ``LINTRO_AI_MAX_COST_USD=uncapped``). Historical: #2018 / 9f43a98a
-    briefly shipped 0.50; #2025 restored 2.00 as the interim committed cap.
+    unset after the #2156 rollout (no committed cap; CI forwards
+    ``LINTRO_AI_MAX_COST_USD``, and dogfood operators set ``uncapped``).
+    Historical: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00 as
+    the interim committed cap.
     """
     loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
     ai_section = loaded["ai"]
