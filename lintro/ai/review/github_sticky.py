@@ -466,6 +466,7 @@ def advance_review_state(
         findings=match.records,
         coverage=result.coverage_records,
         flagged_files=result.flagged_files,
+        pending_invalidations=result.pending_invalidations,
         repo=state.repo,
         pr_number=state.pr_number,
         base_sha=state.base_sha,

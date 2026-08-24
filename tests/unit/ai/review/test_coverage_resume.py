@@ -30,6 +30,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.patch_hash import normalized_patch_hash
@@ -340,21 +341,77 @@ def test_same_round_sampled_siblings_inherit_without_prior() -> None:
     assert_that(counts.complete).is_false()
 
 
-def test_stale_group_invalidation_survives_after_peer_is_covered() -> None:
-    """An unserved group-mate stays queued after the changed peer is covered."""
+def test_inherited_sibling_is_not_a_matcher_reviewed_path(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Same-hash credit covers the denominator without resolving findings."""
+    from dataclasses import replace
+
+    from lintro.ai.review.github_sticky import matcher_reviewed_paths
+    from lintro.ai.review.models.coverage_counts import CoverageCounts
+
+    result = replace(
+        sample_review_result,
+        coverage=CoverageCounts(reviewed=2, carried=0, awaiting=0, eligible=2),
+        metadata=replace(
+            sample_review_result.metadata,
+            reviewed_paths=("keep.py",),
+        ),
+    )
+    assert_that(matcher_reviewed_paths(result=result)).is_equal_to(
+        frozenset({"keep.py"}),
+    )
+
+
+def test_pending_group_invalidation_survives_after_peer_is_covered() -> None:
+    """An unserved group-mate stays queued via persisted pending state."""
     classified = classify_files(
         eligible_paths=("a.py", "g.py"),
         current_hashes={"a.py": "H2", "g.py": "G1"},
         coverage=(
-            CoverageRecord("a.py", "H1", round=1),
             CoverageRecord("a.py", "H2", round=2),
             CoverageRecord("g.py", "G1", round=1),
         ),
         groups=(("a.py", "g.py"),),
+        pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
     assert_that(by_path["g.py"]).is_equal_to(FileReviewNeed.GROUP_INVALIDATED)
+
+
+def test_reviewing_pending_file_converges_on_the_next_round() -> None:
+    """Serving a pending invalidation does not re-trigger the mate."""
+    from lintro.ai.review.coverage import pending_invalidations_for
+
+    classified = classify_files(
+        eligible_paths=("a.py", "g.py"),
+        current_hashes={"a.py": "H2", "g.py": "G1"},
+        coverage=(
+            CoverageRecord("a.py", "H2", round=2),
+            CoverageRecord("g.py", "G1", round=1),
+        ),
+        groups=(("a.py", "g.py"),),
+        pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
+    )
+    pending = pending_invalidations_for(
+        classified=classified,
+        reviewed_now=("g.py",),
+    )
+    assert_that(pending).is_empty()
+    settled = classify_files(
+        eligible_paths=("a.py", "g.py"),
+        current_hashes={"a.py": "H2", "g.py": "G1"},
+        coverage=(
+            CoverageRecord("a.py", "H2", round=2),
+            CoverageRecord("g.py", "G1", round=3),
+        ),
+        groups=(("a.py", "g.py"),),
+        pending_invalidations=pending,
+    )
+    by_path = {item.path: item.need for item in settled}
+    assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
+    assert_that(by_path["g.py"]).is_equal_to(FileReviewNeed.COVERED)
 
 
 def test_latest_record_wins_for_direct_change() -> None:
@@ -372,26 +429,31 @@ def test_latest_record_wins_for_direct_change() -> None:
     ).is_empty()
 
 
-def test_stale_import_invalidation_uses_latest_round() -> None:
-    """An importer re-enters only while its dependency has a newer round."""
+def test_pending_import_invalidation_is_cleared_when_reviewed() -> None:
+    """An importer stays queued only until it is actually read."""
+    from lintro.ai.review.coverage import pending_invalidations_for
+
     reverse = importers_of(
         changed_paths={"a.py", "b.py"},
         contents={"a.py": "from b import x\n", "b.py": "x = 1\n"},
-        directly_changed={"a.py", "b.py"},
+        directly_changed={"b.py"},
     )
     classified = classify_files(
         eligible_paths=("a.py", "b.py"),
         current_hashes={"a.py": "A1", "b.py": "B2"},
         coverage=(
             CoverageRecord("a.py", "A1", round=1),
-            CoverageRecord("b.py", "B1", round=1),
             CoverageRecord("b.py", "B2", round=2),
         ),
         import_importers=reverse,
+        pending_invalidations=(("a.py", FileReviewNeed.IMPORT_INVALIDATED.value),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["b.py"]).is_equal_to(FileReviewNeed.COVERED)
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.IMPORT_INVALIDATED)
+    assert_that(
+        pending_invalidations_for(classified=classified, reviewed_now=("a.py",)),
+    ).is_empty()
 
 
 def test_filter_chunks_follows_queue_priority() -> None:

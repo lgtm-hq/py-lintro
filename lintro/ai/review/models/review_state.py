@@ -28,6 +28,9 @@ class ReviewState:
         findings: Tracked findings (open and resolved) across all rounds.
         coverage: File-level coverage records keyed ``(path, hash)``.
         flagged_files: Guarded reviewer re-read requests.
+        pending_invalidations: Unserved group/import re-reads, as
+            ``(path, need)`` pairs. Survives a capped round so the next
+            empty push still queues those files without round livelock.
         repo: ``owner/name`` that produced the state.
         pr_number: Pull request number, or ``None`` for a local branch run.
         base_sha: Base commit when the state was written.
@@ -45,6 +48,7 @@ class ReviewState:
     findings: tuple[FindingRecord, ...] = field(default_factory=tuple)
     coverage: tuple[CoverageRecord, ...] = field(default_factory=tuple)
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
+    pending_invalidations: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     repo: str = ""
     pr_number: int | None = None
     base_sha: str = ""
@@ -117,6 +121,10 @@ class ReviewState:
             "findings": [record.to_dict() for record in self.findings],
             "coverage": [record.to_dict() for record in self.coverage],
             "flagged_files": [flag.to_dict() for flag in self.flagged_files],
+            "pending_invalidations": [
+                {"path": path, "need": need}
+                for path, need in self.pending_invalidations
+            ],
         }
         if self.truncated:
             payload["truncated"] = True
@@ -166,6 +174,7 @@ class ReviewState:
             ),
             coverage=tuple(coverage),
             flagged_files=tuple(flagged),
+            pending_invalidations=_pending_from_payload(payload),
             repo=str(payload.get("repo", "")),
             pr_number=pr_number,
             base_sha=str(payload.get("base_sha", "")),
@@ -177,3 +186,22 @@ class ReviewState:
             legacy=bool(payload.get("legacy", False)),
             truncated=bool(payload.get("truncated", False)),
         )
+
+
+def _pending_from_payload(
+    payload: dict[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    """Parse pending invalidation pairs from an artifact mapping."""
+    raw = payload.get("pending_invalidations") or []
+    parsed: list[tuple[str, str]] = []
+    if not isinstance(raw, list):
+        return ()
+    allowed = {"group_invalidated", "import_invalidated"}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path", "")).strip()
+        need = str(item.get("need", "")).strip()
+        if path and need in allowed:
+            parsed.append((path, need))
+    return tuple(parsed)

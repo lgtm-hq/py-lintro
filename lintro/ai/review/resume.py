@@ -78,6 +78,7 @@ def plan_resume(
     )
     coverage = () if prior is None or force_full else prior.coverage
     flags = () if prior is None or force_full else prior.flagged_files
+    pending = () if prior is None or force_full else prior.pending_invalidations
     import_targets = {
         path for path in eligible if path.rsplit("/", 1)[-1] not in BROADCAST_FILENAMES
     }
@@ -93,6 +94,7 @@ def plan_resume(
         groups=groups,
         import_importers=imports,
         flags=flags,
+        pending_invalidations=pending,
         force_full=force_full,
     )
     return ResumePlan(

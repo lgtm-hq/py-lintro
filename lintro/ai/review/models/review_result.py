@@ -39,6 +39,7 @@ class ReviewResult:
         awaiting_paths: Eligible paths not yet covered at HEAD, with an
             optional flag reason in ``awaiting_reasons``.
         awaiting_reasons: Path to reviewer flag reason for awaiting files.
+        pending_invalidations: Unserved group/import paths to persist.
     """
 
     metadata: ReviewMetadata
@@ -53,6 +54,7 @@ class ReviewResult:
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
     awaiting_paths: tuple[str, ...] = field(default_factory=tuple)
     awaiting_reasons: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    pending_invalidations: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
     @property
     def has_p1_findings(self) -> bool:

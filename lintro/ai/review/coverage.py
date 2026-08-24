@@ -27,6 +27,7 @@ __all__ = [
     "directly_changed_paths",
     "inherit_same_round_paths",
     "latest_coverage_by_path",
+    "pending_invalidations_for",
     "queue_paths",
     "review_eligible_paths",
 ]
@@ -116,6 +117,7 @@ def classify_files(
     groups: Sequence[Sequence[str]] = (),
     import_importers: Mapping[str, set[str]] | None = None,
     flags: Sequence[FlaggedFile] = (),
+    pending_invalidations: Sequence[tuple[str, str]] = (),
     force_full: bool = False,
 ) -> tuple[ClassifiedFile, ...]:
     """Classify each eligible file for this resume round.
@@ -127,6 +129,8 @@ def classify_files(
         groups: Semantic groups (each a sequence of paths).
         import_importers: ``{directly_changed: {importer, ...}}``.
         flags: Guarded reviewer flags from prior rounds.
+        pending_invalidations: Unserved group/import pairs from a prior
+            capped round.
         force_full: When True, treat every file as never-reviewed.
 
     Returns:
@@ -167,24 +171,13 @@ def classify_files(
         directly_changed=directly_changed,
         broadcast=broadcast,
     )
-    group_invalidated.update(
-        _stale_group_invalidated(
-            eligible_paths=eligible_paths,
-            groups=groups,
-            by_path=by_path,
-            broadcast=broadcast,
-        ),
-    )
+    pending_group, pending_import = _pending_sets(pending_invalidations)
+    group_invalidated.update(pending_group)
     graph = import_importers or {}
     import_invalidated: set[str] = set()
     for imported in directly_changed:
         import_invalidated.update(graph.get(imported, set()))
-    import_invalidated.update(
-        _stale_import_invalidated(
-            import_importers=graph,
-            by_path=by_path,
-        ),
-    )
+    import_invalidated.update(pending_import)
 
     allowed_flags = _allowed_flags(
         flags=flags,
@@ -320,6 +313,33 @@ def directly_changed_paths(
     return changed
 
 
+def pending_invalidations_for(
+    *,
+    classified: Sequence[ClassifiedFile],
+    reviewed_now: Iterable[str],
+) -> tuple[tuple[str, str], ...]:
+    """Return unserved group/import pairs to persist for the next round.
+
+    Args:
+        classified: This round's classification.
+        reviewed_now: Paths the provider actually read (not inherited).
+
+    Returns:
+        ``(path, need)`` pairs still awaiting a real review.
+    """
+    reviewed = set(reviewed_now)
+    return tuple(
+        (item.path, item.need.value)
+        for item in classified
+        if item.need
+        in {
+            FileReviewNeed.GROUP_INVALIDATED,
+            FileReviewNeed.IMPORT_INVALIDATED,
+        }
+        and item.path not in reviewed
+    )
+
+
 def inherit_same_round_paths(
     *,
     reviewed_now: Sequence[str],
@@ -415,56 +435,18 @@ def _group_invalidated(
     return invalidated
 
 
-def _stale_group_invalidated(
-    *,
-    eligible_paths: Sequence[str],
-    groups: Sequence[Sequence[str]],
-    by_path: Mapping[str, CoverageRecord],
-    broadcast: set[str],
-) -> set[str]:
-    """Re-queue group-mates a later capped round reviewed after they were.
-
-    Invalidation is derived from stored rounds so an unserved mate stays
-    awaiting after the changed file is covered and the next push is empty.
-    Broadcast files never contribute a trigger round.
-    """
-    if not groups:
-        return set()
-    eligible = set(eligible_paths)
-    invalidated: set[str] = set()
-    for group in groups:
-        members = set(group) & eligible
-        trigger_rounds = [
-            by_path[path].round
-            for path in members
-            if path not in broadcast and path in by_path
-        ]
-        if not trigger_rounds:
-            continue
-        newest = max(trigger_rounds)
-        for path in members:
-            prior = by_path.get(path)
-            if prior is not None and prior.round < newest:
-                invalidated.add(path)
-    return invalidated
-
-
-def _stale_import_invalidated(
-    *,
-    import_importers: Mapping[str, set[str]],
-    by_path: Mapping[str, CoverageRecord],
-) -> set[str]:
-    """Re-queue importers of a dependency reviewed in a later round."""
-    invalidated: set[str] = set()
-    for imported, importers in import_importers.items():
-        imported_rec = by_path.get(imported)
-        if imported_rec is None:
-            continue
-        for importer in importers:
-            importer_rec = by_path.get(importer)
-            if importer_rec is not None and importer_rec.round < imported_rec.round:
-                invalidated.add(importer)
-    return invalidated
+def _pending_sets(
+    pending_invalidations: Sequence[tuple[str, str]],
+) -> tuple[set[str], set[str]]:
+    """Split persisted pending pairs into group and import path sets."""
+    group: set[str] = set()
+    imports: set[str] = set()
+    for path, need in pending_invalidations:
+        if need == FileReviewNeed.GROUP_INVALIDATED:
+            group.add(path)
+        elif need == FileReviewNeed.IMPORT_INVALIDATED:
+            imports.add(path)
+    return group, imports
 
 
 def _broadcast_paths(paths: Sequence[str]) -> set[str]:

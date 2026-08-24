@@ -51,7 +51,10 @@ from lintro.ai.review.cli_limits import (
     resolve_cli_findings_cap,
     tighter_findings_cap,
 )
-from lintro.ai.review.coverage import inherit_same_round_paths
+from lintro.ai.review.coverage import (
+    inherit_same_round_paths,
+    pending_invalidations_for,
+)
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassResult,
     run_custom_agent_passes,
@@ -983,19 +986,18 @@ async def run_review_async(
 
     completed_files = {path for partial in partials for path in partial.files}
     agent_files = {path for item in custom_results for path in item.files}
-    reviewed_now = inherit_same_round_paths(
-        reviewed_now=tuple(
-            path
-            for path in resume.queue
-            if path in completed_files or path in agent_files
-        ),
+    actually_reviewed = tuple(
+        path for path in resume.queue if path in completed_files or path in agent_files
+    )
+    covered_now = inherit_same_round_paths(
+        reviewed_now=actually_reviewed,
         eligible_paths=resume.eligible,
         current_hashes=resume.hashes,
     )
-    coverage = resume.counts(reviewed_now=reviewed_now)
+    coverage = resume.counts(reviewed_now=covered_now)
     coverage_records = records_for_reviewed(
         plan=resume,
-        reviewed_paths=reviewed_now,
+        reviewed_paths=covered_now,
         head_sha=context.head_ref,
         round_number=prior_state.next_round if prior_state is not None else 1,
         prior=None if force_full else prior_state,
@@ -1013,7 +1015,7 @@ async def run_review_async(
     awaiting_paths = tuple(
         item.path
         for item in resume.classified
-        if item.need is not FileReviewNeed.COVERED and item.path not in reviewed_now
+        if item.need is not FileReviewNeed.COVERED and item.path not in covered_now
     )
     awaiting_reasons = tuple(
         (item.path, item.flag_reason)
@@ -1022,8 +1024,8 @@ async def run_review_async(
     )
     metadata = replace(
         metadata,
-        reviewed_paths=reviewed_now,
-        files_reviewed=len(reviewed_now),
+        reviewed_paths=actually_reviewed,
+        files_reviewed=len(actually_reviewed),
     )
 
     return ReviewResult(
@@ -1039,6 +1041,10 @@ async def run_review_async(
         flagged_files=flagged_files,
         awaiting_paths=awaiting_paths,
         awaiting_reasons=awaiting_reasons,
+        pending_invalidations=pending_invalidations_for(
+            classified=resume.classified,
+            reviewed_now=actually_reviewed,
+        ),
     )
 
 

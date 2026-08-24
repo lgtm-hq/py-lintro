@@ -148,6 +148,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
     flagged: dict[tuple[str, str], FlaggedFile] = {}
     runs: tuple[RunRecord, ...] = ()
     findings: tuple[FindingRecord, ...] = ()
+    pending: tuple[tuple[str, str], ...] = ()
     legacy = False
     truncated = False
     identity = ReviewState()
@@ -161,6 +162,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
             runs = state.runs
         if state.findings:
             findings = state.findings
+        pending = state.pending_invalidations
         legacy = legacy or state.legacy
         truncated = truncated or state.truncated
     return ReviewState(
@@ -169,6 +171,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         findings=findings,
         coverage=tuple(coverage.values()),
         flagged_files=tuple(flagged.values()),
+        pending_invalidations=pending,
         repo=identity.repo,
         pr_number=identity.pr_number,
         base_sha=identity.base_sha,
