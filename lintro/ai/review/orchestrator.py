@@ -325,16 +325,18 @@ def _write_incremental_coverage_part(
         stopped_reason=stopped_reason,
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
+    seed = ReviewState() if force_full or prior_state is None else prior_state
     write_state_part(
-        state=ReviewState(
+        state=replace(
+            seed,
             coverage=records,
-            repo=os.environ.get("GITHUB_REPOSITORY", ""),
-            pr_number=int(pr_raw) if pr_raw.isdigit() else None,
-            base_sha=context.base_ref,
-            head_sha=context.head_ref,
+            repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
+            pr_number=int(pr_raw) if pr_raw.isdigit() else seed.pr_number,
+            base_sha=context.base_ref or seed.base_sha,
+            head_sha=context.head_ref or seed.head_sha,
             workflow="ai-review.yml",
-            event=os.environ.get("GITHUB_EVENT_NAME", ""),
-            run_id=os.environ.get("GITHUB_RUN_ID", ""),
+            event=os.environ.get("GITHUB_EVENT_NAME", "") or seed.event,
+            run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
@@ -533,9 +535,25 @@ async def _review_all_chunks(
         for finished in asyncio.as_completed(tasks):
             chunk_index, outcome = await finished
             if isinstance(outcome, (ReviewExecutionError, AICostBudgetExceededError)):
-                # A cost-cap stop is an expected graceful halt; a
-                # ReviewExecutionError is already wrapped for the caller.
-                # Both propagate raw so run_review can finalize a partial.
+                # A cost-cap / timeout stop is an expected graceful halt.
+                # Harvest siblings that already finished so a timeout on
+                # one worker cannot drop coverage the other worker wrote.
+                for task in tasks:
+                    if not task.done() or task.cancelled():
+                        continue
+                    try:
+                        other_index, other = task.result()
+                    except Exception:
+                        continue
+                    if isinstance(other, Exception):
+                        continue
+                    if partials[other_index] is not None:
+                        continue
+                    partials[other_index] = other
+                    if completed_sink is not None:
+                        completed_sink.append(other)
+                        if on_chunk_complete is not None:
+                            on_chunk_complete(completed_sink)
                 raise outcome
             if isinstance(outcome, Exception):
                 if first_error is None:

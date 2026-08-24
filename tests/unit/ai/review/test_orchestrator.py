@@ -23,6 +23,7 @@ from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.coverage_record import CoverageRecord
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
@@ -441,6 +442,123 @@ def test_incremental_state_json_wins_over_downloaded_prior(
     assert_that({record.path for record in loaded.coverage}).contains("a.py")
     assert_that(loaded.run_id).is_equal_to("current-run")
     assert_that(loaded.head_sha).is_not_equal_to("old-head")
+
+
+def test_incremental_checkpoint_keeps_prior_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-run checkpoint must not wipe carried findings from the artifact."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    prior = ReviewState(
+        coverage=(CoverageRecord(path="kept.py", patch_hash="abc123"),),
+        findings=(FindingRecord(fingerprint="keep-me", title="old nit", file="kept.py"),),
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            prior_state=prior,
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({finding.fingerprint for finding in loaded.findings}).contains(
+        "keep-me",
+    )
+
+
+def test_parallel_timeout_keeps_completed_sibling() -> None:
+    """A timeout on one worker must still persist a sibling that already finished."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _timeout_b(
+        *,
+        provider,
+        user_prompt,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        if "b.py" in user_prompt or "+y" in user_prompt:
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_b,
+        ),
+    ):
+        result = run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=2,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
 
 
 def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
