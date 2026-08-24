@@ -351,7 +351,7 @@ def _describe_validation_error(
 
     Returns:
         A one-line message such as
-        ``LINTRO_AI_PROVIDER='cursur' is not one of: anthropic, openai, cursor``.
+        ``LINTRO_AI_PROVIDER='cursur' is not one of: anthropic, cursor, openai``.
     """
     for error in exc.errors():
         loc = error.get("loc", ())

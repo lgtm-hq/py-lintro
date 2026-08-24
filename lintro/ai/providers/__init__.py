@@ -65,29 +65,6 @@ def get_provider(
             f"Supported providers: {accepted_provider_values()}",
         ) from exc
 
-    provider_classes: dict[AIProvider, tuple[str, str]] = {
-        AIProvider.ANTHROPIC: (
-            "lintro.ai.providers.anthropic",
-            "AnthropicProvider",
-        ),
-        AIProvider.OPENAI: (
-            "lintro.ai.providers.openai",
-            "OpenAIProvider",
-        ),
-        AIProvider.CURSOR: (
-            "lintro.ai.providers.cursor",
-            "CursorProvider",
-        ),
-    }
-
-    entry = provider_classes.get(provider_enum)
-    if entry is None:
-        implemented = ", ".join(p.value for p in provider_classes)
-        raise ValueError(
-            f"AI provider '{provider_enum.value}' is recognized but not "
-            f"implemented. Implemented providers: {implemented}",
-        )
-
     maybe_start_transcript(
         workspace_root=workspace_root or resolve_workspace_root(None),
         config_enabled=config.transcript_logging,

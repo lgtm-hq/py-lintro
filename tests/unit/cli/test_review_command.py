@@ -67,6 +67,16 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--max-cost-usd")
 
 
+def test_review_help_lists_providers_alphabetically() -> None:
+    """``--provider`` help lists providers alphabetically, with no ranking."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["review", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("anthropic|cursor|openai")
+    assert_that(result.output).does_not_contain("anthropic|openai|cursor")
+
+
 def test_review_invalid_provider_env_exits_two(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

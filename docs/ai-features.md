@@ -7,7 +7,9 @@ interactive fix suggestions on top of standard linting results.
 >
 > ```bash
 > pip install -e '.[ai]'
-> export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+> export ANTHROPIC_API_KEY=sk-ant-...   # anthropic
+> # export CURSOR_API_KEY=...           # cursor (CLI-only)
+> # export OPENAI_API_KEY=sk-...        # openai
 > ```
 
 ## Quick Start
@@ -17,7 +19,10 @@ interactive fix suggestions on top of standard linting results.
 # .lintro-config.yaml
 # ai:
 #   enabled: true
+#   # Required when AI is on. No default.
+#   # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
 #   provider: anthropic
+#   transport: api
 
 # Run check — AI summary is generated automatically (1 API call)
 lintro check
@@ -198,6 +203,8 @@ degrades gracefully to a skipped result rather than failing the run.
 # .lintro-config.yaml
 ai:
   enabled: true
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
   provider: anthropic
   transport: api
 tools:
@@ -331,14 +338,33 @@ Exit 2 means no review was produced at all (credential, quota, or lintro-side fa
 Add the `ai` section to `.lintro-config.yaml`:
 
 ```yaml
+# Anthropic
 ai:
-  enabled: true # master switch (AND-ed with the toggles below)
-  lint: true # AI lint summaries during chk/fmt
-  review: true # the `lintro review` AI diff review
-  provider: anthropic # or "openai" / "cursor" ("cursor" needs transport: cli)
-  transport: api # "api" (SDK) or "cli" (local agent binary); no default
-  # model: claude-sonnet-4-6  # uses provider default if omitted
-  # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
+  enabled: true
+  lint: true
+  review: true
+  provider: anthropic
+  transport: api
+```
+
+```yaml
+# Cursor (CLI-only)
+ai:
+  enabled: true
+  lint: true
+  review: true
+  provider: cursor
+  transport: cli
+```
+
+```yaml
+# OpenAI
+ai:
+  enabled: true
+  lint: true
+  review: true
+  provider: openai
+  transport: api
 ```
 
 ### Feature Toggles
@@ -387,8 +413,8 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
 
-  # Provider: "anthropic", "openai" or "cursor" ("cursor" is CLI-only).
-  # (default: anthropic)
+  # Provider: "anthropic", "cursor", or "openai" ("cursor" is CLI-only).
+  # Required when ai.lint or ai.review is enabled. No default.
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
@@ -597,7 +623,10 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-#### [Anthropic](https://docs.anthropic.com/) (default)
+None of these is preferred. Set `ai.provider` or `LINTRO_AI_PROVIDER` whenever AI is on.
+`lintro review` also accepts `--provider`.
+
+#### [Anthropic](https://docs.anthropic.com/)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -606,11 +635,28 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```yaml
 ai:
   provider: anthropic
-  # model: claude-sonnet-4-6  # default
+  # model: claude-sonnet-4-6  # provider default if omitted
 ```
 
 See the [Anthropic API docs](https://docs.anthropic.com/en/api/) for model options and
 pricing.
+
+#### [Cursor](https://cursor.com/docs)
+
+Cursor is CLI-only. Pair it with `transport: cli` and the `agent` binary.
+
+```bash
+export CURSOR_API_KEY=...
+```
+
+```yaml
+ai:
+  provider: cursor
+  transport: cli
+  # model: auto  # provider default if omitted
+```
+
+See the [Cursor CLI docs](https://cursor.com/docs/cli/overview) for model options.
 
 #### [OpenAI](https://platform.openai.com/docs/)
 
@@ -621,7 +667,7 @@ export OPENAI_API_KEY=sk-...
 ```yaml
 ai:
   provider: openai
-  # model: gpt-4o  # default
+  # model: gpt-4o  # provider default if omitted
 ```
 
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
@@ -653,6 +699,8 @@ support both transports.
 ai:
   enabled: true
   review: true
+  # Required when AI is on. No default.
+  # Accepted: anthropic, cursor, openai (cursor requires transport: cli).
   provider: anthropic
   transport: api # or "cli"
 ```
@@ -679,7 +727,7 @@ as the legacy `ai.max_cost_usd` scalar.
 
 | Variable / flag                                           | Overrides         | Notes                                                                                        |
 | --------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------- |
-| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`     | `anthropic`, `openai`, or `cursor`                                                           |
+| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`     | `anthropic`, `cursor`, or `openai`                                                           |
 | `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                        |
 | `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
 | `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
@@ -714,13 +762,13 @@ LINTRO_AI_ENABLED=1 LINTRO_AI_REVIEW=1 lintro review --uncommitted
 **Every transport needs a credential of its own — CLI transport is not
 credential-free.**
 
-| Provider    | Transport | Credential                                                        |
-| ----------- | --------- | ----------------------------------------------------------------- |
-| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                               |
-| `anthropic` | `cli`     | `claude` login session, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` |
-| `openai`    | `api`     | `OPENAI_API_KEY`                                                  |
-| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`   |
-| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)     |
+| Provider    | Transport | Credential                                                                        |
+| ----------- | --------- | --------------------------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                               |
+| `anthropic` | `cli`     | `claude` login, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `apiKeyHelper` |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)                     |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                                  |
+| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`                   |
 
 `ai.api_key_env` overrides the API-transport variable name if you keep the key somewhere
 else.
@@ -783,8 +831,8 @@ instead of a confusing runtime error.
 | Provider    | Binary   | Minimum version | Upgrade                                           |
 | ----------- | -------- | --------------- | ------------------------------------------------- |
 | `anthropic` | `claude` | `2.0.0`         | `npm install -g @anthropic-ai/claude-code@latest` |
-| `openai`    | `codex`  | `0.20.0`        | `npm install -g @openai/codex@latest`             |
 | `cursor`    | `agent`  | `2025.1.1`      | `curl https://cursor.com/install -fsS \| bash`    |
+| `openai`    | `codex`  | `0.20.0`        | `npm install -g @openai/codex@latest`             |
 
 Source of truth: `lintro/ai/providers/cli_contracts.py`.
 
@@ -966,16 +1014,16 @@ lost to truncation.
 When AI is enabled, the pre-execution summary table includes AI configuration:
 
 ```text
-┌───────────────┬──────────────────────────────────┐
-│ Setting       │ Value                            │
-├───────────────┼──────────────────────────────────┤
-│ AI            │ enabled                          │
-│               │   provider: anthropic            │
-│               │   model: claude-sonnet-4-...     │
-│               │   parallel: 5 workers            │
-│               │   safe-auto-apply: on            │
-│               │   verify-fixes: off               │
-└───────────────┴──────────────────────────────────┘
+┌───────────────┬────────────────────────────────────────────┐
+│ Setting       │ Value                                      │
+├───────────────┼────────────────────────────────────────────┤
+│ AI            │ enabled                                    │
+│               │   provider: anthropic                      │
+│               │   model: claude-sonnet-4-6 (default)       │
+│               │   parallel: 5 workers                      │
+│               │   safe-auto-apply: on                      │
+│               │   verify-fixes: off                        │
+└───────────────┴────────────────────────────────────────────┘
 ```
 
 This shows provider status, SDK availability, API key presence, and operational settings
@@ -1003,24 +1051,24 @@ examples pass the key by **name** (`-e VAR`, no `=value`), so the secret is inhe
 from the shell's environment instead of appearing in the container's argument list.
 
 ```bash
-# API transport, with `ai: {provider: anthropic}` in the mounted config
+# Anthropic API — mounted config has `ai: {provider: anthropic, transport: api}`
 docker run --rm \
   -e ANTHROPIC_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
-# API transport, with `ai: {provider: openai}` in the mounted config
+# Cursor CLI — mounted config has `ai: {provider: cursor, transport: cli}`
+# The agent binaries are already on PATH in this image.
+docker run --rm \
+  -e CURSOR_API_KEY \
+  -v $(pwd):/code \
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport cli
+
+# OpenAI API — mounted config has `ai: {provider: openai, transport: api}`
 docker run --rm \
   -e OPENAI_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
-
-# CLI transport — the agent binaries are already on PATH in this image.
-# The credential is still required (see "Transport authentication" above).
-docker run --rm \
-  -e ANTHROPIC_API_KEY \
-  -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport cli
 ```
 
 The agent CLIs live in `/opt/ai-tools`, installed from the digest-pinned
@@ -1057,6 +1105,9 @@ uv pip install 'lintro[ai]'
 # Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
+# Cursor (CLI-only)
+export CURSOR_API_KEY=...
+
 # OpenAI
 export OPENAI_API_KEY=sk-...
 
@@ -1068,7 +1119,7 @@ export OPENAI_API_KEY=sk-...
 
 **Unknown provider:**
 
-Only `anthropic`, `openai` and `cursor` are supported (`cursor` is CLI-transport only).
+Only `anthropic`, `cursor`, and `openai` are supported (`cursor` is CLI-transport only).
 Check your `ai.provider` value.
 
 ### Rate Limits
