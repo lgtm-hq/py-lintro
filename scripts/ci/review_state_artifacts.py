@@ -21,7 +21,7 @@ import re
 import shutil
 import subprocess  # nosec B404 - gh argv is built internally; shell=False
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +35,8 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
+RUNS_PER_PAGE: Final[int] = 100
+ARTIFACTS_PER_PAGE: Final[int] = 100
 
 
 @dataclass(frozen=True)
@@ -278,8 +280,48 @@ def _as_object_list(payload: Any, key: str) -> list[Mapping[str, Any]]:
     return [item for item in items if isinstance(item, Mapping)]
 
 
+def _yield_api_pages(
+    path: str,
+    key: str,
+    *,
+    per_page: int,
+    gh_api: GhApi,
+) -> Iterator[Mapping[str, Any]]:
+    """Yield objects from a GitHub list endpoint, page by page.
+
+    Stops on an API failure or a short page so callers can return at the
+    first match without fetching the rest of the history.
+
+    Args:
+        path: REST path including any non-paging query string.
+        key: Array field name on each page body.
+        per_page: Page size.
+        gh_api: Injectable GitHub API caller.
+
+    Yields:
+        Object mappings in API order (newest first for workflow runs).
+    """
+    page = 1
+    separator = "&" if "?" in path else "?"
+    while True:
+        payload = gh_api(f"{path}{separator}per_page={per_page}&page={page}")
+        if payload is None:
+            return
+        page_items = _as_object_list(payload, key)
+        if not page_items:
+            return
+        yield from page_items
+        if len(page_items) < per_page:
+            return
+        page += 1
+
+
 def fetch_completed_runs(repo: str, *, gh_api: GhApi = _gh_api) -> list[WorkflowRun]:
     """List completed ``ai-review.yml`` runs for ``repo``.
+
+    Paginates newest-first. A 30-day artifact can sit well past the first
+    page on a busy repo; a single ``per_page`` window is not the
+    selection rule (#2154).
 
     Args:
         repo: ``owner/name`` repository slug.
@@ -290,11 +332,15 @@ def fetch_completed_runs(repo: str, *, gh_api: GhApi = _gh_api) -> list[Workflow
     """
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
-        f"?event={WORKFLOW_EVENT}&status=completed&per_page=50"
+        f"?event={WORKFLOW_EVENT}&status=completed"
     )
-    payload = gh_api(path)
     runs: list[WorkflowRun] = []
-    for item in _as_object_list(payload, "workflow_runs"):
+    for item in _yield_api_pages(
+        path,
+        "workflow_runs",
+        per_page=RUNS_PER_PAGE,
+        gh_api=gh_api,
+    ):
         parsed = parse_workflow_run(item)
         if parsed is not None:
             runs.append(parsed)
@@ -317,9 +363,13 @@ def fetch_artifacts(
     Returns:
         Parsed artifacts; unparseable entries are dropped.
     """
-    payload = gh_api(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts: list[Artifact] = []
-    for item in _as_object_list(payload, "artifacts"):
+    for item in _yield_api_pages(
+        f"repos/{repo}/actions/runs/{run_id}/artifacts",
+        "artifacts",
+        per_page=ARTIFACTS_PER_PAGE,
+        gh_api=gh_api,
+    ):
         parsed = parse_artifact(item)
         if parsed is not None:
             artifacts.append(parsed)
@@ -333,7 +383,11 @@ def locate_prior_run_id(
     current_run_id: int | None,
     gh_api: GhApi = _gh_api,
 ) -> int | None:
-    """Fetch runs and select the latest eligible prior-state run.
+    """Walk completed runs newest-first and return the first eligible.
+
+    Pages until a valid state artifact is found so a busy repo cannot
+    hide resume state behind a fixed window. Stops at the first match
+    because the Actions API returns ``created_at`` descending.
 
     Args:
         repo: ``owner/name`` repository slug.
@@ -344,16 +398,25 @@ def locate_prior_run_id(
     Returns:
         The selected run id, or ``None`` when nothing is eligible.
     """
-    runs = fetch_completed_runs(repo, gh_api=gh_api)
-    artifacts_by_run = {
-        run.run_id: fetch_artifacts(repo, run.run_id, gh_api=gh_api) for run in runs
-    }
-    return select_prior_run_id(
-        runs,
-        artifacts_by_run,
-        pr_number=pr_number,
-        current_run_id=current_run_id,
+    path = (
+        f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
+        f"?event={WORKFLOW_EVENT}&status=completed"
     )
+    for item in _yield_api_pages(
+        path,
+        "workflow_runs",
+        per_page=RUNS_PER_PAGE,
+        gh_api=gh_api,
+    ):
+        run = parse_workflow_run(item)
+        if run is None:
+            continue
+        if not is_trusted_completed_run(run) or run.run_id == current_run_id:
+            continue
+        artifacts = fetch_artifacts(repo, run.run_id, gh_api=gh_api)
+        if has_valid_state_artifact(artifacts, pr_number=pr_number):
+            return run.run_id
+    return None
 
 
 def write_run_id(run_id: int | None, output_path: Path | None) -> None:

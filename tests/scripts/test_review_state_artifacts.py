@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -269,6 +270,92 @@ def test_locate_from_env_uses_injected_api(artifacts: ModuleType) -> None:
         gh_api=gh_api,
     )
     assert_that(selected).is_equal_to(200)
+
+
+def test_locate_paginates_past_a_full_first_page(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid artifact past the first page of runs is still selected."""
+    monkeypatch.setattr(artifacts, "RUNS_PER_PAGE", 2)
+    requested: list[str] = []
+
+    def _run(run_id: int) -> dict[str, Any]:
+        return {
+            "id": run_id,
+            "event": "pull_request_target",
+            "status": "completed",
+            "path": ".github/workflows/ai-review.yml",
+            "created_at": "2026-08-24T01:00:00Z",
+        }
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        page = 0
+        match = re.search(r"[?&]page=(\d+)", path)
+        if match is not None:
+            page = int(match.group(1))
+        if "workflows/" in path and page == 1:
+            return {"workflow_runs": [_run(1), _run(2)]}
+        if "workflows/" in path and page == 2:
+            return {"workflow_runs": [_run(999)]}
+        if "runs/999/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "name": "lintro-review-state-pr-15-attempt-1-final",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+    )
+    assert_that(selected).is_equal_to(999)
+    assert_that(any("page=3" in path for path in requested)).is_false()
+
+
+def test_fetch_artifacts_unions_pages(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """State on a later artifact page still counts as valid."""
+    monkeypatch.setattr(artifacts, "ARTIFACTS_PER_PAGE", 2)
+
+    def gh_api(path: str) -> dict[str, Any]:
+        page = 0
+        match = re.search(r"[?&]page=(\d+)", path)
+        if match is not None:
+            page = int(match.group(1))
+        if page == 1:
+            return {
+                "artifacts": [
+                    {"name": "other-1", "expired": False},
+                    {"name": "other-2", "expired": False},
+                ],
+            }
+        if page == 2:
+            return {
+                "artifacts": [
+                    {
+                        "name": "lintro-review-state-pr-15-attempt-1-final",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    found = artifacts.fetch_artifacts("lgtm-hq/py-lintro", 9, gh_api=gh_api)
+    assert_that(
+        artifacts.has_valid_state_artifact(found, pr_number=15),
+    ).is_true()
 
 
 def test_write_run_id_appends_github_output(
