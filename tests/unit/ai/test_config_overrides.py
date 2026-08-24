@@ -317,20 +317,38 @@ def test_max_cost_usd_flag_beats_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
 
 
-def test_max_cost_usd_zero_is_uncapped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Literal ``0`` lifts the ceiling to ``None``, matching CostBudget (#2024)."""
-    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "0")
+def test_max_cost_usd_uncapped_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``uncapped`` lifts the ceiling to ``None`` (#2154)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "UNCAPPED")
 
     from_env = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
     from_flag = apply_cli_overrides(
         AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
-        max_cost_usd=0.0,
+        max_cost_usd="uncapped",
     )
 
     assert_that(from_env.config.max_cost_usd).is_none()
     assert_that(from_env.source_of("max_cost_usd")).is_equal_to(ConfigSource.ENV)
     assert_that(from_flag.config.max_cost_usd).is_none()
     assert_that(from_flag.source_of("max_cost_usd")).is_equal_to(ConfigSource.FLAG)
+
+
+def test_max_cost_usd_overlay_zero_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overlay ``0`` is ambiguous and errors (#2154)."""
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "0")
+
+    with pytest.raises(AIConfigOverrideError) as env_info:
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5))
+    assert_that(str(env_info.value)).contains("ambiguous")
+
+    with pytest.raises(AIConfigOverrideError) as flag_info:
+        apply_cli_overrides(
+            AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+            max_cost_usd=0.0,
+        )
+    assert_that(str(flag_info.value)).contains("uncapped")
 
 
 def test_yaml_zero_is_a_zero_dollar_cap_not_uncapped() -> None:
@@ -350,7 +368,7 @@ def test_max_cost_usd_overlay_beats_transport_profile(
         "transport": "cli",
         "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
     }
-    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "0")
+    monkeypatch.setenv("LINTRO_AI_MAX_COST_USD", "uncapped")
 
     from_env = AIConfig.resolve_from_mapping(mapping)
     applied_env = apply_resolved_transport(from_env.config)
@@ -367,7 +385,7 @@ def test_max_cost_usd_overlay_beats_transport_profile(
                 "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
             },
         ),
-        max_cost_usd=0,
+        max_cost_usd="uncapped",
     )
     applied_flag = apply_resolved_transport(from_flag.config)
 
@@ -416,7 +434,7 @@ def test_flag_overlay_provenance_beats_profile_cap() -> None:
                 "transports": {"api": {"max_cost_usd": 1.25}},
             },
         ),
-        max_cost_usd=0,
+        max_cost_usd="uncapped",
     )
     cap, source = resolve_max_cost_with_source(resolved)
 
@@ -433,7 +451,7 @@ def test_invalid_max_cost_usd_env_fails_loud(monkeypatch: pytest.MonkeyPatch) ->
 
     message = str(exc_info.value)
     assert_that(message).contains("LINTRO_AI_MAX_COST_USD='plenty'")
-    assert_that(message).contains("0 for uncapped")
+    assert_that(message).contains("uncapped")
     assert_that(message).does_not_contain("Traceback")
 
 
@@ -447,7 +465,7 @@ def test_negative_max_cost_usd_fails_loud() -> None:
 
     message = str(exc_info.value)
     assert_that(message).contains("--max-cost-usd=-1.0")
-    assert_that(message).contains("0 for uncapped")
+    assert_that(message).contains("uncapped")
 
 
 def test_nonnumeric_max_cost_usd_flag_fails_loud() -> None:
@@ -460,7 +478,7 @@ def test_nonnumeric_max_cost_usd_flag_fails_loud() -> None:
 
     message = str(exc_info.value)
     assert_that(message).contains("--max-cost-usd='plenty'")
-    assert_that(message).contains("0 for uncapped")
+    assert_that(message).contains("uncapped")
 
 
 def test_nonfinite_max_cost_usd_fails_loud() -> None:
@@ -473,7 +491,7 @@ def test_nonfinite_max_cost_usd_fails_loud() -> None:
             )
         message = str(exc_info.value)
         assert_that(message).contains(f"--max-cost-usd='{raw}'")
-        assert_that(message).contains("0 for uncapped")
+        assert_that(message).contains("uncapped")
 
 
 def test_whitespace_max_cost_usd_env_is_unset(

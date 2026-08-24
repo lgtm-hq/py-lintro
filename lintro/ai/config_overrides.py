@@ -63,7 +63,9 @@ _ENV_BY_FIELD: dict[str, str] = {
 _ENABLED_TRUE = frozenset({"1", "true"})
 _ENABLED_FALSE = frozenset({"0", "false"})
 _ENABLED_ACCEPTED = "1, 0, true, false"
-_MAX_COST_ACCEPTED = "a positive number (USD cap), or 0 for uncapped"
+_MAX_COST_ACCEPTED = "a positive number (USD cap), or uncapped"
+_UNCAP_SENTINEL = "uncapped"
+_ZERO_OVERLAY_ERROR = "ambiguous — use 'uncapped' or a positive value"
 
 _FLAG_BY_FIELD: dict[str, str] = {
     "provider": "--provider",
@@ -152,12 +154,11 @@ def apply_cli_overrides(
     """Apply ``lintro review`` CLI flags on top of a resolved config.
 
     Flags beat env vars. Omitted flags leave the corresponding field
-    untouched. There is no ``--enabled`` flag. Literal ``0`` for
-    ``--max-cost-usd`` means uncapped (mapped to ``None`` before overlay
-    so Pydantic cannot treat it as a $0 cap). Overlaying ``max_cost_usd``
-    also stamps both transport-profile cost fields so
-    ``apply_resolved_transport`` cannot clobber flag/env with a YAML
-    profile cap (#2024).
+    untouched. There is no ``--enabled`` flag. ``uncapped`` (any case)
+    lifts the ceiling. Overlay ``0`` is rejected as ambiguous (#2154).
+    Overlaying ``max_cost_usd`` also stamps both transport-profile cost
+    fields so ``apply_resolved_transport`` cannot clobber flag/env with a
+    YAML profile cap (#2024).
 
     Args:
         resolved: Config + provenance after the env layer.
@@ -239,10 +240,9 @@ def _parse_bool_override(raw: str, *, name: str) -> bool:
 def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
     """Parse a cost-cap override into a USD ceiling, or None if uncapped.
 
-    Literal ``0`` (including ``0.0``) means unlimited, matching
-    :class:`~lintro.ai.budget.CostBudget`. This mapping happens *before*
-    overlay: Pydantic ``max_cost_usd: float | None`` with ``ge=0`` would
-    otherwise accept ``0.0`` as a zero-dollar cap (#2024).
+    ``uncapped`` (case-insensitive) lifts the ceiling. Overlay ``0`` is
+    rejected — it was the #2024 spelling for uncapped and is now
+    ambiguous against a literal $0 YAML cap (#2154).
 
     Args:
         raw: Env-var string or CLI float.
@@ -252,10 +252,12 @@ def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
         A positive finite float, or None when the cap is lifted.
 
     Raises:
-        AIConfigOverrideError: If *raw* is negative, non-numeric, or
-            non-finite.
+        AIConfigOverrideError: If *raw* is ``0``, negative, non-numeric,
+            or non-finite.
     """
     text = str(raw).strip()
+    if text.lower() == _UNCAP_SENTINEL:
+        return None
     try:
         value = float(text)
     except ValueError:
@@ -267,7 +269,9 @@ def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
             f"{name}={raw!r} is not one of: {_MAX_COST_ACCEPTED}",
         )
     if value == 0:
-        return None
+        raise AIConfigOverrideError(
+            f"{name}={raw!r} is {_ZERO_OVERLAY_ERROR}",
+        )
     return value
 
 

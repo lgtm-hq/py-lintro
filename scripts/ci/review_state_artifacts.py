@@ -8,8 +8,8 @@ excluded. Conclusion is irrelevant: an INCOMPLETE (red) round is exactly the
 run to resume from (#2154).
 
 Missing, expired, unlistable, or malformed state degrades to empty — a full
-re-review — and never fails the job. Lintro does not write state yet; this
-plumbing is inert until #2154.
+re-review — and never fails the job. Lintro writes versioned parts under
+``ai-review-state/`` (#2154); this helper only locates the prior run.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Versioned review state persisted in the sticky comment's hidden blob."""
+"""Versioned review state for artifacts and legacy sticky blobs (#2154)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.run_record import RunRecord
 
 __all__ = ["ReviewState"]
@@ -16,17 +18,42 @@ __all__ = ["ReviewState"]
 class ReviewState:
     """Machine-readable review history for one pull request.
 
+    Authoritative CI state lives in workflow artifacts (schema 3).
+    Schema 2 sticky blobs still decode for one-time migration of
+    findings and runs; coverage is never seeded from a comment.
+
     Attributes:
-        version: Schema version of the decoded blob.
+        version: Schema version of the decoded payload.
         runs: Per-round statistics, oldest first.
         findings: Tracked findings (open and resolved) across all rounds.
-        truncated: True when older runs or resolved findings were pruned to
-            keep the sticky comment under GitHub's size limit.
+        coverage: File-level coverage records keyed ``(path, hash)``.
+        flagged_files: Guarded reviewer re-read requests.
+        repo: ``owner/name`` that produced the state.
+        pr_number: Pull request number, or ``None`` for a local branch run.
+        base_sha: Base commit when the state was written.
+        head_sha: Head commit when the state was written.
+        workflow: Trusted workflow filename (CI only).
+        event: Workflow event (CI only).
+        run_id: Actions run id that wrote the state.
+        lintro_version: Lintro version that wrote the state.
+        legacy: True when findings/runs were seeded from a sticky blob.
+        truncated: True when older runs or resolved findings were pruned.
     """
 
-    version: int = 2
+    version: int = 3
     runs: tuple[RunRecord, ...] = field(default_factory=tuple)
     findings: tuple[FindingRecord, ...] = field(default_factory=tuple)
+    coverage: tuple[CoverageRecord, ...] = field(default_factory=tuple)
+    flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
+    repo: str = ""
+    pr_number: int | None = None
+    base_sha: str = ""
+    head_sha: str = ""
+    workflow: str = ""
+    event: str = ""
+    run_id: str = ""
+    lintro_version: str = ""
+    legacy: bool = False
     truncated: bool = False
 
     @property
@@ -67,3 +94,86 @@ class ReviewState:
         if self.truncated:
             payload["truncated"] = True
         return payload
+
+    def to_artifact_dict(self) -> dict[str, Any]:
+        """Serialize the schema-3 artifact envelope.
+
+        Returns:
+            JSON-serializable mapping with identity metadata and coverage.
+        """
+        payload: dict[str, Any] = {
+            "schema_version": 3,
+            "version": 3,
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
+            "workflow": self.workflow,
+            "event": self.event,
+            "run_id": self.run_id,
+            "lintro_version": self.lintro_version,
+            "legacy": self.legacy,
+            "runs": [run.to_dict() for run in self.runs],
+            "findings": [record.to_dict() for record in self.findings],
+            "coverage": [record.to_dict() for record in self.coverage],
+            "flagged_files": [flag.to_dict() for flag in self.flagged_files],
+        }
+        if self.truncated:
+            payload["truncated"] = True
+        return payload
+
+    @classmethod
+    def from_artifact_dict(cls, payload: dict[str, Any]) -> ReviewState:
+        """Parse a schema-3 envelope; unknown coverage rows are dropped.
+
+        Args:
+            payload: Decoded JSON mapping.
+
+        Returns:
+            Parsed state. Invalid coverage/flag rows are omitted.
+        """
+        coverage: list[CoverageRecord] = []
+        for raw in payload.get("coverage") or []:
+            if isinstance(raw, dict):
+                coverage_row = CoverageRecord.from_dict(raw)
+                if coverage_row is not None:
+                    coverage.append(coverage_row)
+        flagged: list[FlaggedFile] = []
+        for raw in payload.get("flagged_files") or []:
+            if isinstance(raw, dict):
+                flag_row = FlaggedFile.from_dict(raw)
+                if flag_row is not None:
+                    flagged.append(flag_row)
+        pr_raw = payload.get("pr_number")
+        pr_number: int | None
+        try:
+            pr_number = int(pr_raw) if pr_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            pr_number = None
+        return cls(
+            version=3,
+            runs=tuple(
+                RunRecord.from_dict(item)
+                for item in payload.get("runs") or []
+                if isinstance(item, dict)
+            ),
+            findings=tuple(
+                record
+                for item in payload.get("findings") or []
+                if isinstance(item, dict)
+                for record in (FindingRecord.from_dict(item),)
+                if record is not None
+            ),
+            coverage=tuple(coverage),
+            flagged_files=tuple(flagged),
+            repo=str(payload.get("repo", "")),
+            pr_number=pr_number,
+            base_sha=str(payload.get("base_sha", "")),
+            head_sha=str(payload.get("head_sha", "")),
+            workflow=str(payload.get("workflow", "")),
+            event=str(payload.get("event", "")),
+            run_id=str(payload.get("run_id", "")),
+            lintro_version=str(payload.get("lintro_version", "")),
+            legacy=bool(payload.get("legacy", False)),
+            truncated=bool(payload.get("truncated", False)),
+        )

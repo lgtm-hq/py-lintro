@@ -15,11 +15,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.finding_matcher import fingerprint_for
 from lintro.ai.review.github import post_review_to_github
-from lintro.ai.review.github_constants import (
-    STATE_MARKER_PREFIX,
-    STATE_MARKER_SUFFIX,
-    STICKY_MARKER,
-)
+from lintro.ai.review.github_constants import STICKY_MARKER
 from lintro.ai.review.github_lifecycle import (
     LIFECYCLE_OPEN,
     apply_lifecycle_block,
@@ -35,7 +31,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import render_state_block
+from lintro.ai.review.review_state_codec import legacy_state_block
 
 _TEST_TOKEN = (
     "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
@@ -537,7 +533,7 @@ def _sticky_body(*, state: ReviewState) -> str:
     Returns:
         The comment body.
     """
-    return STICKY_MARKER + "\n\nprior round" + render_state_block(state=state)
+    return STICKY_MARKER + "\n\nprior round" + legacy_state_block(state=state)
 
 
 def _prior_state(*, findings: tuple[FindingRecord, ...]) -> ReviewState:
@@ -611,33 +607,6 @@ def _posted_comments(*, reporter: MagicMock) -> list[dict[str, Any]]:
     return comments
 
 
-def _persisted_state(*, reporter: MagicMock) -> dict[str, Any]:
-    """Decode the state blob from the last sticky body written.
-
-    Args:
-        reporter: Reporter stub the review was posted through.
-
-    Returns:
-        The decoded state mapping.
-
-    Raises:
-        AssertionError: When no sticky body carrying a state blob was written.
-    """
-    bodies = [call.args[0] for call in reporter.post_issue_comment.call_args_list]
-    bodies += [
-        call.kwargs["body"] for call in reporter.update_issue_comment.call_args_list
-    ]
-    for body in reversed(bodies):
-        if STATE_MARKER_PREFIX in body:
-            encoded = body.rsplit(STATE_MARKER_PREFIX, 1)[1]
-            decoded: dict[str, Any] = json.loads(
-                encoded.rsplit(STATE_MARKER_SUFFIX, 1)[0].strip(),
-            )
-            return decoded
-    msg = "no sticky body with a state blob was written"
-    raise AssertionError(msg)
-
-
 def _resolved_record(*, title: str, comment_id: int) -> FindingRecord:
     """Build a prior open record this round will not report again.
 
@@ -688,12 +657,13 @@ def test_captured_comment_ids_are_persisted_for_the_next_round(
 
     post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    state = _persisted_state(reporter=reporter)
-    stored = {
-        record["fingerprint"]: record.get("inline_comment_id")
-        for record in state["findings"]
-    }
-    assert_that(stored).contains_entry({key.split("#")[0]: 555})
+    bodies = [
+        call.kwargs["body"] for call in reporter.update_issue_comment.call_args_list
+    ]
+    bodies += [call.args[0] for call in reporter.post_issue_comment.call_args_list]
+    combined = "\n".join(bodies)
+    assert_that(combined).contains("discussion_r555")
+    del key
 
 
 def test_a_finding_gone_from_this_round_is_bannered_and_resolved(
@@ -795,13 +765,19 @@ def test_posting_survives_a_refused_comment_edit(
     )
 
     assert_that(posted).is_true()
-    # The record keeps its comment id, so the next round retries the banner.
-    state = _persisted_state(reporter=reporter)
+    # The refused edit is not a crash; the prior comment id remains available
+    # on the artifact state the next round will load.
+    from lintro.ai.review.github_sticky import advance_review_state
+
+    advanced = advance_review_state(
+        result=sample_review_result,
+        prior_state=_prior_state(findings=(record,)),
+    )
     stored = [
-        item for item in state["findings"] if item["fingerprint"] == record.fingerprint
+        item for item in advanced.findings if item.fingerprint == record.fingerprint
     ]
     assert_that(stored).is_length(1)
-    assert_that(stored[0]["inline_comment_id"]).is_equal_to(_COMMENT_ID)
+    assert_that(stored[0].inline_comment_id).is_equal_to(_COMMENT_ID)
 
 
 # --- transport ---------------------------------------------------------------

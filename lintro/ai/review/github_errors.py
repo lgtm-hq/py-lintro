@@ -17,11 +17,7 @@ from lintro.ai.review.github_sticky import render_state_sticky
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import (
-    prune_state_to_fit,
-    render_state_block,
-    renumber_if_legacy_v1,
-)
+from lintro.ai.review.review_state_codec import renumber_if_legacy_v1
 
 #: Cap on the provider error text rendered on the error-only sticky. Provider
 #: failures can carry a whole CLI JSON payload as their message, and none of it
@@ -124,26 +120,8 @@ def format_error_comment(
         lines.extend(["", "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"])
     lines.extend(["", _FOOTER])
     body = "\n".join(lines)
-    if state is not None and (state.findings or state.truncated):
-        block = render_state_block(
-            state=prune_state_to_fit(
-                state=state,
-                body=body,
-                limit=MAX_COMMENT_CHARS,
-            ),
-        )
-        if len(body) + len(block) > MAX_COMMENT_CHARS:
-            # Same floor-overflow last resort as the sticky path: keep an
-            # authentic (empty) block so a forged marker in error prose can
-            # never become the last well-formed candidate.
-            block = render_state_block(
-                state=ReviewState(runs=(), findings=(), truncated=True),
-            )
-        if len(body) + len(block) > MAX_COMMENT_CHARS:
-            # A pathological error body can overflow on its own; trim it so
-            # body + authentic block always fits the budget.
-            body = body[: MAX_COMMENT_CHARS - len(block)].rstrip()
-        body += block
+    if len(body) > MAX_COMMENT_CHARS:
+        body = body[:MAX_COMMENT_CHARS].rstrip()
     return body
 
 

@@ -198,7 +198,7 @@ jobs:
       - name: Locate prior review-state run
         # API listing, not download-artifact's same-run default. Extends
         # run-ai-review.sh so this is not a new script invocation (#2158).
-        # Empty run-id is the no-op: lintro does not write state yet.
+        # Empty run-id is the no-op: first review on a PR, or no valid prior.
         # continue-on-error keeps a locator failure from skipping the
         # review. The file-existence guard covers already-open PRs whose
         # base.sha still has the pre-plumbing run-ai-review.sh (that

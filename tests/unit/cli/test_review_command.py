@@ -103,12 +103,12 @@ def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
 
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("--max-cost-usd='plenty'")
-    assert_that(result.output).contains("0 for uncapped")
+    assert_that(result.output).contains("uncapped")
     assert_that(result.output).does_not_contain("Traceback")
 
 
 def test_review_max_cost_flag_beats_transport_profile() -> None:
-    """``--max-cost-usd 0`` lifts a YAML transport-profile cap (#2024)."""
+    """``--max-cost-usd uncapped`` lifts a YAML transport-profile cap (#2154)."""
     runner = CliRunner()
     mock_context = MagicMock()
     mock_context.changed_files = []
@@ -167,7 +167,7 @@ def test_review_max_cost_flag_beats_transport_profile() -> None:
             model_name="gpt-4o",
             name="openai",
         )
-        result = runner.invoke(cli, ["review", "--max-cost-usd", "0"])
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "uncapped"])
 
     assert_that(result.exit_code).is_equal_to(0)
     provider_config = mock_get_provider.call_args.args[0]

@@ -112,8 +112,14 @@ def test_verdict_labels_cover_every_member() -> None:
 
 
 def test_verdict_rubric_fine_print_names_every_label() -> None:
-    """The rendered rubric fine-print states each verdict label."""
-    for label in VERDICT_LABELS.values():
+    """The rendered rubric fine-print states each findings-derived label.
+
+    ``Incomplete`` is a coverage gate, not a severity outcome, so it is
+    announced on the sticky rather than in this findings rubric.
+    """
+    for verdict, label in VERDICT_LABELS.items():
+        if verdict is ReviewVerdict.INCOMPLETE:
+            continue
         assert_that(VERDICT_RUBRIC_FINE_PRINT).contains(label)
 
 

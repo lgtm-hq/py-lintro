@@ -321,6 +321,8 @@ def match_findings(
     findings: Sequence[ReviewFinding],
     round_number: int,
     head_sha: str = "",
+    reviewed_paths: frozenset[str] | None = None,
+    departed_paths: frozenset[str] | None = None,
 ) -> FindingMatchResult:
     """Match this round's findings against the previously persisted state.
 
@@ -340,6 +342,11 @@ def match_findings(
         round_number: Round number being recorded (1-based).
         head_sha: Head commit sha reviewed in this round; stamped onto findings
             resolved by this round.
+        reviewed_paths: Files re-reviewed this round. Open findings on other
+            paths carry forward. ``None`` keeps the legacy resolve-on-absence
+            behavior.
+        departed_paths: Paths that left the diff (deletes and rename sources)
+            and may resolve even when they were not re-reviewed.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
@@ -404,6 +411,14 @@ def match_findings(
             continue
         if record.status is FindingStatus.RESOLVED:
             merged.append(record)
+            continue
+        path = record.file
+        left_diff = departed_paths is not None and path in departed_paths
+        unread = reviewed_paths is not None and path not in reviewed_paths
+        if unread and not left_diff:
+            merged.append(record)
+            carried.append(record)
+            outcomes[record.key] = FindingMatchOutcome.CARRIED
             continue
         closed = replace(
             record,

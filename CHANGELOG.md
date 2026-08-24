@@ -11,11 +11,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai-review**: file-level resume, INCOMPLETE verdict, artifact-backed state, and
+  sticky redesign (#2154, #2157)
+
 ### Changed
 
 ### Deprecated
 
 ### Removed
+
+- **ai**: overlay `0` for `LINTRO_AI_MAX_COST_USD` / `--max-cost-usd` is rejected. Use
+  `uncapped`. YAML `0` remains a literal $0 cap.
 
 ### Fixed
 

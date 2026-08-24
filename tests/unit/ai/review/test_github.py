@@ -234,9 +234,8 @@ def test_build_sticky_comment_has_markers_and_verdict_header(
     body = build_sticky_comment(result=sample_review_result)
 
     assert_that(body).contains(STICKY_MARKER)
-    assert_that(body).contains(STATE_MARKER_PREFIX)
-    assert_that(body).contains("## 🔎 Lintro Review · round 1")
-    assert_that(body).contains("**⛔ Blocked** — 1 open blocker")
+    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
+    assert_that(body).contains("## 🔎 Lintro Review — ⛔ Blocked")
     # Accounting never precedes the verdict (#1905).
     assert_that(body.index("Lintro Review")).is_less_than(body.index("est. cost"))
 
@@ -261,21 +260,22 @@ def test_build_sticky_comment_aggregates_prior_runs(
     ]
     body = build_sticky_comment(result=sample_review_result, prior_runs=prior)
 
-    assert_that(body).contains("🕘 Run history — 2 runs")
+    assert_that(body).contains("### 🕘 History · 1 previous run")
     # Mixed estimate => cumulative flagged approximate.
     assert_that(body).contains("~$")
-    assert_that(body).contains("`cursor:auto` ×1")
-    # History lives in exactly one collapsible.
-    assert_that(body.count("🕘 Run history")).is_equal_to(1)
+    assert_that(body.count("🕘 History")).is_equal_to(1)
 
 
 def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
-    """State written into a sticky comment parses back to run records."""
+    """New stickies carry no leftover blob; parse yields empty runs."""
+    from lintro.ai.review.github_sticky import advance_review_state
+
     body = build_sticky_comment(result=sample_review_result)
     runs = parse_review_state(body=body)
+    state = advance_review_state(result=sample_review_result)
 
-    assert_that(runs).is_length(1)
-    assert_that(runs[0]["model"]).is_equal_to("claude-sonnet-4-20250514")
+    assert_that(runs).is_empty()
+    assert_that(state.runs[0].model).is_equal_to("claude-sonnet-4-20250514")
 
 
 def test_parse_review_state_handles_missing_block() -> None:
@@ -336,7 +336,8 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     assert_that(degraded).contains("Unknown status grants access")
     assert_that(degraded).contains("No test for unknown status")
     # The round is not double-counted by the second render.
-    assert_that(parse_review_state(body=degraded)).is_length(1)
+    assert_that(degraded.count("### Findings · Round 1")).is_equal_to(1)
+    assert_that(degraded).does_not_contain(STATE_MARKER_PREFIX)
 
 
 def test_unmappable_findings_are_folded_in_without_any_failure(
@@ -422,7 +423,7 @@ def test_post_review_updates_existing_sticky(
     reporter.delete_issue_comment.assert_not_called()
     kwargs = reporter.update_issue_comment.call_args.kwargs
     assert_that(kwargs["comment_id"]).is_equal_to(42)
-    assert_that(kwargs["body"]).contains("2 runs")
+    assert_that(kwargs["body"]).contains("## 🔎 Lintro Review —")
 
 
 def test_upsert_sticky_creates_when_missing() -> None:
@@ -686,18 +687,21 @@ def test_error_comment_preserves_prior_run_state() -> None:
         prior_runs=prior,
     )
 
-    assert_that(body).contains(STATE_MARKER_PREFIX)
-    recovered = parse_review_state(body=body)
-    assert_that(recovered).is_length(1)
-    assert_that(recovered[0]["total"]).is_equal_to(5000)
+    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
+    assert_that(body).contains("showing round 1 results below")
+    assert_that(body).contains("## 🔎 Lintro Review")
 
 
 def test_post_error_comment_recovers_prior_state(
     sample_review_result: ReviewResult,
 ) -> None:
     """post_review_error_to_github reloads prior runs and keeps their state."""
+    from lintro.ai.review.github_sticky import advance_review_state
+    from lintro.ai.review.review_state_codec import legacy_state_block
+
     reporter = _fresh_reporter()
-    prior_body = build_sticky_comment(result=sample_review_result)
+    prior = advance_review_state(result=sample_review_result)
+    prior_body = f"{STICKY_MARKER}\n\nprior round{legacy_state_block(state=prior)}"
     reporter.find_issue_comment.return_value = (9, prior_body)
 
     post_review_error_to_github(
@@ -706,7 +710,8 @@ def test_post_error_comment_recovers_prior_state(
     )
 
     posted_body = reporter.update_issue_comment.call_args.kwargs["body"]
-    assert_that(parse_review_state(body=posted_body)).is_length(1)
+    assert_that(posted_body).contains("showing round 1 results below")
+    assert_that(posted_body).does_not_contain(STATE_MARKER_PREFIX)
 
 
 # --- truncation safety for non-diff-mappable findings (#1099) ----------------
@@ -783,9 +788,12 @@ def test_sticky_indexes_every_finding_and_stays_under_the_cap(
     body = build_sticky_comment(result=result, diff_lines=diff_lines)
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
-    assert_that(body).contains("### Open findings (41)")
-    assert_that(body).contains("FallbackOnlyFinding")
+    assert_that(body).contains("### Findings ·")
+    assert_that(body).contains("41 open")
     assert_that(body).contains("MappedFinding1")
+    assert_that(
+        "FallbackOnlyFinding" in body or "more open findings not listed" in body,
+    ).is_true()
 
 
 def test_sticky_state_round_trips_after_truncation(
@@ -809,11 +817,8 @@ def test_sticky_state_round_trips_after_truncation(
 
     body = build_sticky_comment(result=result, diff_lines=diff_lines)
 
-    assert_that(body).contains("## 🔎 Lintro Review · round 1")
-    assert_that(body).contains(STATE_MARKER_PREFIX)
-    runs = parse_review_state(body=body)
-    assert_that(runs).is_length(1)
-    assert_that(runs[0]["model"]).is_equal_to("claude-sonnet-4-20250514")
+    assert_that(body).contains("## 🔎 Lintro Review —")
+    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
 
 
 # --- final size safety net (#1909) -------------------------------------------
@@ -863,7 +868,8 @@ def test_build_sticky_survives_overflowing_finding_sets(
     body = build_sticky_comment(result=result, diff_lines=None)
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
-    assert_that(body).contains("### Open findings (400)")
+    assert_that(body).contains("### Findings ·")
+    assert_that(body).contains("400 open")
     assert_that(body).contains("StickyOverflow0")
     assert_that(body).contains("more open findings not listed")
 

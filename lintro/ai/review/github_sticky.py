@@ -59,8 +59,10 @@ from lintro.ai.review.finding_matcher import (
 )
 from lintro.ai.review.github_constants import (
     _SEVERITY_EMOJI,
+    ARCHIVE_MARKER,
     MAX_COMMENT_CHARS,
     MAX_STORED_RUNS,
+    PRIMARY_SOFT_LIMIT,
     SHORT_SHA_LENGTH,
     STICKY_FOOTER,
     STICKY_MARKER,
@@ -71,8 +73,6 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
-    format_badge_tables,
-    run_stats_primary_cells,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -92,18 +92,44 @@ from lintro.ai.review.review_state_codec import (
 from lintro.ai.review.severity_gate import count_downgrades
 from lintro.ai.review.verdict import (
     VERDICT_RUBRIC_FINE_PRINT,
+    apply_coverage_gate,
     resolve_bullet_finding,
     verdict_label,
 )
 from lintro.ai.transport import resolve_cost_basis
 
 __all__ = [
+    "advance_review_state",
+    "build_sticky_bodies",
     "build_sticky_comment",
+    "matcher_reviewed_paths",
     "parse_review_state",
     "parse_review_state_v2",
     "render_state_sticky",
     "stamp_comment_ids",
 ]
+
+
+def matcher_reviewed_paths(*, result: ReviewResult) -> frozenset[str] | None:
+    """Return the reviewed-path set the matcher should use.
+
+    An empty ``metadata.reviewed_paths`` on a result with no incomplete
+    coverage is treated as unspecified (``None``) so disappeared findings
+    still resolve — the shape of fixture results and of reviews that ran
+    before this field was populated. A capped incomplete run that truly
+    reviewed no files keeps an empty set so unread findings stay open.
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        Paths the provider read, or ``None`` when the field is unspecified.
+    """
+    if result.metadata.reviewed_paths:
+        return frozenset(result.metadata.reviewed_paths)
+    if result.coverage is not None and not result.coverage.complete:
+        return frozenset()
+    return None
 
 
 def stamp_comment_ids(
@@ -141,6 +167,7 @@ VERDICT_EMOJI: dict[ReviewVerdict, str] = {
     ReviewVerdict.CHANGES_REQUESTED: "⚠️",
     ReviewVerdict.NITS_ONLY: "🟡",
     ReviewVerdict.READY: "✅",
+    ReviewVerdict.INCOMPLETE: "⚠️",
 }
 
 #: Heading used for the reasoning section, per verdict.
@@ -149,6 +176,7 @@ _REASONING_HEADINGS: dict[ReviewVerdict, str] = {
     ReviewVerdict.CHANGES_REQUESTED: "Why changes are requested",
     ReviewVerdict.NITS_ONLY: "Why it's flagged",
     ReviewVerdict.READY: "Why it's ready",
+    ReviewVerdict.INCOMPLETE: "Why the verdict is withheld",
 }
 
 #: Noun naming the finding class that decides each verdict, for the pill.
@@ -157,6 +185,7 @@ _VERDICT_NOUNS: dict[ReviewVerdict, str] = {
     ReviewVerdict.CHANGES_REQUESTED: "warning",
     ReviewVerdict.NITS_ONLY: "nit",
     ReviewVerdict.READY: "finding",
+    ReviewVerdict.INCOMPLETE: "file",
 }
 
 #: Severity that decides each verdict, used to count the pill's subject.
@@ -183,7 +212,11 @@ for _table_name, _table in (
 # _VERDICT_SEVERITY is guarded separately because READY is deliberately absent
 # from it. Without this a new non-READY verdict would pass the loop above and
 # then KeyError inside _readiness_pill on a live PR.
-_missing = set(ReviewVerdict) - {ReviewVerdict.READY} - set(_VERDICT_SEVERITY)
+_missing = (
+    set(ReviewVerdict)
+    - {ReviewVerdict.READY, ReviewVerdict.INCOMPLETE}
+    - set(_VERDICT_SEVERITY)
+)
 if _missing:  # pragma: no cover - guards a future verdict
     raise RuntimeError(f"_VERDICT_SEVERITY missing entries for: {_missing}")
 
@@ -330,47 +363,62 @@ def build_sticky_comment(
     inline_comment_ids: Mapping[str, int] | None = None,
     repo: str = "",
     pr_number: int | None = None,
+    departed_paths: frozenset[str] | None = None,
 ) -> str:
-    """Compose the full v5 "mission control" sticky PR comment body.
+    """Compose the primary sticky body. See :func:`build_sticky_bodies`."""
+    primary, _archive = build_sticky_bodies(
+        result=result,
+        prior_runs=prior_runs,
+        prior_state=prior_state,
+        checklist_display=checklist_display,
+        question_map=question_map,
+        diff_lines=diff_lines,
+        head_sha=head_sha,
+        transport=transport,
+        auth_mode=auth_mode,
+        cost_basis=cost_basis,
+        inline_failure=inline_failure,
+        inline_comment_ids=inline_comment_ids,
+        repo=repo,
+        pr_number=pr_number,
+        departed_paths=departed_paths,
+    )
+    return primary
 
-    This round's findings are matched against the prior state, so the rendered
-    delta, the ``since`` column, and the persisted v2 blob all agree on each
-    finding's identity, first-seen round, and resolution provenance.
+
+def advance_review_state(
+    *,
+    result: ReviewResult,
+    prior_state: ReviewState | None = None,
+    prior_runs: list[dict[str, Any]] | None = None,
+    head_sha: str = "",
+    transport: str = "",
+    auth_mode: str = "",
+    cost_basis: str = "",
+    inline_comment_ids: Mapping[str, int] | None = None,
+    departed_paths: frozenset[str] | None = None,
+) -> ReviewState:
+    """Advance artifact state by one completed review round.
+
+    Matching, verdict derivation, and run-record construction are the same
+    work :func:`build_sticky_bodies` uses to render the comment, so a persist
+    path and a follow-up sticky cannot disagree about what this round did.
 
     Args:
         result: Current review result.
-        prior_runs: Legacy run records recovered from the previous sticky
-            comment's state block. Ignored when ``prior_state`` is given.
-        prior_state: Full state decoded from the previous sticky comment.
-            ``None`` for the first run on a PR.
-        checklist_display: Structured checklist visibility mode.
-        question_map: Prompt id to question text for the checklist appendix and
-            for linked questions on folded-in finding detail.
-        diff_lines: Diff line map. Retained for interface compatibility with
-            the inline-posting path; the v5 sticky indexes every open finding
-            identically whether or not it also posts inline.
-        head_sha: Head commit sha reviewed in this round; stamped onto findings
-            resolved by this round.
+        prior_state: Artifact or migrated sticky state.
+        prior_runs: Legacy run mappings. Ignored when ``prior_state`` is given.
+        head_sha: Head commit sha reviewed in this round.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
-        cost_basis: Provenance of the reported cost
-            (``billed`` / ``estimated`` / ``unpriceable``).
-        inline_failure: Findings whose inline comments could not be posted.
-            When set, the sticky renders a warning row above the open-findings
-            table and folds those findings' full detail back in.
-        inline_comment_ids: Finding key to the id of the inline comment that
-            carries it, captured after this round's review was submitted
-            (#1912). Stamped onto the persisted records, and used to link each
-            open finding's title to the thread that carries its detail.
-        repo: ``owner/name`` slug of the repository, used to build those links.
-        pr_number: Pull request number, likewise. Titles render unlinked when
-            either is unknown rather than as dead links.
+        cost_basis: Provenance of the reported cost.
+        inline_comment_ids: Finding key to inline comment id.
+        departed_paths: Paths that left the diff this round.
 
     Returns:
-        Complete Markdown body carrying the hidden marker and state block,
-        guaranteed to fit GitHub's comment size limit.
+        The state to persist: prior runs plus this round, matched findings,
+        and this result's coverage records.
     """
-    del diff_lines  # Interface compatibility; the v5 sticky indexes uniformly.
     state = prior_state if prior_state is not None else _state_from_runs(prior_runs)
     round_number = state.next_round
     match = match_findings(
@@ -378,10 +426,9 @@ def build_sticky_comment(
         findings=result.findings,
         round_number=round_number,
         head_sha=head_sha,
+        reviewed_paths=matcher_reviewed_paths(result=result),
+        departed_paths=departed_paths,
     )
-    # Stamp the ids before rendering, not only before persisting: the open
-    # table links each title to its thread, and a round-1 finding's id is only
-    # known on the refresh pass that passes ``inline_comment_ids`` in.
     match = replace(
         match,
         records=stamp_comment_ids(
@@ -389,7 +436,116 @@ def build_sticky_comment(
             comment_ids=inline_comment_ids,
         ),
     )
-    verdict = derive_verdict(findings=match.records)
+    findings_verdict = derive_verdict(findings=match.records)
+    if result.coverage is not None:
+        verdict = apply_coverage_gate(
+            findings_verdict=findings_verdict,
+            coverage_complete=result.coverage.complete,
+        )
+    else:
+        verdict = findings_verdict
+    open_count = sum(
+        1 for record in match.records if record.status is FindingStatus.OPEN
+    )
+    current = _run_record(
+        result=result,
+        round_number=round_number,
+        head_sha=head_sha,
+        transport=transport,
+        auth_mode=auth_mode,
+        cost_basis=cost_basis,
+        verdict=verdict,
+        resolved=len(match.resolved),
+        open_after=open_count,
+    )
+    combined_runs = [*state.runs, current]
+    truncated = state.truncated or len(combined_runs) > MAX_STORED_RUNS
+    return ReviewState(
+        version=3,
+        runs=tuple(combined_runs[-MAX_STORED_RUNS:]),
+        findings=match.records,
+        coverage=result.coverage_records,
+        flagged_files=result.flagged_files,
+        repo=state.repo,
+        pr_number=state.pr_number,
+        base_sha=state.base_sha,
+        head_sha=head_sha or state.head_sha,
+        workflow=state.workflow,
+        event=state.event,
+        run_id=state.run_id,
+        lintro_version=state.lintro_version,
+        legacy=state.legacy,
+        truncated=truncated,
+    )
+
+
+def build_sticky_bodies(
+    *,
+    result: ReviewResult,
+    prior_runs: list[dict[str, Any]] | None = None,
+    prior_state: ReviewState | None = None,
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
+    diff_lines: dict[str, set[int]] | None = None,
+    head_sha: str = "",
+    transport: str = "",
+    auth_mode: str = "",
+    cost_basis: str = "",
+    inline_failure: InlinePostFailure | None = None,
+    inline_comment_ids: Mapping[str, int] | None = None,
+    repo: str = "",
+    pr_number: int | None = None,
+    departed_paths: frozenset[str] | None = None,
+) -> tuple[str, str | None]:
+    """Compose the primary sticky and an optional history-archive comment.
+
+    Args:
+        result: Current review result.
+        prior_runs: Legacy run records. Ignored when ``prior_state`` is given.
+        prior_state: Artifact or migrated sticky state.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text.
+        diff_lines: Unused; retained for the inline-posting interface.
+        head_sha: Head commit sha reviewed in this round.
+        transport: Provider transport used for this round.
+        auth_mode: Authentication mode used by the transport.
+        cost_basis: Provenance of the reported cost.
+        inline_failure: Findings whose inline comments could not be posted.
+        inline_comment_ids: Finding key to inline comment id.
+        repo: ``owner/name`` slug used to link finding titles.
+        pr_number: Pull request number used for the same links.
+        departed_paths: Paths that left the diff this round.
+
+    Returns:
+        ``(primary, archive)``. ``archive`` is ``None`` until history would
+        push the primary past :data:`PRIMARY_SOFT_LIMIT`.
+    """
+    del diff_lines
+    state = prior_state if prior_state is not None else _state_from_runs(prior_runs)
+    round_number = state.next_round
+    match = match_findings(
+        previous=state,
+        findings=result.findings,
+        round_number=round_number,
+        head_sha=head_sha,
+        reviewed_paths=matcher_reviewed_paths(result=result),
+        departed_paths=departed_paths,
+    )
+    match = replace(
+        match,
+        records=stamp_comment_ids(
+            records=match.records,
+            comment_ids=inline_comment_ids,
+        ),
+    )
+    findings_verdict = derive_verdict(findings=match.records)
+    if result.coverage is not None:
+        verdict = apply_coverage_gate(
+            findings_verdict=findings_verdict,
+            coverage_complete=result.coverage.complete,
+        )
+    else:
+        verdict = findings_verdict
     prior = list(state.runs)
     open_count = sum(
         1 for record in match.records if record.status is FindingStatus.OPEN
@@ -407,10 +563,9 @@ def build_sticky_comment(
     )
     combined_runs = [*prior, current]
     all_runs = combined_runs[-MAX_STORED_RUNS:]
-    runs_dropped = len(all_runs) < len(combined_runs)
 
-    def assemble(*, limits: _RenderLimits) -> str:
-        """Render the whole body at the given per-section limits."""
+    def assemble(*, limits: _RenderLimits, archive_history: bool = False) -> str:
+        """Render the primary body at the given limits."""
         return _assemble_body(
             result=result,
             match=match,
@@ -426,20 +581,22 @@ def build_sticky_comment(
             limits=limits,
             repo=repo,
             pr_number=pr_number,
+            archive_history=archive_history,
         )
 
-    new_state = ReviewState(
-        runs=tuple(all_runs),
-        findings=match.records,
-        truncated=state.truncated or runs_dropped,
-    )
-    return _fit_body_with_state(
+    primary = _fit_body(
         assemble=assemble,
-        prior_run_count=len(all_runs) - 1,
+        prior_run_count=max(len(all_runs) - 1, 0),
         open_count=open_count,
-        resolved_count=len(match.records) - open_count,
-        state=new_state,
+        resolved_count=len(match.resolved),
     )
+    archive: str | None = None
+    if len(primary) > PRIMARY_SOFT_LIMIT and len(all_runs) > 1:
+        primary = assemble(limits=_RenderLimits(), archive_history=True)
+        archive = _archive_body(runs=all_runs, records=match.records)
+        if len(primary) > MAX_COMMENT_CHARS:
+            primary = _cap_body(body=primary, reserved=0)
+    return primary, archive
 
 
 def render_state_sticky(
@@ -460,26 +617,30 @@ def render_state_sticky(
     navigates by — verdict, tiles, open findings, resolved findings, history —
     is derived from state and rendered unchanged.
 
-    The state is re-emitted exactly as given: a failed round must not advance
-    the round counter or touch the tracked findings, so the caller's state
-    round-trips byte-identically unless size pruning has to intervene.
-
     Args:
-        state: State decoded from the previous sticky comment. Must carry at
-            least one run; callers with an empty state have nothing to show and
-            should render their own first-failure surface instead.
-        banner: Optional blockquote rendered directly under the header, used to
-            explain why the board is not from the current round.
-        repo: ``owner/name`` slug used to link finding titles to their threads.
+        state: Artifact or migrated sticky state. An empty state renders a
+            defined first-failure surface rather than crashing.
+        banner: Optional blockquote rendered directly under the header.
+        repo: ``owner/name`` slug used to link finding titles.
         pr_number: Pull request number used for the same links.
 
     Returns:
-        Complete Markdown body carrying the hidden marker and state block,
-        guaranteed to fit GitHub's comment size limit.
+        Primary sticky body with no hidden state blob.
     """
     records = state.findings
     runs = list(state.runs)
     latest = runs[-1] if runs else None
+    if latest is None and not records:
+        return "\n\n".join(
+            section
+            for section in (
+                STICKY_MARKER,
+                "## 🔎 Lintro Review — no prior review",
+                banner or "> No stored review state is available yet.",
+                STICKY_FOOTER,
+            )
+            if section
+        )
     open_count = sum(1 for record in records if record.status is FindingStatus.OPEN)
 
     def assemble(*, limits: _RenderLimits) -> str:
@@ -495,12 +656,11 @@ def render_state_sticky(
             pr_number=pr_number,
         )
 
-    return _fit_body_with_state(
+    return _fit_body(
         assemble=assemble,
         prior_run_count=max(len(runs) - 1, 0),
         open_count=open_count,
         resolved_count=len(records) - open_count,
-        state=state,
     )
 
 
@@ -531,33 +691,37 @@ def _assemble_state_body(
         The assembled body, without the hidden state block.
     """
     records = state.findings
+    latest = runs[-1] if runs else None
+    verdict = latest.verdict if latest is not None else derive_verdict(findings=records)
     match = FindingMatchResult(records=records)
-    total_open = sum(1 for record in records if record.status is FindingStatus.OPEN)
-    total_resolved = len(records) - total_open
+    total_resolved = sum(
+        1 for record in records if record.status is FindingStatus.RESOLVED
+    )
 
     sections: list[str] = [
         STICKY_MARKER,
-        _header(round_number=round_number, head_sha=head_sha),
+        _header(
+            round_number=round_number,
+            head_sha=head_sha,
+            verdict=verdict,
+        ),
         banner,
-        _readiness_pill(verdict=derive_verdict(findings=records), records=records),
-        _verdict_explainer(),
-        _tiles_section(records=records),
-        _open_findings_section(
-            records=_sorted_open_records(records=records, limit=limits.open),
+        _findings_round_section(
             match=match,
-            total=total_open,
+            result=None,
+            round_number=round_number,
+            head_sha=head_sha,
+            verdict=verdict,
+            limits=limits,
             repo=repo,
             pr_number=pr_number,
-        ),
-        _resolved_section(
-            records=_sorted_resolved_records(records=records, limit=limits.resolved),
-            total=total_resolved,
         ),
     ]
     history = _history_section(
         runs=runs,
         limit=limits.history,
         resolved_total=total_resolved,
+        records=records,
     )
     if history:
         sections.extend(["---", history])
@@ -711,13 +875,14 @@ def _assemble_body(
     limits: _RenderLimits,
     repo: str = "",
     pr_number: int | None = None,
+    archive_history: bool = False,
 ) -> str:
-    """Render every sticky section in order and join the non-empty ones.
+    """Render every sticky section in mockup order and join the non-empty ones.
 
     Args:
         result: Current review result.
         match: Cross-round matching outcome for this round.
-        verdict: Readiness verdict derived from the open findings.
+        verdict: Readiness verdict, including the coverage gate.
         round_number: 1-based round number for this run.
         head_sha: Head commit sha reviewed in this round.
         runs: Every retained run record, oldest first, current run last.
@@ -727,40 +892,39 @@ def _assemble_body(
         question_map: Prompt id to question text.
         inline_failure: Findings whose inline comments could not be posted.
         limits: Per-section render limits.
-        repo: ``owner/name`` slug used to link finding titles to their threads.
+        repo: ``owner/name`` slug used to link finding titles.
         pr_number: Pull request number used for the same links.
+        archive_history: When True, history expanders are replaced by a link.
 
     Returns:
-        The assembled body, without the hidden state block.
+        The assembled primary body. No hidden state blob is appended.
     """
-    open_records = _sorted_open_records(records=match.records, limit=limits.open)
     open_findings = _sorted_open_findings(
         findings=result.findings,
         limit=limits.open,
     )
-    resolved_records = _sorted_resolved_records(
-        records=match.records,
-        limit=limits.resolved,
+    total_resolved = sum(
+        1 for record in match.records if record.status is FindingStatus.RESOLVED
     )
-    total_open = sum(
-        1 for record in match.records if record.status is FindingStatus.OPEN
-    )
-    total_resolved = len(match.records) - total_open
-
     sections: list[str] = [
         STICKY_MARKER,
-        _header(round_number=round_number, head_sha=head_sha),
-        _readiness_pill(verdict=verdict, records=match.records),
-        _verdict_explainer(),
-        _delta_line(match=match, round_number=round_number),
+        _header(
+            round_number=round_number,
+            head_sha=head_sha,
+            verdict=verdict,
+        ),
+        _incomplete_banner(result=result, verdict=verdict),
+        _coverage_section(result=result, verdict=verdict),
         _summary_section(result=result),
         _reasoning_section(result=result, verdict=verdict),
-        _tiles_section(records=match.records),
         _degraded_row(failure=inline_failure),
-        _open_findings_section(
-            records=open_records,
+        _findings_round_section(
             match=match,
-            total=total_open,
+            result=result,
+            round_number=round_number,
+            head_sha=head_sha,
+            verdict=verdict,
+            limits=limits,
             repo=repo,
             pr_number=pr_number,
         ),
@@ -777,7 +941,6 @@ def _assemble_body(
                 round_number=round_number,
             ),
         ),
-        _resolved_section(records=resolved_records, total=total_resolved),
         _this_run_section(
             result=result,
             transport=transport,
@@ -790,6 +953,8 @@ def _assemble_body(
         runs=runs,
         limit=limits.history,
         resolved_total=total_resolved,
+        archive_only=archive_history,
+        records=match.records,
     )
     if history:
         sections.extend(["---", history])
@@ -800,21 +965,199 @@ def _assemble_body(
 # --- section renderers -------------------------------------------------------
 
 
-def _header(*, round_number: int, head_sha: str) -> str:
+def _header(
+    *,
+    round_number: int,
+    head_sha: str,
+    verdict: ReviewVerdict = ReviewVerdict.READY,
+) -> str:
     """Render the sticky comment's title line.
 
     Args:
         round_number: 1-based round number for this run.
         head_sha: Head commit sha reviewed in this round, possibly empty.
+        verdict: Derived readiness verdict, including INCOMPLETE.
 
     Returns:
-        The Markdown heading line.
+        The Markdown heading line with the verdict in the title.
     """
-    parts = ["## 🔎 Lintro Review", f"round {round_number}"]
+    del round_number, head_sha
+    emoji = VERDICT_EMOJI[verdict]
+    label = verdict_label(verdict=verdict)
+    return f"## 🔎 Lintro Review — {emoji} {label}"
+
+
+def _incomplete_banner(*, result: ReviewResult, verdict: ReviewVerdict) -> str:
+    """Render the Variant B withheld-verdict callout.
+
+    Args:
+        result: Current review result, possibly with coverage counts.
+        verdict: Derived verdict.
+
+    Returns:
+        A warning callout, or empty when the round is complete.
+    """
+    if verdict is not ReviewVerdict.INCOMPLETE or result.coverage is None:
+        return ""
+    counts = result.coverage
+    cap = result.metadata.max_cost_usd
+    cap_text = f"`${cap:.2f}`" if cap is not None else "the cost cap"
+    awaiting = counts.awaiting
+    eligible = counts.eligible
+    reason_map = dict(result.awaiting_reasons)
+    listed = result.awaiting_paths[:12]
+    extra = max(len(result.awaiting_paths) - len(listed), 0)
+    items: list[str] = []
+    for path in listed:
+        reason = reason_map.get(path, "")
+        label = f"`{sanitize_comment_text(path, limit=200)}`"
+        if reason:
+            label = f"{label} — {sanitize_comment_text(reason, limit=160)}"
+        items.append(label)
+    if extra:
+        items.append(f"*({extra} more)*")
+    files_block = ""
+    if items:
+        files_block = (
+            "\n>\n> <details><summary>"
+            f"{awaiting} files awaiting review</summary>\n>\n> "
+            + " · ".join(items)
+            + "\n>\n> </details>"
+        )
+    return (
+        "> [!WARNING]\n"
+        f"> **Verdict withheld — {awaiting} of {eligible} files not yet "
+        f"reviewed.** {cap_text} stopped this round after {counts.reviewed} "
+        "files. The check stays ❌ until every file is covered at HEAD; "
+        "the next round resumes with the unreviewed files first."
+        f"{files_block}\n"
+    )
+
+
+def _coverage_section(*, result: ReviewResult, verdict: ReviewVerdict) -> str:
+    """Render the Variant B coverage table.
+
+    Args:
+        result: Current review result.
+        verdict: Derived verdict.
+
+    Returns:
+        The coverage table, or empty when the round is complete.
+    """
+    if verdict is not ReviewVerdict.INCOMPLETE or result.coverage is None:
+        return ""
+    counts = result.coverage
+    return "\n".join(
+        [
+            "### Coverage this round",
+            "",
+            "| reviewed now | carried forward | awaiting review "
+            "| invalidated (re-queued) |",
+            "|:-:|:-:|:-:|:-:|",
+            (
+                f"| **{counts.reviewed}** | {counts.carried} | "
+                f"**{counts.awaiting}** | {counts.invalidated} |"
+            ),
+        ],
+    )
+
+
+def _findings_round_section(
+    *,
+    match: FindingMatchResult,
+    result: ReviewResult | None,
+    round_number: int,
+    head_sha: str,
+    verdict: ReviewVerdict,
+    limits: _RenderLimits,
+    repo: str,
+    pr_number: int | None,
+) -> str:
+    """Render the Findings heading and the combined Δ table.
+
+    Args:
+        match: Cross-round matching outcome.
+        result: Current result, or ``None`` on a state-only re-render.
+        round_number: Current round.
+        head_sha: Head sha for this round.
+        verdict: Derived verdict, including the coverage gate.
+        limits: Per-section render limits.
+        repo: Repository slug for inline links.
+        pr_number: Pull request number for inline links.
+
+    Returns:
+        The Findings section.
+    """
+    open_records = _sorted_open_records(records=match.records, limit=limits.open)
+    fixed_now = [
+        record
+        for record in match.records
+        if record.status is FindingStatus.RESOLVED
+        and record.resolved_round == round_number
+    ]
+    if limits.resolved is not None:
+        fixed_now = fixed_now[: limits.resolved]
+    coverage_label = _findings_coverage_label(result=result, verdict=verdict)
     short = _short_sha(sha=head_sha)
-    if short:
-        parts.append(f"commit `{short}`")
-    return " · ".join(parts)
+    sha_bit = f" · `{short}`" if short else ""
+    open_count = sum(
+        1 for record in match.records if record.status is FindingStatus.OPEN
+    )
+    heading = (
+        f"### Findings · Round {round_number}{sha_bit} · {coverage_label} · "
+        f"{open_count} open · {len(fixed_now)} fixed this round"
+    )
+    if not open_records and not fixed_now:
+        return f"{heading}\n\n✅ Nothing open."
+    lines = [
+        heading,
+        "",
+        "| Δ | Sev | Finding | Where | Since |",
+        "|:-:|:-:|---|---|---|",
+    ]
+    for record in open_records:
+        lines.append(
+            f"| {_delta_cell(record=record, match=match)} "
+            f"| {_severity_cell(record=record)} "
+            f"| {_finding_cell(record=record, repo=repo, pr_number=pr_number)} "
+            f"| `{_location(record=record)}` "
+            f"| round {record.since_round} |",
+        )
+    for record in fixed_now:
+        lines.append(
+            f"| ✔ fixed "
+            f"| {_severity_cell(record=record)} "
+            f"| ~~{_cell(text=record.title, limit=_TITLE_LIMIT)}~~ "
+            f"| `{_location(record=record)}` "
+            f"| round {record.since_round} |",
+        )
+    dropped = open_count - len(open_records)
+    if dropped > 0:
+        lines.extend(
+            [
+                "",
+                f"> ✂️ **{dropped} more open "
+                f"{_plural(count=dropped, noun='finding')} not listed** to fit "
+                "GitHub's size limit — see the inline comments and the workflow "
+                "run log.",
+            ],
+        )
+    return "\n".join(lines)
+
+
+def _findings_coverage_label(
+    *,
+    result: ReviewResult | None,
+    verdict: ReviewVerdict,
+) -> str:
+    """Return the coverage fragment for the Findings heading."""
+    del verdict
+    if result is None or result.coverage is None:
+        return "coverage n/a"
+    counts = result.coverage
+    if counts.complete:
+        return f"✅ {counts.covered_at_head}/{counts.eligible} at HEAD"
+    return f"⚠️ {counts.covered_at_head}/{counts.eligible} files"
 
 
 def _readiness_pill(
@@ -1258,20 +1601,31 @@ def _this_run_section(
         The ``This run`` section.
     """
     metadata = result.metadata
-    primary = run_stats_primary_cells(metadata=metadata)
-    secondary = [
-        (
-            "transport",
-            _transport_label(transport=transport, auth_mode=auth_mode),
-        ),
-        ("depth", str(metadata.depth)),
-        ("files", str(metadata.files_reviewed)),
-        ("checks", str(metadata.checklist_items)),
-        ("duration", f"{metadata.duration_seconds:.0f}s"),
-    ]
-    lines = ["**This run**", ""]
-    lines.extend(format_badge_tables(rows=[primary, secondary]))
-    return "\n".join(lines)
+    usage = metadata.token_usage
+    prefix = "~" if metadata.token_usage_estimated else ""
+    model = sanitize_comment_text(metadata.model or "unknown", limit=80)
+    source = metadata.model_source
+    model_cell = f"`{model}`" + (f" ({source})" if source else "")
+    return "\n".join(
+        [
+            "**This run**",
+            "",
+            "| model | transport | est. cost | tokens in / out | depth "
+            "| files | checks | duration |",
+            "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
+            (
+                f"| {model_cell} "
+                f"| {_transport_label(transport=transport, auth_mode=auth_mode)} "
+                f"| {_fmt_cost(metadata.cost_estimate_usd, estimated=True)} "
+                f"| {prefix}{_fmt_int(int(usage.get('prompt', 0)))} / "
+                f"{prefix}{_fmt_int(int(usage.get('completion', 0)))} "
+                f"| {metadata.depth} "
+                f"| {metadata.files_reviewed} "
+                f"| {metadata.checklist_items} "
+                f"| {metadata.duration_seconds:.0f}s |"
+            ),
+        ],
+    )
 
 
 def _history_section(
@@ -1279,6 +1633,8 @@ def _history_section(
     runs: list[RunRecord],
     limit: int | None,
     resolved_total: int,
+    archive_only: bool = False,
+    records: tuple[FindingRecord, ...] = (),
 ) -> str:
     """Render the single run-history collapsible.
 
@@ -1291,6 +1647,8 @@ def _history_section(
         limit: Number of *prior* runs to include, newest first. ``None``
             includes them all.
         resolved_total: Number of findings resolved across every round.
+        archive_only: When True, emit the archive heading without expanders.
+        records: Finding records used for per-round severity tiles.
 
     Returns:
         The collapsible, or an empty string on the first round where there is
@@ -1303,7 +1661,6 @@ def _history_section(
     total_tokens = sum(run.total for run in runs)
     estimated = any(run.estimated for run in runs)
     prefix = "~" if estimated else ""
-    models = _model_counts(runs=runs)
 
     if limit is None:
         shown = runs
@@ -1314,52 +1671,35 @@ def _history_section(
         shown = [*runs[:-1][len(runs) - 1 - keep :], runs[-1]]
     dropped = len(runs) - len(shown)
 
-    summary = (
-        f"🕘 Run history — {len(runs)} runs · "
+    previous = max(len(runs) - 1, 0)
+    heading = (
+        f"### 🕘 History · {previous} previous "
+        f"{_plural(count=previous, noun='run')} · "
+        f"{resolved_total} fixed · "
         f"{_fmt_cost(total_cost, estimated=estimated)} · "
-        f"{prefix}{_fmt_compact(value=total_tokens)} tokens · "
-        f"{len(models)} {_plural(count=len(models), noun='model')}"
+        f"{prefix}{_fmt_compact(value=total_tokens)} tokens"
     )
-    badges = " · ".join(
-        [
-            "models "
-            + " ".join(
-                f"`{sanitize_comment_text(model, limit=60)}` ×{count}"
-                for model, count in models
-            ),
-            f"est. cost {_fmt_cost(total_cost, estimated=estimated)}",
-            f"tokens {prefix}{_fmt_int(total_tokens)} "
-            f"(in {prefix}{_fmt_int(sum(run.prompt for run in runs))} / "
-            f"out {prefix}{_fmt_int(sum(run.completion for run in runs))})",
-            f"findings {sum(run.p1 + run.p2 + run.p3 for run in runs)} raised · "
-            f"{resolved_total} resolved",
-        ],
-    )
-
-    lines = [
-        f"<details><summary>{summary}</summary>",
-        "",
-        badges,
-        "",
-        "| Run | Commit | Verdict | Model | Open | Fixed | Tokens (in/out) "
-        "| Est. cost | Duration |",
-        "|:-:|---|---|---|:-:|:-:|---|---|---|",
-    ]
-    for run in reversed(shown):
-        lines.append(_history_row(run=run, latest=run is runs[-1]))
-    if dropped > 0:
-        lines.extend(
-            [
-                "",
-                f"> ✂️ **{dropped} older "
-                f"{_plural(count=dropped, noun='run')} not listed** "
-                "(history truncated to fit GitHub's size limit).",
-            ],
+    if archive_only:
+        return (
+            f"{heading}\n\n"
+            "Per-round expanders live on the archive comment "
+            f"({ARCHIVE_MARKER.replace('<!-- ', '').replace(' -->', '')})."
         )
-    lines.append("")
-    lines.extend(_history_mini_summary(run=run) for run in reversed(shown[:-1]))
-    lines.extend(["", "</details>"])
-    return "\n".join(lines)
+    tiles = _tiles_section(records=records) if records else ""
+    expanders = [
+        _round_expander(run=run, records=records) for run in reversed(shown[:-1])
+    ]
+    if dropped > 0:
+        expanders.append(
+            f"> ✂️ **{dropped} older "
+            f"{_plural(count=dropped, noun='run')} not listed** "
+            "(history truncated to fit GitHub's size limit).",
+        )
+    inner = "\n\n".join(part for part in [tiles, *expanders] if part)
+    return (
+        f"{heading}\n\n<details>"
+        f"<summary>Run-by-run history</summary>\n\n{inner}\n\n</details>"
+    )
 
 
 def _history_row(*, run: RunRecord, latest: bool) -> str:
@@ -1395,6 +1735,141 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
         f"| {_fmt_cost(run.cost, estimated=run.estimated)} "
         f"| {run.duration:.0f}s |"
     )
+
+
+def _round_expander(
+    *,
+    run: RunRecord,
+    records: tuple[FindingRecord, ...],
+) -> str:
+    """Render one prior-round expander (narrative, fixed table, this-run row).
+
+    Args:
+        run: Prior run record.
+        records: All tracked findings, used for that round's fixes.
+
+    Returns:
+        A ``<details>`` block for the round.
+    """
+    short = _short_sha(sha=run.sha)
+    sha_bit = f" · <code>{short}</code>" if short else ""
+    open_after = (
+        run.open_after if run.open_after is not None else run.p1 + run.p2 + run.p3
+    )
+    fixed = 0 if run.resolved is None else run.resolved
+    prefix = "~" if run.estimated else ""
+    summary = (
+        f"<b>Round {run.round}</b>{sha_bit} · "
+        f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} · "
+        f"{fixed} fixed, {open_after} left open · "
+        f"{_fmt_cost(run.cost, estimated=run.estimated)} · "
+        f"{run.duration:.0f}s"
+    )
+    narrative = _DETAILS_TAG_RE.sub(
+        r"&lt;\1\2",
+        _cell(text=run.narrative, limit=_NARRATIVE_LIMIT),
+    )
+    lines = [
+        f"<details><summary>{summary}</summary>",
+        "",
+    ]
+    if narrative:
+        lines.extend([f"> {narrative}", ""])
+    fixed_rows = [
+        record
+        for record in records
+        if record.status is FindingStatus.RESOLVED
+        and record.resolved_round == run.round
+        and not record.is_question
+    ]
+    if fixed_rows:
+        lines.extend(
+            [
+                "**Fixed this round**",
+                "",
+                "| Sev | Finding |",
+                "|:-:|---|",
+            ],
+        )
+        for record in fixed_rows:
+            lines.append(
+                f"| {_severity_cell(record=record)} "
+                f"| ~~{_cell(text=record.title, limit=_TITLE_LIMIT)}~~ |",
+            )
+        lines.append("")
+    transport = _transport_label(transport=run.transport, auth_mode=run.auth_mode)
+    lines.extend(
+        [
+            "| model | transport | est. cost | tokens in / out | depth "
+            "| files | checks | duration |",
+            "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
+            (
+                f"| `{_cell(text=run.model or 'unknown', limit=60)}` "
+                f"| {transport} "
+                f"| {_fmt_cost(run.cost, estimated=run.estimated)} "
+                f"| {prefix}{_fmt_int(run.prompt)} / "
+                f"{prefix}{_fmt_int(run.completion)} "
+                f"| {run.depth} "
+                f"| {run.files_reviewed} "
+                f"| {run.checks} "
+                f"| {run.duration:.0f}s |"
+            ),
+            "",
+            "</details>",
+        ],
+    )
+    return "\n".join(lines)
+
+
+def _archive_body(
+    *,
+    runs: list[RunRecord],
+    records: tuple[FindingRecord, ...],
+) -> str:
+    """Render the archive sticky that holds per-round expanders.
+
+    Args:
+        runs: Every retained run, oldest first.
+        records: Tracked findings.
+
+    Returns:
+        Archive comment body, truncated if it exceeds the comment budget.
+    """
+    expanders = [
+        _round_expander(run=run, records=records) for run in reversed(runs[:-1])
+    ]
+    body = "\n\n".join(
+        [
+            ARCHIVE_MARKER,
+            "## 🔎 Lintro Review — history archive",
+            "Older rounds moved here so the primary sticky can keep this-round "
+            "content. The primary comment still carries heading aggregates.",
+            *expanders,
+            STICKY_FOOTER,
+        ],
+    )
+    if len(body) <= MAX_COMMENT_CHARS:
+        return body
+    # Oldest expanders degrade to their summary line.
+    trimmed: list[str] = [
+        ARCHIVE_MARKER,
+        "## 🔎 Lintro Review — history archive",
+        "Older rounds moved here so the primary sticky can keep this-round " "content.",
+    ]
+    for run in reversed(runs[:-1]):
+        candidate = _round_expander(run=run, records=records)
+        probe = "\n\n".join([*trimmed, candidate, STICKY_FOOTER])
+        if len(probe) > MAX_COMMENT_CHARS:
+            short = _short_sha(sha=run.sha)
+            trimmed.append(
+                f"**Round {run.round}**"
+                + (f" · `{short}`" if short else "")
+                + f" · {verdict_label(verdict=run.verdict).lower()}",
+            )
+            continue
+        trimmed.append(candidate)
+    trimmed.append(STICKY_FOOTER)
+    return _cap_body(body="\n\n".join(trimmed), reserved=0)
 
 
 def _history_mini_summary(*, run: RunRecord) -> str:
