@@ -76,6 +76,7 @@ class WorkflowRun:
 
 
 GhApi = Callable[[str], Any | None]
+ApiObject = Mapping[str, Any]
 
 
 def state_artifact_prefix(pr_number: int) -> str:
@@ -352,7 +353,7 @@ def _yield_api_pages(
     *,
     per_page: int,
     gh_api: GhApi,
-) -> Iterator[Mapping[str, Any]]:
+) -> Iterator[ApiObject]:
     """Yield objects from a GitHub list endpoint, page by page.
 
     Stops on an API failure or a short page so callers can return at the
@@ -365,8 +366,8 @@ def _yield_api_pages(
         gh_api: Injectable GitHub API caller.
 
     Yields:
-        Mapping[str, Any]: Object mappings in API order (newest first
-            for workflow runs).
+        ApiObject: Object mappings in API order (newest first for
+            workflow runs).
     """
     page = 1
     separator = "&" if "?" in path else "?"
