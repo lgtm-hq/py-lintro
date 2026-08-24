@@ -365,7 +365,8 @@ def _yield_api_pages(
         gh_api: Injectable GitHub API caller.
 
     Yields:
-        Object mappings in API order (newest first for workflow runs).
+        Mapping[str, Any]: Object mappings in API order (newest first
+            for workflow runs).
     """
     page = 1
     separator = "&" if "?" in path else "?"
