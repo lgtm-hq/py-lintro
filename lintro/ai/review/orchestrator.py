@@ -961,7 +961,7 @@ async def run_review_async(
             def _checkpoint(done: list[_ChunkReviewPartial]) -> None:
                 """Write an incremental coverage part after each finished chunk."""
                 nonlocal part_seq
-                part_seq += 1
+                next_seq = part_seq + 1
                 try:
                     _write_incremental_coverage_part(
                         collected=done,
@@ -969,14 +969,16 @@ async def run_review_async(
                         context=context,
                         prior_state=prior_state,
                         force_full=force_full,
-                        sequence=part_seq,
+                        sequence=next_seq,
                         policy=review_sensitivity,
                     )
                 except Exception:
                     logger.opt(exception=True).warning(
                         "Could not write incremental review-resume part {n}",
-                        n=part_seq,
+                        n=next_seq,
                     )
+                else:
+                    part_seq = next_seq
 
             partials = await _review_all_chunks(
                 chunks=chunks,
