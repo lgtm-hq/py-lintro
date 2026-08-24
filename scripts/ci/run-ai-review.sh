@@ -149,16 +149,17 @@ fi
 export LINTRO_REVIEW_STATE_DIR="${LINTRO_REVIEW_STATE_DIR:-ai-review-state}"
 mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 
-# Capture rather than stream: the classifier needs the JSON error envelope, and
-# the full output is echoed straight afterwards so the log is unchanged.
+# Tee to a file: the classifier needs the JSON error envelope, and the live
+# stream must still reach the Actions log so a mid-run SIGTERM is diagnosable.
 output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-# Timeout comes from ai.transports.cli.timeout (default 900s) — no hand-tuned
+# Timeout comes from ai.transports.cli.timeout (default 1800s) — no hand-tuned
 # --timeout at this call site (#1923). The default ai.api_timeout (60s) is
-# sized for streaming API chunks; a CLI turn runs the whole review in one
-# agent invocation and needs minutes.
+# sized for streaming API chunks; a CLI chunk is one agent invocation and
+# needs minutes. Multi-chunk serial reviews (#2156 14-chunk dogfood) need
+# the 1800s per-call budget so a ~20k-token chunk can finish.
 #
 # COUPLED to ai-review.yml's `timeout-minutes`: the resolved CLI timeout must
 # fire BEFORE the Actions runner kills the job, or the review dies without a
@@ -171,12 +172,12 @@ set +e
 # must cover; tests/scripts/test_run_ai_review.py asserts it matches
 # lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
-CLI_REVIEW_TIMEOUT_SECONDS=900
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1
+CLI_REVIEW_TIMEOUT_SECONDS=1800
+set -o pipefail
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1 | tee "$output_file"
 review_status=$?
+set +o pipefail
 set -e
-
-cat "$output_file"
 
 # Exits 0 only when a review was produced; the classifier writes the annotation
 # and job summary either way. --transport names the failure vocabulary (#1923).

@@ -23,7 +23,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 
-__all__ = ["ResumePlan", "filter_chunks", "plan_resume"]
+__all__ = ["ResumePlan", "filter_chunks", "plan_resume", "records_for_reviewed"]
 
 
 @dataclass(frozen=True, slots=True)

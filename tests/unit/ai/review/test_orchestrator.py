@@ -13,7 +13,7 @@ from assertpy import assert_that
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AIError
+from lintro.ai.exceptions import AIError, AIProviderError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
@@ -232,6 +232,144 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
     assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
     assert_that(result.metadata.chunks_total).is_equal_to(2)
     assert_that(result.findings).is_not_empty()
+
+
+def test_run_review_returns_partial_on_chunk_timeout() -> None:
+    """A mid-run CLI timeout persists completed chunks instead of aborting."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+
+    def _timeout_second_call(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            raise AIProviderError("agent CLI timed out after 900s")
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_second_call,
+        ),
+    ):
+        result = run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("timeout")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.chunks_total).is_equal_to(2)
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
+
+
+def test_run_review_writes_incremental_coverage_parts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each finished chunk writes a CI coverage part before the next call."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _recording_call_ai(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        response = provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_recording_call_ai,
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.01,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    parts = sorted(tmp_path.glob("part-*.json"))
+    assert_that(parts).is_not_empty()
+    payload = parts[0].read_text(encoding="utf-8")
+    assert_that(payload).contains("a.py")
 
 
 def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
