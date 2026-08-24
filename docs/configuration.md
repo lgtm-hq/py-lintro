@@ -488,7 +488,7 @@ export LINTRO_AI_MODEL=cursor-grok-4.6-high
 export LINTRO_AI_TRANSPORT=cli
 export LINTRO_AI_ENABLED=1
 export LINTRO_AI_REVIEW=1
-export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
+export LINTRO_AI_MAX_COST_USD=uncapped # sentinel; a positive number is a USD cap; overlay 0 is an error
 ```
 
 | Variable                         | Description                                                       | Default   |
@@ -503,7 +503,7 @@ export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 | `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
 | `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
 | `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                     | -         |
-| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
+| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`uncapped`** lifts; overlay **`0` is an error**) | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -2993,7 +2993,7 @@ ai:
 | `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
 | `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
 | `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `0` = uncapped (YAML `0` is $0)                     |
+| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error (YAML `0` is $0) |
 | `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
 | `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
 | `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |

@@ -73,8 +73,9 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   installed from npm at that exact version.
 - 💸 **Bounded spend (advisory under the CLI transport)** — `ai.max_cost_usd` defaults
   to the trusted base config, so a PR cannot raise the cap. Repository operators can
-  override that default with the `LINTRO_AI_MAX_COST_USD` Actions variable (`0` means
-  uncapped). It prices only the tokens lintro billed itself, so on the `cli` transport —
+  override that default with the `LINTRO_AI_MAX_COST_USD` Actions variable (`uncapped`
+  lifts the ceiling; overlay `0` is rejected as ambiguous). It prices only the tokens
+  lintro billed itself, so on the `cli` transport —
   where the call bills the subscription — it bounds lintro's own accounting rather than
   enforcing spend. Setting a cap does **not** serialize provider calls: the budget
   checks and charges the ceiling around each call rather than holding a lock across it,
