@@ -21,14 +21,13 @@ name: AI Review - Dogfood
 # authenticates only against an API key, which is precisely the credential that
 # does not work for the Anthropic dogfood (#1838).
 #
-# Spend ceiling defaults to the committed `ai.max_cost_usd: 2.00` in
-# `.lintro-config.yaml` (the empirically validated value from #1976/#1977; the
-# 0.50 that landed with #2018 / 9f43a98a was a side-effect, restored here by
-# #2025), overridable per-repo via the `LINTRO_AI_MAX_COST_USD` Actions
-# variable (#2024) so large multi-chunk PRs can complete instead of posting a
-# partial review every round. Under the CLI transport the call bills the
-# subscription, so the figure is advisory rather than enforced spend control
-# (#1923).
+# Spend ceiling: committed YAML leaves `ai.max_cost_usd` unset (#2156
+# rollout). The `LINTRO_AI_MAX_COST_USD` Actions variable is the operator
+# overlay (#2024 / #2155): `uncapped` lifts the ceiling; overlay `0` is
+# rejected as ambiguous. YAML `0` is still a literal $0 cap. Under the CLI
+# transport the figure is a runtime bound, not marginal dollars (#1923).
+# Historical note: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00
+# as the interim committed cap; this rollout removes that committed cap.
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -335,12 +334,12 @@ jobs:
           LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
           LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
           LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
-          # Spend ceiling override (#2024 / #2154). Unset falls through to
-          # the committed `ai.max_cost_usd: 2.00`. Overlay `uncapped` lifts
-          # the ceiling; overlay `0` is rejected as ambiguous. YAML `0` is
-          # still a literal $0 cap. The CLI transport treats a numeric cap
-          # as a runtime bound, not marginal dollars, under subscription
-          # auth.
+          # Spend ceiling overlay (#2024 / #2154 / #2156). Unset falls
+          # through to committed YAML (now unset = no cap). Overlay
+          # `uncapped` is the explicit lift; overlay `0` is rejected as
+          # ambiguous. YAML `0` is still a literal $0 cap. The CLI
+          # transport treats a numeric cap as a runtime bound, not
+          # marginal dollars, under subscription auth.
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
 
       - name: Upload review-state artifacts

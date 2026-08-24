@@ -78,10 +78,11 @@ Contract invariants:
 - Be consumed by execution, doctor/status, terminal review output, PR rendering, MCP,
   and advisory tools without reparsing the raw `ai:` mapping.
 - CLI and env overlays may raise or lift `ai.max_cost_usd` (`LINTRO_AI_MAX_COST_USD` /
-  `lintro review --max-cost-usd`; literal `0` = uncapped, mapped to `None`) (#2024).
-  Overlays beat transport profile caps as well as the legacy scalar; YAML `0` remains a
-  $0 cap. MCP's per-call `max_cost_usd` argument remains a monotonic clamp: it may lower
-  the effective ceiling, never raise it.
+  `lintro review --max-cost-usd`; overlay `uncapped` lifts the ceiling; overlay `0` is
+  rejected as ambiguous). Overlays beat transport profile caps as well as the legacy
+  scalar; YAML `0` remains a $0 cap. MCP's per-call `max_cost_usd` argument remains a
+  monotonic clamp: it may lower the effective ceiling, never raise it. #2024 originally
+  mapped overlay `0` to uncapped; #2154 / ADR-0007 superseded that.
 
 Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
 `ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies
@@ -183,8 +184,10 @@ time.
 - [#1970](https://github.com/lgtm-hq/py-lintro/issues/1970) — env/CLI override layer and
   provenance (owns `ResolvedAIConfig` implementation).
 - [#2024](https://github.com/lgtm-hq/py-lintro/issues/2024) — cost-cap overlay
-  (`LINTRO_AI_MAX_COST_USD` / `--max-cost-usd`; `0` = uncapped). Overturns the #1970
-  non-goal that forbade raising `ai.max_cost_usd`.
+  (`LINTRO_AI_MAX_COST_USD` / `--max-cost-usd`). Overturns the #1970 non-goal that
+  forbade raising `ai.max_cost_usd`. Overlay `0` = uncapped here is superseded by
+  [#2154](https://github.com/lgtm-hq/py-lintro/issues/2154) / ADR-0007 (`uncapped`
+  sentinel; overlay `0` rejected).
 - [#1923](https://github.com/lgtm-hq/py-lintro/issues/1923) — transport profiles must
   extend the same resolver.
 - [#1885](https://github.com/lgtm-hq/py-lintro/issues/1885) — provider-side `aclose()`

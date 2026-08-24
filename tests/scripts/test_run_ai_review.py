@@ -119,17 +119,21 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
     """Local default stays AI-off; CI turns it on via ``LINTRO_AI_ENABLED=1``.
 
     ``ai.review: true`` is committed so enabling the master switch does not
-    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
-    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in
-    #2018 / 9f43a98a).
+    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is
+    unset after the #2156 rollout (no committed cap; CI forwards
+    ``LINTRO_AI_MAX_COST_USD``, and dogfood operators set ``uncapped``).
+    Historical: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00 as
+    the interim committed cap.
     """
     loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
     ai_section = loaded["ai"]
     assert_that(ai_section["enabled"]).is_false()
     assert_that(ai_section["review"]).is_true()
-    assert_that(ai_section["max_cost_usd"]).is_equal_to(2.00)
+    assert_that(ai_section).does_not_contain_key("max_cost_usd")
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
     assert_that(workflow_text).contains("#2018 / 9f43a98a")
+    assert_that(workflow_text).contains("LINTRO_AI_MAX_COST_USD")
+    assert_that(workflow_text).does_not_contain("|| '2.00'")
     assert_that(workflow_text).does_not_contain("0.50 that landed with\n# #1971")
 
 

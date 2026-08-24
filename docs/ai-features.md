@@ -684,7 +684,7 @@ as the legacy `ai.max_cost_usd` scalar.
 | `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
 | `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
 | `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`       | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                      |
-| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is $0). Invalid fails loud.   |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                 |
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
@@ -698,9 +698,9 @@ LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
 # Same thing with flags (flags win if both are set)
 lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
 
-# Lift the committed cost cap for this run (0 = uncapped, not a $0 cap)
-LINTRO_AI_MAX_COST_USD=0 lintro review --uncommitted
-lintro review --uncommitted --max-cost-usd 0
+# Run without a cost cap (`uncapped`; overlay `0` is an error)
+LINTRO_AI_MAX_COST_USD=uncapped lintro review --uncommitted
+lintro review --uncommitted --max-cost-usd uncapped
 
 # Kill switch for this environment
 LINTRO_AI_ENABLED=0 lintro check .
