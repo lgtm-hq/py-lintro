@@ -1006,11 +1006,11 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("set -euo pipefail")
     assert_that(shell_text).contains("PYTHONUNBUFFERED=1")
     assert_that(shell_text).contains('| tee "$output_file"')
-    result = subprocess.run(  # nosec B603 - fixed argv; shell=False
+    result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
         [
             "bash",
             "-c",
-            "set -euo pipefail; false | tee /dev/null",
+            'set -euo pipefail; set +e; false | tee /dev/null; status=$?; exit "$status"',
         ],
         check=False,
         capture_output=True,
