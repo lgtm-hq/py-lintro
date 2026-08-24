@@ -51,6 +51,7 @@ from lintro.ai.review.cli_limits import (
     resolve_cli_findings_cap,
     tighter_findings_cap,
 )
+from lintro.ai.review.coverage import inherit_same_round_paths
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassResult,
     run_custom_agent_passes,
@@ -742,7 +743,7 @@ async def run_review_async(
         force_full=force_full,
     )
     if resume.queue:
-        chunks = filter_chunks(chunks=chunks, queue=set(resume.queue))
+        chunks = filter_chunks(chunks=chunks, queue=resume.queue)
     elif run_builtin_checklist:
         chunks = []
     agent_selection = select_custom_agents(
@@ -982,8 +983,14 @@ async def run_review_async(
 
     completed_files = {path for partial in partials for path in partial.files}
     agent_files = {path for item in custom_results for path in item.files}
-    reviewed_now = tuple(
-        path for path in resume.queue if path in completed_files or path in agent_files
+    reviewed_now = inherit_same_round_paths(
+        reviewed_now=tuple(
+            path
+            for path in resume.queue
+            if path in completed_files or path in agent_files
+        ),
+        eligible_paths=resume.eligible,
+        current_hashes=resume.hashes,
     )
     coverage = resume.counts(reviewed_now=reviewed_now)
     coverage_records = records_for_reviewed(

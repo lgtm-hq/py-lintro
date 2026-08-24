@@ -24,6 +24,9 @@ __all__ = [
     "ClassifiedFile",
     "classify_files",
     "coverage_counts",
+    "directly_changed_paths",
+    "inherit_same_round_paths",
+    "latest_coverage_by_path",
     "queue_paths",
     "review_eligible_paths",
 ]
@@ -129,7 +132,7 @@ def classify_files(
     Returns:
         One classification per eligible path, in path order.
     """
-    by_path = _latest_by_path(coverage)
+    by_path = latest_coverage_by_path(coverage)
     covered_hashes = {(record.path, record.patch_hash) for record in coverage}
     if force_full:
         return tuple(
@@ -157,15 +160,31 @@ def classify_files(
         covered_hashes=covered_hashes,
     )
 
+    broadcast = _broadcast_paths(eligible_paths)
     group_invalidated = _group_invalidated(
         eligible_paths=eligible_paths,
         groups=groups,
         directly_changed=directly_changed,
-        broadcast=_broadcast_paths(eligible_paths),
+        broadcast=broadcast,
     )
+    group_invalidated.update(
+        _stale_group_invalidated(
+            eligible_paths=eligible_paths,
+            groups=groups,
+            by_path=by_path,
+            broadcast=broadcast,
+        ),
+    )
+    graph = import_importers or {}
     import_invalidated: set[str] = set()
-    for importers in (import_importers or {}).values():
-        import_invalidated.update(importers)
+    for imported in directly_changed:
+        import_invalidated.update(graph.get(imported, set()))
+    import_invalidated.update(
+        _stale_import_invalidated(
+            import_importers=graph,
+            by_path=by_path,
+        ),
+    )
 
     allowed_flags = _allowed_flags(
         flags=flags,
@@ -273,6 +292,78 @@ def coverage_counts(
     )
 
 
+def directly_changed_paths(
+    *,
+    eligible_paths: Sequence[str],
+    current_hashes: Mapping[str, str],
+    coverage: Sequence[CoverageRecord],
+) -> set[str]:
+    """Return paths whose latest stored hash differs from HEAD.
+
+    Uses the highest-round record per path so a later review of a new
+    hash does not keep treating the file as changed.
+
+    Args:
+        eligible_paths: Review-eligible paths at HEAD.
+        current_hashes: Current normalized patch hash per path.
+        coverage: Prior coverage records.
+
+    Returns:
+        Paths that are directly changed this round.
+    """
+    latest = latest_coverage_by_path(coverage)
+    changed: set[str] = set()
+    for path in eligible_paths:
+        prior = latest.get(path)
+        if prior is not None and prior.patch_hash != current_hashes.get(path, ""):
+            changed.add(path)
+    return changed
+
+
+def inherit_same_round_paths(
+    *,
+    reviewed_now: Sequence[str],
+    eligible_paths: Sequence[str],
+    current_hashes: Mapping[str, str],
+) -> tuple[str, ...]:
+    """Credit sampled siblings that share a reviewed representative's hash.
+
+    Args:
+        reviewed_now: Paths the provider actually read.
+        eligible_paths: Review-eligible paths at HEAD.
+        current_hashes: Current normalized patch hash per path.
+
+    Returns:
+        ``reviewed_now`` plus same-hash siblings, de-duplicated.
+    """
+    reviewed = list(dict.fromkeys(reviewed_now))
+    reviewed_hashes = {
+        current_hashes.get(path, "")
+        for path in reviewed
+        if current_hashes.get(path, "")
+    }
+    extras = [
+        path
+        for path in eligible_paths
+        if path not in reviewed
+        and current_hashes.get(path, "") in reviewed_hashes
+        and current_hashes.get(path, "")
+    ]
+    return (*reviewed, *extras)
+
+
+def latest_coverage_by_path(
+    coverage: Sequence[CoverageRecord],
+) -> dict[str, CoverageRecord]:
+    """Keep the highest-round record per path."""
+    latest: dict[str, CoverageRecord] = {}
+    for record in coverage:
+        current = latest.get(record.path)
+        if current is None or record.round >= current.round:
+            latest[record.path] = record
+    return latest
+
+
 def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
     """Hash each per-file unified diff.
 
@@ -283,18 +374,6 @@ def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
         Path to normalized patch hash.
     """
     return {path: normalized_patch_hash(text) for path, text in diffs.items()}
-
-
-def _latest_by_path(
-    coverage: Sequence[CoverageRecord],
-) -> dict[str, CoverageRecord]:
-    """Keep the highest-round record per path."""
-    latest: dict[str, CoverageRecord] = {}
-    for record in coverage:
-        current = latest.get(record.path)
-        if current is None or record.round >= current.round:
-            latest[record.path] = record
-    return latest
 
 
 def _inherit_sampled_hashes(
@@ -333,6 +412,58 @@ def _group_invalidated(
         members = set(group) & eligible
         if members & changed_triggers:
             invalidated.update(members - directly_changed)
+    return invalidated
+
+
+def _stale_group_invalidated(
+    *,
+    eligible_paths: Sequence[str],
+    groups: Sequence[Sequence[str]],
+    by_path: Mapping[str, CoverageRecord],
+    broadcast: set[str],
+) -> set[str]:
+    """Re-queue group-mates a later capped round reviewed after they were.
+
+    Invalidation is derived from stored rounds so an unserved mate stays
+    awaiting after the changed file is covered and the next push is empty.
+    Broadcast files never contribute a trigger round.
+    """
+    if not groups:
+        return set()
+    eligible = set(eligible_paths)
+    invalidated: set[str] = set()
+    for group in groups:
+        members = set(group) & eligible
+        trigger_rounds = [
+            by_path[path].round
+            for path in members
+            if path not in broadcast and path in by_path
+        ]
+        if not trigger_rounds:
+            continue
+        newest = max(trigger_rounds)
+        for path in members:
+            prior = by_path.get(path)
+            if prior is not None and prior.round < newest:
+                invalidated.add(path)
+    return invalidated
+
+
+def _stale_import_invalidated(
+    *,
+    import_importers: Mapping[str, set[str]],
+    by_path: Mapping[str, CoverageRecord],
+) -> set[str]:
+    """Re-queue importers of a dependency reviewed in a later round."""
+    invalidated: set[str] = set()
+    for imported, importers in import_importers.items():
+        imported_rec = by_path.get(imported)
+        if imported_rec is None:
+            continue
+        for importer in importers:
+            importer_rec = by_path.get(importer)
+            if importer_rec is not None and importer_rec.round < imported_rec.round:
+                invalidated.add(importer)
     return invalidated
 
 

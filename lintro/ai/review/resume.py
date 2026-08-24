@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.coverage import (
+    BROADCAST_FILENAMES,
     ClassifiedFile,
     classify_files,
     coverage_counts,
@@ -77,15 +78,13 @@ def plan_resume(
     )
     coverage = () if prior is None or force_full else prior.coverage
     flags = () if prior is None or force_full else prior.flagged_files
-    directly_changed = {
-        path
-        for path in eligible
-        if _is_directly_changed(path=path, hashes=hashes, coverage=coverage)
+    import_targets = {
+        path for path in eligible if path.rsplit("/", 1)[-1] not in BROADCAST_FILENAMES
     }
     imports = importers_of(
         changed_paths=set(eligible),
         contents=context.post_image_files,
-        directly_changed=directly_changed,
+        directly_changed=import_targets,
     )
     classified = classify_files(
         eligible_paths=eligible,
@@ -107,26 +106,30 @@ def plan_resume(
 def filter_chunks(
     *,
     chunks: list[ReviewChunk],
-    queue: set[str],
+    queue: Sequence[str],
 ) -> list[ReviewChunk]:
     """Keep chunks that still contain a file needing review.
 
     Covered group-mates stay in a mixed chunk as read-only context; the
-    chunk is dropped only when every file is already covered.
+    chunk is dropped only when every file is already covered. Remaining
+    chunks are ordered by the first queued file they contain so a
+    capped serial run cannot invert never-reviewed → changed → flagged
+    → invalidated priority.
 
     Args:
         chunks: Chunks from the grouper (full changed-file set).
-        queue: Paths that need review.
+        queue: Paths that need review, in cap-safe order.
 
     Returns:
-        Chunks in original order, minus fully-covered ones.
+        Chunks that still need work, in queue order.
     """
     if not queue:
         return []
-    kept: list[ReviewChunk] = []
-    for chunk in chunks:
-        if any(path in queue for path in chunk.files):
-            kept.append(chunk)
+    rank = {path: index for index, path in enumerate(queue)}
+    kept = [chunk for chunk in chunks if any(path in rank for path in chunk.files)]
+    kept.sort(
+        key=lambda chunk: min(rank[path] for path in chunk.files if path in rank),
+    )
     return kept
 
 
@@ -169,17 +172,3 @@ def records_for_reviewed(
         )
         merged[record.identity] = record
     return tuple(merged.values())
-
-
-def _is_directly_changed(
-    *,
-    path: str,
-    hashes: dict[str, str],
-    coverage: Sequence[CoverageRecord],
-) -> bool:
-    """Return whether *path* has a different hash than the stored entry."""
-    current = hashes.get(path, "")
-    for record in coverage:
-        if record.path == path:
-            return record.patch_hash != current
-    return False

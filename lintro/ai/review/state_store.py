@@ -148,6 +148,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
     flagged: dict[tuple[str, str], FlaggedFile] = {}
     runs: tuple[RunRecord, ...] = ()
     findings: tuple[FindingRecord, ...] = ()
+    legacy = False
     truncated = False
     identity = ReviewState()
     for state in states:
@@ -160,7 +161,8 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
             runs = state.runs
         if state.findings:
             findings = state.findings
-        truncated = truncated or state.legacy
+        legacy = legacy or state.legacy
+        truncated = truncated or state.truncated
     return ReviewState(
         version=ARTIFACT_STATE_VERSION,
         runs=runs,
@@ -175,8 +177,8 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         event=identity.event,
         run_id=identity.run_id,
         lintro_version=identity.lintro_version,
-        legacy=identity.legacy,
-        truncated=identity.truncated,
+        legacy=legacy,
+        truncated=truncated,
     )
 
 

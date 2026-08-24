@@ -1073,13 +1073,11 @@ def _load_prior_review_state(
 ) -> ReviewState:
     """Load CI artifact, local ledger, or a one-time sticky migration."""
     if os.environ.get("GITHUB_ACTIONS") == "true":
-        loaded = load_ci_state(
+        return load_ci_state(
             directory=state_dir(ci=True),
             repo=repo,
             pr_number=pr_number or 0,
         )
-        if loaded.coverage or loaded.runs or loaded.findings:
-            return loaded
     key = local_ledger_key(pr_number=pr_number, head_ref=head_ref)
     local = load_local_state(
         key=key,
@@ -1160,13 +1158,14 @@ def _persist_review_state(
         sequence=1,
         final=True,
     )
-    write_local_state(
-        state=state,
-        key=local_ledger_key(
-            pr_number=pr_number,
-            head_ref=str(getattr(context, "head_ref", "") or ""),
-        ),
-    )
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        write_local_state(
+            state=state,
+            key=local_ledger_key(
+                pr_number=pr_number,
+                head_ref=str(getattr(context, "head_ref", "") or ""),
+            ),
+        )
 
 
 def _departed_paths(*, context: object) -> frozenset[str]:

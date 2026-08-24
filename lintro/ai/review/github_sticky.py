@@ -113,11 +113,11 @@ __all__ = [
 def matcher_reviewed_paths(*, result: ReviewResult) -> frozenset[str] | None:
     """Return the reviewed-path set the matcher should use.
 
-    An empty ``metadata.reviewed_paths`` on a result with no incomplete
-    coverage is treated as unspecified (``None``) so disappeared findings
-    still resolve — the shape of fixture results and of reviews that ran
-    before this field was populated. A capped incomplete run that truly
-    reviewed no files keeps an empty set so unread findings stay open.
+    An empty ``metadata.reviewed_paths`` on a resume-aware result
+    (``coverage`` is set) is a true empty set — including a zero-call
+    carried round — so unread findings stay open. Fixture results and
+    reviews that predate the coverage field still treat the empty tuple
+    as unspecified (``None``) so disappeared findings can resolve.
 
     Args:
         result: Current review result.
@@ -127,7 +127,7 @@ def matcher_reviewed_paths(*, result: ReviewResult) -> frozenset[str] | None:
     """
     if result.metadata.reviewed_paths:
         return frozenset(result.metadata.reviewed_paths)
-    if result.coverage is not None and not result.coverage.complete:
+    if result.coverage is not None:
         return frozenset()
     return None
 

@@ -10,10 +10,13 @@ from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.coverage import (
+    MAX_FLAGS_PER_ROUND,
     ClassifiedFile,
     classify_files,
     coverage_counts,
+    directly_changed_paths,
     hashes_for_diffs,
+    inherit_same_round_paths,
     queue_paths,
     review_eligible_paths,
 )
@@ -21,13 +24,16 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.import_graph import importers_of, parse_python_imports
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
+from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.patch_hash import normalized_patch_hash
+from lintro.ai.review.resume import filter_chunks
 from lintro.ai.review.state_store import (
     load_ci_state,
     load_local_state,
@@ -312,3 +318,131 @@ def test_union_states_merges_independent_paths() -> None:
     )
     paths = {record.path for record in merged.coverage}
     assert_that(paths).is_equal_to({"a.py", "b.py"})
+
+
+def test_same_round_sampled_siblings_inherit_without_prior() -> None:
+    """A representative reviewed this round covers identical-hash siblings."""
+    hashes = {"keep.py": "aaa", "skip.py": "aaa", "other.py": "bbb"}
+    classified = classify_files(
+        eligible_paths=("keep.py", "skip.py", "other.py"),
+        current_hashes=hashes,
+        coverage=(),
+    )
+    reviewed = inherit_same_round_paths(
+        reviewed_now=("keep.py",),
+        eligible_paths=("keep.py", "skip.py", "other.py"),
+        current_hashes=hashes,
+    )
+    counts = coverage_counts(classified=classified, reviewed_now=reviewed)
+    assert_that(reviewed).contains("skip.py")
+    assert_that(counts.reviewed).is_equal_to(2)
+    assert_that(counts.awaiting).is_equal_to(1)
+    assert_that(counts.complete).is_false()
+
+
+def test_stale_group_invalidation_survives_after_peer_is_covered() -> None:
+    """An unserved group-mate stays queued after the changed peer is covered."""
+    classified = classify_files(
+        eligible_paths=("a.py", "g.py"),
+        current_hashes={"a.py": "H2", "g.py": "G1"},
+        coverage=(
+            CoverageRecord("a.py", "H1", round=1),
+            CoverageRecord("a.py", "H2", round=2),
+            CoverageRecord("g.py", "G1", round=1),
+        ),
+        groups=(("a.py", "g.py"),),
+    )
+    by_path = {item.path: item.need for item in classified}
+    assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
+    assert_that(by_path["g.py"]).is_equal_to(FileReviewNeed.GROUP_INVALIDATED)
+
+
+def test_latest_record_wins_for_direct_change() -> None:
+    """A later hash matching HEAD is covered, not permanently changed."""
+    coverage = (
+        CoverageRecord("b.py", "H1", round=1),
+        CoverageRecord("b.py", "H2", round=2),
+    )
+    assert_that(
+        directly_changed_paths(
+            eligible_paths=("b.py",),
+            current_hashes={"b.py": "H2"},
+            coverage=coverage,
+        ),
+    ).is_empty()
+
+
+def test_stale_import_invalidation_uses_latest_round() -> None:
+    """An importer re-enters only while its dependency has a newer round."""
+    reverse = importers_of(
+        changed_paths={"a.py", "b.py"},
+        contents={"a.py": "from b import x\n", "b.py": "x = 1\n"},
+        directly_changed={"a.py", "b.py"},
+    )
+    classified = classify_files(
+        eligible_paths=("a.py", "b.py"),
+        current_hashes={"a.py": "A1", "b.py": "B2"},
+        coverage=(
+            CoverageRecord("a.py", "A1", round=1),
+            CoverageRecord("b.py", "B1", round=1),
+            CoverageRecord("b.py", "B2", round=2),
+        ),
+        import_importers=reverse,
+    )
+    by_path = {item.path: item.need for item in classified}
+    assert_that(by_path["b.py"]).is_equal_to(FileReviewNeed.COVERED)
+    assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.IMPORT_INVALIDATED)
+
+
+def test_filter_chunks_follows_queue_priority() -> None:
+    """Capped serial execution reviews never-reviewed files first."""
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["z.py"],
+            diff="+z",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["a.py"],
+            diff="+a",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    ordered = filter_chunks(chunks=chunks, queue=("a.py", "z.py"))
+    assert_that([chunk.files[0] for chunk in ordered]).is_equal_to(["a.py", "z.py"])
+
+
+def test_flag_cap_stops_at_eight() -> None:
+    """Model flags are hard-capped per round."""
+    coverage = tuple(
+        CoverageRecord(f"f{index}.py", "h") for index in range(MAX_FLAGS_PER_ROUND + 2)
+    )
+    flags = tuple(
+        FlaggedFile(f"f{index}.py", "reason", "h")
+        for index in range(MAX_FLAGS_PER_ROUND + 2)
+    )
+    hashes = {f"f{index}.py": "h" for index in range(MAX_FLAGS_PER_ROUND + 2)}
+    classified = classify_files(
+        eligible_paths=tuple(hashes),
+        current_hashes=hashes,
+        coverage=coverage,
+        flags=flags,
+    )
+    flagged = [
+        item.path for item in classified if item.need is FileReviewNeed.MODEL_FLAGGED
+    ]
+    assert_that(flagged).is_length(MAX_FLAGS_PER_ROUND)
+
+
+def test_union_states_keeps_legacy_from_any_part() -> None:
+    """A later non-legacy part cannot drop migrated-history marking."""
+    merged = union_states(
+        (
+            ReviewState(legacy=True, findings=()),
+            ReviewState(coverage=(CoverageRecord("a.py", "1"),)),
+        ),
+    )
+    assert_that(merged.legacy).is_true()
+    assert_that(merged.coverage).is_length(1)

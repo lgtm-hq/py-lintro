@@ -335,11 +335,12 @@ jobs:
           LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
           LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
           LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
-          # Spend ceiling override (#2024). Unset falls through to the
-          # committed `ai.max_cost_usd: 2.00`, which large PRs exhaust after
-          # 3-4 of ~14 chunks — the review then posts a partial result every
-          # round. `0` means uncapped; the CLI transport treats the cap as a
-          # runtime bound, not marginal dollars, under subscription auth.
+          # Spend ceiling override (#2024 / #2154). Unset falls through to
+          # the committed `ai.max_cost_usd: 2.00`. Overlay `uncapped` lifts
+          # the ceiling; overlay `0` is rejected as ambiguous. YAML `0` is
+          # still a literal $0 cap. The CLI transport treats a numeric cap
+          # as a runtime bound, not marginal dollars, under subscription
+          # auth.
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
 
       - name: Upload review-state artifacts
