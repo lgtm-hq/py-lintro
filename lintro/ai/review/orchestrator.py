@@ -53,6 +53,7 @@ from lintro.ai.review.cli_limits import (
 )
 from lintro.ai.review.coverage import (
     carry_unserved_flags,
+    consume_served_flags,
     inherit_same_round_paths,
     pending_invalidations_for,
 )
@@ -1012,10 +1013,20 @@ async def run_review_async(
         allowed_paths=set(resume.queue),
         eligible_paths=set(resume.eligible),
     )
+    prior_flags = prior_state.flagged_files if prior_state is not None else ()
+    prior_consumed = (
+        () if force_full or prior_state is None else prior_state.consumed_flags
+    )
     flagged_files = carry_unserved_flags(
         new_flags=(*payload_flags, *converted_flags),
-        prior_flags=prior_state.flagged_files if prior_state is not None else (),
+        prior_flags=prior_flags,
         covered_now=covered_now,
+    )
+    consumed_flags = consume_served_flags(
+        prior_consumed=prior_consumed,
+        flags=(*payload_flags, *converted_flags, *prior_flags),
+        covered_now=covered_now,
+        current_hashes=resume.hashes,
     )
     awaiting_paths = tuple(
         item.path
@@ -1050,6 +1061,7 @@ async def run_review_async(
             classified=resume.classified,
             reviewed_now=covered_now,
         ),
+        consumed_flags=consumed_flags,
     )
 
 

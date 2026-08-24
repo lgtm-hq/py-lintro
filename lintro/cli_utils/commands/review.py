@@ -1117,6 +1117,7 @@ def _persist_review_state(
     repo: str,
 ) -> None:
     """Write coverage parts for the artifact upload and local ledger."""
+    from dataclasses import replace
     from importlib.metadata import version as pkg_version
 
     from lintro.ai.review.github_sticky import advance_review_state
@@ -1134,12 +1135,8 @@ def _persist_review_state(
         cost_basis=result.metadata.cost_basis,
         departed_paths=_departed_paths(context=context),
     )
-    state = ReviewState(
-        version=3,
-        runs=advanced.runs,
-        findings=advanced.findings,
-        coverage=advanced.coverage,
-        flagged_files=advanced.flagged_files,
+    state = replace(
+        advanced,
         repo=repo,
         pr_number=pr_number,
         base_sha=str(getattr(context, "base_ref", "") or ""),
@@ -1148,8 +1145,6 @@ def _persist_review_state(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
         lintro_version=_lintro_version(pkg_version),
-        legacy=advanced.legacy,
-        truncated=advanced.truncated,
     )
     directory = state_dir(ci=os.environ.get("GITHUB_ACTIONS") == "true")
     write_state_part(

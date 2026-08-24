@@ -31,6 +31,8 @@ class ReviewState:
         pending_invalidations: Unserved group/import re-reads, as
             ``(path, need)`` pairs. Survives a capped round so the next
             empty push still queues those files without round livelock.
+        consumed_flags: ``(path, hash)`` pairs already honored once so a
+            repeat flag cannot re-queue the same unchanged file.
         repo: ``owner/name`` that produced the state.
         pr_number: Pull request number, or ``None`` for a local branch run.
         base_sha: Base commit when the state was written.
@@ -49,6 +51,7 @@ class ReviewState:
     coverage: tuple[CoverageRecord, ...] = field(default_factory=tuple)
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
     pending_invalidations: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    consumed_flags: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     repo: str = ""
     pr_number: int | None = None
     base_sha: str = ""
@@ -125,6 +128,10 @@ class ReviewState:
                 {"path": path, "need": need}
                 for path, need in self.pending_invalidations
             ],
+            "consumed_flags": [
+                {"path": path, "hash": patch_hash}
+                for path, patch_hash in self.consumed_flags
+            ],
         }
         if self.truncated:
             payload["truncated"] = True
@@ -175,6 +182,7 @@ class ReviewState:
             coverage=tuple(coverage),
             flagged_files=tuple(flagged),
             pending_invalidations=_pending_from_payload(payload),
+            consumed_flags=_consumed_from_payload(payload),
             repo=str(payload.get("repo", "")),
             pr_number=pr_number,
             base_sha=str(payload.get("base_sha", "")),
@@ -204,4 +212,22 @@ def _pending_from_payload(
         need = str(item.get("need", "")).strip()
         if path and need in allowed:
             parsed.append((path, need))
+    return tuple(parsed)
+
+
+def _consumed_from_payload(
+    payload: dict[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    """Parse honored flag identities from an artifact mapping."""
+    raw = payload.get("consumed_flags") or []
+    parsed: list[tuple[str, str]] = []
+    if not isinstance(raw, list):
+        return ()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path", "")).strip()
+        patch_hash = str(item.get("hash", "")).strip()
+        if path and patch_hash:
+            parsed.append((path, patch_hash))
     return tuple(parsed)

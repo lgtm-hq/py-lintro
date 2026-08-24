@@ -28,6 +28,7 @@ __all__ = [
     "inherit_same_round_paths",
     "latest_coverage_by_path",
     "carry_unserved_flags",
+    "consume_served_flags",
     "pending_invalidations_for",
     "queue_paths",
     "review_eligible_paths",
@@ -119,6 +120,7 @@ def classify_files(
     import_importers: Mapping[str, set[str]] | None = None,
     flags: Sequence[FlaggedFile] = (),
     pending_invalidations: Sequence[tuple[str, str]] = (),
+    consumed_flags: Sequence[tuple[str, str]] = (),
     force_full: bool = False,
 ) -> tuple[ClassifiedFile, ...]:
     """Classify each eligible file for this resume round.
@@ -132,6 +134,7 @@ def classify_files(
         flags: Guarded reviewer flags from prior rounds.
         pending_invalidations: Unserved group/import pairs from a prior
             capped round.
+        consumed_flags: ``(path, hash)`` pairs already honored once.
         force_full: When True, treat every file as never-reviewed.
 
     Returns:
@@ -185,6 +188,7 @@ def classify_files(
         eligible_paths=set(eligible_paths),
         current_hashes=current_hashes,
         covered_hashes=covered_hashes,
+        consumed_flags=consumed_flags,
     )
 
     classified: list[ClassifiedFile] = []
@@ -347,6 +351,39 @@ def carry_unserved_flags(
     return (*new, *unserved)
 
 
+def consume_served_flags(
+    *,
+    prior_consumed: Sequence[tuple[str, str]],
+    flags: Sequence[FlaggedFile],
+    covered_now: Iterable[str],
+    current_hashes: Mapping[str, str],
+) -> tuple[tuple[str, str], ...]:
+    """Remember ``(path, hash)`` pairs whose flag was honored this round.
+
+    The same file+hash may be flagged only once (#2154). After the
+    provider reads that path (or a same-hash sibling covers it), a
+    repeat flag cannot re-queue it.
+
+    Args:
+        prior_consumed: Honored pairs from previous rounds.
+        flags: Prior and newly emitted flags considered this round.
+        covered_now: Paths covered this round, including inheritance.
+        current_hashes: Current normalized patch hash per path.
+
+    Returns:
+        Deduplicated honored pairs, prior first.
+    """
+    consumed = dict.fromkeys(prior_consumed)
+    covered = set(covered_now)
+    for flag in flags:
+        if flag.path not in covered:
+            continue
+        patch_hash = flag.patch_hash or current_hashes.get(flag.path, "")
+        if patch_hash:
+            consumed[(flag.path, patch_hash)] = None
+    return tuple(consumed)
+
+
 def pending_invalidations_for(
     *,
     classified: Sequence[ClassifiedFile],
@@ -495,10 +532,12 @@ def _allowed_flags(
     eligible_paths: set[str],
     current_hashes: Mapping[str, str],
     covered_hashes: set[tuple[str, str]],
+    consumed_flags: Sequence[tuple[str, str]] = (),
 ) -> dict[str, str]:
     """Allowlist, one-way, cap, and de-dupe reviewer flags."""
     accepted: dict[str, str] = {}
     seen_keys: set[tuple[str, str]] = set()
+    consumed = set(consumed_flags)
     for flag in flags:
         if len(accepted) >= MAX_FLAGS_PER_ROUND:
             break
@@ -507,7 +546,7 @@ def _allowed_flags(
         current = current_hashes.get(flag.path, "")
         patch_hash = flag.patch_hash or current
         key = (flag.path, patch_hash)
-        if key in seen_keys:
+        if key in seen_keys or key in consumed:
             continue
         seen_keys.add(key)
         # One-way: only a covered (path, hash) can be pushed back.

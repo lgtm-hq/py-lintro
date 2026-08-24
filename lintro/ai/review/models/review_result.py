@@ -40,6 +40,7 @@ class ReviewResult:
             optional flag reason in ``awaiting_reasons``.
         awaiting_reasons: Path to reviewer flag reason for awaiting files.
         pending_invalidations: Unserved group/import paths to persist.
+        consumed_flags: ``(path, hash)`` pairs already honored once.
     """
 
     metadata: ReviewMetadata
@@ -55,6 +56,7 @@ class ReviewResult:
     awaiting_paths: tuple[str, ...] = field(default_factory=tuple)
     awaiting_reasons: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     pending_invalidations: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    consumed_flags: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
     @property
     def has_p1_findings(self) -> bool:

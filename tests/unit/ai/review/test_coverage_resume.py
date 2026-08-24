@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.enums.config_source import ConfigSource
@@ -14,6 +15,7 @@ from lintro.ai.review.coverage import (
     ClassifiedFile,
     carry_unserved_flags,
     classify_files,
+    consume_served_flags,
     coverage_counts,
     directly_changed_paths,
     hashes_for_diffs,
@@ -32,6 +34,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
+from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
@@ -544,6 +547,69 @@ def test_unserved_model_flag_survives_until_the_path_is_covered() -> None:
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
     assert_that(by_path["extras.py"]).is_equal_to(FileReviewNeed.MODEL_FLAGGED)
+
+
+def test_same_path_hash_is_flagged_only_once() -> None:
+    """A repeat flag on an already-honored (path, hash) cannot re-queue."""
+    extras = FlaggedFile("extras.py", "re-check contract", "H2")
+    consumed = consume_served_flags(
+        prior_consumed=(),
+        flags=(extras,),
+        covered_now=("extras.py",),
+        current_hashes={"extras.py": "H2"},
+    )
+    assert_that(consumed).is_equal_to((("extras.py", "H2"),))
+    classified = classify_files(
+        eligible_paths=("extras.py",),
+        current_hashes={"extras.py": "H2"},
+        coverage=(CoverageRecord("extras.py", "H2", round=2),),
+        flags=(FlaggedFile("extras.py", "again", "H2"),),
+        consumed_flags=consumed,
+    )
+    assert_that(classified[0].need).is_equal_to(FileReviewNeed.COVERED)
+
+
+def test_persist_keeps_pending_and_consumed_flags(
+    tmp_path: Path,
+    sample_review_result: ReviewResult,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI persist must not drop resume fields when stamping identity."""
+    from dataclasses import replace
+
+    from lintro.ai.review.state_store import load_ci_state
+    from lintro.cli_utils.commands.review import _persist_review_state
+
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    pending = (("g.py", FileReviewNeed.GROUP_INVALIDATED.value),)
+    result = replace(
+        sample_review_result,
+        pending_invalidations=pending,
+        consumed_flags=(("done.py", "H0"),),
+        coverage_records=(CoverageRecord("a.py", "H1"),),
+    )
+    _persist_review_state(
+        result=result,
+        context=ReviewContext(
+            base_ref="main",
+            head_ref="feature",
+            changed_files=[],
+            unified_diff="",
+            pr_metadata=None,
+        ),
+        prior=None,
+        force_full=False,
+        pr_number=9,
+        repo="lgtm-hq/py-lintro",
+    )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=9,
+    )
+    assert_that(loaded.pending_invalidations).is_equal_to(pending)
+    assert_that(loaded.consumed_flags).is_equal_to((("done.py", "H0"),))
 
 
 def test_union_states_keeps_legacy_from_any_part() -> None:
