@@ -13,11 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI can
-  overlay `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
-- **ai**: raise the default CLI review timeout from 900s to 1800s so a large semantic
-  chunk can finish under serial dogfood (#2156)
-
 ### Deprecated
 
 ### Removed
@@ -25,6 +20,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.131.1] - 2026-08-24
+
+### Changed
+
+- **ai**: drop committed cost cap for uncapped dogfood (#2164) (e377c06)
+- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI can
+  overlay `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
+- **ai**: raise the default CLI review timeout from 900s to 1800s so a large semantic
+  chunk can finish under serial dogfood (#2156)
+
+### Fixed
+
+- **ai**: raise default CLI timeout to 1800s (#2168) (4f32c84)
 
 ## [0.131.0] - 2026-08-24
 
