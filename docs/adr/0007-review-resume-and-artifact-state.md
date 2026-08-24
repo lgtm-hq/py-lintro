@@ -18,7 +18,10 @@ state in an editable hidden blob.
 2. Invalidation is never-reviewed, directly changed, semantic-group mate, one-hop Python
    import, or a guarded `flagged_files` proposal. Broadcast files (pyproject, lockfiles,
    `conftest.py`) do not fan out. Queue order under a cap: never-reviewed → directly
-   changed → model-flagged → group/import-invalidated.
+   changed → model-flagged → group/import-invalidated. Same-hash inheritance is
+   content-addressed: any eligible file whose current hash already has a reviewed
+   representative is covered. Unserved group/import pending pairs and model flags
+   persist until that path is covered this round (including inherited coverage).
 3. Flag/env caps enforce on every cost basis. YAML enforces on `billed` and `estimated`,
    and is advisory on `unpriceable`. Overlay `uncapped` lifts the ceiling; overlay `0`
    is rejected as ambiguous.

@@ -52,6 +52,7 @@ from lintro.ai.review.cli_limits import (
     tighter_findings_cap,
 )
 from lintro.ai.review.coverage import (
+    carry_unserved_flags,
     inherit_same_round_paths,
     pending_invalidations_for,
 )
@@ -1011,7 +1012,11 @@ async def run_review_async(
         allowed_paths=set(resume.queue),
         eligible_paths=set(resume.eligible),
     )
-    flagged_files = (*payload_flags, *converted_flags)
+    flagged_files = carry_unserved_flags(
+        new_flags=(*payload_flags, *converted_flags),
+        prior_flags=prior_state.flagged_files if prior_state is not None else (),
+        covered_now=covered_now,
+    )
     awaiting_paths = tuple(
         item.path
         for item in resume.classified
@@ -1043,7 +1048,7 @@ async def run_review_async(
         awaiting_reasons=awaiting_reasons,
         pending_invalidations=pending_invalidations_for(
             classified=resume.classified,
-            reviewed_now=actually_reviewed,
+            reviewed_now=covered_now,
         ),
     )
 

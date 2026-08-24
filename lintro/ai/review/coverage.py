@@ -27,6 +27,7 @@ __all__ = [
     "directly_changed_paths",
     "inherit_same_round_paths",
     "latest_coverage_by_path",
+    "carry_unserved_flags",
     "pending_invalidations_for",
     "queue_paths",
     "review_eligible_paths",
@@ -313,6 +314,39 @@ def directly_changed_paths(
     return changed
 
 
+def carry_unserved_flags(
+    *,
+    new_flags: Sequence[FlaggedFile],
+    prior_flags: Sequence[FlaggedFile],
+    covered_now: Iterable[str],
+) -> tuple[FlaggedFile, ...]:
+    """Keep prior model flags whose path was not covered this round.
+
+    A capped round can leave a ``MODEL_FLAGGED`` path unserved. Those
+    flags must persist; otherwise the next classify treats the path as
+    ``COVERED`` and the request disappears.
+
+    Args:
+        new_flags: Flags produced by this round's completed chunks.
+        prior_flags: Flags carried from the previous trusted state.
+        covered_now: Paths covered this round, including same-hash
+            inheritance.
+
+    Returns:
+        This round's flags plus unserved prior flags, de-duplicated by
+        path with new flags winning.
+    """
+    covered = set(covered_now)
+    new = tuple(new_flags)
+    new_paths = {flag.path for flag in new}
+    unserved = tuple(
+        flag
+        for flag in prior_flags
+        if flag.path not in covered and flag.path not in new_paths
+    )
+    return (*new, *unserved)
+
+
 def pending_invalidations_for(
     *,
     classified: Sequence[ClassifiedFile],
@@ -322,10 +356,11 @@ def pending_invalidations_for(
 
     Args:
         classified: This round's classification.
-        reviewed_now: Paths the provider actually read (not inherited).
+        reviewed_now: Paths covered this round, including same-hash
+            siblings of a provider-read representative.
 
     Returns:
-        ``(path, need)`` pairs still awaiting a real review.
+        ``(path, need)`` pairs still awaiting coverage.
     """
     reviewed = set(reviewed_now)
     return tuple(

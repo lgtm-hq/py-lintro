@@ -12,11 +12,13 @@ from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.coverage import (
     MAX_FLAGS_PER_ROUND,
     ClassifiedFile,
+    carry_unserved_flags,
     classify_files,
     coverage_counts,
     directly_changed_paths,
     hashes_for_diffs,
     inherit_same_round_paths,
+    pending_invalidations_for,
     queue_paths,
     review_eligible_paths,
 )
@@ -496,6 +498,52 @@ def test_flag_cap_stops_at_eight() -> None:
         item.path for item in classified if item.need is FileReviewNeed.MODEL_FLAGGED
     ]
     assert_that(flagged).is_length(MAX_FLAGS_PER_ROUND)
+
+
+def test_inherited_sibling_clears_pending_invalidation() -> None:
+    """Same-hash credit covers a sampler-omitted mate and drops its pending."""
+    hashes = {"keep.py": "aaa", "skip.py": "aaa"}
+    classified = (
+        ClassifiedFile("keep.py", "aaa", FileReviewNeed.GROUP_INVALIDATED),
+        ClassifiedFile("skip.py", "aaa", FileReviewNeed.GROUP_INVALIDATED),
+    )
+    covered = inherit_same_round_paths(
+        reviewed_now=("keep.py",),
+        eligible_paths=("keep.py", "skip.py"),
+        current_hashes=hashes,
+    )
+    pending = pending_invalidations_for(
+        classified=classified,
+        reviewed_now=covered,
+    )
+    assert_that(covered).contains("skip.py")
+    assert_that(pending).is_empty()
+
+
+def test_unserved_model_flag_survives_until_the_path_is_covered() -> None:
+    """A capped round must not drop a flag the provider never served."""
+    extras = FlaggedFile("extras.py", "re-check contract", "H2")
+    carried = carry_unserved_flags(
+        new_flags=(),
+        prior_flags=(
+            extras,
+            FlaggedFile("a.py", "already served", "H1"),
+        ),
+        covered_now=("a.py",),
+    )
+    assert_that([flag.path for flag in carried]).is_equal_to(["extras.py"])
+    classified = classify_files(
+        eligible_paths=("a.py", "extras.py"),
+        current_hashes={"a.py": "H1", "extras.py": "H2"},
+        coverage=(
+            CoverageRecord("a.py", "H1", round=2),
+            CoverageRecord("extras.py", "H2", round=1),
+        ),
+        flags=carried,
+    )
+    by_path = {item.path: item.need for item in classified}
+    assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
+    assert_that(by_path["extras.py"]).is_equal_to(FileReviewNeed.MODEL_FLAGGED)
 
 
 def test_union_states_keeps_legacy_from_any_part() -> None:
