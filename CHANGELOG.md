@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.130.0] - 2026-08-24
+
+### Added
+
+- **ai**: add `LINTRO_AI_REVIEW` invocation override (#2159) (956547b)
+
+### Changed
+
+- **ai-review**: forward `LINTRO_AI_MAX_COST_USD` repo variable (#2155) (adb7315)
+
 ## [0.129.0] - 2026-08-22
 
 ### Added
