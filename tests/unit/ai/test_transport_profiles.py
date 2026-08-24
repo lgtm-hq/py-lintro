@@ -33,8 +33,8 @@ def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
 
 
-def test_cli_defaults_to_whole_turn_timeout() -> None:
-    """CLI without a profile uses the 900s whole-turn default."""
+def test_cli_defaults_to_per_chunk_timeout() -> None:
+    """CLI without a profile uses the 1800s per-chunk default."""
     config = AIConfig(enabled=True, transport=AITransport.CLI)
     resolved = resolve_transport_settings(config)
     assert_that(resolved.timeout).is_equal_to(DEFAULT_CLI_TIMEOUT)
