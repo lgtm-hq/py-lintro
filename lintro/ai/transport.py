@@ -40,7 +40,7 @@ class ResolvedTransportSettings:
 
     Attributes:
         transport: Active transport.
-        timeout: Per-call / whole-turn timeout in seconds.
+        timeout: Per-call / per-chunk timeout in seconds.
         max_cost_usd: Enforced or advisory cost ceiling (None = unlimited).
         cost_is_advisory: True when the cap cannot enforce spend (CLI/subscription).
         auth_mode: How the transport authenticates.
@@ -120,7 +120,7 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
 
     if transport is AITransport.CLI:
         # Legacy ``ai.api_timeout`` is API-sized (60s default) and must not
-        # silently become the CLI whole-turn budget. CLI falls back to the
+        # silently become the CLI per-chunk budget. CLI falls back to the
         # CLI built-in (1800s) when the profile omits timeout (#1923).
         timeout = (
             profiles.cli.timeout
