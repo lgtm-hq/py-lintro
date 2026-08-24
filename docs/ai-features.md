@@ -698,7 +698,7 @@ LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
 # Same thing with flags (flags win if both are set)
 lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
 
-# Lift the committed cost cap for this run (`uncapped`; overlay `0` is an error)
+# Run without a cost cap (`uncapped`; overlay `0` is an error)
 LINTRO_AI_MAX_COST_USD=uncapped lintro review --uncommitted
 lintro review --uncommitted --max-cost-usd uncapped
 

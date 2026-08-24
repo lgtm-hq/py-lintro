@@ -2983,7 +2983,7 @@ ai:
 | `enabled`               | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                   |
 | `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
 | `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
-| `provider`              | string | `anthropic`    | AI provider (`anthropic` or `openai`)                                                        |
+| `provider`              | string | `anthropic`    | AI provider (`anthropic`, `openai`, or `cursor`)                                             |
 | `model`                 | string | (default)      | Model override                                                                               |
 | `api_key_env`           | string | (default)      | Custom env var for API key                                                                   |
 | `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                  |
