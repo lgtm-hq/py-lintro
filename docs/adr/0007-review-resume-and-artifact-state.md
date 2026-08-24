@@ -39,9 +39,9 @@ state in an editable hidden blob.
 Capped reviews converge across rounds. A quiet re-review makes zero provider calls. A
 partial review cannot render clean or pass the AI Review check. Large capped API-key PRs
 are red on round 1 by design. A mid-round **timeout** is the same class of stop as a
-cost cap: coverage already written is persisted (incremental `part-*.json` under
-`LINTRO_REVIEW_STATE_DIR`) and the next round resumes. A SIGTERM after a finished
-chunk must not lose that chunk.
+cost cap: coverage and this-run findings already written are persisted (incremental
+`part-*.json` under `LINTRO_REVIEW_STATE_DIR`) and the next round resumes. A SIGTERM
+after a finished chunk must not lose that chunk's coverage or issues.
 
 `conftest.py` is a known semantic hole (test-wide fixtures) left on the revisit list.
 

@@ -289,6 +289,14 @@ def test_classify_timeout_error_cause_as_timeout() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
 
 
+def test_timeout_error_wins_over_http_504_signature() -> None:
+    """A TimeoutError cause is TIMEOUT even when the wrapper looks like 504."""
+    error = AIProviderError("HTTP 504 gateway timeout")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")

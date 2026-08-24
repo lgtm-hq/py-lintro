@@ -18,6 +18,7 @@ from lintro.ai.review.finding_matcher import (
     match_findings,
     normalize_file_path,
     normalize_title,
+    review_findings_from_unposted,
 )
 from lintro.ai.review.github_sticky import matcher_reviewed_paths
 from lintro.ai.review.models.coverage_counts import CoverageCounts
@@ -789,3 +790,55 @@ def test_zero_call_carried_round_does_not_resolve_findings(
     assert_that(second.resolved).is_empty()
     assert_that(second.carried).is_length(1)
     assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_review_findings_from_unposted_replays_open_records() -> None:
+    """Unposted open records become findings so a quiet resume can post them."""
+    fingerprint = fingerprint_for(
+        file="a.py",
+        category="security",
+        title="Fail-open default",
+    )
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint=fingerprint,
+                title="Fail-open default",
+                file="a.py",
+                category="security",
+                line=12,
+                severity=Severity.P1,
+            ),
+        ),
+    )
+    replayed = review_findings_from_unposted(
+        prior=prior,
+        current=(),
+        reviewed_paths=frozenset(),
+    )
+    assert_that(replayed).is_length(1)
+    assert_that(replayed[0].file).is_equal_to("a.py")
+    assert_that(replayed[0].title).is_equal_to("Fail-open default")
+
+
+def test_review_findings_from_unposted_skips_reviewed_and_posted() -> None:
+    """Re-reviewed or already-posted records must not be replayed."""
+    posted = FindingRecord(
+        fingerprint="postedfingerprint",
+        title="Already posted",
+        file="posted.py",
+        inline_comment_id=99,
+    )
+    reread = FindingRecord(
+        fingerprint="rereadfingerprint",
+        title="Re-read file",
+        file="reread.py",
+    )
+    current = _finding(title="Current", file="current.py")
+    prior = ReviewState(findings=(posted, reread))
+    replayed = review_findings_from_unposted(
+        prior=prior,
+        current=(current,),
+        reviewed_paths=frozenset({"reread.py"}),
+    )
+    assert_that(replayed).is_empty()

@@ -76,6 +76,7 @@ from lintro.ai.review.errors_taxonomy import (
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.file_selection import resolve_file_selection
+from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.finding_parser import (
     parse_findings,
     parse_flagged_files,
@@ -292,11 +293,13 @@ def _write_incremental_coverage_part(
     sequence: int,
     stopped_reason: str = "",
 ) -> None:
-    """Checkpoint coverage so a later SIGTERM still has something to upload.
+    """Checkpoint coverage and this-run findings for a later SIGTERM.
 
     Writes only when ``LINTRO_REVIEW_STATE_DIR`` is set (CI artifact dir).
     ``final=True`` refreshes ``state.json`` so a leftover downloaded
-    snapshot cannot last-writer-win over this run.
+    snapshot cannot last-writer-win over this run. Findings are matched
+    against the original prior so a resume that skips COVERED files still
+    has issues to post.
 
     Args:
         collected: Chunks finished so far in this run.
@@ -326,9 +329,18 @@ def _write_incremental_coverage_part(
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
     seed = ReviewState() if force_full or prior_state is None else prior_state
+    findings = tuple(finding for partial in collected for finding in partial.findings)
+    match = match_findings(
+        previous=seed,
+        findings=findings,
+        round_number=seed.next_round,
+        head_sha=context.head_ref,
+        reviewed_paths=frozenset(covered_now),
+    )
     write_state_part(
         state=replace(
             seed,
+            findings=match.records,
             coverage=records,
             repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
             pr_number=int(pr_raw) if pr_raw.isdigit() else seed.pr_number,
@@ -939,7 +951,7 @@ async def run_review_async(
                 """Write an incremental coverage part after each finished chunk."""
                 nonlocal part_seq
                 part_seq += 1
-                with suppress(Exception):
+                try:
                     _write_incremental_coverage_part(
                         collected=done,
                         resume=resume,
@@ -947,6 +959,11 @@ async def run_review_async(
                         prior_state=prior_state,
                         force_full=force_full,
                         sequence=part_seq,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Could not write incremental review-resume part {n}",
+                        n=part_seq,
                     )
 
             partials = await _review_all_chunks(

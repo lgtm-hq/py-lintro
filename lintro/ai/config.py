@@ -73,7 +73,7 @@ class CliTransportProfile(BaseModel):
     timeout: float | None = Field(
         default=None,
         ge=1.0,
-        description="Whole-turn timeout in seconds (default 1800).",
+        description="Per-chunk CLI invocation timeout in seconds (default 1800).",
     )
     max_cost_usd_advisory: float | None = Field(
         default=None,

@@ -397,6 +397,11 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     status = _extract_status(text=text)
     cause_exc = _resolve_cause_exception(error=error)
 
+    # A chained TimeoutError is a timeout even when the wrapper text looks
+    # like an HTTP 504 / server error (#2156).
+    if isinstance(cause_exc, TimeoutError):
+        return ReviewErrorKind.TIMEOUT
+
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:
         matcher = signatures.get(kind)
@@ -411,8 +416,6 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
         return ReviewErrorKind.RATE_LIMITED
     if isinstance(cause_exc, AIProviderRequiredError):
         return ReviewErrorKind.PROVIDER_UNAVAILABLE
-    if isinstance(cause_exc, TimeoutError):
-        return ReviewErrorKind.TIMEOUT
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

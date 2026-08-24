@@ -39,7 +39,7 @@ Effective settings = **transport profile → legacy scalar → built-in default*
 `lintro review` logs the resolved profile at start, for example:
 
 ```text
-transport=cli auth=subscription timeout=900 cap=advisory:$0.50 cost_basis=unpriceable
+transport=cli auth=subscription timeout=1800 cap=advisory:$0.50 cost_basis=unpriceable
 ```
 
 ## Example config
@@ -54,7 +54,7 @@ ai:
       timeout: 60
       max_cost_usd: 0.50
     cli:
-      timeout: 900
+      timeout: 1800
       max_cost_usd_advisory: 0.50
 ```
 

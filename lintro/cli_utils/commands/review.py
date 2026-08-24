@@ -676,6 +676,21 @@ def review_command(
                 max_cost_usd_source=cap_source.value,
             ),
         )
+        if prior_state is not None and not force_full:
+            from lintro.ai.review.finding_matcher import (
+                review_findings_from_unposted,
+            )
+
+            replayed = review_findings_from_unposted(
+                prior=prior_state,
+                current=result.findings,
+                reviewed_paths=frozenset(result.metadata.reviewed_paths),
+            )
+            if replayed:
+                result = dc_replace(
+                    result,
+                    findings=(*result.findings, *replayed),
+                )
         try:
             _persist_review_state(
                 result=result,

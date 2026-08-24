@@ -212,6 +212,39 @@ def test_yaml_cap_is_advisory_on_unpriceable() -> None:
     ).is_true()
 
 
+def test_sequence_one_drops_leftover_parts(tmp_path: Path) -> None:
+    """A new run's part-0001 must not keep a leftover downloaded part."""
+    write_state_part(
+        state=ReviewState(
+            coverage=(CoverageRecord("stale.py", "deadbeef"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=1,
+        ),
+        directory=tmp_path,
+        sequence=99,
+        final=True,
+    )
+    write_state_part(
+        state=ReviewState(
+            coverage=(CoverageRecord("a.py", "h1"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=1,
+        ),
+        directory=tmp_path,
+        sequence=1,
+        final=True,
+    )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=1,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that({record.path for record in loaded.coverage}).does_not_contain(
+        "stale.py",
+    )
+
+
 def test_part_union_is_last_writer_wins(tmp_path: Path) -> None:
     """Later parts replace the same ``(path, hash)`` entry."""
     first = ReviewState(

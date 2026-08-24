@@ -1000,6 +1000,24 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_CURSOR_EGRESS }}")
 
 
+def test_run_ai_review_tees_under_pipefail() -> None:
+    """The review pipeline must tee output and fail when the CLI exits non-zero."""
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).contains("set -euo pipefail")
+    assert_that(shell_text).contains('| tee "$output_file"')
+    result = subprocess.run(  # nosec B603 - fixed argv; shell=False
+        [
+            "bash",
+            "-c",
+            "set -euo pipefail; false | tee /dev/null",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+
+
 def test_review_timeout_fits_inside_the_job_timeout() -> None:
     """The CLI transport profile timeout fires before the job ``timeout-minutes``.
 

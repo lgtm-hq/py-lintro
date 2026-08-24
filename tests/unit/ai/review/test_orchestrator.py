@@ -440,6 +440,9 @@ def test_incremental_state_json_wins_over_downloaded_prior(
         pr_number=2166,
     )
     assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that({record.path for record in loaded.coverage}).does_not_contain(
+        "stale.py",
+    )
     assert_that(loaded.run_id).is_equal_to("current-run")
     assert_that(loaded.head_sha).is_not_equal_to("old-head")
 
@@ -454,7 +457,9 @@ def test_incremental_checkpoint_keeps_prior_findings(
     monkeypatch.setenv("PR_NUMBER", "2166")
     prior = ReviewState(
         coverage=(CoverageRecord(path="kept.py", patch_hash="abc123"),),
-        findings=(FindingRecord(fingerprint="keep-me", title="old nit", file="kept.py"),),
+        findings=(
+            FindingRecord(fingerprint="keep-me", title="old nit", file="kept.py"),
+        ),
         repo="lgtm-hq/py-lintro",
         pr_number=2166,
     )
@@ -498,6 +503,83 @@ def test_incremental_checkpoint_keeps_prior_findings(
     )
     assert_that({finding.fingerprint for finding in loaded.findings}).contains(
         "keep-me",
+    )
+    assert_that({finding.file for finding in loaded.findings}).contains("a.py")
+    assert_that({finding.title for finding in loaded.findings}).contains(
+        "Fail-open default",
+    )
+
+
+def test_incremental_checkpoint_keeps_this_run_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-run checkpoint must persist findings from finished chunks."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _timeout_b(
+        *,
+        provider,
+        user_prompt,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        if "b.py" in user_prompt or "+y" in user_prompt:
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_b,
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that({finding.file for finding in loaded.findings}).contains("a.py")
+    assert_that({finding.title for finding in loaded.findings}).contains(
+        "Fail-open default",
     )
 
 
