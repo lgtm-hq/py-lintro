@@ -12,6 +12,7 @@ from loguru import logger
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.finding_occurrence import parse_occurrences
+from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.suggested_change import parse_suggested_change
 from lintro.ai.review.narrative_parser import collapse_to_single_line
@@ -23,7 +24,9 @@ __all__ = [
     "normalize_finding_kind",
     "normalize_severity",
     "parse_findings",
+    "parse_flagged_files",
     "parse_severity_label",
+    "reject_context_findings",
 ]
 
 SEVERITY_SYNONYMS: dict[str, Severity] = {
@@ -227,3 +230,75 @@ def parse_findings(
         # it would silently override the agent's own front matter.
         return tuple(findings)
     return apply_p1_evidence_gate(findings=findings)
+
+
+def parse_flagged_files(*, raw_flags: object) -> tuple[FlaggedFile, ...]:
+    """Parse reviewer re-read requests from untrusted model JSON.
+
+    Args:
+        raw_flags: Raw ``flagged_files`` value from a parsed model response.
+
+    Returns:
+        Flags with a non-empty path and reason. Guards (allowlist, one-way,
+        cap) are applied later by the coverage classifier.
+    """
+    if not isinstance(raw_flags, list):
+        return ()
+    flags: list[FlaggedFile] = []
+    for item in raw_flags:
+        if not isinstance(item, dict):
+            continue
+        parsed = FlaggedFile.from_dict(item)
+        if parsed is not None:
+            flags.append(parsed)
+    return tuple(flags)
+
+
+def reject_context_findings(
+    *,
+    findings: tuple[ReviewFinding, ...],
+    allowed_paths: set[str],
+    eligible_paths: set[str],
+) -> tuple[tuple[ReviewFinding, ...], tuple[FlaggedFile, ...]]:
+    """Drop findings on read-only context files; convert others to flags.
+
+    Findings against files that needed review are kept. Findings against
+    other review-eligible paths become guarded flags. Everything else is
+    discarded so a prompt instruction is not the only boundary.
+
+    Args:
+        findings: Parsed findings from one chunk or the merged run.
+        allowed_paths: Paths this pass may emit findings against (the
+            resume queue, typically intersected with the chunk).
+        eligible_paths: Review-eligible paths in the current diff.
+
+    Returns:
+        Kept findings and flags converted from out-of-scope findings.
+    """
+    kept: list[ReviewFinding] = []
+    flags: list[FlaggedFile] = []
+    allowed = {_normalize_finding_path(path) for path in allowed_paths}
+    eligible = {_normalize_finding_path(path) for path in eligible_paths}
+    for finding in findings:
+        path = _normalize_finding_path(finding.file)
+        if path in allowed:
+            kept.append(finding)
+            continue
+        if path in eligible:
+            reason = finding.title.strip() or "re-read requested"
+            flags.append(FlaggedFile(path=path, reason=reason))
+            logger.info(
+                "Converted context-file finding on {path} to a flagged re-read",
+                path=path,
+            )
+            continue
+        logger.info(
+            "Rejected finding on non-review path {path}",
+            path=path or "(empty)",
+        )
+    return tuple(kept), tuple(flags)
+
+
+def _normalize_finding_path(path: str) -> str:
+    """Normalize a model-reported path for allowlist comparison."""
+    return path.strip().replace("\\", "/").removeprefix("./")

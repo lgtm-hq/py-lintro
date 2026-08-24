@@ -19,12 +19,15 @@ from lintro.ai.review.finding_matcher import (
     normalize_file_path,
     normalize_title,
 )
+from lintro.ai.review.github_sticky import matcher_reviewed_paths
+from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.finding_occurrence import (
     FindingOccurrence,
     parse_occurrences,
 )
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 
 
@@ -711,3 +714,78 @@ def test_parse_occurrences_deduplicates_repeated_locations() -> None:
             FindingOccurrence(file="src/app.py", line=20),
         ),
     )
+
+
+def test_unread_file_findings_carry_forward() -> None:
+    """Absence because a file was not re-reviewed is not a fix."""
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/app.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=frozenset({"src/other.py"}),
+    )
+
+    assert_that(second.resolved).is_empty()
+    assert_that(second.carried).is_length(1)
+    assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_departed_path_resolves_unread_finding() -> None:
+    """A deleted file's findings resolve even though it was not re-read."""
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/gone.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=frozenset(),
+        departed_paths=frozenset({"src/gone.py"}),
+    )
+
+    assert_that(second.resolved).is_length(1)
+    assert_that(second.resolved[0].resolved_sha).is_equal_to("sha2")
+    assert_that(second.resolved[0].status).is_equal_to(FindingStatus.RESOLVED)
+
+
+def test_zero_call_carried_round_does_not_resolve_findings(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A fully-carried resume round must not auto-resolve open findings."""
+    result = replace(
+        sample_review_result,
+        coverage=CoverageCounts(
+            reviewed=0,
+            carried=1,
+            awaiting=0,
+            eligible=1,
+        ),
+        metadata=replace(sample_review_result.metadata, reviewed_paths=()),
+    )
+    reviewed = matcher_reviewed_paths(result=result)
+    assert_that(reviewed).is_equal_to(frozenset())
+
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/app.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=reviewed,
+    )
+    assert_that(second.resolved).is_empty()
+    assert_that(second.carried).is_length(1)
+    assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)

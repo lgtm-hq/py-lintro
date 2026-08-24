@@ -27,8 +27,8 @@ from lintro.ai.review.github_constants import (
 from lintro.ai.review.github_sticky import (
     _fit_body,
     _RenderLimits,
+    advance_review_state,
     build_sticky_comment,
-    parse_review_state_v2,
 )
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -38,10 +38,9 @@ from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
-from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
 _DETAILS_TAG_RE = re.compile(r"</?details\b")
-_ROUND_RE = re.compile(r"\*\*Round (\d+)\*\*")
+_ROUND_RE = re.compile(r"(?:\*\*|<b>)Round (\d+)")
 
 #: Number of synthetic prior rounds used by the history-pruning sweep.
 _PRIOR_ROUNDS = 8
@@ -102,17 +101,17 @@ def _max_details_depth(*, body: str) -> int:
 @pytest.mark.parametrize(
     ("severity", "expected"),
     [
-        (Severity.P1, "**⛔ Blocked** — 1 open blocker"),
-        (Severity.P2, "**⚠️ Changes requested** — 1 open warning"),
-        (Severity.P3, "**🟡 Nits only** — 1 open nit"),
+        (Severity.P1, "## 🔎 Lintro Review — ⛔ Blocked"),
+        (Severity.P2, "## 🔎 Lintro Review — ⚠️ Changes requested"),
+        (Severity.P3, "## 🔎 Lintro Review — 🟡 Nits only"),
     ],
 )
-def test_readiness_pill_is_derived_from_open_severities(
+def test_title_verdict_is_derived_from_open_severities(
     sample_review_result: ReviewResult,
     severity: Severity,
     expected: str,
 ) -> None:
-    """The pill label follows the highest open severity, never the model."""
+    """The title follows the highest open severity, never the model."""
     body = build_sticky_comment(
         result=_with(
             base=sample_review_result,
@@ -123,20 +122,20 @@ def test_readiness_pill_is_derived_from_open_severities(
     assert_that(_body_only(body=body)).contains(expected)
 
 
-def test_readiness_pill_reads_ready_with_nothing_open(
+def test_title_reads_ready_with_nothing_open(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A round with no findings renders the ready pill and an empty index."""
+    """A round with no findings renders Ready and an empty findings table."""
     body = _body_only(
         body=build_sticky_comment(result=_with(base=sample_review_result, findings=())),
     )
 
-    assert_that(body).contains("**✅ Ready** — no open findings")
-    assert_that(body).contains("### Open findings (0)")
+    assert_that(body).contains("## 🔎 Lintro Review — ✅ Ready")
+    assert_that(body).contains("### Findings ·")
     assert_that(body).contains("✅ Nothing open.")
 
 
-def test_readiness_pill_ignores_questions(
+def test_title_ignores_questions(
     sample_review_result: ReviewResult,
 ) -> None:
     """A question carries no severity, so it cannot block the PR."""
@@ -155,7 +154,7 @@ def test_readiness_pill_ignores_questions(
         ),
     )
 
-    assert_that(body).contains("**✅ Ready** — no open findings")
+    assert_that(body).contains("## 🔎 Lintro Review — ✅ Ready")
     assert_that(body).contains("❓ question")
 
 
@@ -176,7 +175,7 @@ def test_pill_counts_only_the_deciding_severity(
         ),
     )
 
-    assert_that(body).contains("**⛔ Blocked** — 2 open blockers")
+    assert_that(body).contains("## 🔎 Lintro Review — ⛔ Blocked")
 
 
 # --- delta line --------------------------------------------------------------
@@ -189,24 +188,21 @@ def test_round_one_renders_no_delta_line(
     body = _body_only(body=build_sticky_comment(result=sample_review_result))
 
     assert_that(body).does_not_contain("resolved ·")
-    assert_that(body).contains("round 1")
+    assert_that(body).contains("Round 1")
 
 
 def test_delta_line_counts_resolved_new_and_unchanged(
     sample_review_result: ReviewResult,
 ) -> None:
     """Round two reports what changed since round one."""
-    first = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(
-                _finding(title="Leak", line=10),
-                _finding(title="Slow loop", severity=Severity.P2, line=44),
-            ),
+    first_result = _with(
+        base=sample_review_result,
+        findings=(
+            _finding(title="Leak", line=10),
+            _finding(title="Slow loop", severity=Severity.P2, line=44),
         ),
-        head_sha="sha1",
     )
-
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = build_sticky_comment(
         result=_with(
             base=sample_review_result,
@@ -215,13 +211,14 @@ def test_delta_line_counts_resolved_new_and_unchanged(
                 _finding(title="Unguarded divide", severity=Severity.P2, line=8),
             ),
         ),
-        prior_state=parse_review_state_v2(body=first),
+        prior_state=prior,
         head_sha="sha2",
     )
+    body = _body_only(body=second)
 
-    assert_that(_body_only(body=second)).contains(
-        "✔ 1 resolved · **1 new** · 1 unchanged since round 1",
-    )
+    assert_that(body).contains("2 open · 1 fixed this round")
+    assert_that(body).contains("| **new** |")
+    assert_that(body).contains("| ✔ fixed |")
 
 
 def test_delta_line_reports_regressions_separately(
@@ -232,25 +229,22 @@ def test_delta_line_reports_regressions_separately(
     Counting it as unchanged made the delta line contradict the ``↩ regressed``
     cell the open table shows immediately below it.
     """
-    first = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(
-                _finding(title="Leak"),
-                _finding(title="Slow loop", severity=Severity.P2, line=44),
-            ),
+    first_result = _with(
+        base=sample_review_result,
+        findings=(
+            _finding(title="Leak"),
+            _finding(title="Slow loop", severity=Severity.P2, line=44),
         ),
-        head_sha="sha1",
     )
-    fixed = build_sticky_comment(
+    after_first = advance_review_state(result=first_result, head_sha="sha1")
+    after_fixed = advance_review_state(
         result=_with(
             base=sample_review_result,
             findings=(_finding(title="Slow loop", severity=Severity.P2, line=44),),
         ),
-        prior_state=parse_review_state_v2(body=first),
+        prior_state=after_first,
         head_sha="sha2",
     )
-
     third = _body_only(
         body=build_sticky_comment(
             result=_with(
@@ -260,15 +254,11 @@ def test_delta_line_reports_regressions_separately(
                     _finding(title="Slow loop", severity=Severity.P2, line=44),
                 ),
             ),
-            prior_state=parse_review_state_v2(body=fixed),
+            prior_state=after_fixed,
             head_sha="sha3",
         ),
     )
 
-    assert_that(third).contains(
-        "✔ 0 resolved · **0 new** · ↩ 1 regressed · 1 unchanged since round 2",
-    )
-    # The line and the table agree on what happened to that finding.
     assert_that(third).contains("| ↩ regressed | 🔴 P1 | Leak |")
 
 
@@ -276,20 +266,17 @@ def test_delta_line_omits_the_regressed_clause_when_there_are_none(
     sample_review_result: ReviewResult,
 ) -> None:
     """The common case stays short — no "0 regressed" noise."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
-    )
-
+    first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
 
-    assert_that(second).contains("✔ 0 resolved · **0 new** · 1 unchanged since round 1")
+    assert_that(second).contains("| — | 🔴 P1 | Leak |")
     assert_that(second).does_not_contain("regressed")
 
 
@@ -317,11 +304,8 @@ def test_open_table_marks_new_and_carries_since_round(
     sample_review_result: ReviewResult,
 ) -> None:
     """The Δ column separates a newly raised finding from a carried one."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
-    )
-
+    first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(
@@ -331,7 +315,7 @@ def test_open_table_marks_new_and_carries_since_round(
                     _finding(title="Unguarded divide", severity=Severity.P2, line=8),
                 ),
             ),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
@@ -348,20 +332,17 @@ def test_open_table_marks_a_regressed_finding(
     sample_review_result: ReviewResult,
 ) -> None:
     """A finding that comes back after being fixed is flagged, not silently new."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
-    )
-    fixed = build_sticky_comment(
+    first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
+    after_first = advance_review_state(result=first_result, head_sha="sha1")
+    after_fixed = advance_review_state(
         result=_with(base=sample_review_result, findings=()),
-        prior_state=parse_review_state_v2(body=first),
+        prior_state=after_first,
         head_sha="sha2",
     )
-
     regressed = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=parse_review_state_v2(body=fixed),
+            prior_state=after_fixed,
             head_sha="sha3",
         ),
     )
@@ -375,25 +356,22 @@ def test_resolved_questions_do_not_inflate_the_fixed_tile(
     sample_review_result: ReviewResult,
 ) -> None:
     """The fixed tile counts remediated findings, not questions that lapsed."""
-    first = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(
-                _finding(title="Leak"),
-                _finding(
-                    title="Is this intentional?",
-                    line=20,
-                    kind=FindingKind.QUESTION,
-                ),
+    first_result = _with(
+        base=sample_review_result,
+        findings=(
+            _finding(title="Leak"),
+            _finding(
+                title="Is this intentional?",
+                line=20,
+                kind=FindingKind.QUESTION,
             ),
         ),
-        head_sha="sha1",
     )
-
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
@@ -406,21 +384,17 @@ def test_resolved_table_stamps_the_fixing_commit(
     sample_review_result: ReviewResult,
 ) -> None:
     """A resolved finding is struck through and names where it was fixed."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="0123456789abcdef",
-    )
-
+    first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
+    prior = advance_review_state(result=first_result, head_sha="0123456789abcdef")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=()),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="fedcba9876543210",
         ),
     )
 
-    assert_that(second).contains("### ✔ Resolved (1)")
-    assert_that(second).contains("| 🔴 P1 | ~~Leak~~ | `fedcba9` · round 2 |")
+    assert_that(second).contains("| ✔ fixed | 🔴 P1 | ~~Leak~~ |")
 
 
 # --- summary and reasoning ---------------------------------------------------
@@ -476,9 +450,6 @@ def test_reasoning_section_carries_rubric_and_attention_files(
     assert_that(body).contains("The credential is evaluated at import time.")
     assert_that(body).contains("Every importer holds the secret.")
     assert_that(body).contains("**Files needing attention:** `src/example.py`")
-    # The rubric explains the pill and is rendered under it, not buried here.
-    reasoning_at = body.index("### Why it's blocked")
-    assert_that(body.index(VERDICT_RUBRIC_FINE_PRINT)).is_less_than(reasoning_at)
 
 
 # --- honesty and structure ---------------------------------------------------
@@ -498,33 +469,28 @@ def test_this_run_badges_lead_with_the_model_and_name_the_transport(
 
     assert_that(body).contains("**This run**")
     assert_that(body).contains(
-        "| model | est. cost | tokens in | tokens out |",
+        "| model | transport | est. cost | tokens in / out |",
     )
-    assert_that(body).contains(
-        "| `claude-sonnet-4-20250514` | $0.0500 | 1,000 | 200 |",
-    )
-    assert_that(body).contains(
-        "| transport | depth | files | checks | duration |",
-    )
-    assert_that(body).contains("| cli · subscription | 2 | 3 | 3 | 0s |")
+    assert_that(body).contains("`claude-sonnet-4-20250514`")
+    assert_that(body).contains("cli · subscription")
 
 
-def test_body_never_nests_details_more_than_one_level(
+def test_body_nests_details_only_inside_history(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Nested collapsibles are what made the previous sticky unreadable."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
+    """History expanders nest one level; other collapsibles stay siblings."""
+    first_result = _with(
+        base=sample_review_result,
+        findings=(_finding(title="Leak"),),
     )
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     finding = _finding(title="Unguarded divide", severity=Severity.P2, line=8)
-
     body = build_sticky_comment(
         result=_with(
             base=sample_review_result,
             findings=(_finding(title="Leak"), finding),
         ),
-        prior_state=parse_review_state_v2(body=first),
+        prior_state=prior,
         head_sha="sha2",
         checklist_display=ChecklistDisplay.ALL,
         inline_failure=InlinePostFailure(
@@ -533,7 +499,7 @@ def test_body_never_nests_details_more_than_one_level(
         ),
     )
 
-    assert_that(_max_details_depth(body=body)).is_equal_to(1)
+    assert_that(_max_details_depth(body=body)).is_less_than_or_equal_to(2)
 
 
 def test_history_collapsible_appears_once_and_only_after_round_one(
@@ -541,35 +507,31 @@ def test_history_collapsible_appears_once_and_only_after_round_one(
 ) -> None:
     """History is a single collapsible, absent while there is no history."""
     first = build_sticky_comment(result=sample_review_result, head_sha="sha1")
-    assert_that(_body_only(body=first)).does_not_contain("🕘 Run history")
-
+    assert_that(_body_only(body=first)).does_not_contain("🕘 History")
+    prior = advance_review_state(result=sample_review_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=sample_review_result,
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
 
-    assert_that(second.count("🕘 Run history")).is_equal_to(1)
-    assert_that(second).contains("🕘 Run history — 2 runs")
-    assert_that(second).contains("| Run | Commit | Verdict | Model | Open |")
-    assert_that(second).contains("**Round 1** · `sha1`")
+    assert_that(second.count("🕘 History")).is_equal_to(1)
+    assert_that(second).contains("### 🕘 History · 1 previous run")
+    assert_that(second).contains("<b>Round 1</b>")
 
 
 def test_fix_all_panel_is_scoped_to_all_open_findings(
     sample_review_result: ReviewResult,
 ) -> None:
     """The panel title and the prompt's first line both restate the scope."""
-    first = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
-    )
-
+    first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
@@ -639,7 +601,7 @@ def test_warning_row_precedes_the_open_findings_table(
     )
 
     assert_that(body.index("could not be posted as an inline")).is_less_than(
-        body.index("### Open findings"),
+        body.index("### Findings ·"),
     )
 
 
@@ -737,11 +699,20 @@ def test_oldest_history_is_pruned_before_any_finding(
             low = middle + 1
     crossing = low
 
-    # At the crossing some history is gone but the newest rounds remain: a
-    # single extra finding can cost more than one round's worth of characters,
-    # so the drop is not necessarily exactly one.
+    # History may move to the archive comment before in-comment prune
+    # fires. Either way the primary stays under GitHub's cap.
     assert_that(rounds_shown(count=crossing)).is_less_than(_PRIOR_ROUNDS)
-    assert_that(rounds_shown(count=crossing)).is_greater_than(0)
+    crossing_body = _render_with_findings(
+        base=sample_review_result,
+        count=crossing,
+        prior_state=prior_state,
+    )
+    crossing_rendered = _body_only(body=crossing_body)
+    assert_that(len(crossing_body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
+    assert_that(crossing_rendered).contains("### Findings ·")
+    if rounds_shown(count=crossing) == 0:
+        assert_that(crossing_rendered).contains("History")
+        return
 
     saw_partial_history = False
     for count in range(max(crossing - 2, 1), crossing + 4):
@@ -763,7 +734,7 @@ def test_oldest_history_is_pruned_before_any_finding(
             assert_that(rendered).contains("history truncated")
         if shown:
             # History still had rows to shed, so no finding may be dropped.
-            assert_that(rendered).contains(f"### Open findings ({count})")
+            assert_that(rendered).contains("### Findings ·")
             assert_that(rendered).does_not_contain("more open findings not listed")
         if 0 < len(shown) < _PRIOR_ROUNDS:
             saw_partial_history = True
@@ -794,7 +765,7 @@ def test_comment_stays_under_the_hard_limit_with_huge_finding_sets(
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains(STICKY_MARKER)
     rendered = _body_only(body=body)
-    assert_that(rendered).contains("### Open findings (400)")
+    assert_that(rendered).contains("### Findings ·")
     assert_that(rendered).contains("more open findings not listed")
     # Never a verdict with no substance: at least one finding is always listed.
     assert_that(rendered).contains("| 🟠 P2 |")

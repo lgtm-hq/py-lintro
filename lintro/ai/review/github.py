@@ -30,6 +30,7 @@ from lintro.ai.review.finding_matcher import (
     normalize_file_path,
 )
 from lintro.ai.review.github_constants import (
+    ARCHIVE_MARKER,
     GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
@@ -55,7 +56,9 @@ from lintro.ai.review.github_sticky import (
     _cap_body as _cap_body,
 )
 from lintro.ai.review.github_sticky import (
+    build_sticky_bodies,
     build_sticky_comment,
+    matcher_reviewed_paths,
     parse_review_state,
     parse_review_state_v2,
 )
@@ -76,6 +79,7 @@ __all__ = [
     "GITHUB_COMMENT_HARD_LIMIT",
     "STATE_MARKER_PREFIX",
     "STICKY_MARKER",
+    "ARCHIVE_MARKER",
     "MAX_COMMENT_CHARS",
     "build_review_body",
     "build_sticky_comment",
@@ -103,6 +107,8 @@ def post_review_to_github(
     cost_basis: str = "",
     config_source: str = "",
     auto_resolve: bool = True,
+    prior_state: ReviewState | None = None,
+    departed_paths: frozenset[str] | None = None,
 ) -> bool:
     """Post (or update) the sticky review comment and inline findings.
 
@@ -127,6 +133,10 @@ def post_review_to_github(
             came from, shown under the review body's run stats.
         auto_resolve: ``review.auto_resolve``. When false, an addressed thread
             still gets its banner but is left for a human to resolve.
+        prior_state: Artifact or ledger state. When omitted, the sticky blob
+            is migrated (findings and runs only).
+        departed_paths: Paths that left the diff this round (deletes / rename
+            sources). Their open findings may resolve.
 
     Returns:
         True when posting succeeded; False on failure or when GitHub context is
@@ -138,7 +148,11 @@ def post_review_to_github(
         return False
 
     prompt_questions = question_map or {}
-    comment_id, prior_state = _load_prior_state(reporter=gh_reporter)
+    comment_id, sticky_state = _load_prior_state(reporter=gh_reporter)
+    if prior_state is None or not (
+        prior_state.coverage or prior_state.runs or prior_state.findings
+    ):
+        prior_state = sticky_state
     diff_lines = gh_reporter.fetch_pr_diff_lines()
     head_sha = result.metadata.head_ref
 
@@ -147,8 +161,8 @@ def post_review_to_github(
         inline_failure: InlinePostFailure | None,
         comment_ids: dict[str, int] | None = None,
     ) -> str:
-        """Render the sticky body against the unchanged prior state."""
-        return build_sticky_comment(
+        """Render the primary sticky body against the unchanged prior state."""
+        primary, archive = build_sticky_bodies(
             result=result,
             prior_state=prior_state,
             head_sha=head_sha,
@@ -162,7 +176,12 @@ def post_review_to_github(
             inline_comment_ids=comment_ids,
             repo=gh_reporter.repo or "",
             pr_number=gh_reporter.pr_number,
+            departed_paths=departed_paths,
         )
+        render.archive = archive  # type: ignore[attr-defined]
+        return primary
+
+    render.archive = None  # type: ignore[attr-defined]
 
     inline_findings, fallback = _partition_findings(
         findings=result.findings,
@@ -176,6 +195,8 @@ def post_review_to_github(
         findings=result.findings,
         round_number=prior_state.next_round,
         head_sha=head_sha,
+        reviewed_paths=matcher_reviewed_paths(result=result),
+        departed_paths=departed_paths,
     )
 
     # A finding that maps to no line in the diff never gets an inline comment,
@@ -193,6 +214,10 @@ def post_review_to_github(
         reporter=gh_reporter,
         body=render(inline_failure=failure),
         comment_id=comment_id,
+    )
+    _upsert_archive(
+        reporter=gh_reporter,
+        body=getattr(render, "archive", None),
     )
 
     if inline_findings:
@@ -261,6 +286,10 @@ def post_review_to_github(
             failure=failure,
             comment_ids=comment_ids,
             comment_id=comment_id,
+        )
+        _upsert_archive(
+            reporter=gh_reporter,
+            body=getattr(render, "archive", None),
         )
 
     return success
@@ -653,6 +682,7 @@ def post_review_error_to_github(
     pr_number: int | None = None,
     repo: str | None = None,
     reporter: GitHubPRReporter | None = None,
+    prior_state: ReviewState | None = None,
 ) -> bool:
     """Post (or update) the sticky comment with a formatted API-error message.
 
@@ -668,6 +698,9 @@ def post_review_error_to_github(
         pr_number: Optional PR number override.
         repo: Optional repository override (owner/name).
         reporter: Optional preconfigured GitHub reporter.
+        prior_state: Artifact or local ledger already loaded for this
+            invocation. When set, the error sticky re-renders from it
+            instead of decoding a leftover blob.
 
     Returns:
         True when posting succeeded; False otherwise.
@@ -676,7 +709,11 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
-    comment_id, prior_state = _load_prior_state(reporter=gh_reporter)
+    comment_id, sticky_state = _load_prior_state(reporter=gh_reporter)
+    if prior_state is None or not (
+        prior_state.coverage or prior_state.runs or prior_state.findings
+    ):
+        prior_state = sticky_state
     body = format_error_comment(
         error=error,
         provider=provider,
@@ -710,6 +747,24 @@ def _load_prior_state(
         return None, ReviewState()
     comment_id, prior_body = found
     return comment_id, parse_review_state_v2(body=prior_body)
+
+
+def _upsert_archive(
+    *,
+    reporter: GitHubPRReporter,
+    body: str | None,
+) -> None:
+    """Create or update the history-archive sticky when one was rendered.
+
+    Args:
+        reporter: GitHub reporter used to find and write the archive.
+        body: Archive Markdown, or ``None`` when history still fits.
+    """
+    if not body:
+        return
+    found = reporter.find_issue_comment(marker=ARCHIVE_MARKER)
+    comment_id = found[0] if found is not None else None
+    _upsert_sticky(reporter=reporter, body=body, comment_id=comment_id)
 
 
 def _upsert_sticky(

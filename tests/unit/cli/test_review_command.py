@@ -18,12 +18,16 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.state_store import write_local_state
 from lintro.cli import cli
 from lintro.cli_utils.commands.review import (
     _cli_overrides,
     _describe_config_source,
+    _load_prior_review_state,
     _merge_advisory_into_json,
 )
 from lintro.models.core.tool_result import ToolResult
@@ -103,12 +107,12 @@ def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
 
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("--max-cost-usd='plenty'")
-    assert_that(result.output).contains("0 for uncapped")
+    assert_that(result.output).contains("uncapped")
     assert_that(result.output).does_not_contain("Traceback")
 
 
 def test_review_max_cost_flag_beats_transport_profile() -> None:
-    """``--max-cost-usd 0`` lifts a YAML transport-profile cap (#2024)."""
+    """``--max-cost-usd uncapped`` lifts a YAML transport-profile cap (#2154)."""
     runner = CliRunner()
     mock_context = MagicMock()
     mock_context.changed_files = []
@@ -167,7 +171,7 @@ def test_review_max_cost_flag_beats_transport_profile() -> None:
             model_name="gpt-4o",
             name="openai",
         )
-        result = runner.invoke(cli, ["review", "--max-cost-usd", "0"])
+        result = runner.invoke(cli, ["review", "--max-cost-usd", "uncapped"])
 
     assert_that(result.exit_code).is_equal_to(0)
     provider_config = mock_get_provider.call_args.args[0]
@@ -1951,3 +1955,34 @@ def test_review_post_reports_config_source_and_transport() -> None:
         "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
     )
     assert_that(kwargs["transport"]).is_equal_to(str(AITransport.API))
+
+
+def test_ci_does_not_import_the_local_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Actions runs may only resume from downloaded artifacts."""
+    ledger = tmp_path / "ledger"
+    write_local_state(
+        state=ReviewState(
+            coverage=(CoverageRecord("a.py", "h"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=999,
+        ),
+        key="pr-999",
+        directory=ledger,
+    )
+    monkeypatch.setattr(
+        "lintro.ai.review.state_store.LOCAL_STATE_DIR",
+        ledger,
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path / "empty-artifacts"))
+    (tmp_path / "empty-artifacts").mkdir()
+    loaded = _load_prior_review_state(
+        pr_number=999,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+        post=False,
+    )
+    assert_that(loaded.coverage).is_empty()

@@ -98,6 +98,30 @@ def test_clean_review_passes(classifier: ModuleType) -> None:
     assert_that(report.transport).is_equal_to("cli")
 
 
+def test_incomplete_coverage_reddens_the_check(classifier: ModuleType) -> None:
+    """A produced review with incomplete coverage must fail the check (#2154)."""
+    output = json.dumps(
+        {
+            "readiness_verdict": "incomplete",
+            "coverage": {
+                "reviewed": 2,
+                "carried": 0,
+                "awaiting": 5,
+                "invalidated": 0,
+                "eligible": 7,
+                "covered_at_head": 2,
+                "complete": False,
+            },
+            "stopped_reason": "cost cap",
+        },
+    )
+    report = classifier.classify(status=0, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("2/7 files covered at HEAD")
+
+
 def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
     """Findings mean the review worked; they must not redden an advisory check.
 

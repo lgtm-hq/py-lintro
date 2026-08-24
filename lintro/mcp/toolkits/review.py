@@ -546,12 +546,18 @@ def _review_payload(
                 "cost_usd": result.metadata.cost_estimate_usd,
             },
         )
-    return {
+    payload: dict[str, Any] = {
         "summary": result.summary,
         "findings": [_finding_to_dict(finding=finding) for finding in result.findings],
         "run": _run_metadata(metadata=result.metadata),
         "budget": budget.to_dict(exceeded=exceeded),
+        "readiness_verdict": result.readiness_verdict.value,
     }
+    if result.coverage is not None:
+        payload["coverage"] = result.coverage.to_dict()
+        payload["partial"] = result.metadata.partial
+        payload["stopped_reason"] = result.metadata.stopped_reason
+    return payload
 
 
 def _no_changes_payload(

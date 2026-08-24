@@ -169,6 +169,18 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                 },
             },
         },
+        "flagged_files": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["path", "reason"],
+                "additionalProperties": False,
+                "properties": {
+                    "path": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
     },
 }
 

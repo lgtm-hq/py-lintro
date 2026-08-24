@@ -48,5 +48,11 @@
       "confidence": "high|medium|low",
       "checklist_ids": [1, 2]
     }
+  ],
+  "flagged_files": [
+    {
+      "path": "path/to/already-reviewed-file.py",
+      "reason": "Why this covered file should be re-read next round"
+    }
   ]
 }
