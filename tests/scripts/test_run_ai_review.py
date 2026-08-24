@@ -12,6 +12,7 @@ import os
 import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -161,6 +162,15 @@ def test_shell_help_exits_zero() -> None:
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
+    assert_that(result.stdout).contains("--locate-prior-state")
+
+
+def test_shell_locate_prior_state_is_a_noop_without_github() -> None:
+    """Locate mode does not require a provider credential and always exits 0."""
+    result = _run_shell(args=["--locate-prior-state"], env_overrides={})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("run-id=")
 
 
 def test_shell_fails_visibly_without_oauth_token() -> None:
@@ -393,18 +403,20 @@ def test_workflow_job_is_same_repo_only() -> None:
 
 
 def test_workflow_job_reads_pull_requests() -> None:
-    """The workflow token only needs contents + pull-requests read.
+    """The workflow token stays read-only: contents, PRs, and actions.
 
     ``actions/checkout`` reads the trusted base ref (``contents: read``).
-    ``gh`` fetches the PR diff (``pull-requests: read``). ``--post`` writes
-    as ``lintro-review[bot]`` via the App token (#2050), so the job-scoped
-    ``GITHUB_TOKEN`` stays read-only.
+    ``gh`` fetches the PR diff (``pull-requests: read``). Cross-run
+    artifact listing needs ``actions: read`` (#2158). ``--post`` writes
+    as ``lintro-review[bot]`` via the App token (#2050), so the
+    job-scoped ``GITHUB_TOKEN`` never gains write.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     perms = loaded["jobs"]["ai-review"]["permissions"]
     assert_that(perms["pull-requests"]).is_equal_to("read")
     assert_that(perms["contents"]).is_equal_to("read")
+    assert_that(perms["actions"]).is_equal_to("read")
 
 
 def test_workflow_installs_from_base_ref_not_pr_head() -> None:
@@ -445,6 +457,10 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     )
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
     assert_that(workflow_text).contains("TWO-PR BOOTSTRAP")
+    assert_that(workflow_text).contains("default branch")
+    assert_that(workflow_text).does_not_contain(
+        "GitHub runs the workflow YAML from the PR",
+    )
     assert_that(workflow_text).does_not_contain(".ai-review-installer")
     assert_that(workflow_text).does_not_contain("enable_cursor_workspace_trust")
 
@@ -647,7 +663,7 @@ def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """Provider credentials are injected only into the final review step env.
+    """Provider credentials are injected only into the review step env.
 
     Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
@@ -722,6 +738,8 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
         "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -934,6 +952,7 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "registry.npmjs.org:443",
         "nodejs.org:443",
         "release-assets.githubusercontent.com:443",
+        "pipelines.actions.githubusercontent.com:443",
     )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
@@ -1015,3 +1034,102 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
         f"{posting_margin_minutes} min posting margin — bump it together "
         "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
     ).is_greater_than_or_equal_to(budget)
+
+
+def _ai_review_steps() -> list[Any]:
+    """Return the parsed AI-review job steps.
+
+    Returns:
+        Step mappings from ``ai-review.yml``.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    assert_that(steps).is_instance_of(list)
+    return list(steps)
+
+
+def test_workflow_locates_prior_state_via_existing_script() -> None:
+    """Prior-state lookup extends ``run-ai-review.sh``, not a new script."""
+    steps = _ai_review_steps()
+    locate_steps = [
+        step for step in steps if step.get("name") == "Locate prior review-state run"
+    ]
+    assert_that(locate_steps).is_length(1)
+    locate = locate_steps[0]
+    assert_that(locate["id"]).is_equal_to("prior-state")
+    assert_that(locate["run"]).is_equal_to(
+        "scripts/ci/run-ai-review.sh --locate-prior-state",
+    )
+    env = locate["env"]
+    assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
+    assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
+    assert_that(env["GITHUB_RUN_ID"]).is_equal_to("${{ github.run_id }}")
+    assert_that(env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
+    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        assert_that(env).does_not_contain_key(credential_env)
+
+
+def test_workflow_downloads_prior_state_across_runs() -> None:
+    """Cross-run download uses the pinned action and skips when no run-id."""
+    steps = _ai_review_steps()
+    download_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and str(step["uses"]).startswith("actions/download-artifact@")
+    ]
+    assert_that(download_steps).is_length(1)
+    download = download_steps[0]
+    assert_that(download["if"]).is_equal_to("steps.prior-state.outputs.run-id != ''")
+    download_with = download["with"]
+    assert_that(download_with["run-id"]).is_equal_to(
+        "${{ steps.prior-state.outputs.run-id }}",
+    )
+    assert_that(download_with["pattern"]).is_equal_to(
+        "lintro-review-state-pr-${{ github.event.number }}-*",
+    )
+    assert_that(download_with["merge-multiple"]).is_true()
+    assert_that(download_with["github-token"]).is_equal_to(
+        "${{ secrets.GITHUB_TOKEN }}",
+    )
+    assert_that(download_with["path"]).is_equal_to("ai-review-state")
+
+
+def test_workflow_uploads_state_artifacts_on_always() -> None:
+    """The final upload is always() and no-ops when no state files exist."""
+    steps = _ai_review_steps()
+    upload_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and str(step["uses"]).startswith("actions/upload-artifact@")
+    ]
+    assert_that(upload_steps).is_length(1)
+    upload = upload_steps[0]
+    assert_that(upload["if"]).is_equal_to("always()")
+    upload_with = upload["with"]
+    name = str(upload_with["name"])
+    assert_that(name).contains("lintro-review-state-pr-")
+    assert_that(name).contains("github.event.number")
+    assert_that(name).contains("github.run_attempt")
+    assert_that(name).contains("-final")
+    assert_that(upload_with["path"]).is_equal_to("ai-review-state/")
+    assert_that(upload_with["if-no-files-found"]).is_equal_to("ignore")
+    assert_that(upload_with["retention-days"]).is_equal_to(30)
+
+
+def test_workflow_keeps_mint_immediately_before_review() -> None:
+    """Artifact plumbing must not sit between the App token and ``--post``."""
+    steps = _ai_review_steps()
+    names = [str(step.get("name", "")) for step in steps]
+    mint_index = names.index("Mint lintro-review App token")
+    review_index = next(
+        index for index, name in enumerate(names) if name.startswith("Run AI review")
+    )
+    upload_index = names.index("Upload review-state artifacts")
+    locate_index = names.index("Locate prior review-state run")
+    download_index = names.index("Download prior review-state artifacts")
+    assert_that(review_index).is_equal_to(mint_index + 1)
+    assert_that(locate_index).is_less_than(mint_index)
+    assert_that(download_index).is_less_than(mint_index)
+    assert_that(upload_index).is_greater_than(review_index)
