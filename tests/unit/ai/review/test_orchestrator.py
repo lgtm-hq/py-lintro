@@ -17,6 +17,7 @@ from lintro.ai.exceptions import AIError, AIProviderError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -669,6 +670,81 @@ def test_incremental_checkpoint_applies_sensitivity_filter(
     titles = {finding.title for finding in loaded.findings}
     assert_that(titles).contains("Fail-open default")
     assert_that(titles).does_not_contain("Doc drift note")
+
+
+def test_incremental_checkpoint_keeps_inherited_sibling_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-hash coverage must not resolve findings on unread sibling files."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint="keep-b",
+                title="old nit on b",
+                file="b.py",
+                description="Sibling body",
+                cause="sibling cause",
+                fix="sibling fix",
+            ),
+        ),
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="b.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=("diff --git a/a.py b/a.py\n+x\ndiff --git a/b.py b/b.py\n+x"),
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            prior_state=prior,
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    sibling = next(finding for finding in loaded.findings if finding.file == "b.py")
+    assert_that(sibling.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(sibling.title).is_equal_to("old nit on b")
 
 
 def test_parallel_timeout_keeps_completed_sibling() -> None:

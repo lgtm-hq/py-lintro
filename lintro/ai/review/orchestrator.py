@@ -337,12 +337,17 @@ def _write_incremental_coverage_part(
         ),
         policy=policy,
     )
+    # Coverage may credit same-hash siblings; matching must not. Those
+    # files were not re-read, so their prior open findings stay carried.
+    actually_reviewed = frozenset(
+        path for path in resume.queue if path in completed_files
+    )
     match = match_findings(
         previous=seed,
         findings=findings,
         round_number=seed.next_round,
         head_sha=context.head_ref,
-        reviewed_paths=frozenset(covered_now),
+        reviewed_paths=actually_reviewed,
     )
     write_state_part(
         state=replace(
