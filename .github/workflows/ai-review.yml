@@ -86,10 +86,12 @@ jobs:
   ai-review:
     name: AI Review
     runs-on: ubuntu-24.04
-    # No continue-on-error, at either level: a job-level continue-on-error
-    # rewrites the conclusion to `success`, which is precisely how a review that
-    # never ran kept reading as a pass (#1826). The check is not required, so a
-    # red conclusion here is visible without being blocking.
+    # No job-level continue-on-error: that rewrites the conclusion to
+    # `success`, which is precisely how a review that never ran kept
+    # reading as a pass (#1826). Locate/download are the only step-level
+    # exceptions (best-effort plumbing; they must not skip the review).
+    # The review step itself still has none. The check is not required,
+    # so a red conclusion here is visible without being blocking.
     #
     # Skip draft PRs and never run for fork PRs. Fork PRs already cannot read
     # secrets, but requiring head.repo == the base repo makes it explicit that
@@ -197,17 +199,29 @@ jobs:
         # API listing, not download-artifact's same-run default. Extends
         # run-ai-review.sh so this is not a new script invocation (#2158).
         # Empty run-id is the no-op: lintro does not write state yet.
+        # continue-on-error keeps a locator failure from skipping the
+        # review. The file-existence guard covers already-open PRs whose
+        # base.sha still has the pre-plumbing run-ai-review.sh (that
+        # older script treats --locate-prior-state as a PR number).
         id: prior-state
+        continue-on-error: true
         env:
           PR_NUMBER: ${{ github.event.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/ci/run-ai-review.sh --locate-prior-state
+        run: |
+          if [[ -f scripts/ci/review_state_artifacts.py ]]; then
+            scripts/ci/run-ai-review.sh --locate-prior-state
+          else
+            echo "run-id=" >>"${GITHUB_OUTPUT:?}"
+          fi
 
       - name: Download prior review-state artifacts
         # Skipped until a prior completed run actually uploaded state.
+        # continue-on-error: a download failure must not skip the review.
         if: steps.prior-state.outputs.run-id != ''
+        continue-on-error: true
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

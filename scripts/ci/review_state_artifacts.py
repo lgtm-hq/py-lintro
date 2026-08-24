@@ -23,7 +23,7 @@ import subprocess  # nosec B404 - gh argv is built internally; shell=False
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -37,6 +37,7 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
 RUNS_PER_PAGE: Final[int] = 100
 ARTIFACTS_PER_PAGE: Final[int] = 100
+RETENTION_DAYS: Final[int] = 30
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,8 @@ class WorkflowRun:
         status: Run status (must be ``completed``).
         path: Workflow path recorded on the run.
         created_at: When the run was created; newest wins.
+        pull_request_numbers: PRs attached on the run. Empty on some
+            ``pull_request_target`` payloads; then artifact names decide.
     """
 
     run_id: int
@@ -69,6 +72,7 @@ class WorkflowRun:
     status: str
     path: str
     created_at: datetime
+    pull_request_numbers: tuple[int, ...] = ()
 
 
 GhApi = Callable[[str], Any | None]
@@ -124,6 +128,39 @@ def has_valid_state_artifact(
     )
 
 
+def is_within_retention(run: WorkflowRun, *, now: datetime) -> bool:
+    """Return whether ``run`` can still hold a non-expired state artifact.
+
+    Args:
+        run: Candidate workflow run.
+        now: Clock used for the retention cutoff.
+
+    Returns:
+        True when ``created_at`` is inside ``RETENTION_DAYS``.
+    """
+    created = run.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    return created >= current - timedelta(days=RETENTION_DAYS)
+
+
+def mentions_other_pr(run: WorkflowRun, *, pr_number: int) -> bool:
+    """Return whether the run is known to belong to a different PR.
+
+    An empty ``pull_requests`` list is treated as unknown — common for
+    ``pull_request_target`` — so the caller still checks artifact names.
+
+    Args:
+        run: Candidate workflow run.
+        pr_number: Pull request being resumed.
+
+    Returns:
+        True when the run lists PRs and this PR is not among them.
+    """
+    return bool(run.pull_request_numbers) and pr_number not in run.pull_request_numbers
+
+
 def is_trusted_completed_run(run: WorkflowRun) -> bool:
     """Return whether ``run`` is a completed trusted AI-review run.
 
@@ -147,16 +184,19 @@ def select_prior_run_id(
     *,
     pr_number: int,
     current_run_id: int | None,
+    now: datetime,
 ) -> int | None:
     """Select the latest completed trusted run that carries valid state.
 
     Conclusion is not consulted. The current run is never selected.
+    Runs older than the artifact retention window cannot be eligible.
 
     Args:
         runs: Candidate runs; order does not matter.
         artifacts_by_run: Artifacts keyed by run id.
         pr_number: Pull request whose state is being resumed.
         current_run_id: Run to exclude, if known.
+        now: Clock used for the retention cutoff.
 
     Returns:
         The selected run id, or ``None`` when nothing is eligible.
@@ -166,6 +206,8 @@ def select_prior_run_id(
         for run in runs
         if is_trusted_completed_run(run)
         and run.run_id != current_run_id
+        and is_within_retention(run, now=now)
+        and not mentions_other_pr(run, pr_number=pr_number)
         and has_valid_state_artifact(
             artifacts_by_run.get(run.run_id, ()),
             pr_number=pr_number,
@@ -192,7 +234,30 @@ def _parse_datetime(raw: str) -> datetime:
     try:
         return datetime.fromisoformat(text)
     except ValueError:
-        return datetime.fromtimestamp(0).astimezone()
+        return datetime.fromtimestamp(0, tz=UTC)
+
+
+def _parse_pr_numbers(payload: Mapping[str, Any]) -> tuple[int, ...]:
+    """Extract pull-request numbers from a workflow-run payload.
+
+    Args:
+        payload: Raw run mapping from the Actions API.
+
+    Returns:
+        Parsed PR numbers, possibly empty.
+    """
+    raw = payload.get("pull_requests")
+    if not isinstance(raw, list):
+        return ()
+    numbers: list[int] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            numbers.append(int(item["number"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return tuple(numbers)
 
 
 def parse_workflow_run(payload: Mapping[str, Any]) -> WorkflowRun | None:
@@ -214,6 +279,7 @@ def parse_workflow_run(payload: Mapping[str, Any]) -> WorkflowRun | None:
         status=str(payload.get("status", "")),
         path=str(payload.get("path", "")),
         created_at=_parse_datetime(str(payload.get("created_at", ""))),
+        pull_request_numbers=_parse_pr_numbers(payload),
     )
 
 
@@ -316,37 +382,6 @@ def _yield_api_pages(
         page += 1
 
 
-def fetch_completed_runs(repo: str, *, gh_api: GhApi = _gh_api) -> list[WorkflowRun]:
-    """List completed ``ai-review.yml`` runs for ``repo``.
-
-    Paginates newest-first. A 30-day artifact can sit well past the first
-    page on a busy repo; a single ``per_page`` window is not the
-    selection rule (#2154).
-
-    Args:
-        repo: ``owner/name`` repository slug.
-        gh_api: Injectable GitHub API caller.
-
-    Returns:
-        Parsed runs; unparseable entries are dropped.
-    """
-    path = (
-        f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
-        f"?event={WORKFLOW_EVENT}&status=completed"
-    )
-    runs: list[WorkflowRun] = []
-    for item in _yield_api_pages(
-        path,
-        "workflow_runs",
-        per_page=RUNS_PER_PAGE,
-        gh_api=gh_api,
-    ):
-        parsed = parse_workflow_run(item)
-        if parsed is not None:
-            runs.append(parsed)
-    return runs
-
-
 def fetch_artifacts(
     repo: str,
     run_id: int,
@@ -382,22 +417,27 @@ def locate_prior_run_id(
     pr_number: int,
     current_run_id: int | None,
     gh_api: GhApi = _gh_api,
+    now: datetime | None = None,
 ) -> int | None:
     """Walk completed runs newest-first and return the first eligible.
 
     Pages until a valid state artifact is found so a busy repo cannot
     hide resume state behind a fixed window. Stops at the first match
-    because the Actions API returns ``created_at`` descending.
+    because the Actions API returns ``created_at`` descending. Stops
+    entirely once runs fall outside the 30-day artifact retention
+    window — an older run cannot hold a non-expired artifact.
 
     Args:
         repo: ``owner/name`` repository slug.
         pr_number: Pull request whose state is being resumed.
         current_run_id: Run to exclude, if known.
         gh_api: Injectable GitHub API caller.
+        now: Clock used for the retention cutoff; defaults to UTC now.
 
     Returns:
         The selected run id, or ``None`` when nothing is eligible.
     """
+    clock = now if now is not None else datetime.now(tz=UTC)
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
         f"?event={WORKFLOW_EVENT}&status=completed"
@@ -412,6 +452,10 @@ def locate_prior_run_id(
         if run is None:
             continue
         if not is_trusted_completed_run(run) or run.run_id == current_run_id:
+            continue
+        if not is_within_retention(run, now=clock):
+            return None
+        if mentions_other_pr(run, pr_number=pr_number):
             continue
         artifacts = fetch_artifacts(repo, run.run_id, gh_api=gh_api)
         if has_valid_state_artifact(artifacts, pr_number=pr_number):
@@ -458,6 +502,7 @@ def locate_from_env(
     env: Mapping[str, str],
     *,
     gh_api: GhApi = _gh_api,
+    now: datetime | None = None,
 ) -> int | None:
     """Resolve the prior-state run from process environment.
 
@@ -466,6 +511,7 @@ def locate_from_env(
     Args:
         env: Process environment.
         gh_api: Injectable GitHub API caller.
+        now: Clock used for the retention cutoff; defaults to UTC now.
 
     Returns:
         The selected run id, or ``None``.
@@ -481,6 +527,7 @@ def locate_from_env(
             pr_number=pr_number,
             current_run_id=current_run_id,
             gh_api=gh_api,
+            now=now,
         )
     except Exception:  # noqa: BLE001 - fail-safe empty state, never fail the job
         return None

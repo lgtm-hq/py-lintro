@@ -369,22 +369,42 @@ def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     assert_that(pull_request).does_not_contain_key("paths-ignore")
 
 
+_BEST_EFFORT_STATE_STEPS = frozenset(
+    {
+        "Locate prior review-state run",
+        "Download prior review-state artifacts",
+    },
+)
+
+
 def test_workflow_never_rewrites_its_conclusion_to_success() -> None:
-    """No ``continue-on-error`` anywhere, so a failed review shows as failed.
+    """The review step cannot swallow failure; locate/download may.
 
     Job-level ``continue-on-error`` rewrites the job conclusion to ``success``,
     which is exactly how a review that produced nothing kept reading as a pass for
-    months (#1826). The check is not required, so a red conclusion is visible
-    without being blocking — that is the whole trade this asserts.
+    months (#1826). Locate and download are best-effort plumbing: their
+    ``continue-on-error`` keeps a missing prior artifact from skipping the
+    review. The review step itself still has none. The check is not required,
+    so a red conclusion is visible without being blocking.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     job = loaded["jobs"]["ai-review"]
     assert_that(job).does_not_contain_key("continue-on-error")
+    review_seen = False
     for step in job["steps"]:
+        name = str(step.get("name", ""))
+        if name in _BEST_EFFORT_STATE_STEPS:
+            assert_that(step.get("continue-on-error")).described_as(
+                f"step {name!r} is best-effort plumbing",
+            ).is_true()
+            continue
+        if name.startswith("Run AI review"):
+            review_seen = True
         assert_that(step).described_as(
-            f"step {step.get('name')!r} must not swallow its own failure",
+            f"step {name!r} must not swallow its own failure",
         ).does_not_contain_key("continue-on-error")
+    assert_that(review_seen).is_true()
 
 
 def test_workflow_job_is_same_repo_only() -> None:
@@ -1057,9 +1077,11 @@ def test_workflow_locates_prior_state_via_existing_script() -> None:
     assert_that(locate_steps).is_length(1)
     locate = locate_steps[0]
     assert_that(locate["id"]).is_equal_to("prior-state")
-    assert_that(locate["run"]).is_equal_to(
-        "scripts/ci/run-ai-review.sh --locate-prior-state",
-    )
+    assert_that(locate.get("continue-on-error")).is_true()
+    run = locate["run"]
+    assert_that(run).contains("scripts/ci/review_state_artifacts.py")
+    assert_that(run).contains("scripts/ci/run-ai-review.sh --locate-prior-state")
+    assert_that(run).contains("GITHUB_OUTPUT")
     env = locate["env"]
     assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
     assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
@@ -1080,6 +1102,7 @@ def test_workflow_downloads_prior_state_across_runs() -> None:
     ]
     assert_that(download_steps).is_length(1)
     download = download_steps[0]
+    assert_that(download.get("continue-on-error")).is_true()
     assert_that(download["if"]).is_equal_to("steps.prior-state.outputs.run-id != ''")
     download_with = download["with"]
     assert_that(download_with["run-id"]).is_equal_to(

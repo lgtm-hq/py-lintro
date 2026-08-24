@@ -46,6 +46,9 @@ def artifacts() -> ModuleType:
     return _load()
 
 
+NOW = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+
+
 def _ts(*, minutes: int) -> datetime:
     """Return a stable UTC timestamp offset from a fixed origin.
 
@@ -62,30 +65,38 @@ def _run(
     module: ModuleType,
     run_id: int,
     *,
-    minutes: int,
+    minutes: int | None = None,
+    created_at: datetime | None = None,
     event: str = "pull_request_target",
     status: str = "completed",
     path: str = ".github/workflows/ai-review.yml",
+    pull_request_numbers: tuple[int, ...] = (),
 ) -> Any:
     """Build a ``WorkflowRun`` for selection tests.
 
     Args:
         module: Loaded helper module.
         run_id: Actions run id.
-        minutes: Timestamp offset.
+        minutes: Timestamp offset from the origin. Ignored when
+            ``created_at`` is set.
+        created_at: Exact timestamp. Preferred over ``minutes`` when both
+            are provided.
         event: Trigger event.
         status: Run status.
         path: Workflow path recorded on the run.
+        pull_request_numbers: PRs attached on the run payload.
 
     Returns:
         A ``WorkflowRun`` instance.
     """
+    timestamp = created_at if created_at is not None else _ts(minutes=minutes or 0)
     return module.WorkflowRun(
         run_id=run_id,
         event=event,
         status=status,
         path=path,
-        created_at=_ts(minutes=minutes),
+        created_at=timestamp,
+        pull_request_numbers=pull_request_numbers,
     )
 
 
@@ -157,6 +168,7 @@ def test_select_prior_run_id_picks_newest_eligible(artifacts: ModuleType) -> Non
         },
         pr_number=7,
         current_run_id=99,
+        now=NOW,
     )
     assert_that(selected).is_equal_to(22)
 
@@ -173,6 +185,7 @@ def test_select_prior_run_id_excludes_current_run(artifacts: ModuleType) -> None
         },
         pr_number=3,
         current_run_id=50,
+        now=NOW,
     )
     assert_that(selected).is_equal_to(40)
 
@@ -185,6 +198,7 @@ def test_select_prior_run_id_ignores_conclusion(artifacts: ModuleType) -> None:
         {8: [_artifact(artifacts, "lintro-review-state-pr-4-attempt-1-part-2")]},
         pr_number=4,
         current_run_id=9,
+        now=NOW,
     )
     assert_that(selected).is_equal_to(8)
 
@@ -197,6 +211,7 @@ def test_select_prior_run_id_rejects_wrong_event(artifacts: ModuleType) -> None:
         {6: [_artifact(artifacts, "lintro-review-state-pr-5-attempt-1-final")]},
         pr_number=5,
         current_run_id=1,
+        now=NOW,
     )
     assert_that(selected).is_none()
 
@@ -214,8 +229,56 @@ def test_select_prior_run_id_rejects_other_workflow(artifacts: ModuleType) -> No
         {6: [_artifact(artifacts, "lintro-review-state-pr-5-attempt-1-final")]},
         pr_number=5,
         current_run_id=1,
+        now=NOW,
     )
     assert_that(selected).is_none()
+
+
+def test_select_prior_run_id_rejects_outside_retention(
+    artifacts: ModuleType,
+) -> None:
+    """A valid artifact older than the retention window is not eligible."""
+    stale = _run(
+        artifacts,
+        6,
+        created_at=NOW - timedelta(days=31),
+    )
+    selected = artifacts.select_prior_run_id(
+        [stale],
+        {6: [_artifact(artifacts, "lintro-review-state-pr-5-attempt-1-final")]},
+        pr_number=5,
+        current_run_id=1,
+        now=NOW,
+    )
+    assert_that(selected).is_none()
+
+
+def test_select_prior_run_id_skips_other_pr(artifacts: ModuleType) -> None:
+    """A run known to belong to another PR is not a resume source."""
+    other = _run(artifacts, 6, minutes=2, pull_request_numbers=(99,))
+    selected = artifacts.select_prior_run_id(
+        [other],
+        {6: [_artifact(artifacts, "lintro-review-state-pr-5-attempt-1-final")]},
+        pr_number=5,
+        current_run_id=1,
+        now=NOW,
+    )
+    assert_that(selected).is_none()
+
+
+def test_select_prior_run_id_checks_artifacts_when_prs_unknown(
+    artifacts: ModuleType,
+) -> None:
+    """Empty ``pull_requests`` still inspects artifact names."""
+    unknown = _run(artifacts, 6, minutes=2, pull_request_numbers=())
+    selected = artifacts.select_prior_run_id(
+        [unknown],
+        {6: [_artifact(artifacts, "lintro-review-state-pr-5-attempt-1-final")]},
+        pr_number=5,
+        current_run_id=1,
+        now=NOW,
+    )
+    assert_that(selected).is_equal_to(6)
 
 
 def test_locate_from_env_is_empty_without_repo_or_pr(artifacts: ModuleType) -> None:
@@ -268,6 +331,7 @@ def test_locate_from_env_uses_injected_api(artifacts: ModuleType) -> None:
             "GITHUB_RUN_ID": "300",
         },
         gh_api=gh_api,
+        now=NOW,
     )
     assert_that(selected).is_equal_to(200)
 
@@ -317,6 +381,7 @@ def test_locate_paginates_past_a_full_first_page(
             "GITHUB_RUN_ID": "300",
         },
         gh_api=gh_api,
+        now=NOW,
     )
     assert_that(selected).is_equal_to(999)
     assert_that(any("page=3" in path for path in requested)).is_false()
@@ -356,6 +421,124 @@ def test_fetch_artifacts_unions_pages(
     assert_that(
         artifacts.has_valid_state_artifact(found, pr_number=15),
     ).is_true()
+
+
+def test_locate_stops_at_retention_cutoff(artifacts: ModuleType) -> None:
+    """Runs older than retention end the walk without an artifact fetch."""
+    requested: list[str] = []
+    stale_created = (NOW - timedelta(days=31)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 50,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": stale_created,
+                    },
+                ],
+            }
+        return {"artifacts": [{"name": "should-not-fetch", "expired": False}]}
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(selected).is_none()
+    assert_that(any("/artifacts" in path for path in requested)).is_false()
+
+
+def test_locate_skips_artifact_fetch_for_other_pr(artifacts: ModuleType) -> None:
+    """A run that lists another PR is skipped without fetching artifacts."""
+    requested: list[str] = []
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 50,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T01:00:00Z",
+                        "pull_requests": [{"number": 99}],
+                    },
+                ],
+            }
+        return {
+            "artifacts": [
+                {
+                    "name": "lintro-review-state-pr-15-attempt-1-final",
+                    "expired": False,
+                },
+            ],
+        }
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(selected).is_none()
+    assert_that(any("/artifacts" in path for path in requested)).is_false()
+
+
+def test_locate_checks_artifacts_when_pull_requests_empty(
+    artifacts: ModuleType,
+) -> None:
+    """``pull_request_target`` often omits ``pull_requests``; names decide."""
+    requested: list[str] = []
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 50,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T01:00:00Z",
+                        "pull_requests": [],
+                    },
+                ],
+            }
+        return {
+            "artifacts": [
+                {
+                    "name": "lintro-review-state-pr-15-attempt-1-final",
+                    "expired": False,
+                },
+            ],
+        }
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(selected).is_equal_to(50)
+    assert_that(any("/artifacts" in path for path in requested)).is_true()
 
 
 def test_write_run_id_appends_github_output(
