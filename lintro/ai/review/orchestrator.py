@@ -563,7 +563,11 @@ async def _review_all_chunks(
                     try:
                         other_index, other = task.result()
                     except Exception:
-                        continue
+                        logger.opt(exception=True).debug(
+                            "Skipping a failed sibling while harvesting "
+                            "completed chunks",
+                        )
+                        continue  # nosec B112 - harvest only finished siblings; a failed result() is not this stop's outcome
                     if isinstance(other, Exception):
                         continue
                     if partials[other_index] is not None:
@@ -969,7 +973,7 @@ async def run_review_async(
                         policy=review_sensitivity,
                     )
                 except Exception:
-                    logger.warning(
+                    logger.opt(exception=True).warning(
                         "Could not write incremental review-resume part {n}",
                         n=part_seq,
                     )

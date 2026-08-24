@@ -371,6 +371,34 @@ def _resolve_cause_exception(*, error: Exception) -> BaseException:
     return current
 
 
+def _iter_cause_chain(*, error: BaseException) -> tuple[BaseException, ...]:
+    """Return the exception and each chained ``__cause__``."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None:
+        chain.append(current)
+        cause = current.__cause__
+        current = cause if isinstance(cause, BaseException) else None
+    return tuple(chain)
+
+
+def _typed_kind(*, error: Exception) -> ReviewErrorKind | None:
+    """Return a kind from a typed lintro AI exception anywhere in the chain."""
+    for current in _iter_cause_chain(error=error):
+        if isinstance(current, AIAuthenticationError):
+            return ReviewErrorKind.AUTH_FAILED
+        if isinstance(current, AIRateLimitError):
+            return ReviewErrorKind.RATE_LIMITED
+        if isinstance(current, AIProviderRequiredError):
+            return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    return None
+
+
+def _chain_has(*, error: Exception, typ: type[BaseException]) -> bool:
+    """Return whether *typ* appears anywhere in the exception chain."""
+    return any(isinstance(current, typ) for current in _iter_cause_chain(error=error))
+
+
 def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKind:
     """Classify a review error into a canonical :class:`ReviewErrorKind`.
 
@@ -396,26 +424,27 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     text = resolve_cause_text(error=error).lower()
     status = _extract_status(text=text)
     cause_exc = _resolve_cause_exception(error=error)
-
-    # A chained TimeoutError is a timeout even when the wrapper text looks
-    # like an HTTP 504 / server error (#2156).
-    if isinstance(cause_exc, TimeoutError):
-        return ReviewErrorKind.TIMEOUT
+    typed = _typed_kind(error=error)
+    if typed is not None:
+        return typed
 
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:
+        if kind is ReviewErrorKind.SERVER_ERROR:
+            continue
         matcher = signatures.get(kind)
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
 
-    # Subsume the existing lintro AI exception hierarchy: a typed auth/rate-limit
-    # error is authoritative even when its text carries no matching substring.
-    if isinstance(cause_exc, AIAuthenticationError):
-        return ReviewErrorKind.AUTH_FAILED
-    if isinstance(cause_exc, AIRateLimitError):
-        return ReviewErrorKind.RATE_LIMITED
-    if isinstance(cause_exc, AIProviderRequiredError):
-        return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    # A chained TimeoutError is a timeout even when the wrapper text looks
+    # like an HTTP 504 / server error. Specific credit/auth/quota signatures
+    # above still win (#2156).
+    if _chain_has(error=error, typ=TimeoutError):
+        return ReviewErrorKind.TIMEOUT
+
+    matcher = signatures.get(ReviewErrorKind.SERVER_ERROR)
+    if matcher is not None and matcher.matches(status=status, text=text):
+        return ReviewErrorKind.SERVER_ERROR
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

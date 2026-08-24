@@ -297,6 +297,14 @@ def test_timeout_error_wins_over_http_504_signature() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
 
 
+def test_credit_signature_wins_over_nested_timeout_error() -> None:
+    """A credits signature must not become TIMEOUT just because a cause timed out."""
+    error = AIProviderError("Your credit balance is too low to access the API")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")
