@@ -63,3 +63,14 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
   config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
   MCP error mapping.
+
+## File-level resume (#2154 / ADR-0007)
+
+Coverage is keyed `(path, normalized patch hash)` and stored in workflow artifacts (CI)
+or `.lintro-cache/ai/review-state/` (local). A quiet re-review of an already-covered
+HEAD makes zero provider calls. Partial coverage forces `ReviewVerdict.INCOMPLETE`;
+`lintro review` still exits 0/1 from findings, and `classify_review_outcome.py` reddens
+the check.
+
+See [ADR-0007](../adr/0007-review-resume-and-artifact-state.md) and
+[ai-review-report.md](../ai-review-report.md).

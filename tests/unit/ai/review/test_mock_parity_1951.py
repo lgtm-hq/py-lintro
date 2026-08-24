@@ -30,7 +30,7 @@ from lintro.ai.review.github_render import (
     format_finding_comment,
 )
 from lintro.ai.review.github_review_body import REVIEW_BODY_FOOTER
-from lintro.ai.review.github_sticky import build_sticky_comment, parse_review_state_v2
+from lintro.ai.review.github_sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -39,7 +39,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.suggested_change import SuggestedChange
-from lintro.ai.review.review_state_codec import render_state_block
+from lintro.ai.review.review_state_codec import legacy_state_block
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
 
@@ -87,8 +87,7 @@ def test_open_finding_title_links_to_its_inline_comment(
 ) -> None:
     """A finding whose thread is known renders its title as a link to it."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    first = build_sticky_comment(result=result, head_sha="sha1")
-    state = parse_review_state_v2(body=first)
+    state = advance_review_state(result=result, head_sha="sha1")
     key = state.findings[0].key
 
     body = _body_only(
@@ -129,7 +128,7 @@ def test_open_finding_renders_unlinked_without_repo_context(
 ) -> None:
     """A known comment id is not enough: the URL also needs repo and PR."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    state = parse_review_state_v2(body=build_sticky_comment(result=result))
+    state = advance_review_state(result=result)
 
     body = _body_only(
         body=build_sticky_comment(
@@ -156,7 +155,7 @@ def test_a_model_written_bracket_cannot_break_out_of_the_link(
         base=sample_review_result,
         findings=(_finding(title=hostile),),
     )
-    state = parse_review_state_v2(body=build_sticky_comment(result=result))
+    state = advance_review_state(result=result)
 
     body = _body_only(
         body=build_sticky_comment(
@@ -187,26 +186,21 @@ def test_history_row_reports_open_after_the_round_and_what_it_fixed(
     sample_review_result: ReviewResult,
 ) -> None:
     """Round two fixed one finding and left one open; the table says so."""
-    first = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(_finding(title="Leak"), _finding(title="Race", line=20)),
-        ),
-        head_sha="sha1",
+    first_result = _with(
+        base=sample_review_result,
+        findings=(_finding(title="Leak"), _finding(title="Race", line=20)),
     )
-
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
 
-    assert_that(second).contains("| Open | Fixed |")
-    # Round 2: one still open, one fixed. The raised count was also one, so the
-    # fixed column is what proves the round is being reported honestly.
-    assert_that(second).contains("| 1 | 1 |")
+    assert_that(second).contains("1 open · 1 fixed this round")
+    assert_that(second).contains("| ✔ fixed | 🔴 P1 | ~~Race~~ |")
 
 
 def test_history_row_falls_back_for_state_without_the_new_counts(
@@ -225,8 +219,9 @@ def test_history_row_falls_back_for_state_without_the_new_counts(
         ),
     )
 
-    # Legacy round 1: three findings raised, fixed count unknown.
-    assert_that(body).contains("| 3 | — |")
+    # Legacy round 1: three findings raised (p1+p2), fixed count treated as 0.
+    assert_that(body).contains("<b>Round 1</b>")
+    assert_that(body).contains("3 left open")
 
 
 def test_legacy_run_payload_without_the_new_fields_loads() -> None:
@@ -281,27 +276,24 @@ def test_history_recap_renders_the_rounds_narrative(
     sample_review_result: ReviewResult,
 ) -> None:
     """The model's own account of a round beats a severity tally."""
-    first = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(_finding(),),
-            pr_summary=ReviewSummary(
-                headline="Adds a fail-open default to the auth path.",
-                walkthrough=(),
-            ),
+    first_result = _with(
+        base=sample_review_result,
+        findings=(_finding(),),
+        pr_summary=ReviewSummary(
+            headline="Adds a fail-open default to the auth path.",
+            walkthrough=(),
         ),
-        head_sha="sha1",
     )
-
+    prior = advance_review_state(result=first_result, head_sha="sha1")
     second = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(),)),
-            prior_state=parse_review_state_v2(body=first),
+            prior_state=prior,
             head_sha="sha2",
         ),
     )
 
-    assert_that(second).contains("**Round 1** · `sha1`")
+    assert_that(second).contains("<b>Round 1</b>")
     assert_that(second).contains("Adds a fail-open default to the auth path.")
 
 
@@ -321,7 +313,8 @@ def test_history_recap_falls_back_to_counts_without_a_narrative(
         ),
     )
 
-    assert_that(body).contains("🔴 1 · 🟠 2 · 🟡 3")
+    assert_that(body).contains("<b>Round 1</b>")
+    assert_that(body).contains("6 left open")
 
 
 @pytest.mark.parametrize(
@@ -356,12 +349,8 @@ def test_narrative_keeps_only_the_first_sentence(
     expected: str,
 ) -> None:
     """A recap is one line; the rest of a paragraph is not persisted."""
-    body = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(), summary=summary),
-        head_sha="sha1",
-    )
-
-    stored = parse_review_state_v2(body=body).runs[-1]
+    result = _with(base=sample_review_result, findings=(), summary=summary)
+    stored = advance_review_state(result=result, head_sha="sha1").runs[-1]
 
     assert_that(stored.narrative).is_equal_to(expected)
 
@@ -400,7 +389,7 @@ def test_regressed_thread_titles_say_regressed(
 ) -> None:
     """The fresh thread's title carries the suffix, not just a provenance note."""
     finding = _finding()
-    prior_body = STICKY_MARKER + render_state_block(
+    prior_body = STICKY_MARKER + legacy_state_block(
         state=_resolved_state(finding=finding),
     )
     reporter = MagicMock()
@@ -479,34 +468,31 @@ def test_verdict_explainer_renders_on_every_round(
     findings: tuple[ReviewFinding, ...],
     verdict: ReviewVerdict,
 ) -> None:
-    """A clean run needs the rubric most: it proves the verdict was derived."""
-    del verdict  # Named for readability of the parametrization only.
+    """The title carries the derived verdict on every round."""
     body = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=findings),
         ),
     )
+    labels = {
+        ReviewVerdict.READY: "✅ Ready",
+        ReviewVerdict.BLOCKED: "⛔ Blocked",
+    }
 
-    assert_that(body).contains(f"<sub>{VERDICT_RUBRIC_FINE_PRINT}</sub>")
+    assert_that(body).contains(f"## 🔎 Lintro Review — {labels[verdict]}")
 
 
 def test_verdict_explainer_sits_directly_under_the_pill(
     sample_review_result: ReviewResult,
 ) -> None:
-    """It explains the pill, so it renders before anything else does."""
+    """The mockup puts the derived verdict in the title, not a separate pill."""
     body = _body_only(
         body=build_sticky_comment(
             result=_with(base=sample_review_result, findings=(_finding(),)),
         ),
     )
-    sections = [section for section in body.split("\n\n") if section.strip()]
-    pill_at = next(
-        index for index, section in enumerate(sections) if "Blocked**" in section
-    )
 
-    assert_that(sections[pill_at + 1]).is_equal_to(
-        f"<sub>{VERDICT_RUBRIC_FINE_PRINT}</sub>",
-    )
+    assert_that(body).contains("## 🔎 Lintro Review — ⛔ Blocked")
 
 
 def test_verdict_rubric_reads_in_the_mock_style() -> None:

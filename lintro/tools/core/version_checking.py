@@ -50,6 +50,7 @@ TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
 
 import os
 import threading
+from pathlib import Path
 
 from loguru import logger
 
@@ -59,7 +60,10 @@ from lintro._tool_versions import (
     get_tool_version,
 )
 from lintro.enums.tool_name import ToolName
+from lintro.enums.update_channel import UpdateChannel
+from lintro.tools.core import update_channels as update_channel_ops
 from lintro.tools.core.install_hints import SEMGREP_ISOLATED_INSTALL_HINT
+from lintro.tools.core.update_channels import VersionAdvisory
 
 # Module-level set to track logged warnings and prevent duplicates
 # during parallel execution
@@ -245,6 +249,10 @@ def get_install_hints() -> dict[str, str]:
             "or download from "
             "https://github.com/trufflesecurity/trufflehog/releases (v{version}+)"
         ),
+        "typos": (
+            "Install via: cargo install typos-cli or brew install typos-cli "
+            "(v{version}+)"
+        ),
         "vale": (
             "Install via: brew install vale "
             "or download from https://github.com/errata-ai/vale/releases (v{version}+)"
@@ -308,3 +316,71 @@ def get_install_hints() -> dict[str, str]:
                 )
 
     return hints
+
+
+def build_outdated_version_advisory(
+    *,
+    tool: str,
+    installed: str,
+    latest_known: str,
+    binary_path: str | Path | None = None,
+    install_package: str | None = None,
+    install_type: str | None = None,
+    channel_override: UpdateChannel | str | None = None,
+) -> VersionAdvisory | None:
+    """Build a version advisory when installed is below the known pin.
+
+    Uses pinned manifest / tool-versions expectations only — no network
+    calls. When no binary path is available, falls back to a soft mapping
+    from the manifest ``install.type``. Path-based ``UNKNOWN`` / ``STANDALONE``
+    detections are kept honest — manifest ``install.type`` must not invent a
+    pip/npm/cargo update command beside a system binary.
+
+    Args:
+        tool: Canonical tool name.
+        installed: Currently installed version string.
+        latest_known: Pinned expected/recommended version.
+        binary_path: Path to the installed binary for channel detection.
+        install_package: Manifest package name override.
+        install_type: Manifest install type used when *binary_path* is absent.
+        channel_override: Explicit channel (e.g. from manifest).
+
+    Returns:
+        :class:`VersionAdvisory` when ``installed < latest_known``, else None.
+    """
+    try:
+        if _is_at_least(installed=installed, latest_known=latest_known):
+            return None
+    except ValueError:
+        return None
+
+    override = channel_override
+    if override is None and binary_path is None:
+        override = update_channel_ops.channel_from_install_type(install_type)
+
+    return update_channel_ops.build_version_advisory(
+        tool=tool,
+        installed=installed,
+        latest_known=latest_known,
+        binary_path=binary_path,
+        install_package=install_package,
+        channel_override=override,
+    )
+
+
+def _is_at_least(*, installed: str, latest_known: str) -> bool:
+    """Return True when installed version is >= latest_known.
+
+    Delegates to :func:`lintro.tools.core.version_parsing.compare_versions` so
+    doctor and ``lintro versions`` classify the same strings the same way.
+
+    Args:
+        installed: Installed version string.
+        latest_known: Expected version string.
+
+    Returns:
+        True when installed meets or exceeds latest_known.
+    """
+    from lintro.tools.core.version_parsing import compare_versions
+
+    return compare_versions(installed, latest_known) >= 0

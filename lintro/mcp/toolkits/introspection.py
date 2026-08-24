@@ -80,7 +80,9 @@ _LIST_TOOLS_DESCRIPTION: Final[str] = (
 _VERSIONS_DESCRIPTION: Final[str] = (
     "Report the installed version of every external tool against the minimum "
     "and recommended versions lintro expects, flagging each as ok, outdated, "
-    "incompatible, or missing. Read-only."
+    "incompatible, or missing. Each entry includes binary_path and a structured "
+    "advisory (channel plus optional update_command) when the tool is behind. "
+    "Read-only."
 )
 
 _DOCTOR_DESCRIPTION: Final[str] = (
@@ -333,6 +335,10 @@ def _versions_payload() -> dict[str, Any]:
                 "status": status,
                 "error": info.error_message,
                 "install_hint": info.install_hint,
+                "binary_path": info.binary_path,
+                "advisory": (
+                    info.advisory.to_dict() if info.advisory is not None else None
+                ),
             },
         )
 

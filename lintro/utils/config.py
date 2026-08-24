@@ -158,14 +158,12 @@ STRUCTURAL_SECTIONS: frozenset[str] = frozenset(
     },
 )
 
-# Legacy/alternate section names that do not match a ``ToolName`` value
-# directly but have historically been treated as tool sections (e.g. the
-# underlying binary name rather than the canonical tool name).
-_LEGACY_TOOL_SECTION_ALIASES: frozenset[str] = frozenset(
-    {
-        "markdownlint-cli2",
-    },
-)
+# Legacy/alternate section names mapped to the canonical ``ToolName`` value.
+# These do not match a ``ToolName`` spelling directly (e.g. the underlying
+# binary name rather than the canonical tool name) but are accepted in config.
+LEGACY_TOOL_SECTION_ALIASES: dict[str, str] = {
+    "markdownlint-cli2": "markdownlint",
+}
 
 
 def _get_tool_sections() -> frozenset[str]:
@@ -189,7 +187,7 @@ def _get_tool_sections() -> frozenset[str]:
 
     tool_sections = {tool.value for tool in ToolName}
     tool_sections |= {tool.value.replace("_", "-") for tool in ToolName}
-    tool_sections |= _LEGACY_TOOL_SECTION_ALIASES
+    tool_sections |= set(LEGACY_TOOL_SECTION_ALIASES)
     return frozenset(tool_sections)
 
 

@@ -23,12 +23,14 @@ from mcp.types import Tool
 
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.tool_status import ToolStatus
+from lintro.enums.update_channel import UpdateChannel
 from lintro.mcp.registry import DEFAULT_TOOL_TIMEOUT_SECONDS
 from lintro.mcp.toolkits.introspection import (
     INTROSPECTION_TIMEOUT_SECONDS,
     build_introspection_toolkit,
 )
 from lintro.tools.core.tool_registry import ManifestTool
+from lintro.tools.core.update_channels import VersionAdvisory
 from lintro.tools.core.version_parsing import ToolVersionInfo
 from lintro.utils import doctor_report
 from lintro.utils.doctor_report import ToolCheckResult
@@ -323,6 +325,14 @@ def test_versions_reports_installed_against_expected(
                 current_version="1.41.0",
                 version_check_passed=True,
                 below_recommended=True,
+                binary_path="/proj/.venv/bin/yamllint",
+                advisory=VersionAdvisory(
+                    tool="yamllint",
+                    installed="1.41.0",
+                    latest_known="1.42.0",
+                    channel=UpdateChannel.PIP,
+                    update_command="uv pip install --upgrade 'yamllint>=1.42.0'",
+                ),
             ),
         },
     )
@@ -344,6 +354,15 @@ def test_versions_reports_installed_against_expected(
     # and the same label lintro_list_tools would report for it.
     assert_that(entries["yamllint"]["status"]).is_equal_to("outdated")
     assert_that(entries["yamllint"]["satisfies_minimum"]).is_true()
+    assert_that(entries["yamllint"]["binary_path"]).is_equal_to(
+        "/proj/.venv/bin/yamllint",
+    )
+    assert_that(entries["yamllint"]["advisory"]["channel"]).is_equal_to("pip")
+    assert_that(entries["yamllint"]["advisory"]["update_command"]).is_equal_to(
+        "uv pip install --upgrade 'yamllint>=1.42.0'",
+    )
+    assert_that(entries["ruff"]).contains_key("binary_path", "advisory")
+    assert_that(entries["black"]["advisory"]).is_none()
     assert_that(payload["summary"]).is_equal_to(
         {"incompatible": 1, "missing": 1, "ok": 1, "outdated": 1, "total": 4},
     )

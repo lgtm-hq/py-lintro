@@ -34,7 +34,7 @@
       "file": "path/to/file",
       "line": 123,
       "title": "Short single-line title (5-8 words, no line breaks)",
-      "description": "What is wrong and why it matters in production",
+      "description": "What is wrong, why it matters in production, and which severity-rubric boundary this meets (P2 because the contract is false / P3 because the code path is correct)",
       "cause": "Root cause — trace the code path",
       "failure_scenario": "REQUIRED for P1 — the concrete mechanism by which this fails (inputs, path taken, observable result); else empty string",
       "fix": "Concise fix suggestion",
@@ -47,6 +47,12 @@
       "occurrences": [{ "file": "path/to/file", "line": 123 }],
       "confidence": "high|medium|low",
       "checklist_ids": [1, 2]
+    }
+  ],
+  "flagged_files": [
+    {
+      "path": "path/to/already-reviewed-file.py",
+      "reason": "Why this covered file should be re-read next round"
     }
   ]
 }

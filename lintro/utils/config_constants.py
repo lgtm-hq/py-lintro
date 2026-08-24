@@ -100,6 +100,7 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.HADOLINT: 50,
     ToolName.OXLINT: 50,
     ToolName.TERRAFORM: 50,
+    ToolName.TYPOS: 50,
     ToolName.ACTIONLINT: 55,
     ToolName.MYPY: 82,
     ToolName.TSC: 82,

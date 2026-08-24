@@ -28,6 +28,7 @@ from lintro.ai.review.models.run_record import RunRecord
 __all__ = [
     "decode_state",
     "encode_state",
+    "legacy_state_block",
     "migrate_v1_runs",
     "prune_state_to_fit",
     "renumber_if_legacy_v1",
@@ -57,13 +58,28 @@ def render_state_block(*, state: ReviewState) -> str:
         state: State to embed.
 
     Returns:
-        The block, including its leading blank-line separator.
+        Empty string. Authoritative state lives in workflow artifacts
+        (#2154); the sticky is pure rendering and never writes a leftover
+        blob.
     """
-    return (
-        f"\n\n{STATE_MARKER_PREFIX} "
-        + encode_state(state=state)
-        + f" {STATE_MARKER_SUFFIX}"
-    )
+    del state
+    return ""
+
+
+def legacy_state_block(*, state: ReviewState) -> str:
+    """Wrap encoded state in leftover-blob markers for decode/migration tests.
+
+    New stickies never call this. The decoder still reads v1/v2 blobs so a
+    one-time migration can seed findings and runs.
+
+    Args:
+        state: State to encode.
+
+    Returns:
+        The historical HTML-comment block, including its leading blank line.
+    """
+    encoded = encode_state(state=state)
+    return f"\n\n{STATE_MARKER_PREFIX} {encoded} {STATE_MARKER_SUFFIX}"
 
 
 def _extract_payload(*, body: str) -> dict[str, Any] | None:
@@ -227,8 +243,8 @@ def decode_state(*, body: str) -> ReviewState:
 
 
 def _block_length(*, state: ReviewState) -> int:
-    """Return the rendered length of the state block for ``state``."""
-    return len(render_state_block(state=state))
+    """Return the encoded leftover-blob length used by prune."""
+    return len(legacy_state_block(state=state))
 
 
 def prune_state_to_fit(

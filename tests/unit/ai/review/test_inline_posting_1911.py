@@ -15,9 +15,11 @@ from assertpy import assert_that
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.github import post_review_to_github
-from lintro.ai.review.github_sticky import build_sticky_comment
+from lintro.ai.review.github_constants import STICKY_MARKER
+from lintro.ai.review.github_sticky import advance_review_state
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.suggested_change import SuggestedChange
+from lintro.ai.review.review_state_codec import legacy_state_block
 
 _TEST_TOKEN = (
     "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
@@ -43,6 +45,12 @@ def _reporter() -> MagicMock:
     reporter.repo = "owner/name"
     reporter.pr_number = 7
     return reporter
+
+
+def _prior_sticky(*, result: ReviewResult, head_sha: str) -> str:
+    """Render a leftover v2 sticky so posting can migrate prior state."""
+    state = advance_review_state(result=result, head_sha=head_sha)
+    return STICKY_MARKER + legacy_state_block(state=state)
 
 
 def _with_change(
@@ -142,7 +150,7 @@ def test_round_two_scopes_suggestions_to_the_new_commits(
     )
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=result, head_sha="aaa111"),
+        _prior_sticky(result=result, head_sha="aaa111"),
     )
     # This round only touched line 40, so the finding's line is old ground.
     reporter.fetch_compare_lines.return_value = {"src/main.py": {40}}
@@ -186,7 +194,7 @@ def test_carried_over_finding_falls_back_to_mode_b(
     # new commits did touch, so only the carried-over rule can reject it.
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=result, head_sha="aaa111"),
+        _prior_sticky(result=result, head_sha="aaa111"),
     )
     reporter.fetch_compare_lines.return_value = {"src/main.py": {9, 10, 11}}
 
@@ -208,7 +216,7 @@ def test_round_two_finding_new_to_this_round_keeps_mode_a(
     )
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=prior, head_sha="aaa111"),
+        _prior_sticky(result=prior, head_sha="aaa111"),
     )
     reporter.fetch_compare_lines.return_value = {"src/main.py": {9, 10, 11}}
     # Same location, different finding — round 2 sees it for the first time.
@@ -236,7 +244,7 @@ def test_prior_round_without_a_recorded_sha_falls_back_to_mode_b(
     # round's diff.
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=result, head_sha=""),
+        _prior_sticky(result=result, head_sha=""),
     )
 
     post_review_to_github(result=result, reporter=reporter)

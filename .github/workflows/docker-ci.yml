@@ -147,7 +147,7 @@ jobs:
               - 'docker-compose.yml'
               - '.dockerignore'
               # Build/packaging metadata feeding tool resolution.
-              - 'Makefile'
+              - 'justfile'
               - 'MANIFEST.in'
               # Isolated semgrep lockfile: a pin bump changes the min version
               # dogfood enforces for every file.

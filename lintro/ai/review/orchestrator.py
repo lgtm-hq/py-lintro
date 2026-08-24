@@ -51,6 +51,12 @@ from lintro.ai.review.cli_limits import (
     resolve_cli_findings_cap,
     tighter_findings_cap,
 )
+from lintro.ai.review.coverage import (
+    carry_unserved_flags,
+    consume_served_flags,
+    inherit_same_round_paths,
+    pending_invalidations_for,
+)
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassResult,
     run_custom_agent_passes,
@@ -60,6 +66,7 @@ from lintro.ai.review.custom_agents import (
     CustomAgentSpec,
     select_custom_agents,
 )
+from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
@@ -68,14 +75,21 @@ from lintro.ai.review.errors_taxonomy import (
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.file_selection import resolve_file_selection
-from lintro.ai.review.finding_parser import parse_findings
+from lintro.ai.review.finding_parser import (
+    parse_findings,
+    parse_flagged_files,
+    reject_context_findings,
+)
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.file_assessment import FileAssessment
+from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.summary_bullet import SummaryBullet
@@ -97,6 +111,7 @@ from lintro.ai.review.response_recovery import (
     resolve_schema_retry_timeout,
     unstructured_review_payload,
 )
+from lintro.ai.review.resume import filter_chunks, plan_resume, records_for_reviewed
 from lintro.ai.review.sensitivity import (
     ReviewSensitivityPolicy,
     filter_findings_by_policy,
@@ -235,6 +250,8 @@ class _ChunkReviewPartial:
     pr_summary: ReviewSummary | None = None
     verdict_reasoning: VerdictReasoning | None = None
     file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
+    files: tuple[str, ...] = field(default_factory=tuple)
+    flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
 
 
 def resolve_review_chunks(
@@ -312,9 +329,10 @@ async def _review_all_chunks(
     all completed work.
 
     Chunks are reviewed concurrently under a semaphore capped by
-    ``max_parallel_calls`` whether or not a cost cap is set (depth 1–3). A
-    ``ReviewExecutionError`` or a cost-cap stop cancels the remaining work and
-    propagates to ``run_review_async``. Depth ≥ 2 assigns each chunk a disjoint
+    ``max_parallel_calls``. Callers that enforce a cost cap pass ``1`` so the
+    resume queue cannot invert (issue #2154). A ``ReviewExecutionError`` or a
+    cost-cap stop cancels the remaining work and propagates to
+    ``run_review_async``. Depth ≥ 2 assigns each chunk a disjoint
     generated-checklist id range so merge stays deterministic under fan-out.
     """
     if len(chunks) <= 1:
@@ -533,6 +551,9 @@ def run_review(
     run_builtin_checklist: bool = True,
     workspace_root: Path | None = None,
     context_collection_seconds: float = 0.0,
+    prior_state: ReviewState | None = None,
+    force_full: bool = False,
+    enforce_cost_cap: bool = True,
 ) -> ReviewResult:
     """Execute an AI diff review from synchronous code.
 
@@ -562,6 +583,10 @@ def run_review(
             agents that declare a ``model`` override.
         context_collection_seconds: Wall-clock seconds the caller spent in
             ``collect_review_context`` (recorded in ``phase_timings``).
+        prior_state: Artifact or local-ledger state from a previous round.
+        force_full: Discard carried coverage (``--full``).
+        enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
+            chunk calls so concurrency cannot violate queue order.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -585,6 +610,9 @@ def run_review(
             run_builtin_checklist=run_builtin_checklist,
             workspace_root=workspace_root,
             context_collection_seconds=context_collection_seconds,
+            prior_state=prior_state,
+            force_full=force_full,
+            enforce_cost_cap=enforce_cost_cap,
         ),
     )
 
@@ -608,6 +636,9 @@ async def run_review_async(
     run_builtin_checklist: bool = True,
     workspace_root: Path | None = None,
     context_collection_seconds: float = 0.0,
+    prior_state: ReviewState | None = None,
+    force_full: bool = False,
+    enforce_cost_cap: bool = True,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -634,6 +665,10 @@ async def run_review_async(
             agents that declare a ``model`` override.
         context_collection_seconds: Wall-clock seconds the caller spent in
             ``collect_review_context`` (recorded in ``phase_timings``).
+        prior_state: Artifact or local-ledger state from a previous round.
+        force_full: Discard carried coverage (``--full``).
+        enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
+            chunk calls so concurrency cannot violate queue order.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -705,6 +740,17 @@ async def run_review_async(
         if run_builtin_checklist
         else []
     )
+    resume = plan_resume(
+        context=context,
+        prior=prior_state,
+        extra_skips=chunk_skips,
+        groups=tuple(tuple(chunk.files) for chunk in chunks),
+        force_full=force_full,
+    )
+    if resume.queue:
+        chunks = filter_chunks(chunks=chunks, queue=resume.queue)
+    elif run_builtin_checklist:
+        chunks = []
     agent_selection = select_custom_agents(
         agents=custom_agents,
         changed_paths=tuple(file.path for file in context.changed_files),
@@ -722,7 +768,9 @@ async def run_review_async(
         else ai_config
     )
     tracker = progress or NullReviewProgress()
-    budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
+    budget = CostBudget(
+        max_cost_usd=ai_config.max_cost_usd if enforce_cost_cap else None,
+    )
     # Branch on the provider's declared capability, not its identity (#1241):
     # a durable session only helps when the transport can resume one.
     # begin/end_durable_session are concrete no-ops on BaseAIProvider, so no
@@ -770,7 +818,11 @@ async def run_review_async(
                 progress=tracker,
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
-                max_parallel_calls=ai_config.max_parallel_calls,
+                max_parallel_calls=(
+                    1
+                    if enforce_cost_cap and ai_config.max_cost_usd is not None
+                    else ai_config.max_parallel_calls
+                ),
                 strictness_section=strictness_section,
                 next_generated_checklist_id=(
                     _max_checklist_id(checklist_items=checklist_items) + 1
@@ -778,20 +830,22 @@ async def run_review_async(
                 diff_budget=diff_budget,
                 completed_sink=collected,
             )
-        await run_custom_agent_passes(
-            selected=agent_selection.selected,
-            context=context,
-            provider=provider,
-            ai_config=effective_ai_config,
-            budget=budget,
-            repo_root=repo_root,
-            workspace_root=workspace_root,
-            # Never reuse the built-in review's durable session: each agent is
-            # an independent, narrowly scoped pass with its own instructions.
-            use_one_shot=True,
-            on_pass_complete=custom_results.append,
-            on_agent_failed=custom_agents_failed.append,
-        )
+        if resume.queue:
+            await run_custom_agent_passes(
+                selected=agent_selection.selected,
+                context=context,
+                provider=provider,
+                ai_config=effective_ai_config,
+                budget=budget,
+                repo_root=repo_root,
+                workspace_root=workspace_root,
+                # Never reuse the built-in review's durable session: each agent
+                # is an independent, narrowly scoped pass with its own
+                # instructions.
+                use_one_shot=True,
+                on_pass_complete=custom_results.append,
+                on_agent_failed=custom_agents_failed.append,
+            )
         provider_seconds = time.monotonic() - provider_started
         merge_started = time.monotonic()
         merged, filtered_findings, total_findings = _finalize_partials(
@@ -932,6 +986,64 @@ async def run_review_async(
         ),
     )
 
+    completed_files = {path for partial in partials for path in partial.files}
+    agent_files = {path for item in custom_results for path in item.files}
+    actually_reviewed = tuple(
+        path for path in resume.queue if path in completed_files or path in agent_files
+    )
+    covered_now = inherit_same_round_paths(
+        reviewed_now=actually_reviewed,
+        eligible_paths=resume.eligible,
+        current_hashes=resume.hashes,
+    )
+    coverage = resume.counts(reviewed_now=covered_now)
+    coverage_records = records_for_reviewed(
+        plan=resume,
+        reviewed_paths=covered_now,
+        head_sha=context.head_ref,
+        round_number=prior_state.next_round if prior_state is not None else 1,
+        prior=None if force_full else prior_state,
+        stopped_reason=stopped_reason,
+    )
+    payload_flags = tuple(
+        flag for partial in partials for flag in partial.flagged_files
+    )
+    filtered_findings, converted_flags = reject_context_findings(
+        findings=filtered_findings,
+        allowed_paths=set(resume.queue),
+        eligible_paths=set(resume.eligible),
+    )
+    prior_flags = prior_state.flagged_files if prior_state is not None else ()
+    prior_consumed = (
+        () if force_full or prior_state is None else prior_state.consumed_flags
+    )
+    flagged_files = carry_unserved_flags(
+        new_flags=(*payload_flags, *converted_flags),
+        prior_flags=prior_flags,
+        covered_now=covered_now,
+    )
+    consumed_flags = consume_served_flags(
+        prior_consumed=prior_consumed,
+        flags=(*payload_flags, *converted_flags, *prior_flags),
+        covered_now=covered_now,
+        current_hashes=resume.hashes,
+    )
+    awaiting_paths = tuple(
+        item.path
+        for item in resume.classified
+        if item.need is not FileReviewNeed.COVERED and item.path not in covered_now
+    )
+    awaiting_reasons = tuple(
+        (item.path, item.flag_reason)
+        for item in resume.classified
+        if item.path in set(awaiting_paths) and item.flag_reason
+    )
+    metadata = replace(
+        metadata,
+        reviewed_paths=actually_reviewed,
+        files_reviewed=len(actually_reviewed),
+    )
+
     return ReviewResult(
         metadata=metadata,
         summary=summary,
@@ -940,6 +1052,16 @@ async def run_review_async(
         pr_summary=merged.pr_summary,
         verdict_reasoning=merged.verdict_reasoning,
         file_assessments=merged.file_assessments,
+        coverage=coverage,
+        coverage_records=coverage_records,
+        flagged_files=flagged_files,
+        awaiting_paths=awaiting_paths,
+        awaiting_reasons=awaiting_reasons,
+        pending_invalidations=pending_invalidations_for(
+            classified=resume.classified,
+            reviewed_now=covered_now,
+        ),
+        consumed_flags=consumed_flags,
     )
 
 
@@ -1476,7 +1598,10 @@ async def _review_chunk(
         use_one_shot=use_one_shot,
         elapsed=elapsed,
     )
-    partial = _payload_to_partial(response=response, payload=payload)
+    partial = replace(
+        _payload_to_partial(response=response, payload=payload),
+        files=tuple(chunk.files),
+    )
 
     if extra_checklist_usage is not None:
         partial = replace(
@@ -1974,6 +2099,7 @@ def _payload_to_partial(
 
     checklist = _parse_checklist(raw_checklist=payload.get("checklist", []))
     findings = parse_findings(raw_findings=payload.get("findings", []))
+    flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
 
     return _ChunkReviewPartial(
         summary=summary,
@@ -1985,6 +2111,7 @@ def _payload_to_partial(
         pr_summary=pr_summary,
         verdict_reasoning=verdict_reasoning,
         file_assessments=file_assessments,
+        flagged_files=flagged_files,
     )
 
 
@@ -2189,6 +2316,7 @@ def _empty_review_result(
         summary="No changes found to review.",
         checklist=(),
         findings=(),
+        coverage=CoverageCounts(),
     )
 
 

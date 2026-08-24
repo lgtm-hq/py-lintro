@@ -172,7 +172,7 @@ SUPPORTED_TOOLS=(
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform"
-	"trufflehog" "tsc"
+	"trufflehog" "tsc" "typos"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -281,8 +281,20 @@ else
 	BIN_DIR="$HOME/.local/bin"
 	mkdir -p "$BIN_DIR"
 	echo -e "${YELLOW}Installing tools locally to $BIN_DIR${NC}"
-	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH${NC}"
+	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH:${NC}"
+	echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
 fi
+
+# Tools installed into $BIN_DIR must be reachable for the rest of this run:
+# later install steps probe with `command -v`, and so does the verification
+# loop. Without this a freshly installed binary would be reported missing (and
+# reinstalled) purely because the caller's shell has not been reloaded. This
+# only affects this process; the reminder above still applies to the user's
+# own shell.
+case ":$PATH:" in
+*":$BIN_DIR:"*) ;;
+*) export PATH="$BIN_DIR:$PATH" ;;
+esac
 
 # Function to detect platform and architecture
 detect_platform() {
@@ -1202,6 +1214,81 @@ main() {
 		fi
 	fi # cargo-deny
 
+	if should_install "typos"; then
+		# Install typos (source-code spell checker; crate "typos-cli", binary "typos")
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing typos...${NC}"
+		TYPOS_VERSION=$(get_tool_version "typos") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typos-cli==${TYPOS_VERSION}"
+		elif command -v typos &>/dev/null; then
+			echo -e "${GREEN}✓ typos already installed${NC}"
+		else
+			typos_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/typos-cli-${TYPOS_VERSION}/typos-cli-${TYPOS_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/typos.tar.gz" 3; then
+					tar -xzf "$tmpdir/typos.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/typos" ]; then
+						cp "$tmpdir/typos" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+						echo -e "${GREEN}✓ typos installed from pre-built binary${NC}"
+						typos_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
+					# cargo install writes to $CARGO_HOME/bin; copy into BIN_DIR
+					# so later verification via command -v / PATH finds it.
+					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/typos"
+					if [ -x "$cargo_bin" ]; then
+						cp "$cargo_bin" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+					fi
+					if command -v typos &>/dev/null || [ -x "$BIN_DIR/typos" ]; then
+						echo -e "${GREEN}✓ typos installed via cargo${NC}"
+						typos_installed=true
+					else
+						echo -e "${YELLOW}⚠ cargo install succeeded but typos not on PATH${NC}"
+					fi
+				fi
+			fi
+
+			# Homebrew fallback for macOS hosts without a Rust toolchain.
+			if [ "$typos_installed" = false ] && command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Falling back to Homebrew...${NC}"
+				if brew install typos-cli; then
+					echo -e "${GREEN}✓ typos installed via Homebrew${NC}"
+					typos_installed=true
+				fi
+			fi
+
+			if [ "$typos_installed" = false ]; then
+				# typos is part of the default toolset; a silent miss would
+				# leave every subsequent lintro run degraded and the
+				# verification step reporting a missing tool.
+				echo -e "${RED}✗ Failed to install typos (pre-built binary, cargo, and brew all unavailable)${NC}"
+				exit 1
+			fi
+		fi
+	fi # typos
+
 	if should_install "ruff"; then
 		# Install ruff (Python linting and formatting)
 		echo -e "${BLUE}Installing ruff...${NC}"
@@ -1950,6 +2037,7 @@ main() {
 		["terraform"]="Terraform formatting and validation"
 		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
+		["typos"]="Source-code spell checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
 	)
@@ -1964,7 +2052,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

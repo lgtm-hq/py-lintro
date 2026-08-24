@@ -1,6 +1,6 @@
-"""Env-var and CLI-flag overlays for AI configuration (#1970, #2024).
+"""Env-var and CLI-flag overlays for AI configuration (#1970, #2024, #2153).
 
-Exactly five environment variables map onto five ``ai:`` fields. Invalid
+Exactly six environment variables map onto six ``ai:`` fields. Invalid
 values fail at resolution with a calm diagnostic naming the variable (or
 flag) and the accepted values — they never fall through to the config
 default.
@@ -19,7 +19,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.exceptions import AIConfigOverrideError
-from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "ENV_MAX_COST_USD",
     "ENV_MODEL",
     "ENV_PROVIDER",
+    "ENV_REVIEW",
     "ENV_TRANSPORT",
     "OVERRIDE_FIELDS",
     "apply_cli_overrides",
@@ -38,6 +39,7 @@ ENV_PROVIDER = "LINTRO_AI_PROVIDER"
 ENV_MODEL = "LINTRO_AI_MODEL"
 ENV_TRANSPORT = "LINTRO_AI_TRANSPORT"
 ENV_ENABLED = "LINTRO_AI_ENABLED"
+ENV_REVIEW = "LINTRO_AI_REVIEW"
 ENV_MAX_COST_USD = "LINTRO_AI_MAX_COST_USD"
 
 OVERRIDE_FIELDS: tuple[str, ...] = (
@@ -45,6 +47,7 @@ OVERRIDE_FIELDS: tuple[str, ...] = (
     "model",
     "transport",
     "enabled",
+    "review",
     "max_cost_usd",
 )
 
@@ -53,24 +56,28 @@ _ENV_BY_FIELD: dict[str, str] = {
     "model": ENV_MODEL,
     "transport": ENV_TRANSPORT,
     "enabled": ENV_ENABLED,
+    "review": ENV_REVIEW,
     "max_cost_usd": ENV_MAX_COST_USD,
 }
 
 _ENABLED_TRUE = frozenset({"1", "true"})
 _ENABLED_FALSE = frozenset({"0", "false"})
 _ENABLED_ACCEPTED = "1, 0, true, false"
-_MAX_COST_ACCEPTED = "a positive number (USD cap), or 0 for uncapped"
+_MAX_COST_ACCEPTED = "a positive number (USD cap), or uncapped"
+_UNCAP_SENTINEL = "uncapped"
+_ZERO_OVERLAY_ERROR = "ambiguous — use 'uncapped' or a positive value"
 
 _FLAG_BY_FIELD: dict[str, str] = {
     "provider": "--provider",
     "model": "--model",
     "transport": "--transport",
+    "review": "--review/--no-review",
     "max_cost_usd": "--max-cost-usd",
 }
 
 
 def read_env_overrides() -> dict[str, Any]:
-    """Read the five ``LINTRO_AI_*`` overrides that are present.
+    """Read the six ``LINTRO_AI_*`` overrides that are present.
 
     Unset or whitespace-only variables are omitted (layer absent). There is
     no meta-gate variable.
@@ -90,7 +97,16 @@ def read_env_overrides() -> dict[str, Any]:
         overlay["transport"] = transport
     enabled_raw = _env_text(ENV_ENABLED)
     if enabled_raw is not None:
-        overlay["enabled"] = _parse_enabled(enabled_raw)
+        overlay["enabled"] = _parse_bool_override(
+            enabled_raw,
+            name=ENV_ENABLED,
+        )
+    review_raw = _env_text(ENV_REVIEW)
+    if review_raw is not None:
+        overlay["review"] = _parse_bool_override(
+            review_raw,
+            name=ENV_REVIEW,
+        )
     max_cost_raw = _env_text(ENV_MAX_COST_USD)
     if max_cost_raw is not None:
         overlay["max_cost_usd"] = _parse_max_cost_usd(
@@ -132,23 +148,24 @@ def apply_cli_overrides(
     provider: str | None = None,
     model: str | None = None,
     transport: str | None = None,
+    review: bool | None = None,
     max_cost_usd: float | str | None = None,
 ) -> ResolvedAIConfig:
     """Apply ``lintro review`` CLI flags on top of a resolved config.
 
     Flags beat env vars. Omitted flags leave the corresponding field
-    untouched. There is no ``--enabled`` flag. Literal ``0`` for
-    ``--max-cost-usd`` means uncapped (mapped to ``None`` before overlay
-    so Pydantic cannot treat it as a $0 cap). Overlaying ``max_cost_usd``
-    also stamps both transport-profile cost fields so
-    ``apply_resolved_transport`` cannot clobber flag/env with a YAML
-    profile cap (#2024).
+    untouched. There is no ``--enabled`` flag. ``uncapped`` (any case)
+    lifts the ceiling. Overlay ``0`` is rejected as ambiguous (#2154).
+    Overlaying ``max_cost_usd`` also stamps both transport-profile cost
+    fields so ``apply_resolved_transport`` cannot clobber flag/env with a
+    YAML profile cap (#2024).
 
     Args:
         resolved: Config + provenance after the env layer.
         provider: ``--provider`` value, or None when unset.
         model: ``--model`` value, or None when unset.
         transport: ``--transport`` value, or None when unset.
+        review: ``--review/--no-review`` value, or None when unset.
         max_cost_usd: ``--max-cost-usd`` value, or None when unset.
 
     Returns:
@@ -161,6 +178,8 @@ def apply_cli_overrides(
         overlay["model"] = str(model).strip()
     if transport is not None and str(transport).strip():
         overlay["transport"] = str(transport).strip()
+    if review is not None:
+        overlay["review"] = review
     if max_cost_usd is not None:
         overlay["max_cost_usd"] = _parse_max_cost_usd(
             max_cost_usd,
@@ -195,11 +214,12 @@ def _env_text(name: str) -> str | None:
     return stripped or None
 
 
-def _parse_enabled(raw: str) -> bool:
-    """Parse ``LINTRO_AI_ENABLED`` into a bool.
+def _parse_bool_override(raw: str, *, name: str) -> bool:
+    """Parse a boolean ``LINTRO_AI_*`` override.
 
     Args:
         raw: Stripped env value.
+        name: Environment variable name for error text.
 
     Returns:
         True for ``1``/``true``; False for ``0``/``false`` (case-insensitive).
@@ -213,17 +233,16 @@ def _parse_enabled(raw: str) -> bool:
     if key in _ENABLED_FALSE:
         return False
     raise AIConfigOverrideError(
-        f"{ENV_ENABLED}={raw!r} is not one of: {_ENABLED_ACCEPTED}",
+        f"{name}={raw!r} is not one of: {_ENABLED_ACCEPTED}",
     )
 
 
 def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
     """Parse a cost-cap override into a USD ceiling, or None if uncapped.
 
-    Literal ``0`` (including ``0.0``) means unlimited, matching
-    :class:`~lintro.ai.budget.CostBudget`. This mapping happens *before*
-    overlay: Pydantic ``max_cost_usd: float | None`` with ``ge=0`` would
-    otherwise accept ``0.0`` as a zero-dollar cap (#2024).
+    ``uncapped`` (case-insensitive) lifts the ceiling. Overlay ``0`` is
+    rejected — it was the #2024 spelling for uncapped and is now
+    ambiguous against a literal $0 YAML cap (#2154).
 
     Args:
         raw: Env-var string or CLI float.
@@ -233,10 +252,12 @@ def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
         A positive finite float, or None when the cap is lifted.
 
     Raises:
-        AIConfigOverrideError: If *raw* is negative, non-numeric, or
-            non-finite.
+        AIConfigOverrideError: If *raw* is ``0``, negative, non-numeric,
+            or non-finite.
     """
     text = str(raw).strip()
+    if text.lower() == _UNCAP_SENTINEL:
+        return None
     try:
         value = float(text)
     except ValueError:
@@ -248,7 +269,9 @@ def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
             f"{name}={raw!r} is not one of: {_MAX_COST_ACCEPTED}",
         )
     if value == 0:
-        return None
+        raise AIConfigOverrideError(
+            f"{name}={raw!r} is {_ZERO_OVERLAY_ERROR}",
+        )
     return value
 
 
@@ -276,9 +299,9 @@ def _apply_overlay(
         AIConfigOverrideError: If Pydantic rejects an overlay value.
     """
     update: dict[str, Any] = {
-        **overlay,
         "lint": config.lint,
         "review": config.review,
+        **overlay,
     }
     try:
         payload = config.model_dump()
@@ -360,10 +383,10 @@ def _accepted_values(field: str) -> str:
         Accepted values, or empty when the field is free-form.
     """
     if field == "provider":
-        return ", ".join(provider.value for provider in AIProvider)
+        return accepted_provider_values()
     if field == "transport":
         return ", ".join(transport.value for transport in AITransport)
-    if field == "enabled":
+    if field in {"enabled", "review"}:
         return _ENABLED_ACCEPTED
     if field == "max_cost_usd":
         return _MAX_COST_ACCEPTED

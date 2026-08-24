@@ -40,6 +40,11 @@ from lintro.tools.core.tool_installer import (
     resolve_version_command,
 )
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
+from lintro.tools.core.update_channels import (
+    VersionAdvisory,
+    resolve_channel_binary_path,
+)
+from lintro.tools.core.version_checking import build_outdated_version_advisory
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -80,6 +85,7 @@ class ToolCheckResult:
         path: Filesystem path where the tool was found.
         install_hint: Context-aware install command.
         upgrade_hint: Context-aware upgrade command for outdated tools.
+        advisory: Structured update advisory when outdated/incompatible.
     """
 
     tool: ManifestTool
@@ -90,6 +96,7 @@ class ToolCheckResult:
     path: str | None = None
     install_hint: str = ""
     upgrade_hint: str = ""
+    advisory: VersionAdvisory | None = None
 
     @property
     def installed(self) -> bool:
@@ -209,6 +216,17 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
                 upgrade_hint=upgrade_hint,
             )
 
+    channel_path = resolve_channel_binary_path(
+        tool_name=tool.name,
+        install_bin=tool.install_bin,
+        install_component=tool.install_component,
+        probe_path=tool_path,
+        probe_argv0=main_cmd,
+        which=shutil.which,
+    )
+    if channel_path is not None:
+        tool_path = str(channel_path)
+
     try:
         result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             command,
@@ -247,6 +265,17 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             recommended=tool.version,
             minimum=tool.min_version,
         )
+        advisory = None
+        if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
+            advisory = build_outdated_version_advisory(
+                tool=tool.name,
+                installed=version,
+                latest_known=tool.version,
+                binary_path=tool_path,
+                install_package=tool.install_package,
+                install_type=tool.install_type,
+                channel_override=tool.update_channel,
+            )
         return ToolCheckResult(
             tool=tool,
             status=status,
@@ -254,6 +283,7 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
             path=tool_path,
             install_hint=hint,
             upgrade_hint=upgrade_hint,
+            advisory=advisory,
         )
     except subprocess.TimeoutExpired:
         return ToolCheckResult(
@@ -515,9 +545,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         config = get_config(reload=True)
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - any parse failure is a report line, not a crash
+    except Exception as exc:  # noqa: BLE001
+        # Any parse failure is a report line, not a crash.
         return None, [
             DoctorCheck(
                 category=DoctorCheckCategory.CONFIG,
@@ -543,9 +572,8 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         warnings = validate_config_consistency()
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - a broken native config must not abort the report
+    except Exception as exc:  # noqa: BLE001
+        # A broken native config must not abort the report.
         warnings = [f"consistency check failed: {exc}"]
 
     if warnings:

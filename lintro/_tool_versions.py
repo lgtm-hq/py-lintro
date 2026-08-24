@@ -67,7 +67,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CLIPPY: "1.97.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
-    ToolName.GOLANGCI_LINT: "2.12.2",
+    ToolName.GOLANGCI_LINT: "2.13.0",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUSTC: "1.97.1",
@@ -77,6 +77,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.TAPLO: "0.10.0",
     ToolName.TERRAFORM: "1.15.8",
     ToolName.TRUFFLEHOG: "3.97.0",
+    ToolName.TYPOS: "1.49.0",
     ToolName.VALE: "3.17.1",
 }
 

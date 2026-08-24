@@ -32,6 +32,7 @@ from lintro.ai.enums import (
     SanitizeMode,
 )
 from lintro.ai.enums.config_source import ConfigSource
+from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
@@ -151,7 +152,14 @@ class AIConfig(BaseModel):
             "when ai.enabled is also true (the two are ANDed)."
         ),
     )
-    provider: AIProvider = AIProvider.ANTHROPIC
+    provider: AIProvider | None = Field(
+        default=None,
+        description=(
+            "Required when any AI feature (ai.lint or ai.review) is enabled. "
+            "Set via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            f"Accepted providers: {accepted_provider_values()}."
+        ),
+    )
     transport: AITransport | None = Field(
         default=None,
         description=(
@@ -457,9 +465,9 @@ class AIConfig(BaseModel):
 
         Environment overrides (``LINTRO_AI_PROVIDER``, ``LINTRO_AI_MODEL``,
         ``LINTRO_AI_TRANSPORT``, ``LINTRO_AI_ENABLED``,
-        ``LINTRO_AI_MAX_COST_USD``) are applied here so every consumer of
-        :meth:`from_mapping` — execution, status, doctor, MCP — sees the
-        same effective values (#1970, #2024).
+        ``LINTRO_AI_REVIEW``, ``LINTRO_AI_MAX_COST_USD``) are applied here
+        so every consumer of :meth:`from_mapping` — execution, status,
+        doctor, MCP — sees the same effective values (#1970, #2024, #2153).
 
         This is the boundary that keeps :mod:`lintro.config` free of any
         knowledge of ``AIConfig``'s field set (see issue #724): the loader
@@ -498,7 +506,8 @@ class AIConfig(BaseModel):
 
         Returns:
             Validated config together with provenance for ``provider``,
-            ``model``, ``transport``, ``enabled``, and ``max_cost_usd``.
+            ``model``, ``transport``, ``enabled``, ``review``, and
+            ``max_cost_usd``.
         """
         from lintro.ai.config_overrides import (
             OVERRIDE_FIELDS,

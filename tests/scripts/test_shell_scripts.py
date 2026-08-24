@@ -537,3 +537,23 @@ def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
         and "requirements-semgrep.txt" in rule.get("matchFileNames", [])
     ]
     assert_that(disabled).is_not_empty()
+
+
+def test_local_lintro_prepends_local_bin_without_install_flag() -> None:
+    """Typos in ~/.local/bin must be visible on a plain ``check`` run.
+
+    ``add_local_bin_to_path`` used to live only inside the ``--install``
+    helper, so a fresh shell never exported PATH for an already-installed
+    binary.
+    """
+    script = Path("scripts/local/local-lintro.sh").read_text(encoding="utf-8")
+    main_start = script.find("main() {")
+    assert_that(main_start).is_not_equal_to(-1)
+    main_end = script.find("\n}", main_start)
+    main = script[main_start:main_end]
+    install_gate = main.find('if [ "${1:-}" = "--install"')
+    path_call = main.find("add_local_bin_to_path")
+
+    assert_that(path_call).is_not_equal_to(-1)
+    assert_that(install_gate).is_not_equal_to(-1)
+    assert_that(path_call).is_less_than(install_gate)

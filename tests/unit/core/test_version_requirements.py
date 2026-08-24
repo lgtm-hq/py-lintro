@@ -95,6 +95,8 @@ def test_compare_versions(version1: str, version2: str, expected: int) -> None:
         # Clippy: clippy output should convert 0.1.X to 1.X.0
         ("clippy", "clippy 0.1.92 (ded5c06cf2 2025-12-08)", "1.92.0"),
         ("clippy", "clippy 0.1.75 (abcdef123 2024-01-01)", "1.75.0"),
+        # typos: the binary is "typos" but `--version` prints the crate name.
+        ("typos", "typos-cli 1.49.0", "1.49.0"),
     ],
 )
 def test_extract_version_from_output(

@@ -5,16 +5,19 @@ consistency, accuracy, and completeness.
 """
 
 import re
+import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_scripts_have_help() -> None:
     """Test that all executable scripts support --help flag."""
-    script_dir = Path("scripts")
+    script_dir = _REPO_ROOT / "scripts"
     failed_scripts = []
 
     for script_file in script_dir.rglob("*.sh"):
@@ -47,7 +50,7 @@ def test_scripts_have_help() -> None:
 
 def test_scripts_readme_coverage() -> None:
     """Test that all scripts are documented in scripts/README.md."""
-    scripts_readme = Path("scripts/README.md")
+    scripts_readme = _REPO_ROOT / "scripts" / "README.md"
     if not scripts_readme.exists():
         pytest.skip("scripts/README.md not found")
 
@@ -56,14 +59,14 @@ def test_scripts_readme_coverage() -> None:
 
     # Get all script files
     script_files = set()
-    for script_file in Path("scripts").rglob("*.sh"):
+    for script_file in (_REPO_ROOT / "scripts").rglob("*.sh"):
         # Skip files inside private packages (e.g. ``scripts/ci/_generator/``);
         # those are implementation detail of a documented entry script, not
         # separately invokable scripts.
         if any(part.startswith("_") for part in script_file.parts):
             continue
         script_files.add(script_file.name)
-    for script_file in Path("scripts").rglob("*.py"):
+    for script_file in (_REPO_ROOT / "scripts").rglob("*.py"):
         if script_file.name == "__init__.py":
             continue
         # Skip files inside private packages (e.g. ``scripts/ci/_generator/``);
@@ -94,6 +97,7 @@ def test_cli_help_works() -> None:
             capture_output=True,
             text=True,
             timeout=10,
+            cwd=_REPO_ROOT,
         )
         assert_that(result.returncode).is_equal_to(0)
         assert_that(result.stdout).contains("check")
@@ -230,10 +234,11 @@ def test_internal_doc_links() -> None:
 
     broken_links = []
     for doc_file in doc_files:
-        if not Path(doc_file).exists():
+        doc_path = _REPO_ROOT / doc_file
+        if not doc_path.exists():
             continue
 
-        with open(doc_file, encoding="utf-8") as f:
+        with open(doc_path, encoding="utf-8") as f:
             content = f.read()
 
         # Find markdown links
@@ -247,7 +252,7 @@ def test_internal_doc_links() -> None:
 
             link_path, _, fragment = link_url.partition("#")
             # A bare "#anchor" points at the current document.
-            source = Path(doc_file)
+            source = doc_path
             target = source if not link_path else (source.parent / link_path).resolve()
 
             if not target.exists():
@@ -279,10 +284,11 @@ def test_all_docs_have_titles() -> None:
 
     files_without_titles = []
     for doc_file in doc_files:
-        if not Path(doc_file).exists():
+        doc_path = _REPO_ROOT / doc_file
+        if not doc_path.exists():
             continue
 
-        with open(doc_file, encoding="utf-8") as f:
+        with open(doc_path, encoding="utf-8") as f:
             first_line = f.readline().strip()
 
         if not first_line.startswith("# "):
@@ -302,10 +308,11 @@ def test_command_consistency() -> None:
 
     inconsistent_commands = []
     for doc_file in doc_files:
-        if not Path(doc_file).exists():
+        doc_path = _REPO_ROOT / doc_file
+        if not doc_path.exists():
             continue
 
-        with open(doc_file, encoding="utf-8") as f:
+        with open(doc_path, encoding="utf-8") as f:
             content = f.read()
 
         # `chk`, `fmt`, and `ls` are valid, current CLI aliases (registered in
@@ -347,6 +354,7 @@ _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_AI_MODEL",
     "LINTRO_AI_TRANSPORT",
     "LINTRO_AI_ENABLED",
+    "LINTRO_AI_REVIEW",
     "LINTRO_AI_MAX_COST_USD",
 }
 
@@ -369,15 +377,17 @@ def _project_version() -> str:
     """
     import tomllib
 
-    with open("pyproject.toml", "rb") as f:
+    with (_REPO_ROOT / "pyproject.toml").open("rb") as f:
         data = tomllib.load(f)
     return str(data["project"]["version"])
 
 
 def test_docs_agree_on_tier_count() -> None:
     """README and the Configuration Guide must state the same tier count."""
-    readme = Path("README.md").read_text(encoding="utf-8")
-    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    config_doc = (_REPO_ROOT / "docs" / "configuration.md").read_text(
+        encoding="utf-8",
+    )
 
     readme_tiers = set(re.findall(r"(\d+)-tier", readme))
     config_tiers = set(re.findall(r"(\d+)-tier", config_doc, flags=re.IGNORECASE))
@@ -391,12 +401,14 @@ def test_docs_agree_on_tier_count() -> None:
 
 def test_documented_env_vars_are_handled() -> None:
     """Every LINTRO_* env var in the config docs must be read by the runtime."""
-    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    config_doc = (_REPO_ROOT / "docs" / "configuration.md").read_text(
+        encoding="utf-8",
+    )
 
     # Collect the source text once so we can confirm each var is referenced.
     source_text = "\n".join(
         p.read_text(encoding="utf-8", errors="ignore")
-        for p in Path("lintro").rglob("*.py")
+        for p in (_REPO_ROOT / "lintro").rglob("*.py")
     )
 
     documented = set(re.findall(r"LINTRO_[A-Z_]+", config_doc))
@@ -460,7 +472,7 @@ def test_security_md_supports_current_minor() -> None:
     major, minor, *_ = version.split(".")
     current_line = f"{major}.{minor}.x"
 
-    security = Path("SECURITY.md").read_text(encoding="utf-8")
+    security = (_REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
     supported_rows = [
         line for line in security.splitlines() if "|" in line and "✅" in line
     ]
@@ -479,7 +491,9 @@ def test_html_validate_docs_pin_matches_manifest() -> None:
 
     pin = get_tool_version(tool_name="html-validate")
     assert_that(pin).is_not_none()
-    config_doc = Path("docs/configuration.md").read_text(encoding="utf-8")
+    config_doc = (_REPO_ROOT / "docs" / "configuration.md").read_text(
+        encoding="utf-8",
+    )
     assert_that(config_doc).described_as(
         "docs/configuration.md must name the current html-validate pin",
     ).contains(f"currently `{pin}`")
@@ -487,7 +501,116 @@ def test_html_validate_docs_pin_matches_manifest() -> None:
 
 def test_preview_serve_disables_astro_agent_background() -> None:
     """Local preview must stay attached unless a caller opts into background."""
-    script = Path("scripts/ci/site/preview-serve.sh").read_text(encoding="utf-8")
+    script = (_REPO_ROOT / "scripts" / "ci" / "site" / "preview-serve.sh").read_text(
+        encoding="utf-8",
+    )
     assert_that(script).described_as(
         "preview-serve.sh must default ASTRO_PREVIEW_BACKGROUND to 0",
     ).contains('ASTRO_PREVIEW_BACKGROUND="${ASTRO_PREVIEW_BACKGROUND:-0}"')
+
+
+def test_justfile_contract() -> None:
+    """The justfile must declare recipes and command lines without needing just.
+
+    Recipe headers are matched at start-of-line so ``test-unit`` cannot satisfy
+    ``test``. ``just --list`` is an extra parse check only when the binary is
+    present; CI images without just still lock the file contract.
+
+    """
+    justfile = (_REPO_ROOT / "justfile").read_text(encoding="utf-8")
+    contributing = (_REPO_ROOT / "docs" / "contributing.md").read_text(
+        encoding="utf-8",
+    )
+
+    assert_that(justfile).does_not_contain("just.systems/install.sh")
+    assert_that(contributing).does_not_contain("just.systems/install.sh")
+    assert_that(justfile).contains('"bash", "-euo", "pipefail", "-c"')
+    assert_that(justfile).contains("scripts/local/run-tests.sh")
+    assert_that(justfile).does_not_contain("scripts/local/local-test.sh")
+    assert_that(justfile).contains('replace(TOOLS, " ", ",")')
+    assert_that(justfile).contains("just test-unit --")
+    assert_that(justfile).contains("|| true")
+    assert_that(justfile).contains("docker build --target full")
+    assert_that(justfile).contains("./scripts/ci/site/dev.sh")
+    assert_that(justfile).contains("./scripts/ci/site/build.sh")
+    assert_that(contributing).contains("just test-unit --")
+    assert_that(contributing).does_not_contain("just test-unit -v")
+    assert_that(contributing).contains("just lintro-check")
+    assert_that(contributing).contains("just lintro-format")
+
+    def has_recipe(name: str) -> bool:
+        return (
+            re.search(rf"^{re.escape(name)}(?:\s|\*|:)", justfile, re.MULTILINE)
+            is not None
+        )
+
+    for recipe in (
+        "setup",
+        "install",
+        "pre-commit",
+        "lint",
+        "format",
+        "mypy",
+        "bench",
+        "test",
+        "test-integration",
+        "test-unit",
+        "docker-build",
+        "docker-test",
+        "clean",
+        "site-dev",
+        "site-build",
+        "site-test",
+        "site-preview",
+    ):
+        assert_that(has_recipe(recipe)).described_as(
+            f"justfile must declare a `{recipe}` recipe at start of line",
+        ).is_true()
+
+    assert_that(has_recipe("all")).described_as(
+        "the all convenience target must stay removed",
+    ).is_false()
+
+    just_bin = shutil.which("just")
+    if just_bin is None:
+        pytest.skip("`just` binary not installed; skipping just --list parse check")
+
+    try:
+        result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            [just_bin, "--list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            cwd=_REPO_ROOT,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("`just --list` timed out")
+
+    assert_that(result.returncode).is_equal_to(0)
+    listed = {
+        line.strip().split(" ", 1)[0]
+        for line in result.stdout.splitlines()
+        if line.strip() and not line.strip().startswith("Available")
+    }
+    assert_that(listed).contains("pre-commit", "test-integration", "site-dev")
+    assert_that(listed).does_not_contain("all")
+
+
+def test_makefile_is_retired() -> None:
+    """The root Makefile is replaced by the justfile and must not return."""
+    assert_that((_REPO_ROOT / "Makefile").exists()).described_as(
+        "root Makefile was replaced by the justfile",
+    ).is_false()
+
+
+def test_repo_file_paths_are_cwd_independent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repo file reads must not depend on the process working directory."""
+    monkeypatch.chdir(tmp_path)
+
+    assert_that((_REPO_ROOT / "justfile").is_file()).is_true()
+    assert_that((_REPO_ROOT / "docs" / "contributing.md").is_file()).is_true()
+    assert_that((_REPO_ROOT / "Makefile").exists()).is_false()

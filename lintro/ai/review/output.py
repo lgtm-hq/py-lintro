@@ -27,7 +27,7 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         Dictionary representation suitable for JSON encoding.
     """
     metadata = asdict(result.metadata)
-    return {
+    payload: dict[str, Any] = {
         "metadata": metadata,
         "summary": result.summary,
         "readiness_verdict": result.readiness_verdict.value,
@@ -45,6 +45,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         "checklist": [asdict(answer) for answer in result.checklist],
         "findings": [asdict(finding) for finding in result.findings],
     }
+    if result.coverage is not None:
+        payload["coverage"] = result.coverage.to_dict()
+        payload["partial"] = result.metadata.partial
+        payload["stopped_reason"] = result.metadata.stopped_reason
+    return payload
 
 
 def review_result_to_json(*, result: ReviewResult) -> str:

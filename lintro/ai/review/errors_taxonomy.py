@@ -19,7 +19,11 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum, auto
 
-from lintro.ai.exceptions import AIAuthenticationError, AIRateLimitError
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AIProviderRequiredError,
+    AIRateLimitError,
+)
 
 
 class ReviewErrorKind(StrEnum):
@@ -38,6 +42,8 @@ class ReviewErrorKind(StrEnum):
         INVALID_RESPONSE: The model returned a malformed/unparseable response
             (a lintro-side parse/validation failure, not a provider transport
             error).
+        PROVIDER_UNAVAILABLE: No provider is configured, so the review never
+            reached a model. Distinct from a malformed response.
         UNKNOWN: No signature matched; the surfaced cause text is shown as-is.
     """
 
@@ -49,6 +55,7 @@ class ReviewErrorKind(StrEnum):
     SERVER_ERROR = auto()
     TIMEOUT = auto()
     INVALID_RESPONSE = auto()
+    PROVIDER_UNAVAILABLE = auto()
     UNKNOWN = auto()
 
 
@@ -294,6 +301,10 @@ KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
         "Retry the review — model output may have been malformed — or try a "
         "different model via `ai.model`.",
     ),
+    ReviewErrorKind.PROVIDER_UNAVAILABLE: (
+        "no AI provider is configured",
+        "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+    ),
     ReviewErrorKind.UNKNOWN: (
         "the review could not be completed",
         "See the cause above and the workflow logs; retry if it looks transient.",
@@ -394,6 +405,8 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
         return ReviewErrorKind.AUTH_FAILED
     if isinstance(cause_exc, AIRateLimitError):
         return ReviewErrorKind.RATE_LIMITED
+    if isinstance(cause_exc, AIProviderRequiredError):
+        return ReviewErrorKind.PROVIDER_UNAVAILABLE
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

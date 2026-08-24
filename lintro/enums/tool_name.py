@@ -47,6 +47,7 @@ class ToolName(StrEnum):
     TERRAFORM = auto()
     TRUFFLEHOG = auto()
     TSC = auto()
+    TYPOS = auto()
     VALE = auto()
     VUE_TSC = auto()
     YAMLLINT = auto()

@@ -10,8 +10,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
+from lintro.ai.exceptions import (
+    AINotAvailableError,  # noqa: F401 -- public re-export
+    AIProviderRequiredError,
+)
 from lintro.ai.paths import resolve_workspace_root
+from lintro.ai.provider_enum import (
+    accepted_provider_values,
+    provider_required_error,
+)
 from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.transcript import maybe_start_transcript
 
@@ -44,15 +51,18 @@ def get_provider(
         BaseAIProvider: Configured provider instance.
 
     Raises:
+        AIProviderRequiredError: If no provider is set. The message names
+            ``ai.provider``, ``LINTRO_AI_PROVIDER``, and ``--provider``.
         ValueError: If the provider name is not recognized.
     """
+    if config.provider is None:
+        raise AIProviderRequiredError(provider_required_error())
     try:
-        provider_enum = AIProvider(config.provider.lower())
+        provider_enum = AIProvider(str(config.provider).lower())
     except ValueError as exc:
-        supported = ", ".join(p.value for p in AIProvider)
         raise ValueError(
             f"Unknown AI provider: '{config.provider}'. "
-            f"Supported providers: {supported}",
+            f"Supported providers: {accepted_provider_values()}",
         ) from exc
 
     provider_classes: dict[AIProvider, tuple[str, str]] = {

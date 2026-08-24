@@ -192,7 +192,7 @@
     },
     {
       "name": "golangci_lint",
-      "version": "2.12.2",
+      "version": "2.13.0",
       "install": {
         "type": "binary"
       },
@@ -217,7 +217,7 @@
     },
     {
       "name": "html_validate",
-      "version": "11.6.2",
+      "version": "11.8.0",
       "min_version": "11.5.6",
       "install": {
         "type": "npm",
@@ -515,6 +515,19 @@
       "version_command": ["tsc", "--version"],
       "languages": ["typescript"],
       "tags": ["linter", "type_checker"]
+    },
+    {
+      "name": "typos",
+      "version": "1.49.0",
+      "install": {
+        "type": "cargo",
+        "package": "typos-cli"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["typos", "--version"],
+      "languages": ["text"],
+      "tags": ["linter"]
     },
     {
       "name": "vale",

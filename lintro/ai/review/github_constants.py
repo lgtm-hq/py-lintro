@@ -7,6 +7,9 @@ import re
 from lintro.ai.review.models.review_finding import Severity
 
 STICKY_MARKER = "<!-- lintro-ai-review -->"
+ARCHIVE_MARKER = "<!-- lintro-ai-review-archive -->"
+# Split history into a second comment before GitHub's hard cap.
+PRIMARY_SOFT_LIMIT = 56_000
 STATE_MARKER_PREFIX = "<!-- lintro-ai-review-state:"
 STATE_MARKER_SUFFIX = "-->"
 # Current review-state schema version. v2 adds per-run statistics and
@@ -39,8 +42,9 @@ _FOOTER = (
 #: One-line footer of the v5 sticky comment (#1909). Names where finding detail
 #: actually lives, so the sticky is read as an index rather than a duplicate.
 STICKY_FOOTER = (
-    "<sub>🤖 lintro · finding details on inline comments · updates in place on "
-    "every push · `~` = estimated locally (provider did not report usage)</sub>"
+    "<sub>🤖 lintro review · findings are commented inline · "
+    "[how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/"
+    "docs/ai-review-report.md)</sub>"
 )
 
 _MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")

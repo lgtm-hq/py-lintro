@@ -145,6 +145,11 @@ tools:
     auto_install: true # Override global auto_install for this tool only
 ```
 
+Each `tools.<name>` value must be a mapping (`ruff: {}` or `ruff: {enabled: true}`) or a
+boolean (`ruff: true` / `ruff: false`). A bare `tools.ruff:` is YAML null and is
+rejected by `check`, `format`, and `config show` with exit 1. Use
+`lintro config validate` for a structured report.
+
 ### Configuration Report Command
 
 Use `lintro config` to view the current configuration status for all tools:
@@ -482,6 +487,7 @@ export LINTRO_AI_PROVIDER=cursor
 export LINTRO_AI_MODEL=cursor-grok-4.6-high
 export LINTRO_AI_TRANSPORT=cli
 export LINTRO_AI_ENABLED=1
+export LINTRO_AI_REVIEW=1
 export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 ```
 
@@ -496,6 +502,7 @@ export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
 | `LINTRO_AI_MODEL`                | Override `ai.model`                                               | -         |
 | `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
 | `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
+| `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                     | -         |
 | `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
@@ -598,6 +605,10 @@ enabled = false
 enabled = false
 ```
 
+`[tool.lintro.execution]` and `[tool.lintro.enforce]` nested tables are equivalent to
+the YAML `execution:` / `enforce:` sections. Flat keys such as `fail_fast` under
+`[tool.lintro]` also work.
+
 `pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
 configuration source and these tables are not consulted.
 
@@ -633,7 +644,20 @@ lintro doctor --json               # machine-readable output for CI
 
 The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
-`upgrade_hint`.
+`upgrade_hint`. `upgrade_hint` is the install-strategy command (pin conflicts, uv vs
+pip, node package manager). Doctor, `lintro versions --json`, and MCP `lintro_versions`
+always include `advisory` (`null` when the tool is current). When present, that object
+has the detected update channel and a path-heuristic `update_command`. Execute
+`upgrade_hint` to change installs; `update_command` is diagnostic and can disagree with
+`upgrade_hint` when the binary path and the manifest strategy name different managers.
+`binary_path` is the tool binary resolved past cargo/bash wrappers. A `standalone` or
+`unknown` path does not inherit a pip/npm/cargo `update_command` from manifest
+`install.type`.
+
+The human `lintro versions` table labels a tool **OUTDATED** when it meets the minimum
+but trails the recommended pin (`below_recommended`). JSON `version_check_passed` stays
+`true` in that case; only the table status string changed from PASS. The process still
+exits 0.
 
 ### Node.js Package Manager Policy {#node-package-manager-policy}
 
@@ -1902,7 +1926,7 @@ runtime. Branches 3 and 4 emit a one-time warning because they require network a
 the npm registry, and a failure on either path is reported with install guidance rather
 than html-validate's raw error.
 
-**Node runtime requirement:** the pinned html-validate (currently `11.6.2`) declares
+**Node runtime requirement:** the pinned html-validate (currently `11.8.0`) declares
 `engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
 reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
 21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.
@@ -2164,6 +2188,101 @@ brew install vale
 lintro check docs/ --tools vale
 lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
 lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
+```
+
+#### Typos Configuration
+
+[typos](https://github.com/crate-ci/typos) is a fast, low-false-positive spell checker
+for source code and documentation. It checks all text files and can auto-correct
+misspellings.
+
+> **When typos runs.** typos is language-agnostic, so it has no entry in the manifest's
+> `language_map`. That makes selection depend on which path a project takes:
+>
+> - **No Lintro config (first run).** Tool selection comes from language detection,
+>   which does not pull typos in on its own. It joins through the "unmapped tool with a
+>   native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or `_typos.toml`
+>   exists at a scan root. crate-ci/typos also reads `[tool.typos]` in `pyproject.toml`
+>   and `[package.metadata.typos]` / `[workspace.metadata.typos]` in `Cargo.toml`; those
+>   files are **not** in Lintro's `native_configs`, so a typical Python or Rust tree
+>   does not auto-select the plugin. The binary still honors those tables once typos is
+>   selected. An empty `[tool.lintro]` table is not a config, so this path still
+>   applies.
+> - **With a resolved Lintro config, or `--tools all`.** Language scoping is bypassed. A
+>   resolved config is `.lintro-config.yaml` (or `.yml`), a **non-empty**
+>   `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section. Typos
+>   then runs when the binary is on `PATH` **and** it is not filtered out by
+>   `execution.enabled_tools` or `tools.typos.enabled: false`. `lintro init`'s
+>   recommended profile writes a language-based `enabled_tools` allowlist that does
+>   **not** include typos, so those projects do not start spell-checking on upgrade. An
+>   existing **unscoped** `lintro check` (`enabled_tools: []` or omitted) will.
+>
+> `lintro check --tools typos` selects it explicitly in either case.
+>
+> Two things are worth knowing before that first run:
+>
+> - **Turning it off.** Do not create a Lintro config solely to disable typos on a
+>   no-config first run: that file is a resolved config, so language scoping is skipped
+>   and an empty `enabled_tools` allowlist runs the full unscoped registry, including
+>   typos. On a first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On
+>   a project that already has a Lintro config, disable the tool:
+>
+>   ```yaml
+>   tools:
+>     typos:
+>       enabled: false
+>   ```
+>
+>   Or leave it out of `execution.enabled_tools` if you use an allowlist
+>   (`lintro init --profile recommended` already does).
+>
+>   `--tools` is an allowlist rather than an opt-out: `lintro check --tools ruff` runs
+>   ruff _only_, dropping every other tool as well, so reach for it to narrow a single
+>   run, not to exclude one tool.
+>
+> - **Project vocabulary.** The first run usually reports a handful of deliberate
+>   spellings — product names, abbreviations, deliberate misspellings inside test
+>   fixtures. Add them to `.typos.toml` rather than suppressing the tool: real words go
+>   in `[default.extend-words]`, and anything that is only correct in one context is
+>   better handled by a context-anchored `[default] extend-ignore-re` pattern so the
+>   same word is still caught elsewhere. `lintro format --tools typos` applies the
+>   corrections typos is confident about, which clears most of the rest.
+
+**File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
+
+```toml
+# Accept project-specific vocabulary that the default dictionary flags
+[default.extend-words]
+unparseable = "unparseable"
+
+# Skip files/directories that deliberately contain non-English or fixture text
+[files]
+extend-exclude = ["tests/fixtures/"]
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `timeout` | integer | Per-invocation timeout in seconds (default: 30) |
+
+typos' word list and file scope are configured through its native `typos.toml` file
+rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
+`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
+also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
+keeps `lintro format` away from the common binary formats (images, archives, compiled
+objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
+header can still reach `--write-changes` — so add the extensions you care about to
+`[files] extend-exclude` when a project stores unusual binary assets.
+
+**Usage Examples:**
+
+```bash
+# Check spelling across the project
+lintro check --tools typos
+
+# Auto-correct misspellings in place
+lintro format --tools typos
 ```
 
 ### Rust Tools

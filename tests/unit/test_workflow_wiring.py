@@ -928,6 +928,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".prettierignore",
         ".prettierrc.json",
         ".stylelintrc.json",
+        ".typos.toml",
         ".vale.ini",
         ".yamllint",
         "apps",
@@ -937,9 +938,9 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "docker",
         "docker-compose.yml",
         "Dockerfile",
+        "justfile",
         "LICENSE",
         "lintro",
-        "Makefile",
         "MANIFEST.in",
         "npm",
         "package.json",
@@ -1046,6 +1047,8 @@ def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
     filters = detect_step["with"]["filters"]
     filter_names = re.findall(r"^([^#\s][^:]*):\s*$", filters, re.M)
     assert_that(filter_names).is_equal_to(["full-lint"])
+    assert_that(filters).contains("- 'justfile'")
+    assert_that(filters).does_not_contain("- 'Makefile'")
 
     resolve_step = steps["result"]
     assert_that(resolve_step["run"]).is_equal_to(

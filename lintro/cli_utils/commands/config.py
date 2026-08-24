@@ -1,4 +1,11 @@
-"""Config command for displaying Lintro configuration status."""
+"""Config command group for inspecting and validating Lintro configuration.
+
+Provides:
+
+- ``lintro config`` / ``lintro config show``: display effective configuration.
+- ``lintro config validate``: validate a config file against the schema.
+- ``lintro config init``: scaffold a starter config (delegates to ``init``).
+"""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -9,7 +16,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from lintro.cli_utils.commands.init import init_command
 from lintro.config import LintroConfig, get_config
+from lintro.config.config_validator import ValidationResult, validate_config_file
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.unified_config import (
     _load_native_tool_config,
     get_ordered_tools,
@@ -33,7 +43,11 @@ def _get_all_tool_names() -> list[str]:
     return ToolRegistry.get_names()
 
 
-@click.command()
+@click.group(
+    invoke_without_command=True,
+    no_args_is_help=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 @click.option(
     "--verbose",
     "-v",
@@ -52,7 +66,114 @@ def _get_all_tool_names() -> list[str]:
     type=click.Path(),
     help="Export effective configuration as a .lintro-config.yaml file.",
 )
+@click.pass_context
 def config_command(
+    ctx: click.Context,
+    verbose: bool,
+    json_output: bool,
+    export_path: str | None,
+) -> None:
+    """Inspect and validate Lintro configuration.
+
+    Without a subcommand, displays the effective configuration (same as
+    ``config show``). Subcommands provide validation and scaffolding:
+
+    \u0008
+    - config show      Display the effective configuration.
+    - config validate  Validate a config file against the schema.
+    - config init      Scaffold a starter .lintro-config.yaml.
+
+    Group-level flags given before a subcommand (e.g.
+    ``lintro config --json validate``) are forwarded to that subcommand.
+
+    \u000c
+
+    Args:
+        ctx: Click context used to detect subcommand dispatch.
+        verbose: Show detailed configuration including native tool configs.
+        json_output: Output configuration as JSON.
+        export_path: Path to export effective configuration as YAML file.
+    """
+    if ctx.invoked_subcommand is not None:
+        _forward_group_options(
+            ctx=ctx,
+            verbose=verbose,
+            json_output=json_output,
+            export_path=export_path,
+        )
+        return
+
+    _run_config_report(
+        verbose=verbose,
+        json_output=json_output,
+        export_path=export_path,
+    )
+
+
+def _forward_group_options(
+    ctx: click.Context,
+    verbose: bool,
+    json_output: bool,
+    export_path: str | None,
+) -> None:
+    """Forward group-level flags to the invoked subcommand.
+
+    Click binds ``lintro config --json validate`` to the *group*'s ``--json``,
+    so without this the subcommand would run with its own defaults and quietly
+    ignore the flag. Values are injected via ``ctx.default_map``, which the
+    subcommand's context consults for any parameter not given explicitly, so
+    an explicit flag on the subcommand still wins.
+
+    Args:
+        ctx: The group's Click context.
+        verbose: Whether ``--verbose`` was given on the group.
+        json_output: Whether ``--json`` was given on the group.
+        export_path: Value of ``--export`` given on the group, if any.
+
+    Raises:
+        click.UsageError: When a group flag is not accepted by the
+            invoked subcommand (for example ``--export`` with validate).
+    """
+    provided: dict[str, Any] = {}
+    if verbose:
+        provided["verbose"] = True
+    if json_output:
+        provided["json_output"] = True
+    if export_path is not None:
+        provided["export_path"] = export_path
+    if not provided:
+        return
+
+    invoked = ctx.invoked_subcommand
+    if invoked is None:
+        return
+
+    group = cast(click.Group, ctx.command)
+    command = group.get_command(ctx, invoked)
+    if command is None:
+        return
+
+    param_names = {param.name for param in command.params}
+    leftover = [key for key in provided if key not in param_names]
+    if leftover:
+        flag_names = {
+            "verbose": "--verbose",
+            "json_output": "--json",
+            "export_path": "--export",
+        }
+        shown = ", ".join(flag_names[key] for key in leftover)
+        raise click.UsageError(
+            f"{shown} cannot be used with 'config {invoked}'.",
+        )
+
+    default_map: dict[str, Any] = dict(ctx.default_map or {})
+    merged: dict[str, Any] = dict(default_map.get(invoked) or {})
+    merged.update(provided)
+    default_map[invoked] = merged
+    ctx.default_map = default_map
+
+
+def _run_config_report(
     verbose: bool,
     json_output: bool,
     export_path: str | None,
@@ -72,9 +193,17 @@ def config_command(
         verbose: Show detailed configuration including native tool configs.
         json_output: Output configuration as JSON.
         export_path: Path to export effective configuration as YAML file.
+
+    Raises:
+        SystemExit: When the config cannot be parsed (for example a null
+            ``tools.<name>:`` entry). Exits 1 with the parse error.
     """
     console = Console()
-    config = get_config(reload=True)
+    try:
+        config = get_config(reload=True)
+    except ConfigurationError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1) from exc
 
     if export_path:
         _export_yaml(config=config, export_path=export_path, console=console)
@@ -89,6 +218,163 @@ def config_command(
         config=config,
         verbose=verbose,
     )
+
+
+@config_command.command("show")
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Show detailed configuration including native tool configs.",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output configuration as JSON.",
+)
+@click.option(
+    "--export",
+    "export_path",
+    type=click.Path(),
+    help="Export effective configuration as a .lintro-config.yaml file.",
+)
+def config_show_command(
+    verbose: bool,
+    json_output: bool,
+    export_path: str | None,
+) -> None:
+    """Display the effective Lintro configuration.
+
+    \u000c
+
+    Args:
+        verbose: Show detailed configuration including native tool configs.
+        json_output: Output configuration as JSON.
+        export_path: Path to export effective configuration as YAML file.
+    """
+    _run_config_report(
+        verbose=verbose,
+        json_output=json_output,
+        export_path=export_path,
+    )
+
+
+@config_command.command("validate")
+@click.option(
+    "--path",
+    "config_path",
+    type=click.Path(),
+    default=None,
+    help="Path to the config file to validate (default: auto-detect).",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output validation results as JSON.",
+)
+def config_validate_command(
+    config_path: str | None,
+    json_output: bool,
+) -> None:
+    """Validate a Lintro configuration file against the schema.
+
+    Reports unknown tools (with typo suggestions), deprecated or unknown
+    options, and hard errors such as invalid value types. Exits non-zero when
+    the configuration is invalid.
+
+    \u000c
+
+    Args:
+        config_path: Explicit config file to validate; auto-detected if None.
+        json_output: Emit machine-readable JSON instead of Rich output.
+
+    Raises:
+        SystemExit: With code 1 when the configuration is invalid.
+    """
+    result = validate_config_file(config_path)
+
+    if json_output:
+        _output_validation_json(result)
+    else:
+        _output_validation_rich(result, console=Console())
+
+    if not result.is_valid:
+        raise SystemExit(1)
+
+
+def _output_validation_json(result: ValidationResult) -> None:
+    """Print validation results as JSON.
+
+    Args:
+        result: The validation result to serialize.
+    """
+    import json
+
+    payload = {
+        "config_path": str(result.config_path) if result.config_path else None,
+        "valid": result.is_valid,
+        "errors": [
+            {
+                "code": str(msg.code),
+                "message": msg.message,
+                "location": msg.location,
+                "suggestion": msg.suggestion,
+            }
+            for msg in result.errors
+        ],
+        "warnings": [
+            {
+                "code": str(msg.code),
+                "message": msg.message,
+                "location": msg.location,
+                "suggestion": msg.suggestion,
+            }
+            for msg in result.warnings
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+
+
+def _output_validation_rich(result: ValidationResult, console: Console) -> None:
+    """Render validation results using Rich formatting.
+
+    Args:
+        result: The validation result to render.
+        console: Rich console for output.
+    """
+    source = result.config_path or "[dim]none found[/dim]"
+    console.print(f"[bold]Validating[/bold] {source}")
+    console.print()
+
+    if result.warnings:
+        console.print("[bold yellow]Warnings:[/bold yellow]")
+        for msg in result.warnings:
+            console.print(f"  [yellow]⚠️[/yellow]  {msg.render()}")
+        console.print()
+
+    if result.errors:
+        console.print("[bold red]Errors:[/bold red]")
+        for msg in result.errors:
+            console.print(f"  [red]✗[/red] {msg.render()}")
+        console.print()
+
+    n_err = len(result.errors)
+    n_warn = len(result.warnings)
+    if result.is_valid:
+        suffix = f" ({n_warn} warning{'s' if n_warn != 1 else ''})" if n_warn else ""
+        console.print(f"[green]✅ Configuration is VALID{suffix}[/green]")
+    else:
+        console.print(
+            f"[red]❌ Configuration is INVALID "
+            f"({n_err} error{'s' if n_err != 1 else ''}, "
+            f"{n_warn} warning{'s' if n_warn != 1 else ''})[/red]",
+        )
+
+
+# Reuse the top-level init scaffolding as `config init`.
+config_command.add_command(init_command, name="init")
 
 
 def _config_to_export_dict(config: LintroConfig) -> dict[str, Any]:
