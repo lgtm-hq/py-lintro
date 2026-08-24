@@ -1058,10 +1058,15 @@ async def run_review_async(
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
         completed = True
+        hint = (
+            "Raise ai.transports.cli.timeout or narrow --path to review the rest."
+            if stopped_reason.startswith("timeout")
+            else "Raise ai.max_cost_usd or narrow --path to review the rest."
+        )
         logger.warning(
-            "Review stopped early — {reason} after reviewing {n} of {m} "
-            "chunks. Raise ai.max_cost_usd or narrow --path to review the rest.",
+            "Review stopped early — {reason} after reviewing {n} of {m} chunks. {hint}",
             reason=stopped_reason,
+            hint=hint,
             n=len(partials),
             m=len(chunks),
             cause=str(exc),
