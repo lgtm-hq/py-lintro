@@ -56,10 +56,16 @@ set -euo pipefail
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
+#   GITHUB_RUN_ID           Current Actions run; excluded from prior-state lookup.
+#   GITHUB_OUTPUT           When set, --locate-prior-state writes run-id=.
 #   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
 #   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
 #   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
+#   LINTRO_AI_MAX_COST_USD  Optional spend ceiling overlay (empty = config default).
 #   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
+#   LINTRO_REVIEW_STATE_DIR Directory for coverage artifacts (default:
+#                           ai-review-state). The workflow downloads prior
+#                           state here and uploads it after the review.
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -69,14 +75,25 @@ Dogfood `lintro review` on a pull request (informational, not required).
 Usage:
   PR_NUMBER=<n> scripts/ci/run-ai-review.sh
   scripts/ci/run-ai-review.sh <pr-number>
+  scripts/ci/run-ai-review.sh --locate-prior-state
 
 Exits 0 only when a review was actually produced. A missing or dead credential,
 a depleted balance, or an unreachable provider exits 1 with a visible reason.
+
+--locate-prior-state lists completed trusted ai-review.yml runs and writes
+run-id= for the latest one that carries a valid state artifact (empty when
+none exist). Always exits 0; missing state is a no-op, not a failure.
 EOF
 	exit 0
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${1:-}" == "--locate-prior-state" ]]; then
+	# Fail-safe: the locator never reddens the job. Empty run-id skips
+	# download-artifact; the review then starts from empty coverage.
+	exec python3 "${script_dir}/review_state_artifacts.py" locate
+fi
 
 # Sentinels understood by classify_review_outcome.py: the review was never
 # invoked, either for want of a credential or for some other reason.
@@ -126,6 +143,11 @@ repo_arg=()
 if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 	repo_arg=(--repo "${GITHUB_REPOSITORY}")
 fi
+
+# Resume coverage is read from (and written to) this directory. The workflow
+# downloads a prior run's artifact here and uploads the directory afterwards.
+export LINTRO_REVIEW_STATE_DIR="${LINTRO_REVIEW_STATE_DIR:-ai-review-state}"
+mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 
 # Capture rather than stream: the classifier needs the JSON error envelope, and
 # the full output is echoed straight afterwards so the log is unchanged.

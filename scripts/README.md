@@ -134,6 +134,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `install-osv-scanner.sh`             | Download and verify osv-scanner with curl exit-23 retries                  | `./scripts/ci/security/install-osv-scanner.sh`                                                                             |
 | `check-vuln-suppressions.sh`         | Verbose wrapper for lgtm-ci vulnerability suppression check                | `./scripts/ci/security/check-vuln-suppressions.sh`                                                                         |
 | `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro           | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                                                              |
+| `review_state_artifacts.py`          | Locate a prior AI-review state artifact run across Actions (#2158)         | `python3 scripts/ci/review_state_artifacts.py locate`                                                                      |
 | `classify_review_outcome.py`         | Decide whether a `lintro review` run actually produced a review (#1826)    | `python3 scripts/ci/classify_review_outcome.py --status 2 --output-file review.log`                                        |
 | `run-ai-contract-tests.sh`           | Run a tier of the agent-CLI contract suite in the ai-tools image (#1614)   | `IMAGE=<ref> TIER=1 ./scripts/ci/run-ai-contract-tests.sh`                                                                 |
 | `ai_tools_image_pin.py`              | Resolve the digest-pinned lintro-ai-tools image from the root Dockerfile   | `python3 scripts/ci/ai_tools_image_pin.py`                                                                                 |
@@ -176,6 +177,7 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | Script                          | Purpose                                                    | Usage                                                    |
 | ------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
 | `build.sh`                      | Build the docs site for GitHub Pages                       | `./scripts/ci/site/build.sh --help`                      |
+| `dev.sh`                        | Run the docs site Astro dev server                         | `./scripts/ci/site/dev.sh --help`                        |
 | `check.sh`                      | Run Astro type-check (`astro check`)                       | `./scripts/ci/site/check.sh --help`                      |
 | `test.sh`                       | Run Vitest with coverage in `apps/site`                    | `./scripts/ci/site/test.sh --help`                       |
 | `test-python.sh`                | Run pytest for site maintenance scripts                    | `./scripts/ci/site/test-python.sh --help`                |

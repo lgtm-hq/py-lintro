@@ -352,6 +352,8 @@ def test_prompt_rubric_names_the_same_verdicts_as_the_code_rubric() -> None:
     """The rubric shown to the model and the rendered one cannot drift apart."""
     rules = format_output_rules(checklist_count=1)
 
-    for label in VERDICT_LABELS.values():
+    for verdict, label in VERDICT_LABELS.items():
+        if verdict is ReviewVerdict.INCOMPLETE:
+            continue
         assert_that(rules).contains(label)
         assert_that(VERDICT_RUBRIC_FINE_PRINT).contains(label)

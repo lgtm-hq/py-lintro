@@ -52,9 +52,8 @@ If you want to publish the weekly report to Pages, prefer using a dedicated
 
 **File:** `.github/workflows/ai-review.yml`
 
-py-lintro dogfoods its own `lintro review` command on pull requests that touch
-`lintro/**`. The workflow runs an AI diff review and prints the JSON result to the job
-log.
+py-lintro dogfoods its own `lintro review` command on every eligible pull request. The
+workflow runs an AI diff review and prints the JSON result to the job log.
 
 **Features:**
 
@@ -66,21 +65,28 @@ log.
   the PR's changes are reviewed as data and never executed with the secret. Trade-off: a
   PR that breaks the review code itself isn't caught by this job — that is covered by
   the unit tests.
-- 🔑 **Bring-your-own credential** — runs the `cli` transport against the pinned
-  `claude` CLI, authenticated by the `CLAUDE_CODE_OAUTH_TOKEN` secret (a Claude
-  subscription session). `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
-  `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so the OAuth session is
-  actually used (#1838). The CLI version is pinned in `docker/ai-tools.Dockerfile` and
-  installed from npm at that exact version.
-- 💸 **Bounded spend (advisory under the CLI transport)** — `ai.max_cost_usd` comes from
-  the trusted base config, so a PR cannot raise the cap. It prices only the tokens
-  lintro billed itself, so on the `cli` transport — where the call bills the
-  subscription — it bounds lintro's own accounting rather than enforcing spend. Setting
-  a cap does **not** serialize provider calls: the budget checks and charges the ceiling
-  around each call rather than holding a lock across it, so budgeted chunk reviews still
-  run concurrently. The trade-off is that calls already in flight when the ceiling is
-  reached still finish, so the final total can overshoot `ai.max_cost_usd` by roughly
-  one round of concurrent calls.
+- 🔑 **Bring-your-own credential** — runs the `cli` transport. Provider and model come
+  from the `LINTRO_AI_PROVIDER` / `LINTRO_AI_MODEL` Actions variables. When those
+  variables are unset the workflow falls through to the committed defaults (`anthropic`,
+  empty model). Operators can set them to `cursor` and `cursor-grok-4.6-high` for
+  current dogfood. Cursor uses `CURSOR_API_KEY`; Anthropic uses the pinned `claude` CLI
+  authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (a Claude subscription session).
+  `ANTHROPIC_API_KEY` is deliberately **not** in scope, and `LINTRO_CLI_BARE: never`
+  keeps `--bare` off the command line so an OAuth session is actually used (#1838). CLI
+  versions are pinned in `docker/ai-tools.Dockerfile` and installed from npm at those
+  exact versions.
+- 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
+  base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
+  still cannot raise spend: the workflow installs lintro from the base ref and forwards
+  `LINTRO_AI_MAX_COST_USD` from the repository Actions variable. Operators set that
+  variable to a positive USD cap or to `uncapped` (overlay `0` is rejected as
+  ambiguous). It prices only the tokens lintro billed itself, so on the `cli` transport
+  — where the call bills the subscription — it bounds lintro's own accounting rather
+  than enforcing spend. Setting a cap does **not** serialize provider calls: the budget
+  checks and charges the ceiling around each call rather than holding a lock across it,
+  so budgeted chunk reviews still run concurrently. The trade-off is that calls already
+  in flight when the ceiling is reached still finish, so the final total can overshoot
+  `ai.max_cost_usd` by roughly one round of concurrent calls.
 - 🟡 **Loud but non-blocking** — the check is deliberately **not** required, but it is
   not unconditionally green either: it reddens whenever no review was produced (missing
   or dead credential, depleted balance, unreachable provider, lintro-side failure). See
@@ -89,9 +95,11 @@ log.
 - ⏭️ **Skipped, not failed, where it cannot run** — draft PRs and fork PRs (which cannot
   read secrets) never start the job at all.
 
-To activate it, add a `CLAUDE_CODE_OAUTH_TOKEN` secret to the repository or organization
-(**Settings → Secrets and variables → Actions**). Mint one with `claude setup-token`.
-Because reviews run using trusted base-branch lintro, the token is safe to enable.
+To activate it, add the matching secret (**Settings → Secrets and variables →
+Actions**): `CURSOR_API_KEY` plus `LINTRO_AI_PROVIDER=cursor` (and optionally
+`LINTRO_AI_MODEL` / `LINTRO_AI_MAX_COST_USD=uncapped`) for Cursor, or
+`CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for Anthropic. Because
+reviews run using lintro from the trusted base branch, the credential is safe to enable.
 
 #### Activation precondition (security audit #1317)
 
@@ -103,8 +111,9 @@ all three controls (also asserted in `tests/scripts/test_run_ai_review.py`):
 2. **Trusted install** — the checkout step uses `pull_request.base.sha`, never the PR
    head, so code that runs with the credential is always from the trusted base ref. The
    `claude` CLI is installed at a version pinned in that same trusted checkout.
-3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN` is injected only into the final
-   review step's `env`, after checkout, the CLI install, and dependency install.
+3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN` and `CURSOR_API_KEY` are injected
+   only into the final review step's `env`, after checkout, the CLI install, and
+   dependency install.
 
 These controls landed with #1074; #1317 verified them against current `main`. A
 dedicated GitHub Environment with required reviewers is optional once (1–3) hold. Re-run

@@ -13,6 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI can
+  overlay `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
+
 ### Deprecated
 
 ### Removed
@@ -20,6 +23,93 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.131.0] - 2026-08-24
+
+### Added
+
+- **ai-review**: file-level resume, INCOMPLETE verdict, artifact-backed state, and
+  sticky redesign (#2154, #2157)
+
+### Changed
+
+- **ai**: file-level review resume and sticky redesign (82d2ccb)
+- **ai-review**: add inert artifact plumbing for review state (#2161) (99348bc)
+
+### Removed
+
+- **ai**: overlay `0` for `LINTRO_AI_MAX_COST_USD` / `--max-cost-usd` is rejected. Use
+  `uncapped`. YAML `0` remains a literal $0 cap.
+
+## [0.130.0] - 2026-08-24
+
+### Added
+
+- **ai**: add `LINTRO_AI_REVIEW` invocation override (#2159) (956547b)
+
+### Changed
+
+- **ai-review**: forward `LINTRO_AI_MAX_COST_USD` repo variable (#2155) (adb7315)
+
+## [0.129.0] - 2026-08-22
+
+### Added
+
+- **cli**: add config validate and config init/show subcommands (6ebec28)
+- **cli**: add `config validate` plus `config init` / `config show` subcommands (#1165)
+
+### Fixed
+
+- **config**: auto-detect `config validate` ignores non-mapping YAML the same way
+  `load_config` does and continues to `[tool.lintro]`; a null `enforce` / `execution` /
+  `defaults` / `tools` section or a non-string `tools:` key raises `ConfigurationError`
+  instead of crashing (#1165)
+
+## [0.128.0] - 2026-08-22
+
+### Added
+
+- **ai**: calibrate review P2 vs P3 severity to stabilize verdicts (#2146) (a4c937d)
+- **review**: P2 vs P3 severity rubric in the review prompt so borderline findings stay
+  nits instead of flipping the derived verdict (#1968)
+
+## [0.127.0] - 2026-08-22
+
+### Changed
+
+- **ai**: require an explicit AI provider (#2144) (a14a558)
+
+## [0.126.0] - 2026-08-21
+
+### Added
+
+- **doctor**: tool update advisories with per-tool update-channel resolver (#1480)
+  (63bec8d)
+
+## [0.125.0] - 2026-08-21
+
+### Added
+
+- **build**: replace Makefile with just command runner (#1174) (d9c1ba1)
+
+### Changed
+
+- **bench**: add hyperfine CLI overhead benchmark suite (#1572) (280e783)
+
+## [0.124.0] - 2026-08-20
+
+### Added
+
+- **tools**: add typos spell-checker plugin (#1146) (1a61c40)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 61d1c91 (#2121)
+  (62921d3)
+- **deps**: update dependency golangci/golangci-lint to 2.13.0 (minor) (#2133) (2721d88)
+- **deps**: update dependency html-validate to 11.8.0 (minor) (#2135) (1998b82)
+- **deps**: update dependency golang to 1.27.0 (minor) (#2129) (f625245)
+- **docker**: repin setup-buildx-action to v4.3.0 tag SHA (#2134) (9153b88)
 
 ## [0.123.3] - 2026-08-20
 

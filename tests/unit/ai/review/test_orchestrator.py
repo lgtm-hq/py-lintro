@@ -36,12 +36,16 @@ from lintro.ai.review.orchestrator import (
 from lintro.ai.review.progress import ReviewProgressCallback
 
 
-def _sample_response_json(*, include_finding: bool = True) -> str:
+def _sample_response_json(
+    *,
+    include_finding: bool = True,
+    finding_file: str = "src/main.py",
+) -> str:
     finding = (
         {
             "severity": "P1",
             "category": "security",
-            "file": "src/main.py",
+            "file": finding_file,
             "line": 12,
             "title": "Fail-open default",
             "description": "Unknown status grants access",
@@ -117,6 +121,20 @@ def _one_file_context() -> ReviewContext:
     )
 
 
+def _two_file_context() -> ReviewContext:
+    """Build a two-file context matching the mid-run chunk fixtures."""
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="b.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=("diff --git a/a.py b/a.py\n+x\ndiff --git a/b.py b/b.py\n+y"),
+        pr_metadata=None,
+    )
+
+
 def test_run_review_marks_cli_transport_tokens_estimated() -> None:
     """CLI transport flags token usage as locally estimated in metadata."""
     provider = _mock_provider(content=_sample_response_json())
@@ -150,7 +168,7 @@ def test_run_review_marks_cli_transport_tokens_estimated() -> None:
 
 def test_run_review_returns_partial_on_cost_cap() -> None:
     """Cost cap mid-run finalizes a partial review instead of erroring."""
-    provider = _mock_provider(content=_sample_response_json())
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
     chunks = [
         ReviewChunk(
             id=1,
@@ -193,7 +211,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         ),
     ):
         result = run_review(
-            _one_file_context(),
+            _two_file_context(),
             provider=provider,
             ai_config=AIConfig(
                 enabled=True,
@@ -312,7 +330,7 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
         pytest.raises(AIError),
     ):
         run_review(
-            _one_file_context(),
+            _two_file_context(),
             provider=provider,
             ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=1,
@@ -762,8 +780,8 @@ def _multi_chunks(*, count: int = 4) -> list[ReviewChunk]:
     ]
 
 
-def test_run_review_parallelizes_with_cost_cap(tmp_path: Path) -> None:
-    """A cost cap must not force serial chunk reviews (issue #1969)."""
+def test_run_review_serializes_when_cost_cap_is_set(tmp_path: Path) -> None:
+    """A cost cap forces serial chunk reviews so queue order cannot invert."""
     context = _multi_chunk_context(tmp_path=tmp_path, count=4)
     chunks = _multi_chunks(count=4)
     provider = _mock_provider(content=_sample_response_json(include_finding=False))
@@ -822,7 +840,7 @@ def test_run_review_parallelizes_with_cost_cap(tmp_path: Path) -> None:
             classifications=[],
         )
 
-    assert_that(max_active).is_greater_than(1)
+    assert_that(max_active).is_equal_to(1)
     assert_that(result.metadata.partial).is_false()
     assert_that(result.metadata.chunks_reviewed).is_equal_to(4)
 
@@ -875,7 +893,6 @@ def test_run_review_parallelizes_depth_two_chunks(tmp_path: Path) -> None:
                 enabled=True,
                 transport=AITransport.API,
                 max_parallel_calls=4,
-                max_cost_usd=5.0,
             ),
             depth=2,
             checklist_items=[],

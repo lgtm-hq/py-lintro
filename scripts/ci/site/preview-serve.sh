@@ -22,7 +22,7 @@ export ASTRO_BASE="${ASTRO_BASE:-${ASTRO_BASE_DEFAULT}}"
 
 cd "${SITE_DIR}"
 if [[ ! -d dist ]]; then
-	echo "Missing ${SITE_DIR}/dist — run ./scripts/ci/site/build.sh or make site-build first." >&2
+	echo "Missing ${SITE_DIR}/dist — run ./scripts/ci/site/build.sh or just site-build first." >&2
 	exit 1
 fi
 

@@ -43,6 +43,7 @@ from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.install_strategies.package_names import script_tool_name
 from lintro.tools.core.node_fallback import REGISTRY_RUNNERS
 from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
+from lintro.tools.core.update_channels import WRAPPER_PROBE_NAMES
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -50,7 +51,7 @@ from lintro.tools.core.version_parsing import (
 
 #: Version-probe entrypoints that run a wrapper or host binary rather than the
 #: tool's own executable, so they cannot prove the tool is on PATH.
-_INDIRECT_PROBE_COMMANDS = frozenset({"sh", "bash", "cargo"})
+_INDIRECT_PROBE_COMMANDS = WRAPPER_PROBE_NAMES
 
 # Re-export so existing ``from lintro.tools.core.tool_installer import InstallPlan``
 # continues to work.

@@ -68,6 +68,7 @@ class CustomAgentPassResult:
         agent_name: Name of the agent that produced the pass.
         findings: Findings reported by the agent, already attributed via
             :attr:`~lintro.ai.review.models.review_finding.ReviewFinding.source`.
+        files: Changed files this pass actually reviewed.
         input_tokens: Prompt tokens consumed by the pass.
         output_tokens: Completion tokens produced by the pass.
         cost_estimate: Estimated USD cost of the pass.
@@ -75,6 +76,7 @@ class CustomAgentPassResult:
 
     agent_name: str
     findings: tuple[ReviewFinding, ...] = ()
+    files: tuple[str, ...] = ()
     input_tokens: int = 0
     output_tokens: int = 0
     cost_estimate: float = 0.0
@@ -326,6 +328,7 @@ async def run_custom_agent_passes(
                 agent=agent,
                 content=response.content,
             ),
+            files=entry.files,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cost_estimate=response.cost_estimate,

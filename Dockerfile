@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:da2ecac40dc5c3c46f19fab1bf7f7203d341c2d4b0452291e4d446be61490f83 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:2779ba63c3b72b17ad7670244e5c1ab20f847887a11188c22840afb2b99dc7f0 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -34,6 +34,8 @@ COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
 COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 COPY scripts/utils/install-semgrep.sh /app/scripts/utils/install-semgrep.sh
+COPY scripts/utils/install-tools.sh /app/scripts/utils/install-tools.sh
+COPY scripts/utils/utils.sh /app/scripts/utils/utils.sh
 
 ARG WITH_AI=false
 
@@ -52,6 +54,14 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     (UV_SYSTEM_PYTHON=1 uv pip uninstall --system semgrep || true) && \
     chmod +x /app/scripts/utils/install-semgrep.sh && \
     /app/scripts/utils/install-semgrep.sh --docker
+
+# New binaries land in docker/tools.Dockerfile, but this app image still
+# FROMs a digest-pinned tools image that will not contain them until the
+# next published digest. Bridge typos here so dogfood actually runs it
+# instead of silently skipping (binary_missing). No-op once the digest
+# already has `typos` on PATH.
+RUN chmod +x /app/scripts/utils/install-tools.sh && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -81,7 +91,7 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 # tool set is still enforced at tools-image build time in docker/tools.Dockerfile.
 RUN echo "Smoke-testing tool stack..." && \
     ruff --version && prettier --version && rustfmt --version && \
-    shellcheck --version && semgrep --version && \
+    shellcheck --version && semgrep --version && typos --version && \
     echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

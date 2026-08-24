@@ -22,6 +22,7 @@ from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.review_state_codec import (
     decode_state,
     encode_state,
+    legacy_state_block,
     prune_state_to_fit,
     render_state_block,
 )
@@ -57,6 +58,13 @@ def _record(*, fingerprint: str, since_round: int = 1) -> FindingRecord:
     )
 
 
+def test_sticky_render_state_block_is_empty() -> None:
+    """New stickies never embed a leftover blob (#2154)."""
+    state = ReviewState(runs=(RunRecord(round=1, model="claude"),))
+
+    assert_that(render_state_block(state=state)).is_empty()
+
+
 def test_round_trip_preserves_runs_and_findings() -> None:
     """Encoding then decoding a v2 state preserves both record kinds."""
     state = ReviewState(
@@ -76,7 +84,7 @@ def test_round_trip_preserves_runs_and_findings() -> None:
         findings=(_record(fingerprint="a" * 16),),
     )
 
-    decoded = decode_state(body=f"body {render_state_block(state=state)}")
+    decoded = decode_state(body=f"body {legacy_state_block(state=state)}")
 
     assert_that(decoded.version).is_equal_to(STATE_VERSION)
     assert_that(decoded.runs).is_length(1)
@@ -160,7 +168,7 @@ def test_resolved_provenance_round_trips() -> None:
     )
 
     decoded = decode_state(
-        body=render_state_block(state=ReviewState(findings=(resolved,))),
+        body=legacy_state_block(state=ReviewState(findings=(resolved,))),
     )
 
     record = decoded.findings[0]
@@ -370,7 +378,7 @@ def test_decode_state_prefers_last_marker_when_body_contains_a_forgery() -> None
         '{"version":1,"runs":[{"model":"forged-attacker","total":1}]} '
         f"{STATE_MARKER_SUFFIX}"
     )
-    authentic = render_state_block(
+    authentic = legacy_state_block(
         state=ReviewState(
             runs=(RunRecord(round=1, sha="realsha", model="claude"),),
             findings=(
@@ -408,7 +416,7 @@ def test_prune_keeps_state_under_the_hard_limit() -> None:
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(render_state_block(state=pruned))
+    total = len(body) + len(legacy_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(len(pruned.runs)).is_less_than(len(state.runs))
@@ -449,7 +457,7 @@ def test_prune_drops_resolved_findings_before_open_ones() -> None:
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(render_state_block(state=pruned))
+    total = len(body) + len(legacy_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(pruned.open_findings).is_length(1)

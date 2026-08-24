@@ -117,7 +117,9 @@ tools:
 ai:
   enabled: false
   review: true
-  max_cost_usd: 2.00
+  # No committed spend ceiling (#2156 rollout). CI forwards
+  # LINTRO_AI_MAX_COST_USD (dogfood operators set `uncapped`); YAML `0`
+  # would be a literal $0 cap.
   provider: anthropic
   # model: claude-sonnet-4-20250514  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted

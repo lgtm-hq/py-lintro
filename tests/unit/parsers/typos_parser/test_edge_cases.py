@@ -1,0 +1,294 @@
+"""Tests for typos parser edge cases."""
+
+from __future__ import annotations
+
+from assertpy import assert_that
+
+from lintro.parsers.typos.typos_parser import (
+    _parse_typos_errors,
+    _parse_typos_output,
+    parse_typos_report,
+)
+
+from .conftest import make_typo_record
+
+
+def test_typo_without_corrections() -> None:
+    """A finding with no corrections still parses with a helpful message."""
+    output = make_typo_record(typo="asdfg", corrections=[])
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].corrections).is_equal_to([])
+    assert_that(issues[0].message).is_equal_to('"asdfg" is disallowed')
+
+
+def test_unicode_typo_is_preserved() -> None:
+    """Unicode content in the typo and file path is preserved."""
+    output = make_typo_record(
+        path="café/naïve.md",
+        typo="téh",
+        corrections=["the"],
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].file).is_equal_to("café/naïve.md")
+    assert_that(issues[0].typo).is_equal_to("téh")
+
+
+def test_non_integer_location_defaults_to_zero() -> None:
+    """Non-integer line/offset values fall back to zero without raising."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":"oops",'
+        '"byte_offset":null,"typo":"teh","corrections":["the"]}'
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].line).is_equal_to(0)
+    # An unusable byte_offset means "unknown", not "first character".
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(0)
+
+
+def test_non_string_corrections_are_dropped() -> None:
+    """Non-string correction entries are discarded, not stringified.
+
+    Stringifying a null or nested value would display nonsense and flip
+    ``fixable`` to True, offering an auto-replace that cannot work.
+    """
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":1,"byte_offset":0,'
+        '"typo":"teh","corrections":[1,null,{"a":1},"the"]}'
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].corrections).is_equal_to(["the"])
+
+
+def test_only_non_string_corrections_is_not_fixable() -> None:
+    """A corrections list with nothing usable leaves the finding unfixable."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":1,"byte_offset":0,'
+        '"typo":"teh","corrections":[null,1]}'
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].corrections).is_empty()
+    assert_that(issues[0].fixable).is_false()
+    assert_that(issues[0].message).is_equal_to('"teh" is disallowed')
+
+
+def test_missing_corrections_key_defaults_to_empty() -> None:
+    """A record without a corrections key yields an empty corrections list."""
+    output = '{"type":"typo","path":"x.txt","line_num":1,"byte_offset":0,"typo":"teh"}'
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].corrections).is_equal_to([])
+
+
+def test_boolean_location_values_do_not_leak_through() -> None:
+    """JSON booleans decode to ``bool`` but must not become line/offset values."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":true,'
+        '"byte_offset":true,"typo":"teh","corrections":["the"]}'
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].line).is_equal_to(0)
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(0)
+
+
+def test_negative_location_values_fall_back_to_zero() -> None:
+    """Out-of-range line/offset values never produce a non-positive column."""
+    output = (
+        '{"type":"typo","path":"x.txt","line_num":-3,'
+        '"byte_offset":-5,"typo":"teh","corrections":["the"]}'
+    )
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].line).is_equal_to(0)
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(0)
+
+
+def test_zero_byte_offset_is_column_one() -> None:
+    """A real zero offset is the first byte of the line, not "unknown"."""
+    output = make_typo_record(line_num=4, byte_offset=0)
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].byte_offset).is_equal_to(0)
+    assert_that(issues[0].column).is_equal_to(1)
+
+
+def test_findings_without_corrections_are_not_fixable() -> None:
+    """A word with no suggested correction cannot be auto-replaced."""
+    output = make_typo_record(typo="asdfg", corrections=[])
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].fixable).is_false()
+
+
+def test_findings_with_corrections_are_fixable() -> None:
+    """A finding with a suggested correction is auto-fixable."""
+    output = make_typo_record(typo="teh", corrections=["the"])
+
+    issues = _parse_typos_output(output)
+
+    assert_that(issues[0].fixable).is_true()
+
+
+def test_error_records_are_extracted_separately() -> None:
+    """``error`` records are reported as diagnostics, not as findings."""
+    output = "\n".join(
+        [
+            make_typo_record(path="good.txt"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+
+    assert_that(_parse_typos_output(output)).is_length(1)
+    assert_that(_parse_typos_errors(output)).is_equal_to(
+        ["bad.txt: Permission denied"],
+    )
+
+
+def test_error_records_without_a_path_still_report() -> None:
+    """A pathless error record still yields a readable message."""
+    output = '{"type":"error","msg":"config is invalid"}'
+
+    assert_that(_parse_typos_errors(output)).is_equal_to(["config is invalid"])
+
+
+def test_no_error_records_yields_no_diagnostics() -> None:
+    """Clean output produces no diagnostics."""
+    assert_that(_parse_typos_errors(make_typo_record())).is_empty()
+    assert_that(_parse_typos_errors(None)).is_empty()
+
+
+def test_unknown_record_types_are_reported_as_diagnostics() -> None:
+    """A record type typos might add later fails loudly instead of vanishing."""
+    output = '{"type":"some_future_type","path":"x.txt","msg":"something odd"}'
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_equal_to(["x.txt: something odd"])
+
+
+def test_informational_record_types_are_not_diagnostics() -> None:
+    """Known informational record types stay out of the diagnostics list."""
+    output = "\n".join(
+        [
+            '{"type":"binary_file","path":"logo.png"}',
+            '{"type":"file_type","path":"notes.txt"}',
+        ],
+    )
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_empty()
+
+
+def test_type_file_is_not_treated_as_informational() -> None:
+    """A ``type=file`` progress record is not in the 1.49.0 JSON allowlist.
+
+    typos 1.49.0's ``Message`` enum includes ``file``, but the default
+    spell-check walker never emits it — only the ``--files`` lister
+    (``FoundFiles``) does. Unknown types fail closed. If a future typos
+    release starts emitting ``type=file`` from default ``--format json``,
+    this test fails and the allowlist can be extended.
+    """
+    output = '{"type":"file","path":"notes.txt"}'
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_equal_to(
+        ["notes.txt: typos reported 'file'"],
+    )
+
+
+def test_type_parse_is_not_treated_as_informational() -> None:
+    """A ``type=parse`` dump record is not in the informational allowlist.
+
+    ``parse`` is the identifier/word dump mode in typos 1.49.0, not a
+    spell-check finding. Omitting it is fail-closed.
+    """
+    output = '{"type":"parse","kind":"identifier","data":"teh"}'
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_equal_to(
+        ["typos reported 'parse'"],
+    )
+
+
+def test_parse_typos_report_pairs_findings_and_diagnostics() -> None:
+    """The combined parser returns both views of one stdout stream."""
+    output = "\n".join(
+        [
+            make_typo_record(path="good.txt"),
+            '{"type":"error","path":"bad.txt","msg":"Permission denied"}',
+        ],
+    )
+
+    report = parse_typos_report(output=output)
+
+    assert_that(report.issues).is_length(1)
+    assert_that(report.issues[0].file).is_equal_to("good.txt")
+    assert_that(report.diagnostics).is_equal_to(["bad.txt: Permission denied"])
+
+
+def test_parse_typos_report_empty_output_is_clean() -> None:
+    """An empty stream is a clean report, not a diagnostic."""
+    report = parse_typos_report(output=None)
+
+    assert_that(report.issues).is_empty()
+    assert_that(report.diagnostics).is_empty()
+
+
+def test_undecodable_lines_are_reported_as_diagnostics() -> None:
+    """With --format json, a non-JSON stdout line means something went wrong."""
+    output = "\n".join([make_typo_record(), "argument `nosuch.txt` is not found"])
+
+    assert_that(_parse_typos_output(output)).is_length(1)
+    assert_that(_parse_typos_errors(output)).is_equal_to(
+        ["unparseable typos output: argument `nosuch.txt` is not found"],
+    )
+
+
+def test_unhashable_record_type_is_a_diagnostic_not_a_crash() -> None:
+    """An unhashable ``type`` value must not raise during allowlist lookup."""
+    output = '{"type":[],"path":"x.txt","msg":"weird"}'
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_equal_to(["x.txt: weird"])
+
+
+def test_object_record_type_is_a_diagnostic() -> None:
+    """An object-valued ``type`` is handled the same way as any unknown type."""
+    output = '{"type":{"kind":"odd"},"path":"x.txt"}'
+
+    assert_that(_parse_typos_errors(output)).is_length(1)
+
+
+def test_incomplete_typo_records_become_diagnostics() -> None:
+    """A finding the parser cannot use must not vanish from both views."""
+    output = '{"type":"typo","path":null,"line_num":1,"typo":"teh"}'
+
+    assert_that(_parse_typos_output(output)).is_empty()
+    assert_that(_parse_typos_errors(output)).is_length(1)
+    assert_that(_parse_typos_errors(output)[0]).starts_with("incomplete typos finding:")
+
+
+def test_usable_typo_records_are_not_diagnostics() -> None:
+    """A well-formed finding stays out of the diagnostics list."""
+    assert_that(_parse_typos_errors(make_typo_record())).is_empty()

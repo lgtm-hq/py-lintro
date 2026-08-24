@@ -23,6 +23,10 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 
 _PRIMARY_HEADER = "| model | est. cost | tokens in | tokens out |"
+_STICKY_THIS_RUN_HEADER = (
+    "| model | transport | est. cost | tokens in / out | depth "
+    "| files | checks | duration |"
+)
 
 
 def _sticky(*, result: ReviewResult) -> str:
@@ -179,15 +183,14 @@ def test_primary_cells_omit_the_tilde_for_reported_values(
 def test_both_surfaces_render_the_same_primary_badge_table(
     sample_review_result: ReviewResult,
 ) -> None:
-    """One renderer means the sticky and the body cannot drift apart."""
+    """The review body keeps the shared helper; the sticky uses the mockup row."""
     sticky = _sticky(result=sample_review_result)
     body = _body(result=sample_review_result)
 
-    assert_that(sticky).contains(_PRIMARY_HEADER)
     assert_that(body).contains(_PRIMARY_HEADER)
-    assert_that(_value_row(text=sticky, header=_PRIMARY_HEADER)).is_equal_to(
-        _value_row(text=body, header=_PRIMARY_HEADER),
-    )
+    assert_that(sticky).contains(_STICKY_THIS_RUN_HEADER)
+    assert_that(sticky).contains("`claude-sonnet-4-20250514`")
+    assert_that(body).contains("`claude-sonnet-4-20250514`")
 
 
 def test_sticky_this_run_section_renders_two_badge_tables(
@@ -203,13 +206,10 @@ def test_sticky_this_run_section_renders_two_badge_tables(
             [
                 "**This run**",
                 "",
-                _PRIMARY_HEADER,
-                "| --- | --- | --- | --- |",
-                "| `claude-sonnet-4-20250514` | $0.0500 | 1,000 | 200 |",
-                "",
-                "| transport | depth | files | checks | duration |",
-                "| --- | --- | --- | --- | --- |",
-                "| cli · subscription | 2 | 3 | 3 | 0s |",
+                _STICKY_THIS_RUN_HEADER,
+                "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
+                "| `claude-sonnet-4-20250514` | cli · subscription | "
+                "~$0.0500 | 1,000 / 200 | 2 | 3 | 3 | 0s |",
             ],
         ),
     )
@@ -229,6 +229,7 @@ def test_sticky_this_run_tables_keep_the_estimated_prefix(
 
     sticky = _sticky(result=result)
 
-    assert_that(_value_row(text=sticky, header=_PRIMARY_HEADER)).is_equal_to(
-        "| `claude-sonnet-4-20250514` | ~$0.0500 | ~1,000 | ~200 |",
+    assert_that(_value_row(text=sticky, header=_STICKY_THIS_RUN_HEADER)).is_equal_to(
+        "| `claude-sonnet-4-20250514` | cli · subscription | "
+        "~$0.0500 | ~1,000 / ~200 | 2 | 3 | 3 | 0s |",
     )

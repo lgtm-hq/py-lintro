@@ -51,6 +51,11 @@ _CONFIG_REVIEW_OFF = """ai:
   provider: anthropic
 """
 
+_CONFIG_NO_PROVIDER = """ai:
+  enabled: true
+  review: true
+"""
+
 
 def _run_session(
     *,
@@ -655,6 +660,33 @@ def test_review_is_unavailable_without_the_ai_extra(
     assert_that(payload["error"]["detail"]["reason"]).is_equal_to("ai_unavailable")
 
 
+def test_review_is_unavailable_when_provider_is_unset(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An enabled review without ``ai.provider`` is unavailable, even on empty diffs."""
+    import lintro.ai.availability as availability
+
+    monkeypatch.setattr(availability, "is_ai_available", lambda: True)
+    (repo / ".lintro-config.yaml").write_text(_CONFIG_NO_PROVIDER, encoding="utf-8")
+
+    empty_result, empty_payload = _call(workspace=repo, arguments={"base": "feature"})
+    changed_result, changed_payload = _call(workspace=repo, arguments={"base": "main"})
+
+    for result, payload in (
+        (empty_result, empty_payload),
+        (changed_result, changed_payload),
+    ):
+        assert_that(result.is_error).is_true()
+        assert_that(payload["error"]["code"]).is_equal_to(
+            McpErrorCode.TOOL_UNAVAILABLE.value,
+        )
+        assert_that(payload["error"]["detail"]["reason"]).is_equal_to(
+            "provider_unavailable",
+        )
+        assert_that(payload["error"]["message"]).contains("ai.provider")
+
+
 def test_review_is_unavailable_when_the_workspace_disables_it(
     repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -672,6 +704,8 @@ def test_review_is_unavailable_when_the_workspace_disables_it(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
     assert_that(payload["error"]["detail"]["reason"]).is_equal_to("review_disabled")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_ENABLED=1")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_REVIEW=1")
 
 
 def test_review_rejects_a_depth_outside_the_supported_range(repo: Path) -> None:

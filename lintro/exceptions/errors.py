@@ -27,8 +27,13 @@ class ParserError(LintroError):
     """Raised when parsing tool output fails."""
 
 
-class ConfigurationError(LintroError):
-    """Raised when configuration loading or validation fails."""
+class ConfigurationError(LintroError, ValueError):
+    """Raised when configuration loading or validation fails.
+
+    Also a ``ValueError`` so existing ``except ValueError`` handlers and
+    tests keep working, while CLI commands can catch this type without
+    swallowing unrelated runtime ``ValueError``s.
+    """
 
 
 class FileAccessError(LintroError):

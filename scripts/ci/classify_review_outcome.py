@@ -114,12 +114,14 @@ class ReviewOutcome(StrEnum):
 
     Members:
         REVIEWED: A review was produced; findings may or may not be present.
+        INCOMPLETE: A review was produced but coverage-at-HEAD is not 100%.
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
     """
 
     REVIEWED = auto()
+    INCOMPLETE = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
@@ -129,9 +131,10 @@ class ReviewOutcome(StrEnum):
         """Return whether a review actually reached the pull request.
 
         Returns:
-            True only for :attr:`REVIEWED`.
+            True for :attr:`REVIEWED` and :attr:`INCOMPLETE` (a partial
+            review was produced).
         """
-        return self is ReviewOutcome.REVIEWED
+        return self in {ReviewOutcome.REVIEWED, ReviewOutcome.INCOMPLETE}
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +154,33 @@ class OutcomeReport:
     detail: str
     exit_code: int
     transport: str = DEFAULT_TRANSPORT
+
+
+def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the coverage object from a successful review JSON envelope.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The coverage mapping, or ``None`` when absent.
+    """
+    decoder = json.JSONDecoder()
+    index = text.find("{")
+    while index != -1:
+        try:
+            payload, _end = decoder.raw_decode(text[index:])
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        if isinstance(payload, dict) and "readiness_verdict" in payload:
+            coverage = payload.get("coverage")
+            if isinstance(coverage, dict):
+                return coverage
+            if payload.get("readiness_verdict") == "incomplete":
+                return {"complete": False, "covered_at_head": 0, "eligible": 0}
+        index = text.find("{", index + 1)
+    return None
 
 
 def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
@@ -309,6 +339,24 @@ def classify(
         )
 
     if status in (REVIEW_STATUS_CLEAN, REVIEW_STATUS_FINDINGS):
+        coverage = _parse_coverage_envelope(text=output)
+        if coverage is not None and not coverage.get("complete", True):
+            covered = coverage.get("covered_at_head", 0)
+            eligible = coverage.get("eligible", 0)
+            return OutcomeReport(
+                outcome=ReviewOutcome.INCOMPLETE,
+                headline=_with_transport(
+                    transport=transport,
+                    headline=(
+                        "review incomplete — "
+                        f"{covered}/{eligible} files covered at HEAD; "
+                        "next round resumes"
+                    ),
+                ),
+                detail=str(coverage.get("stopped_reason") or ""),
+                exit_code=1,
+                transport=transport,
+            )
         findings = status == REVIEW_STATUS_FINDINGS
         return OutcomeReport(
             outcome=ReviewOutcome.REVIEWED,
@@ -408,11 +456,26 @@ def render_summary(*, report: OutcomeReport) -> str:
     Returns:
         Markdown text ending in a newline.
     """
-    icon = "✅" if report.outcome.produced_review else "🚫"
+    if report.outcome is ReviewOutcome.INCOMPLETE:
+        icon = "⚠️"
+    elif report.outcome.produced_review:
+        icon = "✅"
+    else:
+        icon = "🚫"
     lines = [
         f"### {icon} AI Review ({report.transport}) — {report.headline}",
         "",
     ]
+    if report.outcome is ReviewOutcome.INCOMPLETE:
+        lines.extend(
+            [
+                "A review was produced, but coverage-at-HEAD is not 100%. "
+                "The next round resumes with unreviewed files first. "
+                "P1 findings still pass this check; an unfinished review "
+                "does not.",
+                "",
+            ],
+        )
     if report.detail:
         lines.extend(["> " + report.detail, ""])
     if not report.outcome.produced_review:

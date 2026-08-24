@@ -39,6 +39,7 @@ from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
 )
+from lintro.tools.core.update_channels import format_advisory_line
 from lintro.tools.definitions.oxlint_doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
@@ -119,7 +120,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version:<10}", style="yellow")
         line.append(f"(>= {r.tool.min_version}, rec. {r.tool.version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        if r.upgrade_hint:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.INCOMPATIBLE:
         line = Text("    ")
@@ -128,7 +132,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version or '?':<10}", style="red")
         line.append(f"(>= {r.tool.min_version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        if r.upgrade_hint:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.DISABLED:
         line = Text("    ")
@@ -338,8 +345,7 @@ def _generate_markdown_report(
         for check in ai_checks:
             hint = check.hint or "-"
             lines.append(
-                f"| {check.name} | {check.status.upper()} "
-                f"| {check.message} | {hint} |",
+                f"| {check.name} | {check.status.upper()} | {check.message} | {hint} |",
             )
 
     lines.append("")
@@ -683,11 +689,11 @@ def _output_json(
         for r in all_results
         if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
     )
-    tools_json: dict[str, dict[str, str | None]] = {}
+    tools_json: dict[str, dict[str, object]] = {}
     issues: list[dict[str, str]] = []
 
     for r in all_results:
-        tools_json[r.tool.name] = {
+        tool_entry: dict[str, object] = {
             "recommended": r.tool.version,
             "min_version": r.tool.min_version,
             "expected": r.tool.min_version,
@@ -701,7 +707,9 @@ def _output_json(
             "path": r.path,
             "install_hint": r.install_hint,
             "upgrade_hint": r.upgrade_hint,
+            "advisory": r.advisory.to_dict() if r.advisory is not None else None,
         }
+        tools_json[r.tool.name] = tool_entry
         if r.status == ToolStatus.MISSING and r.tool.tier != "dev":
             issues.append(
                 {

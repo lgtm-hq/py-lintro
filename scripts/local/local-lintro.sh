@@ -25,9 +25,31 @@ fi
 export RUFF_UNSAFE_FIXES=true
 echo -e "${YELLOW}Enabled unsafe fixes for local development (RUFF_UNSAFE_FIXES=true)${NC}"
 
+# install-tools.sh --local drops binaries into ~/.local/bin. Its own PATH
+# export dies with that subprocess, so add the directory here too — otherwise
+# a tool this script just installed is still invisible to the lintro run below
+# on a fresh shell that does not already have ~/.local/bin on PATH.
+add_local_bin_to_path() {
+	local local_bin="$HOME/.local/bin"
+	case ":$PATH:" in
+	*":$local_bin:"*) ;;
+	*)
+		export PATH="$local_bin:$PATH"
+		echo -e "${YELLOW}Added $local_bin to PATH for this run.${NC}"
+		echo -e "${YELLOW}Add it to your shell profile to make this permanent:${NC}"
+		echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+		;;
+	esac
+}
+
 # Function to check if tools are installed
 check_and_install_tools() {
 	echo -e "${BLUE}Checking tool availability...${NC}"
+
+	# Look in the installer's target directory before deciding anything is
+	# missing: a previously installed tool there is invisible to `command -v`
+	# on a shell that never added ~/.local/bin to PATH.
+	add_local_bin_to_path
 
 	# Check for required tools
 	local missing_tools=()
@@ -49,6 +71,12 @@ check_and_install_tools() {
 		missing_tools+=("uv")
 	fi
 
+	# typos runs in the default toolset, so a missing binary degrades every
+	# subsequent `lintro check`/`format` run rather than just one tool.
+	if ! command -v typos &>/dev/null; then
+		missing_tools+=("typos")
+	fi
+
 	# If tools are missing, offer to install them (or auto-install with --yes)
 	if [ ${#missing_tools[@]} -gt 0 ]; then
 		echo -e "${YELLOW}Missing tools: ${missing_tools[*]}${NC}"
@@ -56,6 +84,7 @@ check_and_install_tools() {
 			echo -e "${BLUE}Installing missing tools (non-interactive)...${NC}"
 			if [ -f "./scripts/utils/install-tools.sh" ]; then
 				./scripts/utils/install-tools.sh --local
+				add_local_bin_to_path
 			else
 				echo -e "${RED}Error: scripts/utils/install-tools.sh not found${NC}"
 				echo -e "${YELLOW}Please run the installation script manually or ensure tools are installed${NC}"
@@ -68,6 +97,7 @@ check_and_install_tools() {
 				echo -e "${BLUE}Installing missing tools...${NC}"
 				if [ -f "./scripts/utils/install-tools.sh" ]; then
 					./scripts/utils/install-tools.sh --local
+					add_local_bin_to_path
 				else
 					echo -e "${RED}Error: scripts/utils/install-tools.sh not found${NC}"
 					echo -e "${YELLOW}Please run the installation script manually or ensure tools are installed${NC}"
@@ -154,6 +184,11 @@ run_lintro() {
 
 # Main execution flow
 main() {
+	# Always expose ~/.local/bin: install-tools.sh drops binaries there, and
+	# a fresh shell will not have that directory on PATH. Do this before the
+	# optional --install check so `local-lintro.sh check` still sees typos.
+	add_local_bin_to_path
+
 	# Check and install tools if needed (only if --install flag is provided)
 	if [ "${1:-}" = "--install" ] || [ "${1:-}" = "-i" ]; then
 		check_and_install_tools

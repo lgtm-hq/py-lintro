@@ -28,6 +28,7 @@ FENCE_LANG_HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^rustume "), "bash"),
     (re.compile(r"^cargo "), "bash"),
     (re.compile(r"^make "), "bash"),
+    (re.compile(r"^just "), "bash"),
     (re.compile(r"^docker "), "bash"),
     (re.compile(r"^uv run "), "bash"),
     (re.compile(r"^Validation errors:"), "text"),

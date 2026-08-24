@@ -312,6 +312,18 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Review readiness verdict
+
+The merge-readiness verdict is derived in code from open-finding severities (never asked
+of the model): any P1 → blocked; else any P2 → changes requested; else any P3 → nits
+only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
+otherwise flip that verdict run-to-run: borderline findings must be P3, and every
+finding `description` must name the rubric boundary it used.
+
+A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
+`--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
+Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
+
 ## Configuration
 
 ### Basic Setup
@@ -647,13 +659,15 @@ ai:
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
 config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
-and `--max-cost-usd`. Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`,
-`LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`, `LINTRO_AI_MAX_COST_USD`) apply to every AI
-surface and lose to CLI flags. There is no `--enabled` flag.
+`--review/--no-review`, and `--max-cost-usd`. Environment variables
+(`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`,
+`LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`) apply to every AI surface and lose to CLI
+flags. There is no `--enabled` flag.
 
 ### Invocation overrides
 
-Resolution order for `provider`, `model`, `transport`, `enabled`, and `max_cost_usd` is:
+Resolution order for `provider`, `model`, `transport`, `enabled`, `review`, and
+`max_cost_usd` is:
 
 ```text
 CLI flag > environment variable > .lintro-config.yaml > built-in default
@@ -669,7 +683,8 @@ as the legacy `ai.max_cost_usd` scalar.
 | `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                        |
 | `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
 | `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
-| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is $0). Invalid fails loud.   |
+| `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`       | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                      |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                 |
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
@@ -683,12 +698,15 @@ LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
 # Same thing with flags (flags win if both are set)
 lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
 
-# Lift the committed cost cap for this run (0 = uncapped, not a $0 cap)
-LINTRO_AI_MAX_COST_USD=0 lintro review --uncommitted
-lintro review --uncommitted --max-cost-usd 0
+# Run without a cost cap (`uncapped`; overlay `0` is an error)
+LINTRO_AI_MAX_COST_USD=uncapped lintro review --uncommitted
+lintro review --uncommitted --max-cost-usd uncapped
 
 # Kill switch for this environment
 LINTRO_AI_ENABLED=0 lintro check .
+
+# Enable diff review without changing the committed config
+LINTRO_AI_ENABLED=1 LINTRO_AI_REVIEW=1 lintro review --uncommitted
 ```
 
 ### Transport authentication

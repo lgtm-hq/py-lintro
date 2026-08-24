@@ -75,21 +75,30 @@ def render_ai_status(
     import os
 
     from lintro.ai.availability import is_provider_available
+    from lintro.ai.provider_enum import (
+        accepted_provider_values,
+        provider_required_error,
+    )
     from lintro.ai.providers import get_default_model
     from lintro.ai.registry import PROVIDERS, AIProvider
 
-    provider_name = ai_config.provider.lower()
+    if ai_config.provider is None:
+        provider_name = ""
+        ai_parts.append("[yellow]enabled (provider unset)[/yellow]")
+        if ai_config.any_feature_enabled:
+            ai_parts.append(f"  [yellow]{provider_required_error()}[/yellow]")
+    else:
+        provider_name = str(ai_config.provider).lower()
     supported = set(AIProvider)
 
     # Check: unknown provider
-    if provider_name not in supported:
+    if provider_name and provider_name not in supported:
         ai_parts.append("[red]enabled (unknown provider)[/red]")
-        names = ", ".join(sorted(supported))
+        names = accepted_provider_values()
         ai_parts.append(
-            f"  [yellow]'{ai_config.provider}' is not supported. "
-            f"Use: {names}[/yellow]",
+            f"  [yellow]'{ai_config.provider}' is not supported. Use: {names}[/yellow]",
         )
-    else:
+    elif provider_name:
         # Check SDK availability
         sdk_ok = is_provider_available(provider_name)
 
@@ -117,7 +126,9 @@ def render_ai_status(
                 f"  [yellow]set {key_env} env var[/yellow]",
             )
 
-    provider_label = str(ai_config.provider)
+    provider_label = (
+        str(ai_config.provider) if ai_config.provider is not None else "unset"
+    )
     if sources is not None:
         provider_label = format_sourced_value(
             provider_label,
@@ -125,8 +136,8 @@ def render_ai_status(
         )
     ai_parts.append(f"  provider: {provider_label}")
 
-    effective_model = ai_config.model or get_default_model(
-        provider_name,
+    effective_model = ai_config.model or (
+        get_default_model(provider_name) if provider_name else None
     )
     if effective_model:
         model_label = effective_model

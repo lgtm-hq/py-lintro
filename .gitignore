@@ -5,6 +5,7 @@
 .coverage
 .claude
 .lintro-cache
+ai-review-state/
 
 ### dirs
 Reports/
@@ -342,6 +343,11 @@ dist
 .pnp.*
 .lintro/
 coverage.json
+
+# Hyperfine exports are machine-specific: generated locally, never committed.
+benchmarks/results/hyperfine/*.json
+benchmarks/fixtures/**/.mypy_cache/
+benchmarks/fixtures/**/.ruff_cache/
 
 # act secrets file (DO NOT COMMIT)
 .secrets

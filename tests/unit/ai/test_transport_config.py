@@ -26,7 +26,9 @@ def test_transport_deferred_to_doctor_when_ai_enabled() -> None:
 
 def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
     """Doctor surfaces missing transport instead of raw config validation."""
-    results = check_ai_configuration(AIConfig(enabled=True))
+    results = check_ai_configuration(
+        AIConfig(enabled=True, provider=AIProvider.ANTHROPIC),
+    )
     assert_that(results).is_length(1)
     assert_that(results[0].name).is_equal_to("ai.transport")
     assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
@@ -34,7 +36,14 @@ def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
 
 def test_doctor_reports_missing_transport_when_only_lint_enabled() -> None:
     """Doctor validates transport when only ai.lint is enabled."""
-    results = check_ai_configuration(AIConfig(enabled=True, lint=True, review=False))
+    results = check_ai_configuration(
+        AIConfig(
+            enabled=True,
+            lint=True,
+            review=False,
+            provider=AIProvider.ANTHROPIC,
+        ),
+    )
     assert_that(results).is_length(1)
     assert_that(results[0].name).is_equal_to("ai.transport")
     assert_that(results[0].message).contains("ai.lint or ai.review")
@@ -42,9 +51,41 @@ def test_doctor_reports_missing_transport_when_only_lint_enabled() -> None:
 
 def test_doctor_reports_missing_transport_when_only_review_enabled() -> None:
     """Doctor validates transport when only ai.review is enabled."""
-    results = check_ai_configuration(AIConfig(enabled=True, lint=False, review=True))
+    results = check_ai_configuration(
+        AIConfig(
+            enabled=True,
+            lint=False,
+            review=True,
+            provider=AIProvider.ANTHROPIC,
+        ),
+    )
     assert_that(results).is_length(1)
     assert_that(results[0].name).is_equal_to("ai.transport")
+
+
+def test_doctor_reports_missing_provider_when_ai_enabled() -> None:
+    """Doctor surfaces missing provider with the three-way migration path."""
+    from lintro.ai.provider_enum import accepted_provider_values
+
+    results = check_ai_configuration(
+        AIConfig(enabled=True, transport=AITransport.API),
+    )
+    assert_that(results).is_length(1)
+    assert_that(results[0].name).is_equal_to("ai.provider")
+    assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
+    assert_that(results[0].message).contains("ai.provider")
+    assert_that(results[0].message).contains("LINTRO_AI_PROVIDER")
+    assert_that(results[0].message).contains("--provider")
+    assert_that(results[0].message).contains(accepted_provider_values())
+    assert_that(accepted_provider_values()).is_equal_to("anthropic, cursor, openai")
+
+
+def test_doctor_reports_missing_provider_and_transport_together() -> None:
+    """Doctor reports both required fields when neither is set."""
+    results = check_ai_configuration(AIConfig(enabled=True))
+    names = [result.name for result in results]
+    assert_that(names).contains("ai.provider")
+    assert_that(names).contains("ai.transport")
 
 
 def test_doctor_skips_when_master_switch_off() -> None:

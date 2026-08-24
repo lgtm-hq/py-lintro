@@ -17,7 +17,7 @@ def test_default_config_booleans_and_provider() -> None:
     """All boolean defaults and provider are correct out of the box."""
     config = AIConfig()
     assert_that(config.enabled).is_false()
-    assert_that(config.provider).is_equal_to("anthropic")
+    assert_that(config.provider).is_none()
     assert_that(config.default_fix).is_false()
     assert_that(config.auto_apply).is_false()
     assert_that(config.auto_apply_safe_fixes).is_true()
@@ -96,6 +96,27 @@ def test_provider_invalid_rejected() -> None:
     """An invalid provider string is rejected by validation."""
     with pytest.raises(ValidationError):
         AIConfig.model_validate({"provider": "gemini"})
+
+
+def test_provider_optional_when_ai_disabled() -> None:
+    """Disabled AI config does not require a provider."""
+    config = AIConfig(enabled=False)
+    assert_that(config.provider).is_none()
+
+
+def test_provider_deferred_when_ai_enabled() -> None:
+    """Enabled AI config may omit provider until doctor or get_provider."""
+    config = AIConfig(enabled=True)
+    assert_that(config.provider).is_none()
+
+
+def test_provider_field_description_lists_accepted_values() -> None:
+    """Schema help lists providers alphabetically from the shared helper."""
+    description = AIConfig.model_fields["provider"].description
+    assert_that(description).contains("`ai.provider` in config")
+    assert_that(description).contains("LINTRO_AI_PROVIDER")
+    assert_that(description).contains("--provider")
+    assert_that(description).contains("anthropic, cursor, openai")
 
 
 # -- Boolean overrides -----------------------------------------------------

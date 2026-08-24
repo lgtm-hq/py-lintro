@@ -24,7 +24,7 @@ FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9
 
 ARG BUN_VERSION=1.3.14
 ARG UV_VERSION=0.12.5
-ARG GO_VERSION=1.26.7
+ARG GO_VERSION=1.27.0
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -159,5 +159,5 @@ RUN echo "=== Verifying all tools ===" && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
-    vale --version && \
+    vale --version && typos --version && \
     echo "=== All tools verified! ==="

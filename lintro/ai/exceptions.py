@@ -22,6 +22,16 @@ class AIConfigOverrideError(AIError):
     """
 
 
+class AIProviderRequiredError(AIError):
+    """AI is enabled but no provider was named.
+
+    Raised by :func:`~lintro.ai.providers.get_provider` when ``ai.provider``
+    is unset. The message names the three set paths (config, env, flag)
+    and the accepted providers. This is a configuration error, not a
+    malformed model response.
+    """
+
+
 class AICostBudgetExceededError(AIError):
     """The configured AI cost budget (``ai.max_cost_usd``) was reached.
 
