@@ -305,6 +305,16 @@ def test_credit_signature_wins_over_nested_timeout_error() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
 
 
+def test_quota_signature_wins_over_typed_rate_limit() -> None:
+    """OpenAI insufficient_quota mapped to AIRateLimitError is still credits."""
+    error = AIRateLimitError(
+        "OpenAI rate limit exceeded: Error code: 429 - insufficient_quota: "
+        "You exceeded your current quota",
+    )
+    kind = classify_provider_error(provider="openai", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")

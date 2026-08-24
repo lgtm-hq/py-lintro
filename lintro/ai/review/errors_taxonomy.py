@@ -404,10 +404,11 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
 
     Resolves the underlying provider cause (unwrapping any
     ``ReviewExecutionError`` wrapper), then tests it against the provider's
-    signature map, the lintro AI exception hierarchy, and finally a shared
-    fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`. When the
-    error already carries a resolved kind (attached by the orchestrator), that
-    kind is authoritative.
+    signature map (so credit/quota needles beat a typed rate-limit), the
+    lintro AI exception hierarchy, TimeoutError, SERVER_ERROR, and finally a
+    shared fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`.
+    When the error already carries a resolved kind (attached by the
+    orchestrator), that kind is authoritative.
 
     Args:
         provider: Provider identifier (e.g. ``"anthropic"``); case-insensitive.
@@ -424,9 +425,6 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     text = resolve_cause_text(error=error).lower()
     status = _extract_status(text=text)
     cause_exc = _resolve_cause_exception(error=error)
-    typed = _typed_kind(error=error)
-    if typed is not None:
-        return typed
 
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:
@@ -436,9 +434,16 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
 
+    # Typed AI exceptions win over TimeoutError / SERVER_ERROR, but credit,
+    # auth, and quota signatures above still win so OpenAI's RateLimitError
+    # wrapping insufficient_quota classifies as INSUFFICIENT_CREDITS (#2156).
+    typed = _typed_kind(error=error)
+    if typed is not None:
+        return typed
+
     # A chained TimeoutError is a timeout even when the wrapper text looks
     # like an HTTP 504 / server error. Specific credit/auth/quota signatures
-    # above still win (#2156).
+    # and typed exceptions above still win (#2156).
     if _chain_has(error=error, typ=TimeoutError):
         return ReviewErrorKind.TIMEOUT
 
