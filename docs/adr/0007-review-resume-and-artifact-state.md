@@ -21,9 +21,9 @@ state in an editable hidden blob.
    changed → model-flagged → group/import-invalidated. Same-hash inheritance is
    content-addressed: any eligible file whose current hash already has a reviewed
    representative is covered. Unserved group/import pending pairs and model flags
-   persist until that path is covered this round (including inherited coverage).
-   The same ``(path, hash)`` may be flagged only once; a repeat flag cannot
-   re-queue that unchanged file.
+   persist until that path is covered this round (including inherited coverage). The
+   same `(path, hash)` may be flagged only once; a repeat flag cannot re-queue that
+   unchanged file.
 3. Flag/env caps enforce on every cost basis. YAML enforces on `billed` and `estimated`,
    and is advisory on `unpriceable`. Overlay `uncapped` lifts the ceiling; overlay `0`
    is rejected as ambiguous.
