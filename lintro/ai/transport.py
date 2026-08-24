@@ -29,7 +29,7 @@ __all__ = [
 ]
 
 DEFAULT_API_TIMEOUT = 60.0
-DEFAULT_CLI_TIMEOUT = 900.0
+DEFAULT_CLI_TIMEOUT = 1800.0
 
 AuthMode = Literal["api_key", "subscription", "unknown"]
 
@@ -40,7 +40,7 @@ class ResolvedTransportSettings:
 
     Attributes:
         transport: Active transport.
-        timeout: Per-call / whole-turn timeout in seconds.
+        timeout: Per-call / per-chunk timeout in seconds.
         max_cost_usd: Enforced or advisory cost ceiling (None = unlimited).
         cost_is_advisory: True when the cap cannot enforce spend (CLI/subscription).
         auth_mode: How the transport authenticates.
@@ -120,8 +120,8 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
 
     if transport is AITransport.CLI:
         # Legacy ``ai.api_timeout`` is API-sized (60s default) and must not
-        # silently become the CLI whole-turn budget. CLI falls back to the
-        # CLI built-in (900s) when the profile omits timeout (#1923).
+        # silently become the CLI per-chunk budget. CLI falls back to the
+        # CLI built-in (1800s) when the profile omits timeout (#1923).
         timeout = (
             profiles.cli.timeout
             if profiles.cli.timeout is not None

@@ -34,7 +34,7 @@ def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_cli_defaults_to_whole_turn_timeout() -> None:
-    """CLI without a profile uses the 900s whole-turn default."""
+    """CLI without a profile uses the 1800s per-chunk default."""
     config = AIConfig(enabled=True, transport=AITransport.CLI)
     resolved = resolve_transport_settings(config)
     assert_that(resolved.timeout).is_equal_to(DEFAULT_CLI_TIMEOUT)
