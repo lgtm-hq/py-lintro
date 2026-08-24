@@ -835,11 +835,17 @@ def test_review_findings_from_unposted_skips_reviewed_and_posted() -> None:
         title="Already posted",
         file="posted.py",
         inline_comment_id=99,
+        description="Already posted body",
+        cause="posted cause",
+        fix="posted fix",
     )
     reread = FindingRecord(
         fingerprint="rereadfingerprint",
         title="Re-read file",
         file="reread.py",
+        description="Re-read body",
+        cause="reread cause",
+        fix="reread fix",
     )
     current = _finding(title="Current", file="current.py")
     prior = ReviewState(findings=(posted, reread))

@@ -1004,6 +1004,7 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     """The review pipeline must tee output and fail when the CLI exits non-zero."""
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
     assert_that(shell_text).contains("set -euo pipefail")
+    assert_that(shell_text).contains("PYTHONUNBUFFERED=1")
     assert_that(shell_text).contains('| tee "$output_file"')
     result = subprocess.run(  # nosec B603 - fixed argv; shell=False
         [

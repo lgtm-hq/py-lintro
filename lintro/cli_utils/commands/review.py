@@ -782,9 +782,7 @@ def review_command(
             ),
             captured_comment_ids=captured_comment_ids,
         )
-        if not posted:
-            logger.warning("GitHub review posting skipped or failed")
-        elif captured_comment_ids:
+        if captured_comment_ids:
             try:
                 _persist_review_state(
                     result=result,
@@ -800,6 +798,8 @@ def review_command(
                     "Could not persist posted inline comment ids; next "
                     "round may replay those findings",
                 )
+        if not posted:
+            logger.warning("GitHub review posting skipped or failed")
 
     exit_code = 1 if result.has_p1_findings else 0
     if fail_on_findings and advisory_findings_count(advisory_results):
