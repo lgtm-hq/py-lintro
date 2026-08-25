@@ -1007,6 +1007,8 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("PYTHONUNBUFFERED=1")
     assert_that(shell_text).contains('>"$output_file" 2>&1 &')
     assert_that(shell_text).contains('kill -TERM "$lintro_pid"')
+    assert_that(shell_text).contains('tail --pid="$lintro_pid"')
+    assert_that(shell_text).contains("kill -KILL")
     assert_that(shell_text).contains("trap '' TERM")
     assert_that(shell_text).contains("[ai-review] still running")
     assert_that(shell_text).contains("persist-on-SIGTERM enabled")
@@ -1021,6 +1023,40 @@ def test_run_ai_review_tees_under_pipefail() -> None:
         text=True,
     )
     assert_that(result.returncode).is_not_equal_to(0)
+
+
+def test_term_immune_log_mirror_is_reaped_with_sigkill() -> None:
+    """A ``trap '' TERM`` tail must not block wait after the review exits."""
+    result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
+        [
+            "bash",
+            "-c",
+            """
+            set -euo pipefail
+            tmp="$(mktemp)"
+            : >"$tmp"
+            ( sleep 0.2; printf '{}\\n' >"$tmp" ) &
+            child=$!
+            (trap '' TERM; tail --pid="$child" -n +1 -f "$tmp") &
+            log_pid=$!
+            wait "$child"
+            status=$?
+            while kill -0 "$child" 2>/dev/null; do
+              wait "$child"
+              status=$?
+            done
+            kill -KILL "$log_pid" 2>/dev/null || true
+            wait "$log_pid" 2>/dev/null || true
+            rm -f "$tmp"
+            exit "$status"
+            """,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert_that(result.returncode).is_equal_to(0)
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:

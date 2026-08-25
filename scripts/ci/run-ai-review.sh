@@ -166,8 +166,8 @@ log_pid=""
 lintro_pid=""
 _cleanup_review() {
 	rm -f "$output_file"
-	kill "${heartbeat_pid:-}" 2>/dev/null || true
-	kill "${log_pid:-}" 2>/dev/null || true
+	kill -KILL "${heartbeat_pid:-}" 2>/dev/null || true
+	kill -KILL "${log_pid:-}" 2>/dev/null || true
 }
 trap '_cleanup_review' EXIT
 # Forward SIGTERM to lintro (runner may signal only this shell) and keep
@@ -175,6 +175,10 @@ trap '_cleanup_review' EXIT
 _forward_term() {
 	if [[ -n "${lintro_pid:-}" ]]; then
 		kill -TERM "$lintro_pid" 2>/dev/null || true
+		# uv run may wrap Python; signal children if uv did not exec.
+		while read -r child; do
+			kill -TERM "$child" 2>/dev/null || true
+		done < <(pgrep -P "$lintro_pid" || true)
 	fi
 }
 trap '_forward_term' TERM INT
@@ -204,11 +208,18 @@ echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 export PYTHONUNBUFFERED=1
 uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1 &
 lintro_pid=$!
-(trap '' TERM; tail -n +1 -f "$output_file") &
+# --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
+# group signal left it ignoring TERM (``trap '' TERM``).
+(trap '' TERM; tail --pid="$lintro_pid" -n +1 -f "$output_file") &
 log_pid=$!
 wait "$lintro_pid"
 review_status=$?
-kill "${log_pid:-}" 2>/dev/null || true
+# A trap can interrupt wait while lintro is still persisting. Reap it.
+while kill -0 "$lintro_pid" 2>/dev/null; do
+	wait "$lintro_pid"
+	review_status=$?
+done
+kill -KILL "${log_pid:-}" 2>/dev/null || true
 wait "${log_pid:-}" 2>/dev/null || true
 trap - TERM INT
 set -e
