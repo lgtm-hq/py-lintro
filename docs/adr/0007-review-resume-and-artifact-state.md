@@ -43,7 +43,8 @@ cost cap: coverage and this-run findings already written are persisted (incremen
 `part-*.json` under `LINTRO_REVIEW_STATE_DIR`) and the next round resumes. A SIGTERM
 after a finished chunk must not lose that chunk's coverage or issues. The wrapper
 uploads those parts from inside the review step: a cancelled Actions job skips later
-`if: always()` uploads, and `wait` 143 after persist is classified as INCOMPLETE.
+`if: always()` uploads. After `wait` reports 143, the persisted envelope decides the
+outcome: incomplete coverage is INCOMPLETE, and complete coverage stays REVIEWED.
 
 `conftest.py` is a known semantic hole (test-wide fixtures) left on the revisit list.
 

@@ -45,6 +45,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -161,6 +162,27 @@ class OutcomeReport:
     transport: str = DEFAULT_TRANSPORT
 
 
+def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
+    """Return whether a review envelope lists any P1 finding.
+
+    Args:
+        payload: Decoded review JSON object.
+
+    Returns:
+        True when any finding severity is ``P1``.
+    """
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        return False
+    for item in findings:
+        if not isinstance(item, Mapping):
+            continue
+        severity = str(item.get("severity") or "").upper()
+        if severity in {"P1", "SEVERITY.P1"}:
+            return True
+    return False
+
+
 def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the coverage object from a successful review JSON envelope.
 
@@ -180,19 +202,22 @@ def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
             continue
         if isinstance(payload, dict) and "readiness_verdict" in payload:
             coverage = payload.get("coverage")
+            extras = {
+                "stopped_reason": payload.get("stopped_reason") or "",
+                "has_p1_findings": _payload_has_p1_findings(payload),
+            }
             if isinstance(coverage, dict):
-                if "stopped_reason" not in coverage and payload.get("stopped_reason"):
-                    coverage = {
-                        **coverage,
-                        "stopped_reason": payload.get("stopped_reason"),
-                    }
-                return coverage
+                merged = {**coverage}
+                if not merged.get("stopped_reason") and extras["stopped_reason"]:
+                    merged["stopped_reason"] = extras["stopped_reason"]
+                merged["has_p1_findings"] = extras["has_p1_findings"]
+                return merged
             if payload.get("readiness_verdict") == "incomplete":
                 return {
                     "complete": False,
                     "covered_at_head": 0,
                     "eligible": 0,
-                    "stopped_reason": payload.get("stopped_reason") or "",
+                    **extras,
                 }
         index = text.find("{", index + 1)
     return None
@@ -445,7 +470,10 @@ def classify(
         # ``wait`` can report SIGTERM after a finished review already wrote a
         # complete envelope. Prefer that over "unexpected status 143".
         if coverage is not None and coverage.get("complete", True):
-            return _reviewed_report(findings=False, transport=transport)
+            return _reviewed_report(
+                findings=bool(coverage.get("has_p1_findings")),
+                transport=transport,
+            )
         # An exit status lintro does not define means the wrapper itself broke
         # (missing dependency, bad flag, crash). Never attribute that to the
         # provider — the fix is in lintro, not in the account.

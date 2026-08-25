@@ -708,8 +708,11 @@ def test_upload_rejects_untrusted_results_host(
     state_dir.mkdir()
     (state_dir / "state.json").write_text("{}", encoding="utf-8")
 
-    def http_do(*_args: object) -> tuple[int, bytes]:
-        raise AssertionError("must not contact an untrusted host")
+    calls: list[tuple[object, ...]] = []
+
+    def http_do(*args: object) -> tuple[int, bytes]:
+        calls.append(args)
+        return 200, b"{}"
 
     uploaded = artifacts.upload_from_env(
         {
@@ -722,6 +725,7 @@ def test_upload_rejects_untrusted_results_host(
         http_do=http_do,
     )
     assert_that(uploaded).is_false()
+    assert_that(calls).is_empty()
 
 
 def test_main_upload_never_exits_nonzero(

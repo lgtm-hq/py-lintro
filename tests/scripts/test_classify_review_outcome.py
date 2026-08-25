@@ -186,6 +186,32 @@ def test_sigterm_status_with_complete_envelope_is_reviewed(
     assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
     assert_that(report.exit_code).is_equal_to(0)
     assert_that(report.headline).does_not_contain("unexpected status")
+    assert_that(report.headline).contains("no P1 findings")
+
+
+def test_sigterm_status_with_complete_p1_envelope_names_findings(
+    classifier: ModuleType,
+) -> None:
+    """A finished P1 envelope must not be labelled clean after SIGTERM."""
+    output = json.dumps(
+        {
+            "readiness_verdict": "ready",
+            "coverage": {
+                "reviewed": 3,
+                "carried": 0,
+                "awaiting": 0,
+                "invalidated": 0,
+                "eligible": 3,
+                "covered_at_head": 3,
+                "complete": True,
+            },
+            "findings": [{"severity": "P1", "title": "bug"}],
+        },
+    )
+    report = classifier.classify(status=classifier.SIGTERM_STATUS, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.headline).contains("P1 findings posted")
 
 
 def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
