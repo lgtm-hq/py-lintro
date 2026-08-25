@@ -708,7 +708,7 @@ def _http_do(
         headers=dict(headers),
     )
     try:
-        with urllib.request.urlopen(  # nosec B310 - https-only; URL from Actions
+        with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
             request,
             timeout=max(0.05, timeout),
         ) as response:
