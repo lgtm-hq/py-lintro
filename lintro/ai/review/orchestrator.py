@@ -701,7 +701,7 @@ async def _review_all_chunks(
                         completed_sink.append(other)
                         if on_chunk_complete is not None:
                             on_chunk_complete(completed_sink)
-                if isinstance(outcome, Exception):
+                if isinstance(outcome, (AIError, ReviewExecutionError)):
                     raise outcome
             if isinstance(outcome, Exception):
                 if first_error is None:
@@ -1208,7 +1208,12 @@ async def run_review_async(
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
         completed = True
-        if stopped_reason.startswith("timeout"):
+        if "SIGTERM" in stopped_reason:
+            hint = (
+                "The runner sent SIGTERM; coverage was persisted. "
+                "Re-run to resume remaining files."
+            )
+        elif stopped_reason.startswith("timeout"):
             timeout_setting = (
                 "ai.transports.cli.timeout"
                 if ai_config.transport is AITransport.CLI
