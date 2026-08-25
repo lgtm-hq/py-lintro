@@ -157,8 +157,15 @@ export LINTRO_REVIEW_STATE_DIR="${LINTRO_REVIEW_STATE_DIR:-ai-review-state}"
 mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 
 # Best-effort: never redden the review because an artifact upload failed.
+# Keep the runtime token out of the agent CLI environment — lintro copies
+# os.environ into the provider subprocess.
+REVIEW_STATE_RUNTIME_TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
+REVIEW_STATE_RESULTS_URL="${ACTIONS_RESULTS_URL:-}"
+unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL
 _upload_review_state() {
-	python3 "${script_dir}/review_state_artifacts.py" upload --suffix "$1" || true
+	ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
+		ACTIONS_RESULTS_URL="${REVIEW_STATE_RESULTS_URL}" \
+		python3 "${script_dir}/review_state_artifacts.py" upload --suffix "$1" || true
 }
 
 # Heartbeat so a silent ``--output json`` review still proves the step is
