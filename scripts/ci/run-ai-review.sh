@@ -219,6 +219,19 @@ while kill -0 "$lintro_pid" 2>/dev/null; do
 	wait "$lintro_pid"
 	review_status=$?
 done
+# If wait returned 143 after lintro already exited, recover the real status.
+if ! kill -0 "$lintro_pid" 2>/dev/null; then
+	wait "$lintro_pid" 2>/dev/null
+	reaped=$?
+	if [[ "$reaped" -ne 127 ]]; then
+		review_status=$reaped
+	fi
+fi
+# Let GNU tail --pid flush the envelope, then SIGKILL the TERM-immune mirror.
+for _ in 1 2 3 4; do
+	kill -0 "${log_pid:-}" 2>/dev/null || break
+	sleep 0.5
+done
 kill -KILL "${log_pid:-}" 2>/dev/null || true
 wait "${log_pid:-}" 2>/dev/null || true
 trap - TERM INT

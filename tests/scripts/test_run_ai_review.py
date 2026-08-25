@@ -1010,6 +1010,8 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains('tail --pid="$lintro_pid"')
     assert_that(shell_text).contains("kill -KILL")
     assert_that(shell_text).contains("trap '' TERM")
+    assert_that(shell_text).contains("reaped=$?")
+    assert_that(shell_text).contains("sleep 0.5")
     assert_that(shell_text).contains("[ai-review] still running")
     assert_that(shell_text).contains("persist-on-SIGTERM enabled")
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
