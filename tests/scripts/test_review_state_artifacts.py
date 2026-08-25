@@ -7,6 +7,7 @@ import importlib.util
 import json
 import re
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -728,6 +729,37 @@ def test_upload_rejects_untrusted_results_host(
     assert_that(calls).is_empty()
 
 
+def _state_env(
+    tmp_path: Path,
+    *,
+    with_part: bool = True,
+) -> tuple[Path, dict[str, str]]:
+    """Create a state directory and the Actions env the uploader reads.
+
+    Args:
+        tmp_path: Pytest temp directory.
+        with_part: When True, include a ``part-*.json`` file.
+
+    Returns:
+        State directory and environment mapping.
+    """
+    state_dir = tmp_path / "ai-review-state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text('{"schema_version": 3}\n', encoding="utf-8")
+    if with_part:
+        (state_dir / "part-0001.json").write_text(
+            '{"schema_version": 3, "coverage": []}\n',
+            encoding="utf-8",
+        )
+    return state_dir, {
+        "ACTIONS_RUNTIME_TOKEN": _runtime_jwt(),
+        "ACTIONS_RESULTS_URL": "https://results-receiver.actions.githubusercontent.com/",
+        "PR_NUMBER": "2166",
+        "GITHUB_RUN_ATTEMPT": "3",
+        "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+    }
+
+
 def test_main_upload_never_exits_nonzero(
     artifacts: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -737,3 +769,128 @@ def test_main_upload_never_exits_nonzero(
     monkeypatch.delenv("ACTIONS_RESULTS_URL", raising=False)
     monkeypatch.setenv("PR_NUMBER", "2166")
     assert_that(artifacts.main(["upload", "--suffix", "inline"])).is_equal_to(0)
+
+
+def test_upload_budget_zero_makes_no_http_calls(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A spent budget must not start Create/PUT/Finalize."""
+    _state_dir, env = _state_env(tmp_path)
+    calls: list[str] = []
+
+    def http_do(
+        method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        calls.append(f"{method} {url}")
+        return 200, b'{"ok":true}'
+
+    uploaded = artifacts.upload_from_env(
+        env,
+        suffix="inline",
+        http_do=http_do,
+        budget_seconds=0,
+    )
+    assert_that(uploaded).is_false()
+    assert_that(calls).is_empty()
+
+
+def test_upload_budget_stops_after_the_first_slow_request(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A request that consumes the budget must skip PUT and Finalize."""
+    _state_dir, env = _state_env(tmp_path)
+    calls: list[str] = []
+
+    def http_do(
+        method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        calls.append(url.rsplit("/", 1)[-1] if method != "PUT" else "PUT")
+        time.sleep(0.05)
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        return 200, b'{"ok":true}'
+
+    uploaded = artifacts.upload_from_env(
+        env,
+        suffix="inline",
+        http_do=http_do,
+        budget_seconds=0.02,
+    )
+    assert_that(uploaded).is_false()
+    assert_that(calls).is_equal_to(["CreateArtifact"])
+
+
+def test_upload_from_env_fails_closed_on_http_errors(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Create 500, ok:false, PUT 4xx, and omitted Finalize ok are not success."""
+    _state_dir, env = _state_env(tmp_path)
+
+    def create_500(
+        _method: str,
+        _url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        return 500, b"nope"
+
+    def ok_false(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":false}'
+        return 200, b"{}"
+
+    def put_403(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        if url == "https://blob.example/upload":
+            return 403, b"blocked"
+        return 200, b'{"ok":true}'
+
+    def finalize_omits_ok(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        if url == "https://blob.example/upload":
+            return 201, b""
+        return 200, b'{"artifactId":"9"}'
+
+    for http_do in (create_500, ok_false, put_403, finalize_omits_ok):
+        assert_that(
+            artifacts.upload_from_env(env, suffix="inline", http_do=http_do),
+        ).is_false()
+
+
+def test_inline_suffix_uses_the_cancel_budget_by_default(
+    artifacts: ModuleType,
+) -> None:
+    """Post-wait uploads default to 2s so classify still fits in SIGTERM grace."""
+    assert_that(artifacts._CANCEL_UPLOAD_BUDGET_SECONDS).is_equal_to(2.0)
+    assert_that(artifacts._CANCEL_UPLOAD_BUDGET_SECONDS).is_less_than(
+        artifacts._UPLOAD_TIMEOUT_SECONDS,
+    )
+    assert_that(artifacts._CHECKPOINT_UPLOAD_BUDGET_SECONDS).is_greater_than(
+        artifacts._CANCEL_UPLOAD_BUDGET_SECONDS,
+    )

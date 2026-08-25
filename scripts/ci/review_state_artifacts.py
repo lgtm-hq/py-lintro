@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess  # nosec B404 - gh argv is built internally; shell=False
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -47,7 +48,13 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
-_UPLOAD_TIMEOUT_SECONDS: Final[int] = 8
+_UPLOAD_TIMEOUT_SECONDS: Final[float] = 8.0
+# Whole Create/PUT/Finalize after wait returns 143. GitHub's cancel
+# grace is ~7.5s; the log flush already used some of it. A 8s×3 upload
+# is SIGKILL'd and classify never runs (#2173).
+_CANCEL_UPLOAD_BUDGET_SECONDS: Final[float] = 2.0
+# Mid-run checkpoints happen while the job is healthy.
+_CHECKPOINT_UPLOAD_BUDGET_SECONDS: Final[float] = 24.0
 RUNS_PER_PAGE: Final[int] = 100
 ARTIFACTS_PER_PAGE: Final[int] = 100
 RETENTION_DAYS: Final[int] = 30
@@ -676,6 +683,8 @@ def _http_do(
     url: str,
     headers: Mapping[str, str],
     body: bytes,
+    *,
+    timeout: float = _UPLOAD_TIMEOUT_SECONDS,
 ) -> tuple[int, bytes]:
     """Issue one HTTPS request.
 
@@ -684,6 +693,7 @@ def _http_do(
         url: Absolute HTTPS URL.
         headers: Request headers.
         body: Request body; empty for no payload.
+        timeout: Connect+read deadline for this request.
 
     Returns:
         Status code and response body. HTTP errors are returned, not raised.
@@ -700,7 +710,7 @@ def _http_do(
     try:
         with urllib.request.urlopen(  # nosec B310 - https-only; URL from Actions
             request,
-            timeout=_UPLOAD_TIMEOUT_SECONDS,
+            timeout=max(0.05, timeout),
         ) as response:
             return int(response.status), response.read()
     except urllib.error.HTTPError as exc:
@@ -748,6 +758,44 @@ def _twirp_json(
     return decoded if isinstance(decoded, dict) else None
 
 
+def _bounded_http_do(
+    http_do: HttpDo,
+    *,
+    budget_seconds: float,
+) -> HttpDo:
+    """Stop starting requests once the whole-upload budget is gone.
+
+    Args:
+        http_do: Underlying client.
+        budget_seconds: Wall-clock budget for Create + PUT + Finalize.
+
+    Returns:
+        Client that returns ``(0, ...)`` when the deadline has passed.
+    """
+    deadline = time.monotonic() + max(0.0, budget_seconds)
+
+    def bounded(
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes,
+    ) -> tuple[int, bytes]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return 0, b"artifact upload budget exhausted"
+        if http_do is _http_do:
+            return _http_do(
+                method,
+                url,
+                headers,
+                body,
+                timeout=min(_UPLOAD_TIMEOUT_SECONDS, remaining),
+            )
+        return http_do(method, url, headers, body)
+
+    return bounded
+
+
 def upload_state(
     *,
     directory: Path,
@@ -755,6 +803,7 @@ def upload_state(
     token: str,
     results_url: str,
     http_do: HttpDo = _http_do,
+    budget_seconds: float = _CHECKPOINT_UPLOAD_BUDGET_SECONDS,
 ) -> bool:
     """Upload JSON state files as one Actions artifact.
 
@@ -764,6 +813,8 @@ def upload_state(
         token: ``ACTIONS_RUNTIME_TOKEN``.
         results_url: ``ACTIONS_RESULTS_URL``.
         http_do: Injectable HTTP client.
+        budget_seconds: Wall-clock cap for the whole Create/PUT/Finalize
+            walk. Cancel-path callers pass ``_CANCEL_UPLOAD_BUDGET_SECONDS``.
 
     Returns:
         True when Create + PUT + Finalize all succeeded.
@@ -775,6 +826,7 @@ def upload_state(
         return False
     archive = zip_state_files(files)
     digest = hashlib.sha256(archive).hexdigest()
+    client = _bounded_http_do(http_do, budget_seconds=budget_seconds)
     created = _twirp_json(
         origin=origin,
         method="CreateArtifact",
@@ -786,14 +838,14 @@ def upload_state(
             "version": 4,
             "mimeType": "application/zip",
         },
-        http_do=http_do,
+        http_do=client,
     )
-    if created is None or not created.get("ok", True):
+    if created is None or created.get("ok") is not True:
         return False
     signed = created.get("signedUploadUrl") or created.get("signed_upload_url")
     if not isinstance(signed, str) or not signed:
         return False
-    put_status, _put_body = http_do(
+    put_status, _put_body = client(
         "PUT",
         signed,
         {
@@ -817,9 +869,9 @@ def upload_state(
             "size": str(len(archive)),
             "hash": f"sha256:{digest}",
         },
-        http_do=http_do,
+        http_do=client,
     )
-    return bool(finalized is not None and finalized.get("ok", True))
+    return bool(finalized is not None and finalized.get("ok") is True)
 
 
 def upload_from_env(
@@ -827,6 +879,7 @@ def upload_from_env(
     *,
     suffix: str,
     http_do: HttpDo = _http_do,
+    budget_seconds: float | None = None,
 ) -> bool:
     """Upload current review state using process environment.
 
@@ -836,6 +889,8 @@ def upload_from_env(
         env: Process environment.
         suffix: Artifact-name suffix (``inline``, ``ckpt-15``, ...).
         http_do: Injectable HTTP client.
+        budget_seconds: Optional whole-upload cap. ``inline`` defaults to
+            the cancel-path budget; checkpoints use the longer default.
 
     Returns:
         True when an artifact was uploaded.
@@ -847,6 +902,12 @@ def upload_from_env(
         return False
     attempt = _parse_optional_int(env.get("GITHUB_RUN_ATTEMPT")) or 1
     directory = Path(env.get("LINTRO_REVIEW_STATE_DIR") or DEFAULT_STATE_DIR)
+    if budget_seconds is None:
+        budget_seconds = (
+            _CANCEL_UPLOAD_BUDGET_SECONDS
+            if suffix == "inline"
+            else _CHECKPOINT_UPLOAD_BUDGET_SECONDS
+        )
     try:
         return upload_state(
             directory=directory,
@@ -858,6 +919,7 @@ def upload_from_env(
             token=token,
             results_url=results_url,
             http_do=http_do,
+            budget_seconds=budget_seconds,
         )
     except Exception:  # noqa: BLE001 - fail-safe; never redden the review
         return False
@@ -886,6 +948,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="inline",
         help="Artifact-name suffix so a run can upload more than once.",
     )
+    upload.add_argument(
+        "--budget-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Wall-clock cap for Create/PUT/Finalize. inline defaults to "
+            f"{_CANCEL_UPLOAD_BUDGET_SECONDS:g}s so classify still runs "
+            "inside SIGTERM grace."
+        ),
+    )
     return parser
 
 
@@ -901,7 +973,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "upload":
-        uploaded = upload_from_env(os.environ, suffix=str(args.suffix))
+        uploaded = upload_from_env(
+            os.environ,
+            suffix=str(args.suffix),
+            budget_seconds=args.budget_seconds,
+        )
         if uploaded:
             sys.stdout.write(
                 f"uploaded review-state artifact ({args.suffix})\n",

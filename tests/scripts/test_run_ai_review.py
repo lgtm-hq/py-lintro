@@ -1019,12 +1019,22 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("[ai-review] still running")
     assert_that(shell_text).contains("persist-on-SIGTERM enabled")
     assert_that(shell_text).contains("review_state_artifacts.py")
-    assert_that(shell_text).contains('upload --suffix "$1"')
-    assert_that(shell_text).contains("_upload_review_state inline")
+    assert_that(shell_text).contains(
+        'upload --suffix "$suffix" --budget-seconds "$budget"',
+    )
+    assert_that(shell_text).contains("timeout --signal=TERM --kill-after=1")
+    assert_that(shell_text).contains("_CANCEL_UPLOAD_BUDGET_SECONDS=2")
+    assert_that(shell_text).contains(
+        '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"',
+    )
+    inline_call = '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"'
+    assert_that(shell_text.index(inline_call)).is_less_than(
+        shell_text.rindex("classify_review_outcome.py"),
+    )
     assert_that(shell_text).contains("ckpt-${elapsed}")
     assert_that(shell_text).contains("unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL")
     assert_that(shell_text).contains(
-        'ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}"'
+        'ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}"',
     )
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
         [

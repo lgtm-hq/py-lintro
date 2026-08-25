@@ -162,10 +162,18 @@ mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 REVIEW_STATE_RUNTIME_TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
 REVIEW_STATE_RESULTS_URL="${ACTIONS_RESULTS_URL:-}"
 unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL
+# Post-wait inline upload must finish inside GitHub's ~7.5s SIGTERM
+# grace so classify still runs. Mid-run checkpoints keep the longer cap.
+_CANCEL_UPLOAD_BUDGET_SECONDS=2
+_CHECKPOINT_UPLOAD_BUDGET_SECONDS=24
 _upload_review_state() {
-	ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
+	local suffix="$1"
+	local budget="${2:-$_CHECKPOINT_UPLOAD_BUDGET_SECONDS}"
+	timeout --signal=TERM --kill-after=1 "$budget" \
+		env ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
 		ACTIONS_RESULTS_URL="${REVIEW_STATE_RESULTS_URL}" \
-		python3 "${script_dir}/review_state_artifacts.py" upload --suffix "$1" || true
+		python3 "${script_dir}/review_state_artifacts.py" \
+		upload --suffix "$suffix" --budget-seconds "$budget" || true
 }
 
 # Heartbeat so a silent ``--output json`` review still proves the step is
@@ -180,7 +188,7 @@ _upload_review_state() {
 		mtime=$(stat -c %Y "${LINTRO_REVIEW_STATE_DIR}/state.json" 2>/dev/null || true)
 		if [[ -n "$mtime" && "$mtime" != "$last_mtime" ]]; then
 			last_mtime=$mtime
-			_upload_review_state "ckpt-${elapsed}"
+			_upload_review_state "ckpt-${elapsed}" "${_CHECKPOINT_UPLOAD_BUDGET_SECONDS}"
 		fi
 	done
 ) &
@@ -277,7 +285,8 @@ set -e
 
 # Upload before classify. GitHub cancels remaining always() steps after
 # SIGTERM; this call still has the persist snapshot on disk (#2166).
-_upload_review_state inline
+# Bound to 2s so a hung Create/PUT/Finalize cannot eat classify.
+_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"
 
 # Exits 0 only when a review was produced; the classifier writes the annotation
 # and job summary either way. --transport names the failure vocabulary (#1923).
