@@ -861,6 +861,38 @@ def test_main_writes_empty_run_id_without_github(
     assert_that(output.read_text(encoding="utf-8")).is_equal_to("run-id=\n")
 
 
+def test_main_locate_stays_zero_when_seed_raises(
+    artifacts: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A seed crash must not redden locate or hide the newest run-id."""
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "15")
+    monkeypatch.setenv("GITHUB_RUN_ID", "400")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path / "ai-review-state"))
+
+    def locate_state_from_env(
+        _env: dict[str, str],
+        *,
+        gh_api: Any = None,
+        now: Any = None,
+    ) -> Any:
+        del gh_api, now
+        return artifacts.LocatedPrior(run_id=300, seed_run_id=200)
+
+    def boom(**_kwargs: Any) -> int:
+        raise RuntimeError("encrypted zip member")
+
+    monkeypatch.setattr(artifacts, "locate_state_from_env", locate_state_from_env)
+    monkeypatch.setattr(artifacts, "seed_prior_run_state", boom)
+    assert_that(artifacts.main(["locate"])).is_equal_to(0)
+    assert_that(output.read_text(encoding="utf-8")).is_equal_to("run-id=300\n")
+
+
 def _runtime_jwt() -> str:
     """Build a runtime JWT whose scp claim carries Results backend IDs.
 

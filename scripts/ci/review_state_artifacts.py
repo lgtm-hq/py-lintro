@@ -1317,12 +1317,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
         pr_number = _parse_optional_int(os.environ.get("PR_NUMBER"))
         if repo and pr_number is not None and pr_number > 0:
-            seed_prior_run_state(
-                repo=repo,
-                pr_number=pr_number,
-                seed_run_id=located.seed_run_id,
-                directory=Path(seed_dir_raw or DEFAULT_STATE_DIR),
-            )
+            try:
+                seed_prior_run_state(
+                    repo=repo,
+                    pr_number=pr_number,
+                    seed_run_id=located.seed_run_id,
+                    directory=Path(seed_dir_raw or DEFAULT_STATE_DIR),
+                )
+            except Exception as exc:  # noqa: BLE001 - fail-safe; never redden locate
+                _log_locate(f"seed exception: {type(exc).__name__}")
     return 0
 
 
