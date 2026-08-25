@@ -274,6 +274,47 @@ def test_resolve_cause_text_prefers_cause_message() -> None:
     )
 
 
+def test_resolve_cause_text_skips_empty_timeout_cause() -> None:
+    """asyncio.TimeoutError() stringifies empty; keep the CLI wrapper text."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    assert_that(resolve_cause_text(error=error)).contains("timed out after 1800s")
+
+
+def test_classify_timeout_error_cause_as_timeout() -> None:
+    """A CLI timeout chained from TimeoutError classifies as TIMEOUT."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="cursor", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
+def test_timeout_error_wins_over_http_504_signature() -> None:
+    """A TimeoutError cause is TIMEOUT even when the wrapper looks like 504."""
+    error = AIProviderError("HTTP 504 gateway timeout")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
+def test_credit_signature_wins_over_nested_timeout_error() -> None:
+    """A credits signature must not become TIMEOUT just because a cause timed out."""
+    error = AIProviderError("Your credit balance is too low to access the API")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
+def test_quota_signature_wins_over_typed_rate_limit() -> None:
+    """OpenAI insufficient_quota mapped to AIRateLimitError is still credits."""
+    error = AIRateLimitError(
+        "OpenAI rate limit exceeded: Error code: 429 - insufficient_quota: "
+        "You exceeded your current quota",
+    )
+    kind = classify_provider_error(provider="openai", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")

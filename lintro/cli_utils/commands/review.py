@@ -676,6 +676,21 @@ def review_command(
                 max_cost_usd_source=cap_source.value,
             ),
         )
+        if post and prior_state is not None and not force_full:
+            from lintro.ai.review.finding_matcher import (
+                review_findings_from_unposted,
+            )
+
+            replayed = review_findings_from_unposted(
+                prior=prior_state,
+                current=result.findings,
+                reviewed_paths=frozenset(result.metadata.reviewed_paths),
+            )
+            if replayed:
+                result = dc_replace(
+                    result,
+                    findings=(*result.findings, *replayed),
+                )
         try:
             _persist_review_state(
                 result=result,
@@ -734,6 +749,7 @@ def review_command(
     if post:
         from lintro.ai.review.github import post_review_to_github
 
+        captured_comment_ids: dict[str, int] = {}
         posted = post_review_to_github(
             result=result,
             pr_number=resolved_pr,
@@ -764,7 +780,24 @@ def review_command(
                     paths=paths,
                 ),
             ),
+            captured_comment_ids=captured_comment_ids,
         )
+        if captured_comment_ids:
+            try:
+                _persist_review_state(
+                    result=result,
+                    context=context,
+                    prior=prior_state,
+                    force_full=force_full,
+                    pr_number=pr,
+                    repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+                    inline_comment_ids=captured_comment_ids,
+                )
+            except Exception:
+                logger.warning(
+                    "Could not persist posted inline comment ids; next "
+                    "round may replay those findings",
+                )
         if not posted:
             logger.warning("GitHub review posting skipped or failed")
 
@@ -1115,6 +1148,7 @@ def _persist_review_state(
     force_full: bool,
     pr_number: int | None,
     repo: str,
+    inline_comment_ids: dict[str, int] | None = None,
 ) -> None:
     """Write coverage parts for the artifact upload and local ledger."""
     from dataclasses import replace
@@ -1133,6 +1167,7 @@ def _persist_review_state(
         transport=result.metadata.transport,
         auth_mode=result.metadata.auth_mode,
         cost_basis=result.metadata.cost_basis,
+        inline_comment_ids=inline_comment_ids,
         departed_paths=_departed_paths(context=context),
     )
     state = replace(

@@ -13,17 +13,22 @@ from assertpy import assert_that
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AIError
+from lintro.ai.exceptions import AIError, AIProviderError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.coverage_record import CoverageRecord
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.orchestrator import (
     _review_chunk,
@@ -34,6 +39,8 @@ from lintro.ai.review.orchestrator import (
     strip_json_fences,
 )
 from lintro.ai.review.progress import ReviewProgressCallback
+from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.state_store import load_ci_state, write_state_part
 
 
 def _sample_response_json(
@@ -232,6 +239,572 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
     assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
     assert_that(result.metadata.chunks_total).is_equal_to(2)
     assert_that(result.findings).is_not_empty()
+
+
+def test_run_review_returns_partial_on_chunk_timeout() -> None:
+    """A mid-run CLI timeout persists completed chunks instead of aborting."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+
+    def _timeout_second_call(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_second_call,
+        ),
+    ):
+        result = run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("timeout")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.chunks_total).is_equal_to(2)
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
+
+
+def test_run_review_writes_incremental_coverage_parts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each finished chunk writes a CI coverage part before the next call."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _recording_call_ai(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        response = provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_recording_call_ai,
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.01,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    parts = sorted(tmp_path.glob("part-*.json"))
+    assert_that(parts).is_not_empty()
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that(loaded.pr_number).is_equal_to(2166)
+
+
+def test_incremental_state_json_wins_over_downloaded_prior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Current-run state.json must beat a leftover downloaded snapshot."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    monkeypatch.setenv("GITHUB_RUN_ID", "current-run")
+    write_state_part(
+        state=ReviewState(
+            coverage=(CoverageRecord(path="stale.py", patch_hash="deadbeef"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=2166,
+            head_sha="old-head",
+            run_id="old-run",
+        ),
+        directory=tmp_path,
+        sequence=99,
+        final=True,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that({record.path for record in loaded.coverage}).does_not_contain(
+        "stale.py",
+    )
+    assert_that(loaded.run_id).is_equal_to("current-run")
+    assert_that(loaded.head_sha).is_not_equal_to("old-head")
+
+
+def test_incremental_checkpoint_keeps_prior_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-run checkpoint must not wipe carried findings from the artifact."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    prior = ReviewState(
+        coverage=(CoverageRecord(path="kept.py", patch_hash="abc123"),),
+        findings=(
+            FindingRecord(fingerprint="keep-me", title="old nit", file="kept.py"),
+        ),
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            prior_state=prior,
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({finding.fingerprint for finding in loaded.findings}).contains(
+        "keep-me",
+    )
+    assert_that({finding.file for finding in loaded.findings}).contains("a.py")
+    assert_that({finding.title for finding in loaded.findings}).contains(
+        "Fail-open default",
+    )
+
+
+def test_incremental_checkpoint_keeps_this_run_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-run checkpoint must persist findings from finished chunks."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _timeout_b(
+        *,
+        provider,
+        user_prompt,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        if "b.py" in user_prompt or "+y" in user_prompt:
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_b,
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    assert_that({record.path for record in loaded.coverage}).contains("a.py")
+    assert_that({finding.file for finding in loaded.findings}).contains("a.py")
+    assert_that({finding.title for finding in loaded.findings}).contains(
+        "Fail-open default",
+    )
+    this_run = next(finding for finding in loaded.findings if finding.file == "a.py")
+    assert_that(this_run.description).contains("Unknown status grants access")
+    assert_that(this_run.cause).contains("else branch returns Active")
+    assert_that(this_run.fix).contains("Default to Expired")
+
+
+def test_incremental_checkpoint_applies_sensitivity_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Focused policy must drop P3 doc-drift findings from the checkpoint."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    payload = {
+        "summary": "Merge with fixes.",
+        "checklist": [{"id": 1, "answer": "yes", "evidence": "a.py:12"}],
+        "findings": [
+            {
+                "severity": "P1",
+                "category": "security",
+                "file": "a.py",
+                "line": 12,
+                "title": "Fail-open default",
+                "description": "Unknown status grants access",
+                "cause": "else branch returns Active",
+                "fix": "Default to Expired",
+                "failure_scenario": "An unknown status grants access",
+                "confidence": "high",
+                "checklist_ids": [1],
+            },
+            {
+                "severity": "P3",
+                "category": ReviewCategory.CONTRACT_DRIFT.value,
+                "file": "README.md",
+                "line": 1,
+                "title": "Doc drift note",
+                "description": "README is stale",
+                "cause": "Docs not updated",
+                "fix": "Update README",
+                "confidence": "low",
+                "checklist_ids": [1],
+            },
+        ],
+    }
+    provider = _mock_provider(content=json.dumps(payload))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            sensitivity=resolve_sensitivity_policy(strictness=ReviewStrictness.FOCUSED),
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    titles = {finding.title for finding in loaded.findings}
+    assert_that(titles).contains("Fail-open default")
+    assert_that(titles).does_not_contain("Doc drift note")
+
+
+def test_incremental_checkpoint_keeps_inherited_sibling_findings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-hash coverage must not resolve findings on unread sibling files."""
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint="keep-b",
+                title="old nit on b",
+                file="b.py",
+                description="Sibling body",
+                cause="sibling cause",
+                fix="sibling fix",
+            ),
+        ),
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="b.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=("diff --git a/a.py b/a.py\n+x\ndiff --git a/b.py b/b.py\n+x"),
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+                user_prompt,
+                system=kwargs.get("system_prompt"),
+                max_tokens=kwargs.get("max_tokens", 1024),
+            ),
+        ),
+    ):
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            prior_state=prior,
+        )
+    loaded = load_ci_state(
+        directory=tmp_path,
+        repo="lgtm-hq/py-lintro",
+        pr_number=2166,
+    )
+    sibling = next(finding for finding in loaded.findings if finding.file == "b.py")
+    assert_that(sibling.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(sibling.title).is_equal_to("old nit on b")
+
+
+def test_parallel_timeout_keeps_completed_sibling() -> None:
+    """A timeout on one worker must still persist a sibling that already finished."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _timeout_b(
+        *,
+        provider,
+        user_prompt,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        if "b.py" in user_prompt or "+y" in user_prompt:
+            raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_timeout_b,
+        ),
+    ):
+        result = run_review(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=2,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
 
 
 def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:

@@ -73,7 +73,7 @@ class CliTransportProfile(BaseModel):
     timeout: float | None = Field(
         default=None,
         ge=1.0,
-        description="Whole-turn timeout in seconds (default 900).",
+        description="Per-chunk CLI invocation timeout in seconds (default 1800).",
     )
     max_cost_usd_advisory: float | None = Field(
         default=None,
@@ -172,7 +172,7 @@ class AIConfig(BaseModel):
         description=(
             "Per-transport operational profiles (timeout and cost caps). "
             "Resolution: transport profile → legacy api_timeout/max_cost_usd "
-            "→ built-in default (api: 60s; cli: 900s)."
+            "→ built-in default (api: 60s; cli: 1800s)."
         ),
     )
     model: str | None = None

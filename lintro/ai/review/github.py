@@ -109,6 +109,7 @@ def post_review_to_github(
     auto_resolve: bool = True,
     prior_state: ReviewState | None = None,
     departed_paths: frozenset[str] | None = None,
+    captured_comment_ids: dict[str, int] | None = None,
 ) -> bool:
     """Post (or update) the sticky review comment and inline findings.
 
@@ -137,6 +138,8 @@ def post_review_to_github(
             is migrated (findings and runs only).
         departed_paths: Paths that left the diff this round (deletes / rename
             sources). Their open findings may resolve.
+        captured_comment_ids: Optional sink for newly captured inline comment
+            ids so the caller can persist them after posting.
 
     Returns:
         True when posting succeeded; False on failure or when GitHub context is
@@ -292,6 +295,8 @@ def post_review_to_github(
             body=getattr(render, "archive", None),
         )
 
+    if captured_comment_ids is not None and comment_ids:
+        captured_comment_ids.update(comment_ids)
     return success
 
 
@@ -1041,7 +1046,6 @@ def _post_inline_findings(
         "comments": comments,
     }
     url = (
-        f"{reporter.api_base}/repos/{reporter.repo}/pulls/"
-        f"{reporter.pr_number}/reviews"
+        f"{reporter.api_base}/repos/{reporter.repo}/pulls/{reporter.pr_number}/reviews"
     )
     return reporter.api_request("POST", url, payload)
