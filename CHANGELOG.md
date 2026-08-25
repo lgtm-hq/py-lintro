@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.131.3] - 2026-08-25
+
+### Fixed
+
+- **ai-review**: persist coverage when the runner sends SIGTERM (#2171) (68a9f42)
+
 ## [0.131.2] - 2026-08-25
 
 ### Fixed
