@@ -764,6 +764,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -977,6 +978,7 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "nodejs.org:443",
         "release-assets.githubusercontent.com:443",
         "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
     )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
@@ -1016,6 +1018,24 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("sleep 0.5")
     assert_that(shell_text).contains("[ai-review] still running")
     assert_that(shell_text).contains("persist-on-SIGTERM enabled")
+    assert_that(shell_text).contains("review_state_artifacts.py")
+    assert_that(shell_text).contains(
+        'upload --suffix "$suffix" --budget-seconds "$budget"',
+    )
+    assert_that(shell_text).contains("timeout --signal=TERM --kill-after=1")
+    assert_that(shell_text).contains("_CANCEL_UPLOAD_BUDGET_SECONDS=2")
+    assert_that(shell_text).contains(
+        '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"',
+    )
+    inline_call = '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"'
+    assert_that(shell_text.index(inline_call)).is_less_than(
+        shell_text.rindex("classify_review_outcome.py"),
+    )
+    assert_that(shell_text).contains("ckpt-${elapsed}")
+    assert_that(shell_text).contains("unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL")
+    assert_that(shell_text).contains(
+        'ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}"',
+    )
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
         [
             "bash",
@@ -1219,7 +1239,30 @@ def test_workflow_keeps_mint_immediately_before_review() -> None:
     upload_index = names.index("Upload review-state artifacts")
     locate_index = names.index("Locate prior review-state run")
     download_index = names.index("Download prior review-state artifacts")
+    runtime_index = names.index("Expose Actions runtime for state upload")
     assert_that(review_index).is_equal_to(mint_index + 1)
     assert_that(locate_index).is_less_than(mint_index)
     assert_that(download_index).is_less_than(mint_index)
+    assert_that(runtime_index).is_less_than(mint_index)
     assert_that(upload_index).is_greater_than(review_index)
+
+
+def test_workflow_exports_runtime_token_into_review_step() -> None:
+    """In-step upload needs the runtime token that ``run:`` steps lack."""
+    steps = _ai_review_steps()
+    runtime = next(
+        step
+        for step in steps
+        if step.get("name") == "Expose Actions runtime for state upload"
+    )
+    assert_that(runtime["id"]).is_equal_to("artifact-runtime")
+    assert_that(str(runtime["uses"])).starts_with("actions/github-script@")
+    review = next(
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    )
+    assert_that(review["env"]["ACTIONS_RUNTIME_TOKEN"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.runtime-token }}",
+    )
+    assert_that(review["env"]["ACTIONS_RESULTS_URL"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.results-url }}",
+    )

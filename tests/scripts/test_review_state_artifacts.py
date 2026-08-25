@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
+import json
 import re
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -584,3 +587,310 @@ def test_main_writes_empty_run_id_without_github(
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert_that(artifacts.main(["locate"])).is_equal_to(0)
     assert_that(output.read_text(encoding="utf-8")).is_equal_to("run-id=\n")
+
+
+def _runtime_jwt() -> str:
+    """Build a runtime JWT whose scp claim carries Results backend IDs.
+
+    Returns:
+        Three-part JWT string.
+    """
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode("ascii")
+    payload = (
+        base64.urlsafe_b64encode(
+            b'{"scp":"Actions.Example Actions.Results:run-backend:job-backend"}',
+        )
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    return f"{header}.{payload}.sig"
+
+
+def test_state_artifact_name_keeps_the_pr_prefix(artifacts: ModuleType) -> None:
+    """In-step uploads must still match the locator/download prefix."""
+    name = artifacts.state_artifact_name(pr_number=2166, attempt=2, suffix="inline")
+    assert_that(name).is_equal_to("lintro-review-state-pr-2166-attempt-2-inline")
+    assert_that(artifacts.is_state_artifact_for_pr(name, 2166)).is_true()
+    dirty = artifacts.state_artifact_name(
+        pr_number=2166,
+        attempt=1,
+        suffix="ckpt 15/../x",
+    )
+    assert_that(dirty).is_equal_to("lintro-review-state-pr-2166-attempt-1-ckpt-15-x")
+
+
+def test_upload_state_creates_puts_and_finalizes(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The in-step uploader walks CreateArtifact, blob PUT, FinalizeArtifact."""
+    state_dir = tmp_path / "ai-review-state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text('{"schema_version": 3}\n', encoding="utf-8")
+    (state_dir / "part-0001.json").write_text(
+        '{"schema_version": 3, "coverage": []}\n',
+        encoding="utf-8",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def http_do(
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> tuple[int, bytes]:
+        calls.append((method, url))
+        if url.endswith("/CreateArtifact"):
+            assert_that(headers["Authorization"]).starts_with("Bearer ")
+            payload = json.loads(body.decode("utf-8"))
+            assert_that(payload["name"]).contains("lintro-review-state-pr-2166-")
+            assert_that(payload["workflowRunBackendId"]).is_equal_to("run-backend")
+            assert_that(payload["mimeType"]).is_equal_to("application/zip")
+            return (
+                200,
+                b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}',
+            )
+        if url == "https://blob.example/upload":
+            assert_that(method).is_equal_to("PUT")
+            assert_that(headers["x-ms-blob-type"]).is_equal_to("BlockBlob")
+            assert_that(headers["x-ms-version"]).is_equal_to("2023-11-03")
+            assert_that(body).contains(b"part-0001.json")
+            assert_that(body).does_not_contain(b"state.json")
+            return 201, b""
+        if url.endswith("/FinalizeArtifact"):
+            payload = json.loads(body.decode("utf-8"))
+            assert_that(payload["size"]).is_not_equal_to("0")
+            assert_that(payload["hash"]).starts_with("sha256:")
+            return 200, b'{"ok":true,"artifactId":"9"}'
+        return 500, b"unexpected"
+
+    uploaded = artifacts.upload_from_env(
+        {
+            "ACTIONS_RUNTIME_TOKEN": _runtime_jwt(),
+            "ACTIONS_RESULTS_URL": "https://results-receiver.actions.githubusercontent.com/",
+            "PR_NUMBER": "2166",
+            "GITHUB_RUN_ATTEMPT": "3",
+            "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+        },
+        suffix="inline",
+        http_do=http_do,
+    )
+    assert_that(uploaded).is_true()
+    assert_that(calls).is_length(3)
+    assert_that(calls[0][1]).contains("CreateArtifact")
+    assert_that(calls[1][0]).is_equal_to("PUT")
+    assert_that(calls[2][1]).contains("FinalizeArtifact")
+
+
+def test_upload_from_env_is_fail_safe_without_runtime_token(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Local or pre-token runs must no-op instead of failing the review."""
+    state_dir = tmp_path / "ai-review-state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text("{}", encoding="utf-8")
+    uploaded = artifacts.upload_from_env(
+        {
+            "PR_NUMBER": "2166",
+            "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+        },
+        suffix="inline",
+    )
+    assert_that(uploaded).is_false()
+
+
+def test_upload_rejects_untrusted_results_host(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """The Twirp client must not follow an arbitrary RESULTS_URL."""
+    state_dir = tmp_path / "ai-review-state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text("{}", encoding="utf-8")
+
+    calls: list[tuple[object, ...]] = []
+
+    def http_do(*args: object) -> tuple[int, bytes]:
+        calls.append(args)
+        return 200, b"{}"
+
+    uploaded = artifacts.upload_from_env(
+        {
+            "ACTIONS_RUNTIME_TOKEN": _runtime_jwt(),
+            "ACTIONS_RESULTS_URL": "https://evil.example/",
+            "PR_NUMBER": "2166",
+            "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+        },
+        suffix="inline",
+        http_do=http_do,
+    )
+    assert_that(uploaded).is_false()
+    assert_that(calls).is_empty()
+
+
+def _state_env(
+    tmp_path: Path,
+    *,
+    with_part: bool = True,
+) -> tuple[Path, dict[str, str]]:
+    """Create a state directory and the Actions env the uploader reads.
+
+    Args:
+        tmp_path: Pytest temp directory.
+        with_part: When True, include a ``part-*.json`` file.
+
+    Returns:
+        State directory and environment mapping.
+    """
+    state_dir = tmp_path / "ai-review-state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text('{"schema_version": 3}\n', encoding="utf-8")
+    if with_part:
+        (state_dir / "part-0001.json").write_text(
+            '{"schema_version": 3, "coverage": []}\n',
+            encoding="utf-8",
+        )
+    return state_dir, {
+        "ACTIONS_RUNTIME_TOKEN": _runtime_jwt(),
+        "ACTIONS_RESULTS_URL": "https://results-receiver.actions.githubusercontent.com/",
+        "PR_NUMBER": "2166",
+        "GITHUB_RUN_ATTEMPT": "3",
+        "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+    }
+
+
+def test_main_upload_never_exits_nonzero(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The upload CLI is fail-safe even when nothing can be uploaded."""
+    monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+    monkeypatch.delenv("ACTIONS_RESULTS_URL", raising=False)
+    monkeypatch.setenv("PR_NUMBER", "2166")
+    assert_that(artifacts.main(["upload", "--suffix", "inline"])).is_equal_to(0)
+
+
+def test_upload_budget_zero_makes_no_http_calls(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A spent budget must not start Create/PUT/Finalize."""
+    _state_dir, env = _state_env(tmp_path)
+    calls: list[str] = []
+
+    def http_do(
+        method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        calls.append(f"{method} {url}")
+        return 200, b'{"ok":true}'
+
+    uploaded = artifacts.upload_from_env(
+        env,
+        suffix="inline",
+        http_do=http_do,
+        budget_seconds=0,
+    )
+    assert_that(uploaded).is_false()
+    assert_that(calls).is_empty()
+
+
+def test_upload_budget_stops_after_the_first_slow_request(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A request that consumes the budget must skip PUT and Finalize."""
+    _state_dir, env = _state_env(tmp_path)
+    calls: list[str] = []
+
+    def http_do(
+        method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        calls.append(url.rsplit("/", 1)[-1] if method != "PUT" else "PUT")
+        time.sleep(0.05)
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        return 200, b'{"ok":true}'
+
+    uploaded = artifacts.upload_from_env(
+        env,
+        suffix="inline",
+        http_do=http_do,
+        budget_seconds=0.02,
+    )
+    assert_that(uploaded).is_false()
+    assert_that(calls).is_equal_to(["CreateArtifact"])
+
+
+def test_upload_from_env_fails_closed_on_http_errors(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Create 500, ok:false, PUT 4xx, and omitted Finalize ok are not success."""
+    _state_dir, env = _state_env(tmp_path)
+
+    def create_500(
+        _method: str,
+        _url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        return 500, b"nope"
+
+    def ok_false(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":false}'
+        return 200, b"{}"
+
+    def put_403(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        if url == "https://blob.example/upload":
+            return 403, b"blocked"
+        return 200, b'{"ok":true}'
+
+    def finalize_omits_ok(
+        _method: str,
+        url: str,
+        _headers: dict[str, str],
+        _body: bytes,
+    ) -> tuple[int, bytes]:
+        if url.endswith("/CreateArtifact"):
+            return 200, b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}'
+        if url == "https://blob.example/upload":
+            return 201, b""
+        return 200, b'{"artifactId":"9"}'
+
+    for http_do in (create_500, ok_false, put_403, finalize_omits_ok):
+        assert_that(
+            artifacts.upload_from_env(env, suffix="inline", http_do=http_do),
+        ).is_false()
+
+
+def test_inline_suffix_uses_the_cancel_budget_by_default(
+    artifacts: ModuleType,
+) -> None:
+    """Post-wait uploads default to 2s so classify still fits in SIGTERM grace."""
+    assert_that(artifacts._CANCEL_UPLOAD_BUDGET_SECONDS).is_equal_to(2.0)
+    assert_that(artifacts._CANCEL_UPLOAD_BUDGET_SECONDS).is_less_than(
+        artifacts._UPLOAD_TIMEOUT_SECONDS,
+    )
+    assert_that(artifacts._CHECKPOINT_UPLOAD_BUDGET_SECONDS).is_greater_than(
+        artifacts._CANCEL_UPLOAD_BUDGET_SECONDS,
+    )

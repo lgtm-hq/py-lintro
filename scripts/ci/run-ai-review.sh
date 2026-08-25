@@ -65,7 +65,12 @@ set -euo pipefail
 #   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
 #   LINTRO_REVIEW_STATE_DIR Directory for coverage artifacts (default:
 #                           ai-review-state). The workflow downloads prior
-#                           state here and uploads it after the review.
+#                           state here. This script uploads checkpoints
+#                           and an inline snapshot so a cancelled job
+#                           still leaves a resume artifact.
+#   ACTIONS_RUNTIME_TOKEN   Present in Actions; required for in-step upload.
+#   ACTIONS_RESULTS_URL     Actions artifact service origin for in-step upload.
+#   GITHUB_RUN_ATTEMPT      Distinguishes artifact names across retries.
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -136,16 +141,6 @@ if [[ -z "$pr_number" ]]; then
 fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
-# Heartbeat so a silent ``--output json`` review still proves the step is
-# alive if the runner SIGTERM's it. Short sleeps so EXIT can reap quickly.
-(
-	elapsed=0
-	while sleep 15; do
-		elapsed=$((elapsed + 15))
-		printf '[ai-review] still running (%ss)\n' "${elapsed}"
-	done
-) &
-heartbeat_pid=$!
 
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
@@ -155,9 +150,49 @@ if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 fi
 
 # Resume coverage is read from (and written to) this directory. The workflow
-# downloads a prior run's artifact here and uploads the directory afterwards.
+# downloads a prior run's artifact here. Incremental in-step uploads attach
+# checkpoints so a cancelled job (which skips later always() steps) still
+# leaves a resume artifact for the next round (#2166).
 export LINTRO_REVIEW_STATE_DIR="${LINTRO_REVIEW_STATE_DIR:-ai-review-state}"
 mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
+
+# Best-effort: never redden the review because an artifact upload failed.
+# Keep the runtime token out of the agent CLI environment — lintro copies
+# os.environ into the provider subprocess.
+REVIEW_STATE_RUNTIME_TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
+REVIEW_STATE_RESULTS_URL="${ACTIONS_RESULTS_URL:-}"
+unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL
+# Post-wait inline upload must finish inside GitHub's ~7.5s SIGTERM
+# grace so classify still runs. Mid-run checkpoints keep the longer cap.
+_CANCEL_UPLOAD_BUDGET_SECONDS=2
+_CHECKPOINT_UPLOAD_BUDGET_SECONDS=24
+_upload_review_state() {
+	local suffix="$1"
+	local budget="${2:-$_CHECKPOINT_UPLOAD_BUDGET_SECONDS}"
+	timeout --signal=TERM --kill-after=1 "$budget" \
+		env ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}" \
+		ACTIONS_RESULTS_URL="${REVIEW_STATE_RESULTS_URL}" \
+		python3 "${script_dir}/review_state_artifacts.py" \
+		upload --suffix "$suffix" --budget-seconds "$budget" || true
+}
+
+# Heartbeat so a silent ``--output json`` review still proves the step is
+# alive if the runner SIGTERM's it. Short sleeps so EXIT can reap quickly.
+# When state.json changes, upload a checkpoint before the next SIGTERM.
+(
+	elapsed=0
+	last_mtime=""
+	while sleep 15; do
+		elapsed=$((elapsed + 15))
+		printf '[ai-review] still running (%ss)\n' "${elapsed}"
+		mtime=$(stat -c %Y "${LINTRO_REVIEW_STATE_DIR}/state.json" 2>/dev/null || true)
+		if [[ -n "$mtime" && "$mtime" != "$last_mtime" ]]; then
+			last_mtime=$mtime
+			_upload_review_state "ckpt-${elapsed}" "${_CHECKPOINT_UPLOAD_BUDGET_SECONDS}"
+		fi
+	done
+) &
+heartbeat_pid=$!
 
 # Tee to a file: the classifier needs the JSON error envelope, and the live
 # stream must still reach the Actions log so a mid-run SIGTERM is diagnosable.
@@ -247,6 +282,11 @@ kill -KILL "${log_pid:-}" 2>/dev/null || true
 wait "${log_pid:-}" 2>/dev/null || true
 trap - TERM INT
 set -e
+
+# Upload before classify. GitHub cancels remaining always() steps after
+# SIGTERM; this call still has the persist snapshot on disk (#2166).
+# Bound to 2s so a hung Create/PUT/Finalize cannot eat classify.
+_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"
 
 # Exits 0 only when a review was produced; the classifier writes the annotation
 # and job summary either way. --transport names the failure vocabulary (#1923).
