@@ -1008,6 +1008,8 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains('>"$output_file" 2>&1 &')
     assert_that(shell_text).contains('kill -TERM "$lintro_pid"')
     assert_that(shell_text).contains('tail --pid="$lintro_pid"')
+    assert_that(shell_text).contains('ps -o sid=')
+    assert_that(shell_text).contains('"$sid" == "$child"')
     assert_that(shell_text).contains("kill -KILL")
     assert_that(shell_text).contains("trap '' TERM")
     assert_that(shell_text).contains("reaped=$?")

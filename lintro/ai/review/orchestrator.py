@@ -513,13 +513,22 @@ async def _review_one_chunk_until_stop(
             {review_task, stop_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if stop_task in done and stop.is_set() and not review_task.done():
-            review_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await review_task
-            raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
-                "SIGTERM",
-            )
+        if stop_task in done and stop.is_set():
+            if not review_task.done():
+                review_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await review_task
+                raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
+                    "SIGTERM",
+                )
+            # The agent may have died from a forwarded TERM before the
+            # stop task won. Treat that failure as the persistable
+            # SIGTERM timeout instead of aborting without coverage.
+            if review_task.cancelled() or review_task.exception() is not None:
+                raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
+                    "SIGTERM",
+                )
+            return review_task.result()
         return await review_task
     finally:
         if not stop_task.done():
@@ -677,6 +686,15 @@ async def _review_all_chunks(
             chunk_index, outcome = await finished
             if chunk_index >= 0:
                 remaining_reviews -= 1
+            if (
+                isinstance(outcome, Exception)
+                and stop is not None
+                and stop.is_set()
+                and not _is_cost_cap_stop(exc=outcome)
+            ):
+                # A forwarded TERM can kill the isolated agent and surface
+                # a non-timeout provider error. Persist as SIGTERM anyway.
+                outcome = sigterm_timeout_error()
             graceful_stop = isinstance(
                 outcome,
                 (ReviewExecutionError, AICostBudgetExceededError),

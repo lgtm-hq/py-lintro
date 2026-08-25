@@ -175,8 +175,16 @@ trap '_cleanup_review' EXIT
 _forward_term() {
 	if [[ -n "${lintro_pid:-}" ]]; then
 		kill -TERM "$lintro_pid" 2>/dev/null || true
-		# uv run may wrap Python; signal children if uv did not exec.
+		# uv run may wrap Python; signal non-session-leader children if uv
+		# did not exec. Skip session leaders — that is the isolated agent
+		# CLI (start_new_session). The orchestrator killpg's it on cancel.
+		# TERMing the agent here can surface a non-timeout provider error
+		# that aborts INCOMPLETE persist.
 		while read -r child; do
+			sid=$(ps -o sid= -p "$child" 2>/dev/null | tr -d ' ')
+			if [[ -n "$sid" && "$sid" == "$child" ]]; then
+				continue
+			fi
 			kill -TERM "$child" 2>/dev/null || true
 		done < <(pgrep -P "$lintro_pid" || true)
 	fi
