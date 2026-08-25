@@ -20,6 +20,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AICostBudgetExceededError,
     AIError,
+    AIProviderError,
 )
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
@@ -83,6 +84,11 @@ from lintro.ai.review.finding_parser import (
     reject_context_findings,
 )
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
+from lintro.ai.review.interrupt import (
+    SIGTERM_TIMEOUT_MESSAGE,
+    install_review_interrupt,
+    sigterm_timeout_error,
+)
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.file_assessment import FileAssessment
@@ -430,6 +436,107 @@ def resolve_review_chunks(
     return chunking.chunks
 
 
+async def _review_one_chunk_until_stop(
+    *,
+    chunk: ReviewChunk,
+    context: ReviewContext,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    depth: int,
+    checklist_items: list[ChecklistItem],
+    checklist_text: str,
+    classifications: list[FileClassification],
+    lint_results: str | None,
+    budget: CostBudget,
+    progress: ReviewProgressCallback,
+    repo_root: str,
+    use_one_shot: bool,
+    strictness_section: str,
+    next_generated_checklist_id: int,
+    diff_budget: int,
+    stop: asyncio.Event | None,
+) -> _ChunkReviewPartial:
+    """Review a single chunk, aborting persistably when *stop* is set.
+
+    Args:
+        chunk: The only remaining chunk.
+        context: Review diff context.
+        provider: Configured AI provider.
+        ai_config: Effective AI configuration.
+        depth: Review depth.
+        checklist_items: Selected checklist items.
+        checklist_text: Pre-formatted checklist prompt.
+        classifications: Domain classifications.
+        lint_results: Optional lint digest.
+        budget: Run cost budget.
+        progress: Progress callback.
+        repo_root: Workspace root for the provider.
+        use_one_shot: Whether to avoid a durable CLI session.
+        strictness_section: Strictness prompt fragment.
+        next_generated_checklist_id: Next generated checklist id.
+        diff_budget: Token budget for the diff.
+        stop: Optional SIGTERM event.
+
+    Returns:
+        The completed chunk partial.
+
+    Raises:
+        AIProviderError: When SIGTERM arrives before the chunk finishes.
+    """
+    review_task = asyncio.ensure_future(
+        _review_chunk_with_progress(
+            chunk_index=0,
+            chunk=chunk,
+            context=context,
+            provider=provider,
+            ai_config=ai_config,
+            depth=depth,
+            checklist_text=checklist_text,
+            checklist_count=len(checklist_items),
+            classifications=classifications,
+            lint_results=lint_results,
+            budget=budget,
+            progress=progress,
+            total_chunks=1,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
+            strictness_section=strictness_section,
+            next_generated_checklist_id=next_generated_checklist_id,
+            diff_budget=diff_budget,
+        ),
+    )
+    if stop is None:
+        return await review_task
+    stop_task = asyncio.ensure_future(stop.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            {review_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done and stop.is_set():
+            if not review_task.done():
+                review_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await review_task
+                raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
+                    "SIGTERM",
+                )
+            # The agent may have died from a forwarded TERM before the
+            # stop task won. Treat that failure as the persistable
+            # SIGTERM timeout instead of aborting without coverage.
+            if review_task.cancelled() or review_task.exception() is not None:
+                raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
+                    "SIGTERM",
+                )
+            return review_task.result()
+        return await review_task
+    finally:
+        if not stop_task.done():
+            stop_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await stop_task
+
+
 async def _review_all_chunks(
     *,
     chunks: list[ReviewChunk],
@@ -451,6 +558,7 @@ async def _review_all_chunks(
     diff_budget: int,
     completed_sink: list[_ChunkReviewPartial] | None = None,
     on_chunk_complete: Callable[[list[_ChunkReviewPartial]], None] | None = None,
+    stop: asyncio.Event | None = None,
 ) -> list[_ChunkReviewPartial]:
     """Review all chunks with bounded concurrency.
 
@@ -467,27 +575,28 @@ async def _review_all_chunks(
     cost-cap stop cancels the remaining work and propagates to
     ``run_review_async``. Depth ≥ 2 assigns each chunk a disjoint
     generated-checklist id range so merge stays deterministic under fan-out.
+    ``stop`` is set by a SIGTERM/SIGINT handler so an in-flight chunk can
+    be cancelled and completed siblings persisted (#2156).
     """
     if len(chunks) <= 1:
-        single = await _review_chunk_with_progress(
-            chunk_index=0,
+        single = await _review_one_chunk_until_stop(
             chunk=chunks[0],
             context=context,
             provider=provider,
             ai_config=ai_config,
             depth=depth,
+            checklist_items=checklist_items,
             checklist_text=checklist_text,
-            checklist_count=len(checklist_items),
             classifications=classifications,
             lint_results=lint_results,
             budget=budget,
             progress=progress,
-            total_chunks=1,
             repo_root=repo_root,
             use_one_shot=use_one_shot,
             strictness_section=strictness_section,
             next_generated_checklist_id=next_generated_checklist_id,
             diff_budget=diff_budget,
+            stop=stop,
         )
         if completed_sink is not None:
             completed_sink.append(single)
@@ -549,17 +658,49 @@ async def _review_all_chunks(
             except Exception as exc:
                 return chunk_index, exc
 
-    tasks = [
+    review_tasks = [
         asyncio.ensure_future(_run_chunk(chunk_index, chunk))
         for chunk_index, chunk in enumerate(chunks)
     ]
+    stop_task: asyncio.Future[tuple[int, _ChunkReviewPartial | Exception]] | None
+    stop_task = None
+    if stop is not None:
+        interrupt = stop
+
+        async def _stop_as_timeout() -> tuple[int, _ChunkReviewPartial | Exception]:
+            """Surface SIGTERM as a persistable timeout outcome."""
+            await interrupt.wait()
+            return -1, sigterm_timeout_error()
+
+        stop_task = asyncio.ensure_future(_stop_as_timeout())
+    tasks: list[asyncio.Future[tuple[int, _ChunkReviewPartial | Exception]]] = [
+        *review_tasks,
+    ]
+    if stop_task is not None:
+        tasks.append(stop_task)
 
     completed = 0
+    remaining_reviews = len(review_tasks)
     try:
         for finished in asyncio.as_completed(tasks):
             chunk_index, outcome = await finished
-            if isinstance(outcome, (ReviewExecutionError, AICostBudgetExceededError)):
-                # A cost-cap / timeout stop is an expected graceful halt.
+            if chunk_index >= 0:
+                remaining_reviews -= 1
+            if (
+                isinstance(outcome, Exception)
+                and stop is not None
+                and stop.is_set()
+                and not _is_cost_cap_stop(exc=outcome)
+            ):
+                # A forwarded TERM can kill the isolated agent and surface
+                # a non-timeout provider error. Persist as SIGTERM anyway.
+                outcome = sigterm_timeout_error()
+            graceful_stop = isinstance(
+                outcome,
+                (ReviewExecutionError, AICostBudgetExceededError),
+            ) or (isinstance(outcome, Exception) and _is_timeout_stop(exc=outcome))
+            if graceful_stop:
+                # A cost-cap / timeout / SIGTERM stop is an expected halt.
                 # Harvest siblings that already finished so a timeout on
                 # one worker cannot drop coverage the other worker wrote.
                 for task in tasks:
@@ -582,7 +723,8 @@ async def _review_all_chunks(
                         completed_sink.append(other)
                         if on_chunk_complete is not None:
                             on_chunk_complete(completed_sink)
-                raise outcome
+                if isinstance(outcome, (AIError, ReviewExecutionError)):
+                    raise outcome
             if isinstance(outcome, Exception):
                 if first_error is None:
                     first_error = _aborted_before_completion(
@@ -600,6 +742,8 @@ async def _review_all_chunks(
                 if on_chunk_complete is not None:
                     on_chunk_complete(completed_sink)
             completed += 1
+            if remaining_reviews == 0:
+                break
     finally:
         for task in tasks:
             if not task.done():
@@ -711,6 +855,7 @@ def run_review(
     prior_state: ReviewState | None = None,
     force_full: bool = False,
     enforce_cost_cap: bool = True,
+    stop: asyncio.Event | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review from synchronous code.
 
@@ -744,6 +889,7 @@ def run_review(
         force_full: Discard carried coverage (``--full``).
         enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
             chunk calls so concurrency cannot violate queue order.
+        stop: Optional event set to persist and halt (tests inject this).
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -770,6 +916,7 @@ def run_review(
             prior_state=prior_state,
             force_full=force_full,
             enforce_cost_cap=enforce_cost_cap,
+            stop=stop,
         ),
     )
 
@@ -796,6 +943,7 @@ async def run_review_async(
     prior_state: ReviewState | None = None,
     force_full: bool = False,
     enforce_cost_cap: bool = True,
+    stop: asyncio.Event | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -826,6 +974,8 @@ async def run_review_async(
         force_full: Discard carried coverage (``--full``).
         enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
             chunk calls so concurrency cannot violate queue order.
+        stop: Optional event set to persist and halt (tests inject this;
+            production uses SIGTERM/SIGINT via :func:`install_review_interrupt`).
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -952,6 +1102,8 @@ async def run_review_async(
     provider_started = started_at
     provider_seconds = 0.0
     parse_merge_seconds = 0.0
+    interrupt = stop if stop is not None else asyncio.Event()
+    uninstall_interrupt = install_review_interrupt(interrupt)
     try:
         # Open the session inside the try so a failure before or during
         # on_start() still reaches the finally that tears it down.
@@ -1011,6 +1163,7 @@ async def run_review_async(
                 diff_budget=diff_budget,
                 completed_sink=collected,
                 on_chunk_complete=_checkpoint,
+                stop=interrupt,
             )
         if resume.queue:
             await run_custom_agent_passes(
@@ -1077,7 +1230,12 @@ async def run_review_async(
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
         completed = True
-        if stopped_reason.startswith("timeout"):
+        if "SIGTERM" in stopped_reason:
+            hint = (
+                "The runner sent SIGTERM; coverage was persisted. "
+                "Re-run to resume remaining files."
+            )
+        elif stopped_reason.startswith("timeout"):
             timeout_setting = (
                 "ai.transports.cli.timeout"
                 if ai_config.transport is AITransport.CLI
@@ -1095,6 +1253,7 @@ async def run_review_async(
             cause=str(exc),
         )
     finally:
+        uninstall_interrupt()
         if durable_session_started:
             provider.end_durable_session()
         with suppress(Exception):
