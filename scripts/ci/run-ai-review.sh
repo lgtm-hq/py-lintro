@@ -210,7 +210,10 @@ uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --out
 lintro_pid=$!
 # --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
 # group signal left it ignoring TERM (``trap '' TERM``).
-(trap '' TERM; tail --pid="$lintro_pid" -n +1 -f "$output_file") &
+(
+	trap '' TERM
+	tail --pid="$lintro_pid" -n +1 -f "$output_file"
+) &
 log_pid=$!
 wait "$lintro_pid"
 review_status=$?

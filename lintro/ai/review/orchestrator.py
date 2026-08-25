@@ -20,6 +20,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AICostBudgetExceededError,
     AIError,
+    AIProviderError,
 )
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
@@ -84,6 +85,7 @@ from lintro.ai.review.finding_parser import (
 )
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.interrupt import (
+    SIGTERM_TIMEOUT_MESSAGE,
     install_review_interrupt,
     sigterm_timeout_error,
 )
@@ -515,7 +517,9 @@ async def _review_one_chunk_until_stop(
             review_task.cancel()
             with suppress(asyncio.CancelledError):
                 await review_task
-            raise sigterm_timeout_error()
+            raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
+                "SIGTERM",
+            )
         return await review_task
     finally:
         if not stop_task.done():
