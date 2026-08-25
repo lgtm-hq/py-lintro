@@ -70,11 +70,13 @@ from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
+    ReviewErrorKind,
     classify_provider_error,
     resolve_cause_text,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.file_selection import resolve_file_selection
+from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.finding_parser import (
     parse_findings,
     parse_flagged_files,
@@ -117,10 +119,12 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.review.state_store import state_dir, write_state_part
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from lintro.ai.config import AIConfig
@@ -128,6 +132,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
     from lintro.ai.review.models.review_context import ReviewContext
+    from lintro.ai.review.resume import ResumePlan
 
 __all__ = [
     "build_git_native_review_prompt",
@@ -237,6 +242,132 @@ def _cost_cap_reason(*, cap: float | None) -> str:
     return f"cost cap (${cap:.2f}) reached"
 
 
+def _is_timeout_stop(*, exc: BaseException) -> bool:
+    """Return whether an exception is a persistable mid-round timeout.
+
+    ADR-0007 / #2154: cap, quota, and timeout all persist coverage and resume.
+    A timeout is classified from the wrapped ``ReviewExecutionError`` kind or
+    from the provider error text (``timed out`` / ``timeout``).
+
+    Args:
+        exc: The exception raised while reviewing chunks.
+
+    Returns:
+        True when the underlying cause is a provider or CLI timeout.
+    """
+    current: BaseException | None = exc
+    while current is not None:
+        if (
+            isinstance(current, ReviewExecutionError)
+            and current.error_kind is ReviewErrorKind.TIMEOUT
+        ):
+            return True
+        current = current.__cause__
+    if not isinstance(exc, Exception):
+        return False
+    return classify_provider_error(provider="", error=exc) is ReviewErrorKind.TIMEOUT
+
+
+def _timeout_reason(*, exc: BaseException) -> str:
+    """Build the human-readable ``stopped_reason`` for a timeout stop.
+
+    Args:
+        exc: The timeout exception (possibly wrapped).
+
+    Returns:
+        A short stop reason that names the timeout.
+    """
+    cause = resolve_cause_text(error=exc) if isinstance(exc, Exception) else str(exc)
+    if cause:
+        return f"timeout ({cause})"
+    return "timeout"
+
+
+def _write_incremental_coverage_part(
+    *,
+    collected: list[_ChunkReviewPartial],
+    resume: ResumePlan,
+    context: ReviewContext,
+    prior_state: ReviewState | None,
+    force_full: bool,
+    sequence: int,
+    policy: ReviewSensitivityPolicy,
+    stopped_reason: str = "",
+) -> None:
+    """Checkpoint coverage and this-run findings for a later SIGTERM.
+
+    Writes only when ``LINTRO_REVIEW_STATE_DIR`` is set (CI artifact dir).
+    ``final=True`` refreshes ``state.json`` so a leftover downloaded
+    snapshot cannot last-writer-win over this run. Findings are matched
+    against the original prior so a resume that skips COVERED files still
+    has issues to post.
+
+    Args:
+        collected: Chunks finished so far in this run.
+        resume: Resume plan for the current diff.
+        context: Review diff context (head SHA).
+        prior_state: Prior artifact state, if any.
+        force_full: When True, do not inherit prior coverage.
+        sequence: Monotonic part number for this run.
+        policy: Sensitivity policy used to filter checkpoint findings.
+        stopped_reason: Optional in-flight stop note stored on new records.
+    """
+    directory_override = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
+    if not directory_override:
+        return
+    completed_files = {path for partial in collected for path in partial.files}
+    covered_now = inherit_same_round_paths(
+        reviewed_now=tuple(path for path in resume.queue if path in completed_files),
+        eligible_paths=resume.eligible,
+        current_hashes=resume.hashes,
+    )
+    records = records_for_reviewed(
+        plan=resume,
+        reviewed_paths=covered_now,
+        head_sha=context.head_ref,
+        round_number=prior_state.next_round if prior_state is not None else 1,
+        prior=None if force_full else prior_state,
+        stopped_reason=stopped_reason,
+    )
+    pr_raw = os.environ.get("PR_NUMBER", "").strip()
+    seed = ReviewState() if force_full or prior_state is None else prior_state
+    findings = filter_findings_by_policy(
+        findings=tuple(
+            finding for partial in collected for finding in partial.findings
+        ),
+        policy=policy,
+    )
+    # Coverage may credit same-hash siblings; matching must not. Those
+    # files were not re-read, so their prior open findings stay carried.
+    actually_reviewed = frozenset(
+        path for path in resume.queue if path in completed_files
+    )
+    match = match_findings(
+        previous=seed,
+        findings=findings,
+        round_number=seed.next_round,
+        head_sha=context.head_ref,
+        reviewed_paths=actually_reviewed,
+    )
+    write_state_part(
+        state=replace(
+            seed,
+            findings=match.records,
+            coverage=records,
+            repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
+            pr_number=int(pr_raw) if pr_raw.isdigit() else seed.pr_number,
+            base_sha=context.base_ref or seed.base_sha,
+            head_sha=context.head_ref or seed.head_sha,
+            workflow="ai-review.yml",
+            event=os.environ.get("GITHUB_EVENT_NAME", "") or seed.event,
+            run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
+        ),
+        directory=state_dir(ci=True),
+        sequence=sequence,
+        final=True,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _ChunkReviewPartial:
     """Intermediate review result for one chunk."""
@@ -319,6 +450,7 @@ async def _review_all_chunks(
     next_generated_checklist_id: int = 1,
     diff_budget: int,
     completed_sink: list[_ChunkReviewPartial] | None = None,
+    on_chunk_complete: Callable[[list[_ChunkReviewPartial]], None] | None = None,
 ) -> list[_ChunkReviewPartial]:
     """Review all chunks with bounded concurrency.
 
@@ -326,7 +458,8 @@ async def _review_all_chunks(
     partial is appended to it as soon as it completes. This lets the caller
     recover the chunks reviewed so far if the run aborts mid-way (e.g. the cost
     cap is reached), enabling a graceful partial review instead of discarding
-    all completed work.
+    all completed work. ``on_chunk_complete`` is invoked with the sink after
+    each append so CI can write an incremental coverage part.
 
     Chunks are reviewed concurrently under a semaphore capped by
     ``max_parallel_calls``. Callers that enforce a cost cap pass ``1`` so the
@@ -358,6 +491,8 @@ async def _review_all_chunks(
         )
         if completed_sink is not None:
             completed_sink.append(single)
+            if on_chunk_complete is not None:
+                on_chunk_complete(completed_sink)
         return [single]
 
     partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
@@ -424,9 +559,29 @@ async def _review_all_chunks(
         for finished in asyncio.as_completed(tasks):
             chunk_index, outcome = await finished
             if isinstance(outcome, (ReviewExecutionError, AICostBudgetExceededError)):
-                # A cost-cap stop is an expected graceful halt; a
-                # ReviewExecutionError is already wrapped for the caller.
-                # Both propagate raw so run_review can finalize a partial.
+                # A cost-cap / timeout stop is an expected graceful halt.
+                # Harvest siblings that already finished so a timeout on
+                # one worker cannot drop coverage the other worker wrote.
+                for task in tasks:
+                    if not task.done() or task.cancelled():
+                        continue
+                    try:
+                        other_index, other = task.result()
+                    except Exception:
+                        logger.opt(exception=True).debug(
+                            "Skipping a failed sibling while harvesting "
+                            "completed chunks",
+                        )
+                        continue  # nosec B112 - harvest only finished siblings; a failed result() is not this stop's outcome
+                    if isinstance(other, Exception):
+                        continue
+                    if partials[other_index] is not None:
+                        continue
+                    partials[other_index] = other
+                    if completed_sink is not None:
+                        completed_sink.append(other)
+                        if on_chunk_complete is not None:
+                            on_chunk_complete(completed_sink)
                 raise outcome
             if isinstance(outcome, Exception):
                 if first_error is None:
@@ -442,6 +597,8 @@ async def _review_all_chunks(
             partials[chunk_index] = outcome
             if completed_sink is not None:
                 completed_sink.append(outcome)
+                if on_chunk_complete is not None:
+                    on_chunk_complete(completed_sink)
             completed += 1
     finally:
         for task in tasks:
@@ -804,6 +961,30 @@ async def run_review_async(
         tracker.on_start(total_chunks=len(chunks), depth=depth)
         provider_started = time.monotonic()
         if chunks:
+            part_seq = 0
+
+            def _checkpoint(done: list[_ChunkReviewPartial]) -> None:
+                """Write an incremental coverage part after each finished chunk."""
+                nonlocal part_seq
+                next_seq = part_seq + 1
+                try:
+                    _write_incremental_coverage_part(
+                        collected=done,
+                        resume=resume,
+                        context=context,
+                        prior_state=prior_state,
+                        force_full=force_full,
+                        sequence=next_seq,
+                        policy=review_sensitivity,
+                    )
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "Could not write incremental review-resume part {n}",
+                        n=next_seq,
+                    )
+                else:
+                    part_seq = next_seq
+
             partials = await _review_all_chunks(
                 chunks=chunks,
                 context=context,
@@ -829,6 +1010,7 @@ async def run_review_async(
                 ),
                 diff_budget=diff_budget,
                 completed_sink=collected,
+                on_chunk_complete=_checkpoint,
             )
         if resume.queue:
             await run_custom_agent_passes(
@@ -865,23 +1047,24 @@ async def run_review_async(
         parse_merge_seconds = time.monotonic() - merge_started
         completed = True
     except (AIError, ReviewExecutionError) as exc:
-        # A graceful partial review: the cost cap was reached mid-run. Keep the
-        # chunks reviewed so far instead of discarding all completed work (see
-        # issue #1094). This is an EXPECTED stop, not a failure — it is detected
-        # from the actual raised exception (a cost-cap exception, possibly
-        # wrapped in a ReviewExecutionError), never inferred from residual budget
-        # state. Any other failure (auth, provider, parser) must propagate so
-        # callers surface a real error via the #1101 taxonomy. When the cap trips
-        # before ANY chunk completes, ``collected`` is empty and the partial is
-        # empty-but-actionable rather than a generic abort.
-        if not _is_cost_cap_stop(exc=exc):
+        # A graceful partial review: a cost cap or timeout stopped the run
+        # mid-way (#1094 / #2154). Keep the chunks reviewed so far instead of
+        # discarding completed work. Detected from the raised exception, never
+        # inferred from residual budget. Any other failure (auth, provider,
+        # parser) must propagate so callers surface a real error via the #1101
+        # taxonomy. When the stop trips before ANY chunk completes,
+        # ``collected`` is empty and the partial is empty-but-actionable
+        # rather than a generic abort.
+        if _is_cost_cap_stop(exc=exc):
+            stopped_reason = _cost_cap_reason(cap=budget.max_cost_usd)
+        elif _is_timeout_stop(exc=exc):
+            stopped_reason = _timeout_reason(exc=exc)
+        else:
             raise
         if provider_seconds <= 0.0:
             provider_seconds = time.monotonic() - provider_started
-        cap = budget.max_cost_usd
         partials = list(collected)
         partial = True
-        stopped_reason = _cost_cap_reason(cap=cap)
         merge_started = time.monotonic()
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
@@ -894,10 +1077,19 @@ async def run_review_async(
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
         completed = True
+        if stopped_reason.startswith("timeout"):
+            timeout_setting = (
+                "ai.transports.cli.timeout"
+                if ai_config.transport is AITransport.CLI
+                else "ai.transports.api.timeout"
+            )
+            hint = f"Raise {timeout_setting} or narrow --path to review the rest."
+        else:
+            hint = "Raise ai.max_cost_usd or narrow --path to review the rest."
         logger.warning(
-            "Review stopped early — {reason} after reviewing {n} of {m} "
-            "chunks. Raise ai.max_cost_usd or narrow --path to review the rest.",
+            "Review stopped early — {reason} after reviewing {n} of {m} chunks. {hint}",
             reason=stopped_reason,
+            hint=hint,
             n=len(partials),
             m=len(chunks),
             cause=str(exc),

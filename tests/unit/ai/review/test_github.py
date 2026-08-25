@@ -292,9 +292,11 @@ def test_post_review_creates_sticky_when_absent(
     """With no existing comment, a new sticky comment is posted."""
     reporter = _fresh_reporter()
 
+    captured: dict[str, int] = {}
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
+        captured_comment_ids=captured,
     )
 
     assert_that(posted).is_true()

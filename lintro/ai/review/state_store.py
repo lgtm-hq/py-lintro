@@ -88,6 +88,13 @@ def write_state_part(
     _atomic_write_json(path=part, payload=payload)
     if final:
         _atomic_write_json(path=directory / "state.json", payload=payload)
+    if sequence == 1:
+        # A new run (or the CLI's final persist) starts at part 0001.
+        # Replace ``state.json`` first, then drop leftover downloaded
+        # parts so a stale snapshot cannot last-writer-win findings.
+        for leftover in directory.glob("part-*.json"):
+            if leftover.resolve() != part.resolve():
+                leftover.unlink(missing_ok=True)
     return part
 
 

@@ -355,7 +355,11 @@ def resolve_cause_text(*, error: Exception) -> str:
         return error.cause_message
     cause = error.__cause__
     if isinstance(cause, BaseException):
-        return str(cause)
+        cause_text = str(cause).strip()
+        if cause_text:
+            return cause_text
+        # asyncio.TimeoutError() stringifies to "" — keep the wrapper
+        # message so "CLI timed out after Ns" still classifies (#2156).
     return str(error)
 
 
@@ -367,15 +371,44 @@ def _resolve_cause_exception(*, error: Exception) -> BaseException:
     return current
 
 
+def _iter_cause_chain(*, error: BaseException) -> tuple[BaseException, ...]:
+    """Return the exception and each chained ``__cause__``."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None:
+        chain.append(current)
+        cause = current.__cause__
+        current = cause if isinstance(cause, BaseException) else None
+    return tuple(chain)
+
+
+def _typed_kind(*, error: Exception) -> ReviewErrorKind | None:
+    """Return a kind from a typed lintro AI exception anywhere in the chain."""
+    for current in _iter_cause_chain(error=error):
+        if isinstance(current, AIAuthenticationError):
+            return ReviewErrorKind.AUTH_FAILED
+        if isinstance(current, AIRateLimitError):
+            return ReviewErrorKind.RATE_LIMITED
+        if isinstance(current, AIProviderRequiredError):
+            return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    return None
+
+
+def _chain_has(*, error: Exception, typ: type[BaseException]) -> bool:
+    """Return whether *typ* appears anywhere in the exception chain."""
+    return any(isinstance(current, typ) for current in _iter_cause_chain(error=error))
+
+
 def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKind:
     """Classify a review error into a canonical :class:`ReviewErrorKind`.
 
     Resolves the underlying provider cause (unwrapping any
     ``ReviewExecutionError`` wrapper), then tests it against the provider's
-    signature map, the lintro AI exception hierarchy, and finally a shared
-    fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`. When the
-    error already carries a resolved kind (attached by the orchestrator), that
-    kind is authoritative.
+    signature map (so credit/quota needles beat a typed rate-limit), the
+    lintro AI exception hierarchy, TimeoutError, SERVER_ERROR, and finally a
+    shared fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`.
+    When the error already carries a resolved kind (attached by the
+    orchestrator), that kind is authoritative.
 
     Args:
         provider: Provider identifier (e.g. ``"anthropic"``); case-insensitive.
@@ -395,18 +428,28 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
 
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:
+        if kind is ReviewErrorKind.SERVER_ERROR:
+            continue
         matcher = signatures.get(kind)
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
 
-    # Subsume the existing lintro AI exception hierarchy: a typed auth/rate-limit
-    # error is authoritative even when its text carries no matching substring.
-    if isinstance(cause_exc, AIAuthenticationError):
-        return ReviewErrorKind.AUTH_FAILED
-    if isinstance(cause_exc, AIRateLimitError):
-        return ReviewErrorKind.RATE_LIMITED
-    if isinstance(cause_exc, AIProviderRequiredError):
-        return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    # Typed AI exceptions win over TimeoutError / SERVER_ERROR, but credit,
+    # auth, and quota signatures above still win so OpenAI's RateLimitError
+    # wrapping insufficient_quota classifies as INSUFFICIENT_CREDITS (#2156).
+    typed = _typed_kind(error=error)
+    if typed is not None:
+        return typed
+
+    # A chained TimeoutError is a timeout even when the wrapper text looks
+    # like an HTTP 504 / server error. Specific credit/auth/quota signatures
+    # and typed exceptions above still win (#2156).
+    if _chain_has(error=error, typ=TimeoutError):
+        return ReviewErrorKind.TIMEOUT
+
+    matcher = signatures.get(ReviewErrorKind.SERVER_ERROR)
+    if matcher is not None and matcher.matches(status=status, text=text):
+        return ReviewErrorKind.SERVER_ERROR
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

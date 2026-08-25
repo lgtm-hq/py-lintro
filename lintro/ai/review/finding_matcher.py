@@ -38,6 +38,7 @@ __all__ = [
     "match_findings",
     "normalize_file_path",
     "normalize_title",
+    "review_findings_from_unposted",
 ]
 
 # Truncated sha256 hex digest length. 16 hex chars (64 bits) keeps the state
@@ -202,6 +203,10 @@ def _current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            description=finding.description,
+            cause=finding.cause,
+            fix=finding.fix,
+            confidence=finding.confidence,
         )
         for index, finding in enumerate(findings)
     ]
@@ -309,10 +314,76 @@ def _merge_pair(
         occurrences=current.occurrences or prior.occurrences,
         occurrences_total=max(prior.occurrence_total, current.occurrence_total),
         severity_downgraded=current.severity_downgraded,
+        description=current.description or prior.description,
+        cause=current.cause or prior.cause,
+        fix=current.fix or prior.fix,
+        confidence=current.confidence or prior.confidence,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
     return merged, FindingMatchOutcome.CARRIED
+
+
+def review_findings_from_unposted(
+    *,
+    prior: ReviewState,
+    current: Sequence[ReviewFinding],
+    reviewed_paths: frozenset[str],
+) -> tuple[ReviewFinding, ...]:
+    """Rebuild findings for open prior records that never got an inline post.
+
+    A SIGTERM after a coverage checkpoint leaves ``FindingRecord``s with no
+    ``inline_comment_id``. Resume then skips COVERED files and would
+    otherwise never post those issues. Records for files this run
+    re-reviewed are omitted so absence can resolve them.
+
+    Args:
+        prior: Artifact state loaded for this resume.
+        current: Findings already produced by this run.
+        reviewed_paths: Paths this run actually read.
+
+    Returns:
+        Reconstructed findings that should be posted this round.
+    """
+    seen = {
+        fingerprint_for(
+            file=finding.file,
+            category=finding.category,
+            title=finding.title,
+        )
+        for finding in current
+    }
+    extra: list[ReviewFinding] = []
+    for record in prior.findings:
+        if record.status is not FindingStatus.OPEN:
+            continue
+        if record.inline_comment_id is not None:
+            continue
+        if record.fingerprint in seen:
+            continue
+        path = normalize_file_path(record.file)
+        if path in reviewed_paths or record.file in reviewed_paths:
+            continue
+        if not (record.description or record.cause or record.fix):
+            continue
+        extra.append(
+            ReviewFinding(
+                severity=record.severity,
+                category=record.category,
+                file=record.file,
+                line=record.line,
+                title=record.title,
+                description=record.description or record.title,
+                cause=record.cause,
+                fix=record.fix,
+                confidence=record.confidence or "medium",
+                checklist_ids=record.checklist_ids,
+                kind=record.kind,
+                occurrences=record.occurrences,
+                severity_downgraded=record.severity_downgraded,
+            ),
+        )
+    return tuple(extra)
 
 
 def match_findings(

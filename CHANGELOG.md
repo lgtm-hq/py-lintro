@@ -19,6 +19,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **ai-review**: persist coverage and this-run findings when a chunk times out, and
+  write incremental artifact parts after each finished chunk so a later SIGTERM can
+  resume and still post those issues (#2156)
+
 ### Security
 
 ## [0.131.1] - 2026-08-24
