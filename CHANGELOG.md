@@ -19,7 +19,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **ci**: retry and log prior-state locate failures, skip runs with a missing
+  `created_at` instead of aborting the walk, and seed the immediately older same-PR
+  persist so an empty-restart artifact cannot hide richer coverage (#2156)
+
 ### Security
+
+## [0.131.4] - 2026-08-25
+
+### Fixed
+
+- **ci**: persist review-state across runner cancel (#2173) (4442681)
 
 ## [0.131.3] - 2026-08-25
 
