@@ -53,6 +53,28 @@ def _empty_result() -> ReviewResult:
     )
 
 
+def _partial_result(*, stopped_reason: str) -> ReviewResult:
+    return ReviewResult(
+        metadata=ReviewMetadata(
+            model="gpt-4o",
+            provider="openai",
+            context_window=128_000,
+            depth=1,
+            chunks_total=2,
+            chunks_current=1,
+            files_reviewed=1,
+            files_total=2,
+            checklist_items=0,
+            partial=True,
+            chunks_reviewed=1,
+            stopped_reason=stopped_reason,
+        ),
+        summary="Partial review.",
+        checklist=(),
+        findings=(),
+    )
+
+
 def test_review_help_shows_flags() -> None:
     """Review command help lists primary flags."""
     runner = CliRunner()
@@ -1787,6 +1809,113 @@ def test_full_review_json_merges_advisory_key() -> None:
     payload = json.loads(result.output)
     assert_that(payload["summary"]).is_equal_to("ok")
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+
+
+def test_sigterm_partial_skips_advisory_and_post() -> None:
+    """Runner SIGTERM must exit after the envelope, not burn the 5s window."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_partial_result(stopped_reason="timeout (SIGTERM)"),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "partial", "partial": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ) as mock_advisory,
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--output",
+                "json",
+                "--advisory-tools",
+                "idiom-review",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("partial")
+    assert_that(payload).does_not_contain_key("advisory")
+    assert_that(mock_advisory.called).is_false()
+    assert_that(mock_post.called).is_false()
+
+
+def test_cost_cap_partial_still_runs_advisory_and_post() -> None:
+    """A cost-cap stop is not a runner SIGKILL window; --post still runs."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_partial_result(stopped_reason="cost cap ($1.00) reached"),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "partial", "partial": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as mock_advisory,
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--output",
+                "json",
+                "--advisory-tools",
+                "idiom-review",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_advisory.called).is_true()
+    assert_that(mock_post.called).is_true()
 
 
 def test_full_review_keeps_results_when_advisory_errors() -> None:

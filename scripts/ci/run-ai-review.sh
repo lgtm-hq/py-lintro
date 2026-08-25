@@ -136,6 +136,16 @@ if [[ -z "$pr_number" ]]; then
 fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
+# Heartbeat so a silent ``--output json`` review still proves the step is
+# alive if the runner SIGTERM's it. Short sleeps so EXIT can reap quickly.
+(
+	elapsed=0
+	while sleep 15; do
+		elapsed=$((elapsed + 15))
+		printf '[ai-review] still running (%ss)\n' "${elapsed}"
+	done
+) &
+heartbeat_pid=$!
 
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
@@ -152,7 +162,34 @@ mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 # Tee to a file: the classifier needs the JSON error envelope, and the live
 # stream must still reach the Actions log so a mid-run SIGTERM is diagnosable.
 output_file="$(mktemp)"
-trap 'rm -f "$output_file"' EXIT
+log_pid=""
+lintro_pid=""
+_cleanup_review() {
+	rm -f "$output_file"
+	kill -KILL "${heartbeat_pid:-}" 2>/dev/null || true
+	kill -KILL "${log_pid:-}" 2>/dev/null || true
+}
+trap '_cleanup_review' EXIT
+# Forward SIGTERM to lintro (runner may signal only this shell) and keep
+# the log mirror alive so the JSON envelope still reaches $output_file.
+_forward_term() {
+	if [[ -n "${lintro_pid:-}" ]]; then
+		kill -TERM "$lintro_pid" 2>/dev/null || true
+		# uv run may wrap Python; signal non-session-leader children if uv
+		# did not exec. Skip session leaders — that is the isolated agent
+		# CLI (start_new_session). The orchestrator killpg's it on cancel.
+		# TERMing the agent here can surface a non-timeout provider error
+		# that aborts INCOMPLETE persist.
+		while read -r child; do
+			sid=$(ps -o sid= -p "$child" 2>/dev/null | tr -d ' ')
+			if [[ -n "$sid" && "$sid" == "$child" ]]; then
+				continue
+			fi
+			kill -TERM "$child" 2>/dev/null || true
+		done < <(pgrep -P "$lintro_pid" || true)
+	fi
+}
+trap '_forward_term' TERM INT
 
 set +e
 # Timeout comes from ai.transports.cli.timeout (default 1800s) — no hand-tuned
@@ -173,10 +210,42 @@ set +e
 # lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=1800
-# Unbuffered Python so the tee pipeline shows mid-chunk progress if SIGTERM'd.
+echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
+# Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
+# ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
 export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1 | tee "$output_file"
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1 &
+lintro_pid=$!
+# --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
+# group signal left it ignoring TERM (``trap '' TERM``).
+(
+	trap '' TERM
+	tail --pid="$lintro_pid" -n +1 -f "$output_file"
+) &
+log_pid=$!
+wait "$lintro_pid"
 review_status=$?
+# A trap can interrupt wait while lintro is still persisting. Reap it.
+while kill -0 "$lintro_pid" 2>/dev/null; do
+	wait "$lintro_pid"
+	review_status=$?
+done
+# If wait returned 143 after lintro already exited, recover the real status.
+if ! kill -0 "$lintro_pid" 2>/dev/null; then
+	wait "$lintro_pid" 2>/dev/null
+	reaped=$?
+	if [[ "$reaped" -ne 127 ]]; then
+		review_status=$reaped
+	fi
+fi
+# Let GNU tail --pid flush the envelope, then SIGKILL the TERM-immune mirror.
+for _ in 1 2 3 4; do
+	kill -0 "${log_pid:-}" 2>/dev/null || break
+	sleep 0.5
+done
+kill -KILL "${log_pid:-}" 2>/dev/null || true
+wait "${log_pid:-}" 2>/dev/null || true
+trap - TERM INT
 set -e
 
 # Exits 0 only when a review was produced; the classifier writes the annotation

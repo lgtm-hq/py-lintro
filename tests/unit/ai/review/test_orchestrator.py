@@ -20,8 +20,10 @@ from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.errors_taxonomy import ReviewErrorKind, classify_provider_error
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
+from lintro.ai.review.interrupt import SIGTERM_TIMEOUT_MESSAGE, sigterm_timeout_error
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.coverage_record import CoverageRecord
@@ -36,6 +38,7 @@ from lintro.ai.review.orchestrator import (
     parse_review_response,
     resolve_review_chunks,
     run_review,
+    run_review_async,
     strip_json_fences,
 )
 from lintro.ai.review.progress import ReviewProgressCallback
@@ -306,6 +309,155 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
     assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
     assert_that(result.metadata.chunks_total).is_equal_to(2)
     assert_that({record.path for record in result.coverage_records}).contains("a.py")
+
+
+@pytest.mark.asyncio
+async def test_run_review_returns_partial_on_sigterm() -> None:
+    """A mid-run SIGTERM persists completed chunks instead of aborting."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+    stop = asyncio.Event()
+
+    async def _hang_second_call(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            stop.set()
+            await asyncio.sleep(60)
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_hang_second_call,
+        ),
+    ):
+        result = await run_review_async(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            stop=stop,
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("timeout")
+    assert_that(result.metadata.stopped_reason).contains("SIGTERM")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
+
+
+async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
+    """A non-timeout agent death after stop still persists completed chunks."""
+    provider = _mock_provider(content=_sample_response_json(finding_file="a.py"))
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+    stop = asyncio.Event()
+
+    async def _die_after_stop(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            stop.set()
+            raise AIProviderError("agent exited 143")
+        return provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_die_after_stop,
+        ),
+    ):
+        result = await run_review_async(
+            _two_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.CLI,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            stop=stop,
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("SIGTERM")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that({record.path for record in result.coverage_records}).contains("a.py")
+
+
+def test_sigterm_timeout_error_classifies_as_timeout() -> None:
+    """The SIGTERM envelope must reuse the persistable TIMEOUT kind."""
+    error = sigterm_timeout_error()
+    assert_that(str(error)).is_equal_to(SIGTERM_TIMEOUT_MESSAGE)
+    assert_that(classify_provider_error(provider="", error=error)).is_equal_to(
+        ReviewErrorKind.TIMEOUT,
+    )
 
 
 def test_run_review_writes_incremental_coverage_parts(

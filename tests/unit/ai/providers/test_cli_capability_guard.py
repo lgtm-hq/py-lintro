@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the transport under test
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -500,6 +502,26 @@ async def test_run_guarded_matches_flag_on_token_boundary(
 
 
 # -- Subprocess execution ---------------------------------------------------
+
+
+async def test_run_starts_child_in_new_session(transport: _FakeTransport) -> None:
+    """Agent children must not share lintro's process group (#2156)."""
+    process = MagicMock()
+    process.communicate = AsyncMock(return_value=(b'{"ok": true}', b""))
+    process.returncode = 0
+    process.pid = 4242
+
+    with patch(
+        "asyncio.create_subprocess_exec",
+        AsyncMock(return_value=process),
+    ) as spawn:
+        await transport.run(["/usr/local/bin/fake", "--always"], timeout=5.0)
+
+    kwargs = spawn.call_args.kwargs
+    if os.name == "posix":
+        assert_that(kwargs.get("start_new_session")).is_true()
+    else:
+        assert_that(kwargs).does_not_contain_key("start_new_session")
 
 
 async def test_run_raises_provider_error_on_timeout(transport: _FakeTransport) -> None:

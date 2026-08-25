@@ -100,6 +100,7 @@ from lintro.utils.execution.advisory import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from lintro.ai.review.models.review_result import ReviewResult
     from lintro.models.core.tool_result import ToolResult
 
 #: Default paths scanned by ``--advisory-only`` when no ``--path`` is given.
@@ -718,15 +719,23 @@ def review_command(
 
     result = enrich_review_result(result=result, question_map=question_map)
 
-    advisory_results = _execute_advisory(
-        advisory_tools=advisory_tools,
-        tool_options=tool_options,
-        paths=_existing_changed_files(
-            changed_files=context.changed_files,
-            workspace_root=workspace_root,
-        ),
-        ai_config=effective_ai_config,
-    )
+    skip_post_tail = _skip_sigterm_post_tail(result=result)
+    if skip_post_tail:
+        logger.warning(
+            "Skipping advisory tools and --post after SIGTERM so the "
+            "wrapper can classify the envelope before the runner SIGKILL",
+        )
+        advisory_results = []
+    else:
+        advisory_results = _execute_advisory(
+            advisory_tools=advisory_tools,
+            tool_options=tool_options,
+            paths=_existing_changed_files(
+                changed_files=context.changed_files,
+                workspace_root=workspace_root,
+            ),
+            ai_config=effective_ai_config,
+        )
 
     output = render_review_output(
         result=result,
@@ -746,7 +755,7 @@ def review_command(
         if advisory_text:
             click.echo(f"\n{advisory_text}")
 
-    if post:
+    if post and not skip_post_tail:
         from lintro.ai.review.github import post_review_to_github
 
         captured_comment_ids: dict[str, int] = {}
@@ -921,6 +930,25 @@ def _existing_changed_files(
         if candidate.is_file():
             paths.append(str(candidate))
     return paths
+
+
+def _skip_sigterm_post_tail(*, result: ReviewResult) -> bool:
+    """Return True when runner SIGTERM left only the persist window.
+
+    GitHub Actions SIGKILLs the review step ~5–7s after SIGTERM. Coverage
+    is already on disk (incremental parts plus the final persist above).
+    Advisory tools and ``--post`` can burn that window so the wrapper
+    never classifies the JSON envelope and ``if: always()`` upload is
+    skipped. The next resume run posts the sticky and inlines.
+
+    Args:
+        result: Completed or partial review result.
+
+    Returns:
+        True when this run is a SIGTERM partial and must exit immediately
+        after writing the envelope.
+    """
+    return result.metadata.partial and "SIGTERM" in result.metadata.stopped_reason
 
 
 def _execute_advisory(
