@@ -5,6 +5,10 @@ node_modules
 .venv
 .lintro
 
+# Standalone prettier in dogfood has no astro parser. astro-check covers
+# these files; prettier-plugin-astro is not loaded without node_modules.
+*.astro
+
 
 # AI prompt templates (not human docs; keep verbatim)
 lintro/ai/prompts/templates/**

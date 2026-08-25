@@ -45,8 +45,8 @@ after a finished chunk must not lose that chunk's coverage or issues. The wrappe
 uploads those parts from inside the review step: a cancelled Actions job skips later
 `if: always()` uploads. The post-wait inline upload is capped at 2s (Create/PUT/Finalize
 together, plus a `timeout(1)` hard kill) so classify still runs inside GitHub's ~7.5s
-SIGTERM grace. After `wait` reports 143, the persisted envelope decides the
-outcome: incomplete coverage is INCOMPLETE, and complete coverage stays REVIEWED.
+SIGTERM grace. After `wait` reports 143, the persisted envelope decides the outcome:
+incomplete coverage is INCOMPLETE, and complete coverage stays REVIEWED.
 
 `conftest.py` is a known semantic hole (test-wide fixtures) left on the revisit list.
 
