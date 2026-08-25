@@ -70,6 +70,11 @@ NO_CREDENTIAL_STATUS: Final[int] = -1
 # red check that does not say why is only marginally better than a green one.
 NOT_INVOKED_STATUS: Final[int] = -2
 
+# 128 + SIGTERM. The wrapper's ``wait`` reports this when the runner signals
+# the step even if ``lintro review`` already wrote a persist envelope and
+# exited 0. Treat that envelope as the outcome, not "unexpected status 143".
+SIGTERM_STATUS: Final[int] = 143
+
 DEFAULT_TRANSPORT: Final[str] = "cli"
 
 # Kind labels refined for the active transport. Shared kinds stay as-is;
@@ -176,9 +181,19 @@ def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
         if isinstance(payload, dict) and "readiness_verdict" in payload:
             coverage = payload.get("coverage")
             if isinstance(coverage, dict):
+                if "stopped_reason" not in coverage and payload.get("stopped_reason"):
+                    coverage = {
+                        **coverage,
+                        "stopped_reason": payload.get("stopped_reason"),
+                    }
                 return coverage
             if payload.get("readiness_verdict") == "incomplete":
-                return {"complete": False, "covered_at_head": 0, "eligible": 0}
+                return {
+                    "complete": False,
+                    "covered_at_head": 0,
+                    "eligible": 0,
+                    "stopped_reason": payload.get("stopped_reason") or "",
+                }
         index = text.find("{", index + 1)
     return None
 
@@ -236,6 +251,64 @@ def _with_transport(*, transport: str, headline: str) -> str:
         Headline that always names the transport.
     """
     return f"[{transport}] {headline}"
+
+
+def _incomplete_report(
+    *,
+    coverage: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the INCOMPLETE outcome from a parsed coverage envelope.
+
+    Args:
+        coverage: Coverage mapping from the review JSON envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Report that reddens the check and tells the next round to resume.
+    """
+    covered = coverage.get("covered_at_head", 0)
+    eligible = coverage.get("eligible", 0)
+    return OutcomeReport(
+        outcome=ReviewOutcome.INCOMPLETE,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                "review incomplete — "
+                f"{covered}/{eligible} files covered at HEAD; "
+                "next round resumes"
+            ),
+        ),
+        detail=str(coverage.get("stopped_reason") or ""),
+        exit_code=1,
+        transport=transport,
+    )
+
+
+def _reviewed_report(*, findings: bool, transport: str) -> OutcomeReport:
+    """Build the REVIEWED outcome for a finished envelope.
+
+    Args:
+        findings: True when the review posted P1 findings.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Green report; the review itself produced a result.
+    """
+    return OutcomeReport(
+        outcome=ReviewOutcome.REVIEWED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                "reviewed — P1 findings posted"
+                if findings
+                else "reviewed — no P1 findings"
+            ),
+        ),
+        detail="",
+        exit_code=0,
+        transport=transport,
+    )
 
 
 def refine_failure_kind(
@@ -338,38 +411,16 @@ def classify(
             transport=transport,
         )
 
+    # A persist envelope wins over the wrapper exit status. ``wait`` reports
+    # 143 when the runner SIGTERMs the step after lintro already wrote
+    # INCOMPLETE JSON and exited 0 (#2156 / #2166 round 5).
+    coverage = _parse_coverage_envelope(text=output)
+    if coverage is not None and not coverage.get("complete", True):
+        return _incomplete_report(coverage=coverage, transport=transport)
+
     if status in (REVIEW_STATUS_CLEAN, REVIEW_STATUS_FINDINGS):
-        coverage = _parse_coverage_envelope(text=output)
-        if coverage is not None and not coverage.get("complete", True):
-            covered = coverage.get("covered_at_head", 0)
-            eligible = coverage.get("eligible", 0)
-            return OutcomeReport(
-                outcome=ReviewOutcome.INCOMPLETE,
-                headline=_with_transport(
-                    transport=transport,
-                    headline=(
-                        "review incomplete — "
-                        f"{covered}/{eligible} files covered at HEAD; "
-                        "next round resumes"
-                    ),
-                ),
-                detail=str(coverage.get("stopped_reason") or ""),
-                exit_code=1,
-                transport=transport,
-            )
-        findings = status == REVIEW_STATUS_FINDINGS
-        return OutcomeReport(
-            outcome=ReviewOutcome.REVIEWED,
-            headline=_with_transport(
-                transport=transport,
-                headline=(
-                    "reviewed — P1 findings posted"
-                    if findings
-                    else "reviewed — no P1 findings"
-                ),
-            ),
-            detail="",
-            exit_code=0,
+        return _reviewed_report(
+            findings=status == REVIEW_STATUS_FINDINGS,
             transport=transport,
         )
 
@@ -391,6 +442,10 @@ def classify(
     )
 
     if status != REVIEW_STATUS_ERROR:
+        # ``wait`` can report SIGTERM after a finished review already wrote a
+        # complete envelope. Prefer that over "unexpected status 143".
+        if coverage is not None and coverage.get("complete", True):
+            return _reviewed_report(findings=False, transport=transport)
         # An exit status lintro does not define means the wrapper itself broke
         # (missing dependency, bad flag, crash). Never attribute that to the
         # provider — the fix is in lintro, not in the account.

@@ -159,11 +159,12 @@ jobs:
         # GitHub releases CDN; those runs blocked it and the action fell
         # back to nodejs.org — allowlisted so Node install is not a silent
         # fallback.
-        # pipelines.actions.githubusercontent.com is the artifact service
-        # (#2158 / test-ci.yml precedent). This job forbids wildcard
-        # endpoints, so `*.blob.core.windows.net` (used by publish jobs)
-        # cannot be copied here. No additional blob-redirect host has
-        # been observed on artifact upload/download in this repo.
+        # pipelines.actions.githubusercontent.com and
+        # results-receiver.actions.githubusercontent.com are the artifact
+        # service (#2158 / in-step persist upload). This job forbids
+        # wildcard endpoints, so `*.blob.core.windows.net` (used by
+        # publish jobs) cannot be copied here. No additional blob-redirect
+        # host has been observed on artifact upload/download in this repo.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -176,6 +177,7 @@ jobs:
             raw.githubusercontent.com:443
             release-assets.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
@@ -348,13 +350,11 @@ jobs:
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
 
       - name: Upload review-state artifacts
-        # Final upload is best-effort. Empirically, a cancelled mid-job
-        # step caused later always() uploads to skip (dogfood job
-        # 97293667852, 2026-08-24). Incremental ``state.json`` writes
-        # (#2154/#2156) are runner-local until this step; they survive
-        # SIGTERM of the review process, not a skipped always() upload.
-        # lintro now traps SIGTERM, writes state.json, and exits with a
-        # JSON envelope so this step can still run after a runner signal.
+        # Final upload is best-effort. A cancelled job skips later
+        # always() steps (dogfood #2166 round 5 / job 97293667852).
+        # run-ai-review.sh uploads checkpoints and an inline snapshot
+        # from inside the review step so persist survives that skip.
+        # This step still runs on a clean or step-timeout finish.
         # if-no-files-found: ignore so pre-feature runs no-op.
         if: always()
         # yamllint disable-line rule:line-length

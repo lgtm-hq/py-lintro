@@ -977,6 +977,7 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "nodejs.org:443",
         "release-assets.githubusercontent.com:443",
         "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
     )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
@@ -1016,6 +1017,10 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("sleep 0.5")
     assert_that(shell_text).contains("[ai-review] still running")
     assert_that(shell_text).contains("persist-on-SIGTERM enabled")
+    assert_that(shell_text).contains("review_state_artifacts.py")
+    assert_that(shell_text).contains('upload --suffix "$1"')
+    assert_that(shell_text).contains("_upload_review_state inline")
+    assert_that(shell_text).contains("ckpt-${elapsed}")
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
         [
             "bash",

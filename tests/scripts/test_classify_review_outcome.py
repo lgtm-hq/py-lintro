@@ -98,9 +98,16 @@ def test_clean_review_passes(classifier: ModuleType) -> None:
     assert_that(report.transport).is_equal_to("cli")
 
 
-def test_incomplete_coverage_reddens_the_check(classifier: ModuleType) -> None:
-    """A produced review with incomplete coverage must fail the check (#2154)."""
-    output = json.dumps(
+def _incomplete_envelope(*, stopped_reason: str = "cost cap") -> str:
+    """Return a persist JSON envelope with incomplete coverage.
+
+    Args:
+        stopped_reason: Why the review stopped early.
+
+    Returns:
+        Captured-output text containing the coverage envelope.
+    """
+    return json.dumps(
         {
             "readiness_verdict": "incomplete",
             "coverage": {
@@ -112,14 +119,60 @@ def test_incomplete_coverage_reddens_the_check(classifier: ModuleType) -> None:
                 "covered_at_head": 2,
                 "complete": False,
             },
-            "stopped_reason": "cost cap",
+            "stopped_reason": stopped_reason,
+            "partial": True,
         },
     )
-    report = classifier.classify(status=0, output=output)
+
+
+def test_incomplete_coverage_reddens_the_check(classifier: ModuleType) -> None:
+    """A produced review with incomplete coverage must fail the check (#2154)."""
+    report = classifier.classify(status=0, output=_incomplete_envelope())
 
     assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
     assert_that(report.exit_code).is_equal_to(1)
     assert_that(report.headline).contains("2/7 files covered at HEAD")
+
+
+def test_sigterm_status_with_persist_envelope_is_incomplete(
+    classifier: ModuleType,
+) -> None:
+    """``wait`` 143 after a SIGTERM persist must not read as unexpected (#2166)."""
+    report = classifier.classify(
+        status=classifier.SIGTERM_STATUS,
+        output=_incomplete_envelope(stopped_reason="timeout (SIGTERM)"),
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("2/7 files covered at HEAD")
+    assert_that(report.headline).does_not_contain("unexpected status")
+    assert_that(report.detail).contains("SIGTERM")
+
+
+def test_sigterm_status_with_complete_envelope_is_reviewed(
+    classifier: ModuleType,
+) -> None:
+    """A finished envelope must stay REVIEWED when wait reports SIGTERM."""
+    output = json.dumps(
+        {
+            "readiness_verdict": "ready",
+            "coverage": {
+                "reviewed": 3,
+                "carried": 0,
+                "awaiting": 0,
+                "invalidated": 0,
+                "eligible": 3,
+                "covered_at_head": 3,
+                "complete": True,
+            },
+        },
+    )
+    report = classifier.classify(status=classifier.SIGTERM_STATUS, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).does_not_contain("unexpected status")
 
 
 def test_review_with_findings_still_passes(classifier: ModuleType) -> None:

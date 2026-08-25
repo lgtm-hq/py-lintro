@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Locate prior AI-review state artifacts across workflow runs (#2158).
+"""Locate and upload AI-review state artifacts (#2158 / #2156).
 
 Cross-run download is not ``download-artifact``'s default. This helper lists
 completed trusted runs of ``ai-review.yml`` and prints the newest run that
@@ -7,25 +7,37 @@ carries a valid ``lintro-review-state-pr-<N>-*`` artifact. The current run is
 excluded. Conclusion is irrelevant: an INCOMPLETE (red) round is exactly the
 run to resume from (#2154).
 
+``upload`` writes the current ``ai-review-state/`` directory through the
+Actions artifact service from inside ``run-ai-review.sh``. A cancelled job
+skips later ``if: always()`` steps (dogfood #2166 round 5); an in-step
+upload still attaches the persist snapshot so the next run can resume.
+
 Missing, expired, unlistable, or malformed state degrades to empty — a full
 re-review — and never fails the job. Lintro writes versioned parts under
-``ai-review-state/`` (#2154); this helper only locates the prior run.
+``ai-review-state/`` (#2154).
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess  # nosec B404 - gh argv is built internally; shell=False
 import sys
+import urllib.error
+import urllib.request
+import zipfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
+from urllib.parse import urlparse
 
 WORKFLOW_FILENAME: Final[str] = "ai-review.yml"
 WORKFLOW_PATH: Final[str] = f".github/workflows/{WORKFLOW_FILENAME}"
@@ -35,9 +47,13 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
+_UPLOAD_TIMEOUT_SECONDS: Final[int] = 15
 RUNS_PER_PAGE: Final[int] = 100
 ARTIFACTS_PER_PAGE: Final[int] = 100
 RETENTION_DAYS: Final[int] = 30
+DEFAULT_STATE_DIR: Final[str] = "ai-review-state"
+TWIRP_SERVICE: Final[str] = "github.actions.results.api.v1.ArtifactService"
+RESULTS_HOST_SUFFIX: Final[str] = ".actions.githubusercontent.com"
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,7 @@ class WorkflowRun:
 
 GhApi = Callable[[str], Any | None]
 ApiObject = Mapping[str, Any]
+HttpDo = Callable[[str, str, Mapping[str, str], bytes], tuple[int, bytes]]
 
 
 def state_artifact_prefix(pr_number: int) -> str:
@@ -535,19 +552,330 @@ def locate_from_env(
         return None
 
 
+def state_files(directory: Path) -> list[Path]:
+    """Return JSON state files in ``directory``.
+
+    Args:
+        directory: Review-state directory.
+
+    Returns:
+        Sorted JSON paths. Missing directories yield empty.
+    """
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix == ".json"
+    )
+
+
+def sanitize_artifact_suffix(raw: str) -> str:
+    """Return a filename-safe artifact-name suffix.
+
+    Args:
+        raw: Caller-supplied suffix (``inline``, ``ckpt-15``, ...).
+
+    Returns:
+        Sanitized suffix; empty input becomes ``inline``.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "").strip())
+    cleaned = cleaned.replace("..", "-")
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-.")
+    return cleaned or "inline"
+
+
+def state_artifact_name(*, pr_number: int, attempt: int, suffix: str) -> str:
+    """Return the artifact name for one in-step upload.
+
+    Args:
+        pr_number: Pull request number.
+        attempt: ``GITHUB_RUN_ATTEMPT``.
+        suffix: Distinguisher so v4 can upload more than once per run.
+
+    Returns:
+        Name matching ``lintro-review-state-pr-<N>-*``.
+    """
+    return (
+        f"{STATE_ARTIFACT_PREFIX}{pr_number}-attempt-{attempt}-"
+        f"{sanitize_artifact_suffix(suffix)}"
+    )
+
+
+def zip_state_files(files: Sequence[Path]) -> bytes:
+    """Zip state files at the archive root.
+
+    Args:
+        files: JSON files to include.
+
+    Returns:
+        Zip bytes.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in files:
+            archive.write(path, arcname=path.name)
+    return buffer.getvalue()
+
+
+def backend_ids_from_token(token: str) -> tuple[str, str] | None:
+    """Read Actions Results backend IDs from the runtime JWT.
+
+    Args:
+        token: ``ACTIONS_RUNTIME_TOKEN``.
+
+    Returns:
+        ``(workflow_run_backend_id, workflow_job_run_backend_id)``, or
+        ``None`` when the token is not an Actions Results JWT.
+    """
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, json.JSONDecodeError, UnicodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    scp = str(payload.get("scp", ""))
+    for scope in scp.split():
+        bits = scope.split(":")
+        if len(bits) == 3 and bits[0] == "Actions.Results":
+            return bits[1], bits[2]
+    return None
+
+
+def _results_origin(results_url: str) -> str | None:
+    """Return the origin of ``ACTIONS_RESULTS_URL`` when it is trusted.
+
+    Args:
+        results_url: Raw results-service URL.
+
+    Returns:
+        ``scheme://host`` origin, or ``None`` when the host is not an
+        Actions results endpoint.
+    """
+    parsed = urlparse(results_url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host.endswith(RESULTS_HOST_SUFFIX):
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _http_do(
+    method: str,
+    url: str,
+    headers: Mapping[str, str],
+    body: bytes,
+) -> tuple[int, bytes]:
+    """Issue one HTTPS request.
+
+    Args:
+        method: HTTP method.
+        url: Absolute HTTPS URL.
+        headers: Request headers.
+        body: Request body; empty for no payload.
+
+    Returns:
+        Status code and response body. HTTP errors are returned, not raised.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return 0, b"refusing non-https artifact URL"
+    request = urllib.request.Request(  # noqa: S310 - scheme checked above
+        url,
+        data=body or None,
+        method=method,
+        headers=dict(headers),
+    )
+    try:
+        with urllib.request.urlopen(  # nosec B310 - https-only; URL from Actions
+            request,
+            timeout=_UPLOAD_TIMEOUT_SECONDS,
+        ) as response:
+            return int(response.status), response.read()
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read()
+    except (OSError, urllib.error.URLError):
+        return 0, b"artifact request failed"
+
+
+def _twirp_json(
+    *,
+    origin: str,
+    method: str,
+    token: str,
+    payload: Mapping[str, Any],
+    http_do: HttpDo,
+) -> dict[str, Any] | None:
+    """Call one ArtifactService Twirp method.
+
+    Args:
+        origin: Results-service origin.
+        method: Twirp method name.
+        token: Runtime token.
+        payload: JSON body (proto field names).
+        http_do: Injectable HTTP client.
+
+    Returns:
+        Decoded object, or ``None`` on failure.
+    """
+    url = f"{origin}/twirp/{TWIRP_SERVICE}/{method}"
+    status, body = http_do(
+        "POST",
+        url,
+        {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json.dumps(payload).encode("utf-8"),
+    )
+    if status < 200 or status >= 300:
+        return None
+    try:
+        decoded = json.loads(body.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def upload_state(
+    *,
+    directory: Path,
+    name: str,
+    token: str,
+    results_url: str,
+    http_do: HttpDo = _http_do,
+) -> bool:
+    """Upload JSON state files as one Actions artifact.
+
+    Args:
+        directory: Directory holding ``state.json`` / ``part-*.json``.
+        name: Artifact name.
+        token: ``ACTIONS_RUNTIME_TOKEN``.
+        results_url: ``ACTIONS_RESULTS_URL``.
+        http_do: Injectable HTTP client.
+
+    Returns:
+        True when Create + PUT + Finalize all succeeded.
+    """
+    files = state_files(directory)
+    origin = _results_origin(results_url)
+    ids = backend_ids_from_token(token)
+    if not files or origin is None or ids is None:
+        return False
+    archive = zip_state_files(files)
+    digest = hashlib.sha256(archive).hexdigest()
+    created = _twirp_json(
+        origin=origin,
+        method="CreateArtifact",
+        token=token,
+        payload={
+            "workflow_run_backend_id": ids[0],
+            "workflow_job_run_backend_id": ids[1],
+            "name": name,
+            "version": 4,
+            "mime_type": {"value": "application/zip"},
+        },
+        http_do=http_do,
+    )
+    if created is None or not created.get("ok", True):
+        return False
+    signed = created.get("signed_upload_url") or created.get("signedUploadUrl")
+    if not isinstance(signed, str) or not signed:
+        return False
+    put_status, _put_body = http_do(
+        "PUT",
+        signed,
+        {
+            "Content-Type": "application/zip",
+            "x-ms-blob-type": "BlockBlob",
+            "x-ms-blob-content-type": "application/zip",
+        },
+        archive,
+    )
+    if put_status < 200 or put_status >= 300:
+        return False
+    finalized = _twirp_json(
+        origin=origin,
+        method="FinalizeArtifact",
+        token=token,
+        payload={
+            "workflow_run_backend_id": ids[0],
+            "workflow_job_run_backend_id": ids[1],
+            "name": name,
+            "size": str(len(archive)),
+            "hash": {"value": f"sha256:{digest}"},
+        },
+        http_do=http_do,
+    )
+    return bool(finalized is not None and finalized.get("ok", True))
+
+
+def upload_from_env(
+    env: Mapping[str, str],
+    *,
+    suffix: str,
+    http_do: HttpDo = _http_do,
+) -> bool:
+    """Upload current review state using process environment.
+
+    Missing Actions context or a transport failure is a no-op.
+
+    Args:
+        env: Process environment.
+        suffix: Artifact-name suffix (``inline``, ``ckpt-15``, ...).
+        http_do: Injectable HTTP client.
+
+    Returns:
+        True when an artifact was uploaded.
+    """
+    token = env.get("ACTIONS_RUNTIME_TOKEN", "").strip()
+    results_url = env.get("ACTIONS_RESULTS_URL", "").strip()
+    pr_number = _parse_optional_int(env.get("PR_NUMBER"))
+    if not token or not results_url or pr_number is None or pr_number <= 0:
+        return False
+    attempt = _parse_optional_int(env.get("GITHUB_RUN_ATTEMPT")) or 1
+    directory = Path(env.get("LINTRO_REVIEW_STATE_DIR") or DEFAULT_STATE_DIR)
+    try:
+        return upload_state(
+            directory=directory,
+            name=state_artifact_name(
+                pr_number=pr_number,
+                attempt=attempt,
+                suffix=suffix,
+            ),
+            token=token,
+            results_url=results_url,
+            http_do=http_do,
+        )
+    except Exception:  # noqa: BLE001 - fail-safe; never redden the review
+        return False
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser.
 
     Returns:
-        Parser for the ``locate`` subcommand.
+        Parser for the ``locate`` and ``upload`` subcommands.
     """
     parser = argparse.ArgumentParser(
-        description="Locate a prior AI-review state artifact run.",
+        description="Locate or upload an AI-review state artifact.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "locate",
         help="Write run-id= for the latest eligible prior-state run.",
+    )
+    upload = subparsers.add_parser(
+        "upload",
+        help="Upload ai-review-state/ from inside the review step.",
+    )
+    upload.add_argument(
+        "--suffix",
+        default="inline",
+        help="Artifact-name suffix so a run can upload more than once.",
     )
     return parser
 
@@ -559,10 +887,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Optional argument vector; ``None`` uses ``sys.argv``.
 
     Returns:
-        Always ``0``. Empty ``run-id=`` is the no-op / fail-safe result.
+        Always ``0``. Empty ``run-id=`` / failed upload is the fail-safe.
     """
     parser = build_parser()
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "upload":
+        uploaded = upload_from_env(os.environ, suffix=str(args.suffix))
+        if uploaded:
+            sys.stdout.write(
+                f"uploaded review-state artifact ({args.suffix})\n",
+            )
+        return 0
     output_raw = os.environ.get("GITHUB_OUTPUT", "").strip()
     output_path = Path(output_raw) if output_raw else None
     write_run_id(locate_from_env(os.environ), output_path)
