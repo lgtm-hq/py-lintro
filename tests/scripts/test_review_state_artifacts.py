@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 import json
 import re
 import sys
 import time
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -108,6 +110,7 @@ def _artifact(
     name: str,
     *,
     expired: bool = False,
+    artifact_id: int = 0,
 ) -> Any:
     """Build an ``Artifact`` for selection tests.
 
@@ -115,11 +118,12 @@ def _artifact(
         module: Loaded helper module.
         name: Artifact name.
         expired: Whether the payload has expired.
+        artifact_id: Actions artifact id; unused unless a seed test needs it.
 
     Returns:
         An ``Artifact`` instance.
     """
-    return module.Artifact(name=name, expired=expired)
+    return module.Artifact(name=name, expired=expired, artifact_id=artifact_id)
 
 
 def test_pr_one_prefix_does_not_match_pr_twelve(artifacts: ModuleType) -> None:
@@ -573,6 +577,274 @@ def test_locate_from_env_swallows_api_errors(artifacts: ModuleType) -> None:
         gh_api=gh_api,
     )
     assert_that(selected).is_none()
+
+
+def test_locate_retries_a_failed_artifact_page(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient artifact-list failure must not hide a valid persist."""
+    monkeypatch.setattr(artifacts, "_retry_sleep", lambda _seconds: None)
+    attempts = {"artifacts": 0}
+
+    def gh_api(path: str) -> dict[str, Any] | None:
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 200,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T02:00:00Z",
+                    },
+                ],
+            }
+        if "runs/200/artifacts" in path:
+            attempts["artifacts"] += 1
+            if attempts["artifacts"] < 3:
+                return None
+            return {
+                "artifacts": [
+                    {
+                        "id": 9,
+                        "name": "lintro-review-state-pr-15-attempt-1-inline",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(selected).is_equal_to(200)
+    assert_that(attempts["artifacts"]).is_equal_to(3)
+
+
+def test_locate_skips_run_with_missing_created_at(artifacts: ModuleType) -> None:
+    """An unusable timestamp must not abort the newest-first walk."""
+
+    def gh_api(path: str) -> dict[str, Any]:
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 50,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "",
+                    },
+                    {
+                        "id": 200,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T02:00:00Z",
+                    },
+                ],
+            }
+        if "runs/200/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "name": "lintro-review-state-pr-15-attempt-1-inline",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    selected = artifacts.locate_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "300",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(selected).is_equal_to(200)
+
+
+def test_locate_prior_state_keeps_newest_and_older_seed(
+    artifacts: ModuleType,
+) -> None:
+    """Newest-wins stays; the previous same-PR persist is the seed."""
+
+    def _run_payload(run_id: int, created: str) -> dict[str, Any]:
+        return {
+            "id": run_id,
+            "event": "pull_request_target",
+            "status": "completed",
+            "path": ".github/workflows/ai-review.yml",
+            "created_at": created,
+            "pull_requests": [{"number": 15}],
+        }
+
+    def gh_api(path: str) -> dict[str, Any]:
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    _run_payload(300, "2026-08-24T03:00:00Z"),
+                    _run_payload(200, "2026-08-24T02:00:00Z"),
+                    _run_payload(100, "2026-08-24T01:00:00Z"),
+                ],
+            }
+        if "runs/300/artifacts" in path or "runs/200/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "id": 1,
+                        "name": "lintro-review-state-pr-15-attempt-1-inline",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    located = artifacts.locate_state_from_env(
+        {
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "PR_NUMBER": "15",
+            "GITHUB_RUN_ID": "400",
+        },
+        gh_api=gh_api,
+        now=NOW,
+    )
+    assert_that(located.run_id).is_equal_to(300)
+    assert_that(located.seed_run_id).is_equal_to(200)
+
+
+def test_parse_artifact_keeps_numeric_id(artifacts: ModuleType) -> None:
+    """Seed downloads need the Actions artifact id."""
+    parsed = artifacts.parse_artifact(
+        {
+            "id": 9556725323,
+            "name": "lintro-review-state-pr-2166-attempt-1-inline",
+            "expired": False,
+        },
+    )
+    assert_that(parsed).is_not_none()
+    assert_that(parsed.artifact_id).is_equal_to(9556725323)
+
+
+def test_extract_seed_parts_rewrites_names(
+    artifacts: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Older parts sort before ``part-0001.json`` so newest findings win."""
+    payload = {"coverage": [{"path": "a.py", "hash": "abc"}], "pr_number": 15}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        bundle.writestr("part-0002.json", json.dumps(payload))
+        bundle.writestr("state.json", json.dumps(payload))
+        bundle.writestr("notes.txt", "ignore")
+    written = artifacts.extract_seed_parts(
+        buffer.getvalue(),
+        run_id=32829243399,
+        directory=tmp_path,
+    )
+    assert_that(written).is_equal_to(2)
+    names = sorted(path.name for path in tmp_path.iterdir())
+    assert_that(names).is_equal_to(
+        [
+            "part-0000-prior-32829243399-part-0002.json",
+            "part-0000-prior-32829243399-state.json",
+        ],
+    )
+
+
+def test_seed_prior_run_state_prefers_inline(
+    artifacts: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final inline persist is the seed source when several exist."""
+    monkeypatch.setattr(artifacts, "_retry_sleep", lambda _seconds: None)
+    payload = {"coverage": [{"path": "a.py", "hash": "abc"}], "pr_number": 15}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        bundle.writestr("part-0001.json", json.dumps(payload))
+    archive = buffer.getvalue()
+    requested: list[str] = []
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        return {
+            "artifacts": [
+                {
+                    "id": 11,
+                    "name": "lintro-review-state-pr-15-attempt-1-ckpt-100",
+                    "expired": False,
+                },
+                {
+                    "id": 22,
+                    "name": "lintro-review-state-pr-15-attempt-1-inline",
+                    "expired": False,
+                },
+            ],
+        }
+
+    def gh_api_bytes(path: str) -> bytes | None:
+        requested.append(path)
+        if path.endswith("/22/zip"):
+            return archive
+        return None
+
+    written = artifacts.seed_prior_run_state(
+        repo="lgtm-hq/py-lintro",
+        pr_number=15,
+        seed_run_id=200,
+        directory=tmp_path,
+        gh_api=gh_api,
+        gh_api_bytes=gh_api_bytes,
+    )
+    assert_that(written).is_equal_to(1)
+    assert_that(any(path.endswith("/22/zip") for path in requested)).is_true()
+    assert_that(any(path.endswith("/11/zip") for path in requested)).is_false()
+    assert_that((tmp_path / "part-0000-prior-200-part-0001.json").is_file()).is_true()
+
+
+def test_pick_seed_artifact_ignores_expired_and_idless(
+    artifacts: ModuleType,
+) -> None:
+    """A seed artifact must be downloadable and owned by this PR."""
+    chosen = artifacts.pick_seed_artifact(
+        [
+            _artifact(
+                artifacts,
+                "lintro-review-state-pr-15-attempt-1-inline",
+                expired=True,
+                artifact_id=1,
+            ),
+            _artifact(
+                artifacts,
+                "lintro-review-state-pr-15-attempt-1-inline",
+                artifact_id=0,
+            ),
+            _artifact(
+                artifacts,
+                "lintro-review-state-pr-99-attempt-1-inline",
+                artifact_id=3,
+            ),
+            _artifact(
+                artifacts,
+                "lintro-review-state-pr-15-attempt-1-inline",
+                artifact_id=4,
+            ),
+        ],
+        pr_number=15,
+    )
+    assert_that(chosen).is_not_none()
+    assert_that(chosen.artifact_id).is_equal_to(4)
 
 
 def test_main_writes_empty_run_id_without_github(

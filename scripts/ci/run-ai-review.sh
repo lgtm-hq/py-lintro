@@ -87,7 +87,10 @@ a depleted balance, or an unreachable provider exits 1 with a visible reason.
 
 --locate-prior-state lists completed trusted ai-review.yml runs and writes
 run-id= for the latest one that carries a valid state artifact (empty when
-none exist). Always exits 0; missing state is a no-op, not a failure.
+none exist). When GITHUB_ACTIONS is set, it also seeds the immediately
+older same-PR persist as part-0000-prior-* so coverage can union. Always
+exits 0; missing state is a no-op, not a failure. Failures are retried
+and logged to stderr.
 EOF
 	exit 0
 fi

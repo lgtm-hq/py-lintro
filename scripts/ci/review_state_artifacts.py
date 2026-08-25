@@ -13,8 +13,14 @@ skips later ``if: always()`` steps (dogfood #2166 round 5); an in-step
 upload still attaches the persist snapshot so the next run can resume.
 
 Missing, expired, unlistable, or malformed state degrades to empty — a full
-re-review — and never fails the job. Lintro writes versioned parts under
-``ai-review-state/`` (#2154).
+re-review — and never fails the job. ``gh api`` failures are retried and
+logged to stderr so an empty ``run-id=`` is diagnosable (#2166 round 8
+wrote nothing while a local locate found the prior persist). An unusable
+``created_at`` skips that run instead of aborting the walk. After the
+newest eligible run is selected, the immediately older same-PR persist is
+seeded as ``part-0000-prior-*`` so ``load_ci_state`` can union coverage
+and an empty-restart artifact cannot hide a richer snapshot. Lintro
+writes versioned parts under ``ai-review-state/`` (#2154).
 """
 
 from __future__ import annotations
@@ -48,6 +54,8 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
+_GH_API_ATTEMPTS: Final[int] = 3
+_GH_API_RETRY_SLEEP_SECONDS: Final[tuple[float, ...]] = (0.25, 0.5)
 _UPLOAD_TIMEOUT_SECONDS: Final[float] = 8.0
 # Whole Create/PUT/Finalize after wait returns 143. GitHub's cancel
 # grace is ~7.5s; the log flush already used some of it. A 8s×3 upload
@@ -70,10 +78,27 @@ class Artifact:
     Attributes:
         name: Artifact name as uploaded.
         expired: Whether GitHub has already expired the payload.
+        artifact_id: Actions artifact id; ``0`` when the payload omitted it.
     """
 
     name: str
     expired: bool = False
+    artifact_id: int = 0
+
+
+@dataclass(frozen=True)
+class LocatedPrior:
+    """Newest eligible prior-state run, plus an older same-PR seed.
+
+    Attributes:
+        run_id: Newest completed trusted run with a valid artifact.
+        seed_run_id: Immediately older same-PR run with a valid artifact,
+            when one exists. ``load_ci_state`` unions both so an empty
+            restart cannot hide richer coverage.
+    """
+
+    run_id: int | None
+    seed_run_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +110,8 @@ class WorkflowRun:
         event: Trigger event (must be ``pull_request_target``).
         status: Run status (must be ``completed``).
         path: Workflow path recorded on the run.
-        created_at: When the run was created; newest wins.
+        created_at: When the run was created; newest wins. ``None``
+            when the API omitted or sent an unusable timestamp.
         pull_request_numbers: PRs attached on the run. Empty on some
             ``pull_request_target`` payloads; then artifact names decide.
     """
@@ -94,11 +120,12 @@ class WorkflowRun:
     event: str
     status: str
     path: str
-    created_at: datetime
+    created_at: datetime | None
     pull_request_numbers: tuple[int, ...] = ()
 
 
 GhApi = Callable[[str], Any | None]
+GhApiBytes = Callable[[str], bytes | None]
 ApiObject = Mapping[str, Any]
 HttpDo = Callable[[str, str, Mapping[str, str], bytes], tuple[int, bytes]]
 
@@ -164,6 +191,8 @@ def is_within_retention(run: WorkflowRun, *, now: datetime) -> bool:
         True when ``created_at`` is inside ``RETENTION_DAYS``.
     """
     created = run.created_at
+    if created is None:
+        return False
     if created.tzinfo is None:
         created = created.replace(tzinfo=UTC)
     current = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -231,6 +260,7 @@ def select_prior_run_id(
         for run in runs
         if is_trusted_completed_run(run)
         and run.run_id != current_run_id
+        and run.created_at is not None
         and is_within_retention(run, now=now)
         and not mentions_other_pr(run, pr_number=pr_number)
         and has_valid_state_artifact(
@@ -244,22 +274,26 @@ def select_prior_run_id(
     return newest.run_id
 
 
-def _parse_datetime(raw: str) -> datetime:
+def _parse_datetime(raw: str) -> datetime | None:
     """Parse a GitHub timestamp, accepting the trailing ``Z``.
 
     Args:
         raw: ISO-8601 timestamp from the Actions API.
 
     Returns:
-        Timezone-aware datetime. Unix epoch when ``raw`` is empty or invalid.
+        Timezone-aware datetime, or ``None`` when ``raw`` is empty or invalid.
+        Epoch is not used as a sentinel — a missing timestamp must skip
+        that run, not abort the newest-first walk.
     """
     text = raw.strip()
+    if not text:
+        return None
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
     try:
         return datetime.fromisoformat(text)
     except ValueError:
-        return datetime.fromtimestamp(0, tz=UTC)
+        return None
 
 
 def _parse_pr_numbers(payload: Mapping[str, Any]) -> tuple[int, ...]:
@@ -320,7 +354,78 @@ def parse_artifact(payload: Mapping[str, Any]) -> Artifact | None:
     name = payload.get("name")
     if not isinstance(name, str) or not name:
         return None
-    return Artifact(name=name, expired=bool(payload.get("expired", False)))
+    artifact_id = 0
+    raw_id = payload.get("id")
+    if isinstance(raw_id, int):
+        artifact_id = raw_id
+    elif isinstance(raw_id, str) and raw_id.isdigit():
+        artifact_id = int(raw_id)
+    return Artifact(
+        name=name,
+        expired=bool(payload.get("expired", False)),
+        artifact_id=artifact_id,
+    )
+
+
+def _log_locate(message: str) -> None:
+    """Write one locator line to stderr (visible in Actions logs).
+
+    Args:
+        message: Already-redacted diagnostic; never include tokens.
+    """
+    sys.stderr.write(f"review-state locate: {message}\n")
+
+
+def _retry_sleep(seconds: float) -> None:
+    """Sleep between ``gh api`` attempts.
+
+    Args:
+        seconds: Delay; tests monkeypatch this to a no-op.
+    """
+    if seconds > 0:
+        time.sleep(seconds)
+
+
+def _call_with_retry(path: str, gh_api: Callable[[str], Any | None]) -> Any | None:
+    """Call ``gh_api`` up to ``_GH_API_ATTEMPTS`` times.
+
+    Args:
+        path: REST path passed to ``gh api``.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The first non-``None`` payload, or ``None`` after all attempts.
+    """
+    for attempt in range(_GH_API_ATTEMPTS):
+        payload = gh_api(path)
+        if payload is not None:
+            return payload
+        if attempt + 1 < _GH_API_ATTEMPTS:
+            delay_index = min(attempt, len(_GH_API_RETRY_SLEEP_SECONDS) - 1)
+            delay = (
+                _GH_API_RETRY_SLEEP_SECONDS[delay_index]
+                if _GH_API_RETRY_SLEEP_SECONDS
+                else 0.0
+            )
+            _retry_sleep(delay)
+    _log_locate(f"gh api returned no payload after {_GH_API_ATTEMPTS} attempts: {path}")
+    return None
+
+
+def _summarize_gh_error(stderr: str) -> str:
+    """Return a short, token-free ``gh`` stderr snippet.
+
+    Args:
+        stderr: Raw stderr from ``gh api``.
+
+    Returns:
+        Single-line excerpt, at most 200 characters.
+    """
+    cleaned = " ".join(stderr.split())
+    for secret in ("Bearer ", "token ", "ghs_", "gho_", "github_pat_"):
+        if secret.lower() in cleaned.lower():
+            return "[redacted gh stderr]"
+    return cleaned[:200]
 
 
 def _gh_api(path: str) -> Any | None:
@@ -334,6 +439,7 @@ def _gh_api(path: str) -> Any | None:
     """
     gh_bin = shutil.which("gh")
     if gh_bin is None:
+        _log_locate("gh binary not on PATH")
         return None
     try:
         result = subprocess.run(  # nosec B603 - resolved gh path; shell=False
@@ -343,14 +449,46 @@ def _gh_api(path: str) -> Any | None:
             timeout=_GH_API_TIMEOUT_SECONDS,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        _log_locate(f"gh api {type(exc).__name__}: {path}")
         return None
     if result.returncode != 0:
+        _log_locate(
+            f"gh api rc={result.returncode} path={path} "
+            f"err={_summarize_gh_error(result.stderr or '')}",
+        )
         return None
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError:
+        _log_locate(f"gh api returned non-JSON: {path}")
         return None
+
+
+def _gh_api_bytes(path: str) -> bytes | None:
+    """Call ``gh api`` and return the raw body (artifact zip).
+
+    Args:
+        path: REST path passed to ``gh api``.
+
+    Returns:
+        Response bytes, or ``None`` on any failure.
+    """
+    gh_bin = shutil.which("gh")
+    if gh_bin is None:
+        return None
+    try:
+        result = subprocess.run(  # nosec B603 - resolved gh path; shell=False
+            [gh_bin, "api", path],
+            capture_output=True,
+            timeout=_GH_API_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    return result.stdout
 
 
 def _as_object_list(payload: Any, key: str) -> list[Mapping[str, Any]]:
@@ -396,7 +534,10 @@ def _yield_api_pages(
     page = 1
     separator = "&" if "?" in path else "?"
     while True:
-        payload = gh_api(f"{path}{separator}per_page={per_page}&page={page}")
+        payload = _call_with_retry(
+            f"{path}{separator}per_page={per_page}&page={page}",
+            gh_api,
+        )
         if payload is None:
             return
         page_items = _as_object_list(payload, key)
@@ -437,21 +578,24 @@ def fetch_artifacts(
     return artifacts
 
 
-def locate_prior_run_id(
+def locate_prior_state(
     *,
     repo: str,
     pr_number: int,
     current_run_id: int | None,
     gh_api: GhApi = _gh_api,
     now: datetime | None = None,
-) -> int | None:
-    """Walk completed runs newest-first and return the first eligible.
+) -> LocatedPrior:
+    """Walk completed runs newest-first and return newest plus a seed.
 
     Pages until a valid state artifact is found so a busy repo cannot
-    hide resume state behind a fixed window. Stops at the first match
-    because the Actions API returns ``created_at`` descending. Stops
-    entirely once runs fall outside the 30-day artifact retention
-    window — an older run cannot hold a non-expired artifact.
+    hide resume state behind a fixed window. Newest-wins is unchanged:
+    ``run_id`` is the first match because the Actions API returns
+    ``created_at`` descending. The walk then continues to the next
+    same-PR persist so an empty-restart artifact can be unioned with
+    the richer snapshot it hid. A missing ``created_at`` skips that
+    run. A valid timestamp outside retention ends the walk without
+    discarding an already-selected newest run.
 
     Args:
         repo: ``owner/name`` repository slug.
@@ -461,13 +605,15 @@ def locate_prior_run_id(
         now: Clock used for the retention cutoff; defaults to UTC now.
 
     Returns:
-        The selected run id, or ``None`` when nothing is eligible.
+        Newest eligible run and optional older same-PR seed.
     """
     clock = now if now is not None else datetime.now(tz=UTC)
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
         f"?event={WORKFLOW_EVENT}&status=completed"
     )
+    newest_id: int | None = None
+    seed_id: int | None = None
     for item in _yield_api_pages(
         path,
         "workflow_runs",
@@ -479,14 +625,56 @@ def locate_prior_run_id(
             continue
         if not is_trusted_completed_run(run) or run.run_id == current_run_id:
             continue
+        if run.created_at is None:
+            _log_locate(f"skip run-id={run.run_id}: missing created_at")
+            continue
         if not is_within_retention(run, now=clock):
-            return None
+            _log_locate(f"stop at run-id={run.run_id}: outside retention")
+            break
         if mentions_other_pr(run, pr_number=pr_number):
             continue
         artifacts = fetch_artifacts(repo, run.run_id, gh_api=gh_api)
-        if has_valid_state_artifact(artifacts, pr_number=pr_number):
-            return run.run_id
-    return None
+        if not has_valid_state_artifact(artifacts, pr_number=pr_number):
+            continue
+        if newest_id is None:
+            newest_id = run.run_id
+            _log_locate(f"selected run-id={newest_id}")
+            continue
+        seed_id = run.run_id
+        _log_locate(f"seed run-id={seed_id}")
+        break
+    if newest_id is None:
+        _log_locate("no eligible prior run-id")
+    return LocatedPrior(run_id=newest_id, seed_run_id=seed_id)
+
+
+def locate_prior_run_id(
+    *,
+    repo: str,
+    pr_number: int,
+    current_run_id: int | None,
+    gh_api: GhApi = _gh_api,
+    now: datetime | None = None,
+) -> int | None:
+    """Walk completed runs newest-first and return the first eligible.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request whose state is being resumed.
+        current_run_id: Run to exclude, if known.
+        gh_api: Injectable GitHub API caller.
+        now: Clock used for the retention cutoff; defaults to UTC now.
+
+    Returns:
+        The selected run id, or ``None`` when nothing is eligible.
+    """
+    return locate_prior_state(
+        repo=repo,
+        pr_number=pr_number,
+        current_run_id=current_run_id,
+        gh_api=gh_api,
+        now=now,
+    ).run_id
 
 
 def write_run_id(run_id: int | None, output_path: Path | None) -> None:
@@ -524,6 +712,42 @@ def _parse_optional_int(raw: str | None) -> int | None:
         return None
 
 
+def locate_state_from_env(
+    env: Mapping[str, str],
+    *,
+    gh_api: GhApi = _gh_api,
+    now: datetime | None = None,
+) -> LocatedPrior:
+    """Resolve newest and seed run ids from process environment.
+
+    Any missing required value or API failure becomes empty (fail-safe).
+
+    Args:
+        env: Process environment.
+        gh_api: Injectable GitHub API caller.
+        now: Clock used for the retention cutoff; defaults to UTC now.
+
+    Returns:
+        Located prior-state ids. Both fields are ``None`` on failure.
+    """
+    repo = env.get("GITHUB_REPOSITORY", "").strip()
+    pr_number = _parse_optional_int(env.get("PR_NUMBER"))
+    if not repo or pr_number is None or pr_number <= 0:
+        return LocatedPrior(run_id=None)
+    current_run_id = _parse_optional_int(env.get("GITHUB_RUN_ID"))
+    try:
+        return locate_prior_state(
+            repo=repo,
+            pr_number=pr_number,
+            current_run_id=current_run_id,
+            gh_api=gh_api,
+            now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 - fail-safe empty state, never fail the job
+        _log_locate(f"locator exception: {type(exc).__name__}")
+        return LocatedPrior(run_id=None)
+
+
 def locate_from_env(
     env: Mapping[str, str],
     *,
@@ -542,21 +766,115 @@ def locate_from_env(
     Returns:
         The selected run id, or ``None``.
     """
-    repo = env.get("GITHUB_REPOSITORY", "").strip()
-    pr_number = _parse_optional_int(env.get("PR_NUMBER"))
-    if not repo or pr_number is None or pr_number <= 0:
+    return locate_state_from_env(env, gh_api=gh_api, now=now).run_id
+
+
+def pick_seed_artifact(
+    artifacts: Sequence[Artifact],
+    *,
+    pr_number: int,
+) -> Artifact | None:
+    """Prefer the final ``-inline`` persist from one older run.
+
+    Args:
+        artifacts: Artifacts attached to the seed run.
+        pr_number: Pull request that must own the artifact.
+
+    Returns:
+        The artifact to extract, or ``None`` when none are usable.
+    """
+    valid = [
+        artifact
+        for artifact in artifacts
+        if not artifact.expired
+        and artifact.artifact_id > 0
+        and is_state_artifact_for_pr(artifact.name, pr_number)
+    ]
+    if not valid:
         return None
-    current_run_id = _parse_optional_int(env.get("GITHUB_RUN_ID"))
+    inline = [artifact for artifact in valid if artifact.name.endswith("-inline")]
+    return inline[0] if inline else valid[0]
+
+
+def extract_seed_parts(
+    archive: bytes,
+    *,
+    run_id: int,
+    directory: Path,
+) -> int:
+    """Write older state JSON as ``part-0000-prior-<run>-<name>``.
+
+    The ``0000`` prefix sorts before this run's ``part-0001.json`` so
+    newest findings still last-writer-win while coverage unions.
+
+    Args:
+        archive: Artifact zip bytes.
+        run_id: Seed run id, used in the rewritten filename.
+        directory: Destination ``ai-review-state/`` directory.
+
+    Returns:
+        Number of JSON files written.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    written = 0
     try:
-        return locate_prior_run_id(
-            repo=repo,
-            pr_number=pr_number,
-            current_run_id=current_run_id,
-            gh_api=gh_api,
-            now=now,
-        )
-    except Exception:  # noqa: BLE001 - fail-safe empty state, never fail the job
-        return None
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            infos = bundle.infolist()
+            for info in infos:
+                name = Path(info.filename).name
+                if info.is_dir() or not name.endswith(".json"):
+                    continue
+                if name != "state.json" and not name.startswith("part-"):
+                    continue
+                target = directory / f"part-0000-prior-{run_id}-{name}"
+                target.write_bytes(bundle.read(info))
+                written += 1
+    except zipfile.BadZipFile:
+        return 0
+    return written
+
+
+def seed_prior_run_state(
+    *,
+    repo: str,
+    pr_number: int,
+    seed_run_id: int,
+    directory: Path,
+    gh_api: GhApi = _gh_api,
+    gh_api_bytes: GhApiBytes = _gh_api_bytes,
+) -> int:
+    """Download one older same-PR persist into uniquely named parts.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request that owns the artifact.
+        seed_run_id: Older completed run to extract.
+        directory: Destination ``ai-review-state/`` directory.
+        gh_api: Injectable GitHub API caller for the artifact list.
+        gh_api_bytes: Injectable downloader for the artifact zip.
+
+    Returns:
+        Number of JSON files written.
+    """
+    artifacts = fetch_artifacts(repo, seed_run_id, gh_api=gh_api)
+    chosen = pick_seed_artifact(artifacts, pr_number=pr_number)
+    if chosen is None:
+        _log_locate(f"seed run-id={seed_run_id}: no downloadable artifact")
+        return 0
+    archive = _call_with_retry(
+        f"repos/{repo}/actions/artifacts/{chosen.artifact_id}/zip",
+        gh_api_bytes,
+    )
+    if not isinstance(archive, (bytes, bytearray)):
+        _log_locate(f"seed run-id={seed_run_id}: zip download failed")
+        return 0
+    written = extract_seed_parts(
+        bytes(archive),
+        run_id=seed_run_id,
+        directory=directory,
+    )
+    _log_locate(f"seeded {written} part(s) from run-id={seed_run_id}")
+    return written
 
 
 def state_files(directory: Path) -> list[Path]:
@@ -989,7 +1307,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     output_raw = os.environ.get("GITHUB_OUTPUT", "").strip()
     output_path = Path(output_raw) if output_raw else None
-    write_run_id(locate_from_env(os.environ), output_path)
+    located = locate_state_from_env(os.environ)
+    write_run_id(located.run_id, output_path)
+    seed_dir_raw = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
+    should_seed = located.seed_run_id is not None and (
+        seed_dir_raw or os.environ.get("GITHUB_ACTIONS") == "true"
+    )
+    if should_seed and located.seed_run_id is not None:
+        repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+        pr_number = _parse_optional_int(os.environ.get("PR_NUMBER"))
+        if repo and pr_number is not None and pr_number > 0:
+            seed_prior_run_state(
+                repo=repo,
+                pr_number=pr_number,
+                seed_run_id=located.seed_run_id,
+                directory=Path(seed_dir_raw or DEFAULT_STATE_DIR),
+            )
     return 0
 
 
