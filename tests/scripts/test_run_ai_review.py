@@ -764,6 +764,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
@@ -1224,7 +1225,30 @@ def test_workflow_keeps_mint_immediately_before_review() -> None:
     upload_index = names.index("Upload review-state artifacts")
     locate_index = names.index("Locate prior review-state run")
     download_index = names.index("Download prior review-state artifacts")
+    runtime_index = names.index("Expose Actions runtime for state upload")
     assert_that(review_index).is_equal_to(mint_index + 1)
     assert_that(locate_index).is_less_than(mint_index)
     assert_that(download_index).is_less_than(mint_index)
+    assert_that(runtime_index).is_less_than(mint_index)
     assert_that(upload_index).is_greater_than(review_index)
+
+
+def test_workflow_exports_runtime_token_into_review_step() -> None:
+    """In-step upload needs the runtime token that ``run:`` steps lack."""
+    steps = _ai_review_steps()
+    runtime = next(
+        step
+        for step in steps
+        if step.get("name") == "Expose Actions runtime for state upload"
+    )
+    assert_that(runtime["id"]).is_equal_to("artifact-runtime")
+    assert_that(str(runtime["uses"])).starts_with("actions/github-script@")
+    review = next(
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    )
+    assert_that(review["env"]["ACTIONS_RUNTIME_TOKEN"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.runtime-token }}",
+    )
+    assert_that(review["env"]["ACTIONS_RESULTS_URL"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.results-url }}",
+    )

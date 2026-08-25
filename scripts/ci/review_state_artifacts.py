@@ -47,7 +47,7 @@ _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
-_UPLOAD_TIMEOUT_SECONDS: Final[int] = 15
+_UPLOAD_TIMEOUT_SECONDS: Final[int] = 8
 RUNS_PER_PAGE: Final[int] = 100
 ARTIFACTS_PER_PAGE: Final[int] = 100
 RETENTION_DAYS: Final[int] = 30
@@ -553,7 +553,11 @@ def locate_from_env(
 
 
 def state_files(directory: Path) -> list[Path]:
-    """Return JSON state files in ``directory``.
+    """Return JSON state files that are safe to merge across uploads.
+
+    Prefer ``part-*.json`` so ``download-artifact`` ``merge-multiple``
+    cannot overwrite ``state.json`` with an older checkpoint. Fall back
+    to ``state.json`` only when this run has not written a part yet.
 
     Args:
         directory: Review-state directory.
@@ -563,11 +567,15 @@ def state_files(directory: Path) -> list[Path]:
     """
     if not directory.is_dir():
         return []
-    return sorted(
+    parts = sorted(
         path
         for path in directory.iterdir()
-        if path.is_file() and path.suffix == ".json"
+        if path.is_file() and path.suffix == ".json" and path.name.startswith("part-")
     )
+    if parts:
+        return parts
+    snapshot = directory / "state.json"
+    return [snapshot] if snapshot.is_file() else []
 
 
 def sanitize_artifact_suffix(raw: str) -> str:
@@ -772,17 +780,17 @@ def upload_state(
         method="CreateArtifact",
         token=token,
         payload={
-            "workflow_run_backend_id": ids[0],
-            "workflow_job_run_backend_id": ids[1],
+            "workflowRunBackendId": ids[0],
+            "workflowJobRunBackendId": ids[1],
             "name": name,
             "version": 4,
-            "mime_type": {"value": "application/zip"},
+            "mimeType": "application/zip",
         },
         http_do=http_do,
     )
     if created is None or not created.get("ok", True):
         return False
-    signed = created.get("signed_upload_url") or created.get("signedUploadUrl")
+    signed = created.get("signedUploadUrl") or created.get("signed_upload_url")
     if not isinstance(signed, str) or not signed:
         return False
     put_status, _put_body = http_do(
@@ -792,6 +800,7 @@ def upload_state(
             "Content-Type": "application/zip",
             "x-ms-blob-type": "BlockBlob",
             "x-ms-blob-content-type": "application/zip",
+            "x-ms-version": "2023-11-03",
         },
         archive,
     )
@@ -802,11 +811,11 @@ def upload_state(
         method="FinalizeArtifact",
         token=token,
         payload={
-            "workflow_run_backend_id": ids[0],
-            "workflow_job_run_backend_id": ids[1],
+            "workflowRunBackendId": ids[0],
+            "workflowJobRunBackendId": ids[1],
             "name": name,
             "size": str(len(archive)),
-            "hash": {"value": f"sha256:{digest}"},
+            "hash": f"sha256:{digest}",
         },
         http_do=http_do,
     )
@@ -896,6 +905,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if uploaded:
             sys.stdout.write(
                 f"uploaded review-state artifact ({args.suffix})\n",
+            )
+        elif os.environ.get("GITHUB_ACTIONS") == "true":
+            sys.stderr.write(
+                f"review-state upload skipped or failed ({args.suffix})\n",
             )
         return 0
     output_raw = os.environ.get("GITHUB_OUTPUT", "").strip()

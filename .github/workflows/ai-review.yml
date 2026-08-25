@@ -286,6 +286,24 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra ai
 
+      - name: Expose Actions runtime for state upload
+        # run: steps do not receive ACTIONS_RUNTIME_TOKEN /
+        # ACTIONS_RESULTS_URL (runner Node/container actions do).
+        # Export masked outputs so the review step can upload
+        # checkpoints before a cancel skips later always() steps.
+        id: artifact-runtime
+        # yamllint disable-line rule:line-length
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const token = process.env.ACTIONS_RUNTIME_TOKEN || ''
+            const results = process.env.ACTIONS_RESULTS_URL || ''
+            if (token) {
+              core.setSecret(token)
+            }
+            core.setOutput('runtime-token', token)
+            core.setOutput('results-url', results)
+
       - name: Mint lintro-review App token
         id: lintro-review-app
         # Repo-scoped installation token (#2050). Default current-repo scope —
@@ -348,6 +366,10 @@ jobs:
           # transport treats a numeric cap as a runtime bound, not
           # marginal dollars, under subscription auth.
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
+          # In-step persist upload (#2173). Masked outputs from the
+          # github-script step above; blank when the runner omitted them.
+          ACTIONS_RUNTIME_TOKEN: ${{ steps.artifact-runtime.outputs.runtime-token }}
+          ACTIONS_RESULTS_URL: ${{ steps.artifact-runtime.outputs.results-url }}
 
       - name: Upload review-state artifacts
         # Final upload is best-effort. A cancelled job skips later

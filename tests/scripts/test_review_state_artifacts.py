@@ -626,6 +626,10 @@ def test_upload_state_creates_puts_and_finalizes(
     state_dir = tmp_path / "ai-review-state"
     state_dir.mkdir()
     (state_dir / "state.json").write_text('{"schema_version": 3}\n', encoding="utf-8")
+    (state_dir / "part-0001.json").write_text(
+        '{"schema_version": 3, "coverage": []}\n',
+        encoding="utf-8",
+    )
     calls: list[tuple[str, str]] = []
 
     def http_do(
@@ -639,21 +643,24 @@ def test_upload_state_creates_puts_and_finalizes(
             assert_that(headers["Authorization"]).starts_with("Bearer ")
             payload = json.loads(body.decode("utf-8"))
             assert_that(payload["name"]).contains("lintro-review-state-pr-2166-")
-            assert_that(payload["workflow_run_backend_id"]).is_equal_to("run-backend")
+            assert_that(payload["workflowRunBackendId"]).is_equal_to("run-backend")
+            assert_that(payload["mimeType"]).is_equal_to("application/zip")
             return (
                 200,
-                b'{"ok":true,"signed_upload_url":"https://blob.example/upload"}',
+                b'{"ok":true,"signedUploadUrl":"https://blob.example/upload"}',
             )
         if url == "https://blob.example/upload":
             assert_that(method).is_equal_to("PUT")
             assert_that(headers["x-ms-blob-type"]).is_equal_to("BlockBlob")
-            assert_that(body).contains(b"state.json")
+            assert_that(headers["x-ms-version"]).is_equal_to("2023-11-03")
+            assert_that(body).contains(b"part-0001.json")
+            assert_that(body).does_not_contain(b"state.json")
             return 201, b""
         if url.endswith("/FinalizeArtifact"):
             payload = json.loads(body.decode("utf-8"))
             assert_that(payload["size"]).is_not_equal_to("0")
-            assert_that(payload["hash"]["value"]).starts_with("sha256:")
-            return 200, b'{"ok":true,"artifact_id":"9"}'
+            assert_that(payload["hash"]).starts_with("sha256:")
+            return 200, b'{"ok":true,"artifactId":"9"}'
         return 500, b"unexpected"
 
     uploaded = artifacts.upload_from_env(

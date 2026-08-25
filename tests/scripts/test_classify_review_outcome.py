@@ -150,6 +150,19 @@ def test_sigterm_status_with_persist_envelope_is_incomplete(
     assert_that(report.detail).contains("SIGTERM")
 
 
+def test_error_status_with_persist_envelope_is_incomplete(
+    classifier: ModuleType,
+) -> None:
+    """A persist envelope beats an error status so resume is not discarded."""
+    report = classifier.classify(
+        status=classifier.REVIEW_STATUS_ERROR,
+        output=_incomplete_envelope(stopped_reason="timeout (SIGTERM)"),
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.headline).does_not_contain("nothing was reviewed")
+
+
 def test_sigterm_status_with_complete_envelope_is_reviewed(
     classifier: ModuleType,
 ) -> None:
