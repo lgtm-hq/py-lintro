@@ -20,7 +20,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - **ci**: retry and log prior-state locate failures, skip runs with a missing
-  ``created_at`` instead of aborting the walk, and seed the immediately older same-PR
+  `created_at` instead of aborting the walk, and seed the immediately older same-PR
   persist so an empty-restart artifact cannot hide richer coverage (#2156)
 
 ### Security
