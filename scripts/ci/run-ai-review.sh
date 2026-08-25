@@ -136,6 +136,16 @@ if [[ -z "$pr_number" ]]; then
 fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
+# Heartbeat so a silent ``--output json`` review still proves the step is
+# alive if the runner SIGTERM's it. Killed on EXIT with the output file.
+(
+	elapsed=0
+	while sleep 60; do
+		elapsed=$((elapsed + 60))
+		printf '[ai-review] still running (%ss)\n' "${elapsed}"
+	done
+) &
+heartbeat_pid=$!
 
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
@@ -152,7 +162,11 @@ mkdir -p "${LINTRO_REVIEW_STATE_DIR}"
 # Tee to a file: the classifier needs the JSON error envelope, and the live
 # stream must still reach the Actions log so a mid-run SIGTERM is diagnosable.
 output_file="$(mktemp)"
-trap 'rm -f "$output_file"' EXIT
+trap 'rm -f "$output_file"; kill "${heartbeat_pid:-}" 2>/dev/null || true' EXIT
+# Stay alive on SIGTERM long enough for lintro's handler to persist
+# coverage. The runner signals the process group, so Python still sees it.
+# A no-op trap keeps this shell from exiting before the classifier runs.
+trap ':' TERM
 
 set +e
 # Timeout comes from ai.transports.cli.timeout (default 1800s) — no hand-tuned
@@ -173,6 +187,7 @@ set +e
 # lintro.ai.transport.DEFAULT_CLI_TIMEOUT.
 # shellcheck disable=SC2034  # documentation variable read by the wiring test
 CLI_REVIEW_TIMEOUT_SECONDS=1800
+echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 # Unbuffered Python so the tee pipeline shows mid-chunk progress if SIGTERM'd.
 export PYTHONUNBUFFERED=1
 uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1 | tee "$output_file"

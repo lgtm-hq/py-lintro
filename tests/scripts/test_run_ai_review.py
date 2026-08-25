@@ -1006,6 +1006,9 @@ def test_run_ai_review_tees_under_pipefail() -> None:
     assert_that(shell_text).contains("set -euo pipefail")
     assert_that(shell_text).contains("PYTHONUNBUFFERED=1")
     assert_that(shell_text).contains('| tee "$output_file"')
+    assert_that(shell_text).contains("trap ':' TERM")
+    assert_that(shell_text).contains("[ai-review] still running")
+    assert_that(shell_text).contains("persist-on-SIGTERM enabled")
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
         [
             "bash",

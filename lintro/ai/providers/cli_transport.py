@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import threading
 from abc import ABC, abstractmethod
@@ -101,11 +102,19 @@ def flag_named_in(lowered_text: str, flag: str) -> bool:
 
 
 async def _terminate(process: asyncio.subprocess.Process) -> None:
-    """Kill a child process and reap it so it cannot linger as a zombie.
+    """Kill a child process (and its session) so it cannot linger as a zombie.
+
+    The child is started with ``start_new_session=True`` so an agent
+    ``killpg`` cannot take lintro with it. Termination therefore has to
+    signal that new process group, not only the direct child pid.
 
     Args:
         process: The child process to stop.
     """
+    pid = getattr(process, "pid", None)
+    if pid is not None and os.name == "posix":
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(pid, signal.SIGKILL)
     with contextlib.suppress(ProcessLookupError):
         process.kill()
     with contextlib.suppress(ProcessLookupError):
@@ -662,6 +671,10 @@ class CliTransport(ABC):
             stdin=input_text,
         ) as record:
             try:
+                spawn_kwargs: dict[str, Any] = {}
+                if os.name == "posix":
+                    # New session: the agent CLI cannot killpg lintro (#2156).
+                    spawn_kwargs["start_new_session"] = True
                 process = await asyncio.create_subprocess_exec(  # nosec B603 - argv is an internally-built list; exec form takes no shell
                     *cmd,
                     stdin=asyncio.subprocess.PIPE if input_text is not None else None,
@@ -669,6 +682,7 @@ class CliTransport(ABC):
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
                     cwd=cwd,
+                    **spawn_kwargs,
                 )
             except FileNotFoundError as exc:
                 raise AINotAvailableError(

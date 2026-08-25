@@ -353,6 +353,8 @@ jobs:
         # 97293667852, 2026-08-24). Incremental ``state.json`` writes
         # (#2154/#2156) are runner-local until this step; they survive
         # SIGTERM of the review process, not a skipped always() upload.
+        # lintro now traps SIGTERM, writes state.json, and exits with a
+        # JSON envelope so this step can still run after a runner signal.
         # if-no-files-found: ignore so pre-feature runs no-op.
         if: always()
         # yamllint disable-line rule:line-length
