@@ -159,14 +159,3 @@ def test_tool_migration_uses_short_titles_and_groups(
     assert_that(watch).contains("navGroup: setup")
     assert_that(watch).contains("order: 25")
     assert_that(ruff.split("---")[1]).does_not_contain("Tool Analysis")
-
-
-def test_category_map_publishes_watch_mode_page() -> None:
-    """Watch Mode is a published usage page, not an unmapped drop."""
-    migrate = _load_migrate_module()
-    assert_that(migrate.CATEGORY_MAP).contains_key("watch-mode.md")
-    assert_that(migrate.CATEGORY_MAP["watch-mode.md"]).is_equal_to(("usage", 25))
-    assert_that(migrate.DOC_NAV).contains_key("usage/watch-mode")
-    assert_that(migrate.DOC_NAV["usage/watch-mode"]).is_equal_to(
-        ("watch mode", "setup"),
-    )

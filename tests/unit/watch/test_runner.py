@@ -7,6 +7,7 @@ selection, headers, screen clearing — without invoking real tools.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.tool_executor import run_lint_tools_simple
 from lintro.watch.runner import WatchRunner
 
 
@@ -79,9 +81,39 @@ def _make_run_tools(
             "on_tool_result": on_tool_result,
             "render_summary": render_summary,
         }
+        on_tool_result(
+            ToolResult(
+                name="ruff",
+                success=exit_code == 0,
+                duration_seconds=0.01,
+            ),
+        )
         return exit_code
 
     return _run
+
+
+def test_watch_runner_options_match_real_executor_signature() -> None:
+    """The injectable backend contract must remain valid for production."""
+    parameters = inspect.signature(run_lint_tools_simple).parameters
+    required = {
+        "action",
+        "paths",
+        "tools",
+        "tool_options",
+        "exclude",
+        "include_venv",
+        "group_by",
+        "output_format",
+        "verbose",
+        "yes",
+        "no_art",
+        "run_post_checks",
+        "on_tool_result",
+        "render_summary",
+    }
+
+    assert_that(set(parameters)).contains(*required)
 
 
 def test_run_batch_checks_by_default(
@@ -157,6 +189,25 @@ def test_run_batch_discards_event_metadata_for_vanished_files(
     runner.run_batch({missing})
 
     assert_that(runner._event_kinds).is_empty()
+
+
+def test_vanished_batch_preserves_last_executed_exit_code(
+    tmp_path: Path,
+    recorder: dict[str, Any],
+) -> None:
+    """A skipped atomic-save path should not erase the last lint failure."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+    runner = WatchRunner(
+        emit=lambda _line: None,
+        run_tools=_make_run_tools(recorder, exit_code=1),
+    )
+    runner.run_batch({str(target)})
+
+    result = runner.run_batch({str(tmp_path / "vanished.py")})
+
+    assert_that(result).is_equal_to(0)
+    assert_that(runner.last_exit_code).is_equal_to(1)
 
 
 def test_run_batch_reports_no_matching_tools(
@@ -305,6 +356,26 @@ def test_run_batch_forwards_restrict_to(
     runner.run_batch({str(target)})
 
     assert_that(recorder["kwargs"]["tools"]).is_equal_to("ruff")
+
+
+def test_run_batch_forwards_environment_and_exclude_options(
+    tmp_path: Path,
+    recorder: dict[str, Any],
+) -> None:
+    """Runner should preserve include-venv and executor exclude options."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+    runner = WatchRunner(
+        include_venv=True,
+        exclude="**/generated/**",
+        emit=lambda _line: None,
+        run_tools=_make_run_tools(recorder),
+    )
+
+    runner.run_batch({str(target)})
+
+    assert_that(recorder["kwargs"]["include_venv"]).is_true()
+    assert_that(recorder["kwargs"]["exclude"]).is_equal_to("**/generated/**")
 
 
 def test_run_batch_catches_executor_value_error(
