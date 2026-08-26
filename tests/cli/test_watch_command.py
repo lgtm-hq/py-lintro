@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
 from lintro.config.watch_config import WatchConfig
+from lintro.utils.execution.tool_configuration import ToolsToRunResult
 
 
 def test_no_fix_overrides_config_auto_fix() -> None:
@@ -168,3 +169,57 @@ def test_malformed_watch_config_is_a_clean_click_error() -> None:
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).contains("watch config must be a mapping")
     assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_default_path_is_current_directory() -> None:
+    """Omitting PATHS should watch the current directory."""
+    with (
+        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
+        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+    ):
+        runner_cls.return_value.last_exit_code = 0
+        result = CliRunner().invoke(cli, ["watch"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(watch_paths.call_args.args[0]).is_equal_to(["."])
+
+
+def test_empty_validated_tool_selection_is_usage_error() -> None:
+    """A fully disabled explicit allowlist should fail before watching."""
+    with (
+        patch(
+            "lintro.cli_utils.commands.watch.get_tools_to_run",
+            return_value=ToolsToRunResult(),
+        ),
+        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
+    ):
+        result = CliRunner().invoke(cli, ["watch", "--tools", "ruff", "."])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("No enabled watch tools remain")
+    watch_paths.assert_not_called()
+
+
+def test_watcher_os_error_is_clean_click_error() -> None:
+    """Observer startup failures should produce a concise nonzero exit."""
+    with patch(
+        "lintro.cli_utils.commands.watch.watch_paths",
+        side_effect=OSError("permission denied"),
+    ):
+        result = CliRunner().invoke(cli, ["watch", "."])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("Watch failed: permission denied")
+    assert_that(result.output).does_not_contain("Traceback")
+
+
+def test_last_batch_exit_code_is_process_exit_code() -> None:
+    """Clean Ctrl-C shutdown should return the latest lint result."""
+    with (
+        patch("lintro.cli_utils.commands.watch.watch_paths"),
+        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+    ):
+        runner_cls.return_value.last_exit_code = 1
+        result = CliRunner().invoke(cli, ["watch", "."])
+
+    assert_that(result.exit_code).is_equal_to(1)

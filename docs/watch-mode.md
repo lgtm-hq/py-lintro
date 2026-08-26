@@ -21,7 +21,8 @@ lintro watch --fix
 ```
 
 Press `Ctrl+C` to stop watching. Watch mode shuts down cleanly and flushes any in-flight
-run before exiting.
+run before exiting. Lint findings do not stop the watcher; on shutdown, the process
+returns the most recent batch's exit code.
 
 ## How It Works
 
@@ -38,6 +39,9 @@ Press Ctrl+C to stop
 [12:35:12] bar.py created
   ├─ ruff: ✅ passed (0.08s)
 ```
+
+Watch mode uses this compact continuous renderer for both `plain` and `grid`; it is not
+the normal one-shot `lintro check` summary.
 
 ### Smart Tool Selection
 
@@ -107,9 +111,7 @@ watch:
     - ruff
     - mypy
   ignore:
-    - '**/__pycache__/**'
-    - '**/.git/**'
-    - '**/node_modules/**'
+    - '**/generated/**'
 ```
 
 | Key            | Type      | Default | Description                                         |
