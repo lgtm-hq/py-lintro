@@ -1979,6 +1979,10 @@ main() {
 	fi
 
 	for tool in "${tools_to_verify[@]}"; do
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would verify $tool is available"
+			continue
+		fi
 		if [ "$tool" = "clippy" ]; then
 			# Clippy is invoked through cargo
 			if command -v cargo &>/dev/null && cargo clippy --version &>/dev/null; then
