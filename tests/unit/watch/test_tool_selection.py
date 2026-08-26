@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
+import pytest
 from assertpy import assert_that
 
 from lintro.plugins.base import BaseToolPlugin
@@ -152,6 +154,32 @@ def test_restrict_to_is_case_insensitive(make_tools: ToolBuilder) -> None:
     )
 
     assert_that(selected).is_equal_to(["ruff"])
+
+
+@pytest.mark.parametrize(
+    ("registered_name", "requested_name", "filename"),
+    [
+        ("svelte-check", "svelte_check", "Component.svelte"),
+        ("vue-tsc", "vue_tsc", "Component.vue"),
+        ("astro-check", "astro_check", "Page.astro"),
+    ],
+)
+def test_restrict_to_accepts_underscore_aliases(
+    make_tools: ToolBuilder,
+    registered_name: str,
+    requested_name: str,
+    filename: str,
+) -> None:
+    """Underscore aliases select tools registered with hyphenated names."""
+    tools = make_tools({registered_name: [f"*{Path(filename).suffix}"]})
+
+    selected = select_tools_for_files(
+        [filename],
+        restrict_to=[requested_name],
+        available_tools=tools,
+    )
+
+    assert_that(selected).is_equal_to([registered_name])
 
 
 def test_restrict_to_that_excludes_all_returns_empty(

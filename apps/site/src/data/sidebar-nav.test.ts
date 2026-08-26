@@ -41,6 +41,19 @@ describe('groupSectionDocs', () => {
     expect(groups[0]?.docs.map((d) => d.id)).toEqual(['getting-started/getting-started']);
   });
 
+  it('falls back to the setup group for watch mode', () => {
+    const docs = [
+      {
+        id: 'usage/watch-mode',
+        data: { title: 'watch mode', order: 25 },
+      },
+    ];
+
+    const { groups } = groupSectionDocs('usage', docs);
+    expect(groups[0]?.label).toBe('setup');
+    expect(groups[0]?.docs.map(sidebarLabel)).toEqual(['watch mode']);
+  });
+
   it('keeps tools overview out of tool groups', () => {
     const docs = [
       { id: 'tools', data: { title: 'tools', order: 5 } },

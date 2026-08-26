@@ -43,9 +43,30 @@ def _make_run_tools(
     """
     recorder["calls"] = 0
 
-    def _run(**kwargs: Any) -> int:
+    def _run(
+        *,
+        action: Action,
+        paths: list[str],
+        tools: str,
+        tool_options: str | None,
+        exclude: str | None,
+        include_venv: bool,
+        group_by: str,
+        output_format: str,
+        verbose: bool,
+    ) -> int:
         recorder["calls"] += 1
-        recorder["kwargs"] = kwargs
+        recorder["kwargs"] = {
+            "action": action,
+            "paths": paths,
+            "tools": tools,
+            "tool_options": tool_options,
+            "exclude": exclude,
+            "include_venv": include_venv,
+            "group_by": group_by,
+            "output_format": output_format,
+            "verbose": verbose,
+        }
         return exit_code
 
     return _run
@@ -148,6 +169,7 @@ def test_run_batch_prints_timestamped_header(
     header = next((line for line in lines if line.startswith("[")), None)
     assert_that(header).is_not_none()
     assert_that(header).contains("foo.py")
+    assert_that(header).matches(r"^\[\d{2}:\d{2}:\d{2}\] changed:")
 
 
 def test_run_batch_clears_screen_when_enabled(

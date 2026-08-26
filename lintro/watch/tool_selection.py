@@ -27,6 +27,18 @@ __all__ = ["get_tools_for_file", "select_tools_for_files"]
 _CATCH_ALL_PATTERNS: frozenset[str] = frozenset({"*"})
 
 
+def _normalized_tool_name(name: str) -> str:
+    """Normalize interchangeable hyphen and underscore tool-name spellings.
+
+    Args:
+        name: Registered or user-supplied tool name.
+
+    Returns:
+        Lowercase name with underscores normalized to hyphens.
+    """
+    return name.lower().replace("_", "-")
+
+
 def _matches(filename: str, pattern: str) -> bool:
     """Return whether a filename matches a single glob pattern.
 
@@ -176,8 +188,8 @@ def select_tools_for_files(
 
     allowed: set[str] | None = None
     if restrict_to is not None:
-        allowed = {name.lower() for name in restrict_to}
-        matched = {name for name in matched if name.lower() in allowed}
+        allowed = {_normalized_tool_name(name) for name in restrict_to}
+        matched = {name for name in matched if _normalized_tool_name(name) in allowed}
 
     honor_enabled = restrict_to is None and available_tools is None
     selected: list[str] = []
@@ -185,7 +197,7 @@ def select_tools_for_files(
         plugin = tools.get(name)
         if plugin is None:
             continue
-        explicit = allowed is not None and name.lower() in allowed
+        explicit = allowed is not None and _normalized_tool_name(name) in allowed
         if _is_watch_compatible(
             name,
             plugin,

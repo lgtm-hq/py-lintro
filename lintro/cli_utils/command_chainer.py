@@ -68,10 +68,10 @@ class CommandChainer:
         Returns:
             True if the arguments contain comma separators indicating chaining.
         """
-        for arg in args:
+        for arg_index, arg in enumerate(args):
             if arg == self.separator:
                 return True
-            if self.separator in arg:
+            if arg_index == 0 and self.separator in arg:
                 # Check if splitting by comma yields known commands
                 parts = [p.strip() for p in arg.split(self.separator) if p.strip()]
                 if parts and all(p in self.command_names for p in parts):
@@ -99,7 +99,8 @@ class CommandChainer:
                 normalized.append(arg)
                 continue
 
-            if self.separator in arg:
+            at_command_boundary = not normalized or normalized[-1] == self.separator
+            if at_command_boundary and self.separator in arg:
                 # Check if this looks like comma-separated commands
                 raw_parts = [part.strip() for part in arg.split(self.separator)]
                 fragments = [part for part in raw_parts if part]

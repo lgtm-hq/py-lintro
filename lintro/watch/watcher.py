@@ -22,6 +22,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from lintro.config.watch_config import DEFAULT_DEBOUNCE_MS
+from lintro.utils.tool_utils import VENV_PATTERNS
 from lintro.watch.debouncer import Debouncer
 
 if TYPE_CHECKING:
@@ -84,6 +85,10 @@ class ObserverLike(Protocol):
 # Gitignore-style patterns excluded from watching by default. Keeps noisy or
 # irrelevant directories (VCS internals, caches, build artifacts, virtualenvs)
 # from triggering runs.
+VENV_IGNORE_PATTERNS: tuple[str, ...] = tuple(
+    f"**/{name}/**" for name in VENV_PATTERNS if name != "node_modules"
+)
+
 DEFAULT_IGNORE_PATTERNS: list[str] = [
     "**/.git/**",
     "**/__pycache__/**",
@@ -91,17 +96,11 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "**/.ruff_cache/**",
     "**/.pytest_cache/**",
     "**/node_modules/**",
-    "**/.venv/**",
-    "**/venv/**",
+    *VENV_IGNORE_PATTERNS,
     "**/dist/**",
     "**/build/**",
     "**/*.pyc",
 ]
-
-VENV_IGNORE_PATTERNS: tuple[str, ...] = (
-    "**/.venv/**",
-    "**/venv/**",
-)
 
 
 def default_ignore_patterns(*, include_venv: bool = False) -> list[str]:
@@ -148,6 +147,7 @@ class LintroEventHandler(FileSystemEventHandler):
         on_change: Callable[[str], None],
         ignore_spec: pathspec.GitIgnoreSpec,
         path_filter: Callable[[str], bool] | None = None,
+        ignore_roots: Iterable[Path] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -158,11 +158,14 @@ class LintroEventHandler(FileSystemEventHandler):
                 in scope. When provided, events for out-of-scope paths (for
                 example siblings of an explicitly-watched single file) are
                 dropped. When ``None``, every non-ignored path is forwarded.
+            ignore_roots: Optional roots that ignore patterns are relative to.
+                Ancestors above these roots do not participate in matching.
         """
         super().__init__()
         self._on_change = on_change
         self._ignore_spec = ignore_spec
         self._path_filter = path_filter
+        self._ignore_roots = tuple(ignore_roots or ())
 
     def _handle(self, path: str) -> None:
         """Forward a path to ``on_change`` unless it is ignored or out of scope.
@@ -185,10 +188,18 @@ class LintroEventHandler(FileSystemEventHandler):
         Returns:
             True if the path should be ignored.
         """
-        # Match against a normalized relative-ish posix form so patterns like
-        # ``**/__pycache__/**`` behave intuitively regardless of absolute path.
-        posix = Path(path).as_posix()
-        return self._ignore_spec.match_file(posix)
+        # Match watched paths relative to their roots. Absolute path ancestors
+        # are outside the watched project and must not trigger ignore patterns.
+        candidate = Path(path)
+        posix_paths = [candidate.as_posix()]
+        if self._ignore_roots:
+            resolved = candidate.resolve()
+            posix_paths = [
+                resolved.relative_to(root).as_posix()
+                for root in self._ignore_roots
+                if resolved.is_relative_to(root)
+            ]
+        return any(self._ignore_spec.match_file(posix) for posix in posix_paths)
 
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle a file modification event.
@@ -298,6 +309,7 @@ def watch_paths(
         on_change=debouncer.on_change,
         ignore_spec=ignore_spec,
         path_filter=_in_scope,
+        ignore_roots=watched_dirs | {path.parent for path in watched_files},
     )
 
     factory: Callable[[], ObserverLike] = observer_factory or Observer
@@ -306,11 +318,11 @@ def watch_paths(
         watch_target = path if Path(path).is_dir() else str(Path(path).parent)
         observer.schedule(handler, watch_target, recursive=True)
 
-    observer.start()
-    _emit_startup(console, paths)
-
     event = stop_event or threading.Event()
     try:
+        observer.start()
+        _emit_startup(console, paths)
+
         while not event.is_set():
             # Wait in short slices so Ctrl-C is responsive on all platforms.
             event.wait(timeout=0.5)

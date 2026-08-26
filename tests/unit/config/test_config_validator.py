@@ -159,6 +159,47 @@ execution:
     assert_that(any("black" in m for m in messages)).is_true()
 
 
+def test_unknown_watch_tool_warns(write_config: Callable[..., Path]) -> None:
+    """Unknown names in watch.tools should warn with a suggestion.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+watch:
+  tools: [ruft]
+""",
+    )
+
+    result = validate_config_file(path)
+
+    messages = [w.render() for w in result.warnings]
+    assert_that(any("unknown tool 'ruft'" in m for m in messages)).is_true()
+    assert_that(any("watch.tools" in m and "ruff" in m for m in messages)).is_true()
+
+
+def test_watch_all_tool_sentinel_is_valid(
+    write_config: Callable[..., Path],
+) -> None:
+    """The watch.tools ``all`` sentinel should not warn.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+watch:
+  tools: [all]
+""",
+    )
+
+    result = validate_config_file(path)
+
+    unknown = [w for w in result.warnings if w.code == ValidationCode.UNKNOWN_TOOL]
+    assert_that(unknown).is_empty()
+
+
 def test_unknown_top_level_key_warns(write_config: Callable[..., Path]) -> None:
     """Unknown top-level keys should warn.
 

@@ -73,14 +73,14 @@ By default, watch mode ignores noisy or irrelevant locations such as `.git/`,
 `__pycache__/`, tool caches, `node_modules/`, virtualenvs, and build output.
 Configuration `watch.ignore` **extends** those built-ins; it cannot re-enable `.git/` or
 `node_modules/` by replacing the list. An empty `ignore` keeps the defaults.
-`--include-venv` drops the built-in `.venv` / `venv` ignores so those directories can
-produce events.
+`--include-venv` drops the built-in virtualenv ignores (including `.venv`, `venv`,
+`env`, `virtualenv`, and `site-packages`) so those directories can produce events.
 
 ## Options
 
 | Flag                     | Description                                                |
 | ------------------------ | ---------------------------------------------------------- |
-| `--tools`                | Comma-separated allowlist of tools to run.                 |
+| `--tools`                | Tool allowlist; `all` uses smart selection.                |
 | `--fix` / `--no-fix`     | Force fix mode on or off (overrides `watch.auto_fix`).     |
 | `--clear` / `--no-clear` | Force screen clear on or off (overrides config).           |
 | `--debounce`             | Debounce interval in milliseconds (default `300`).         |
@@ -114,7 +114,7 @@ watch:
 | `debounce_ms`  | int       | `300`   | Quiet period before a run (must be `>= 0`).         |
 | `auto_fix`     | bool      | `false` | Run tools in fix mode.                              |
 | `clear_screen` | bool      | `false` | Clear the terminal between runs.                    |
-| `tools`        | list[str] | `[]`    | Allowlist of tools (empty = smart selection).       |
+| `tools`        | list[str] | `[]`    | Allowlist; empty or `all` uses smart selection.     |
 | `ignore`       | list[str] | `[]`    | Extra gitignore-style patterns (extends built-ins). |
 
 ## Notes

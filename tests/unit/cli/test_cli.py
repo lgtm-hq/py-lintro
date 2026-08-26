@@ -318,6 +318,7 @@ def test_cli_has_init_command(cli_runner: CliRunner) -> None:
         ("cfg", "config"),
         ("ver", "versions"),
         ("ls", "list-tools"),
+        ("w", "watch"),
     ],
     ids=[
         "chk->check",
@@ -326,6 +327,7 @@ def test_cli_has_init_command(cli_runner: CliRunner) -> None:
         "cfg->config",
         "ver->versions",
         "ls->list-tools",
+        "w->watch",
     ],
 )
 def test_cli_alias_resolves_to_command(

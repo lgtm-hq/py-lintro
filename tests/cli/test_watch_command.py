@@ -62,3 +62,61 @@ def test_include_venv_is_forwarded_to_watcher() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(runner_cls.call_args.kwargs["include_venv"]).is_true()
     assert_that(watch_paths.call_args.kwargs["include_venv"]).is_true()
+
+
+def test_config_values_apply_when_cli_flags_are_omitted() -> None:
+    """Watch config should supply every option not set on the CLI."""
+    config = LintroConfig(
+        watch=WatchConfig(
+            auto_fix=True,
+            clear_screen=True,
+            debounce_ms=750,
+            tools=["ruff"],
+            ignore=["**/generated/**"],
+        ),
+    )
+    with (
+        patch(
+            "lintro.cli_utils.commands.watch.load_config",
+            return_value=config,
+        ),
+        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
+        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+    ):
+        runner_cls.return_value = MagicMock()
+        result = CliRunner().invoke(cli, ["watch", "."])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(runner_cls.call_args.kwargs["auto_fix"]).is_true()
+    assert_that(runner_cls.call_args.kwargs["clear_screen"]).is_true()
+    assert_that(runner_cls.call_args.kwargs["restrict_to"]).is_equal_to(["ruff"])
+    assert_that(watch_paths.call_args.kwargs["debounce_ms"]).is_equal_to(750)
+    assert_that(watch_paths.call_args.kwargs["ignore_patterns"]).is_equal_to(
+        ["**/generated/**"],
+    )
+
+
+def test_tools_all_uses_smart_selection() -> None:
+    """``--tools all`` should not be treated as a tool named ``all``."""
+    with (
+        patch(
+            "lintro.cli_utils.commands.watch.load_config",
+            return_value=LintroConfig(),
+        ),
+        patch("lintro.cli_utils.commands.watch.watch_paths"),
+        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+    ):
+        runner_cls.return_value = MagicMock()
+        result = CliRunner().invoke(cli, ["watch", "--tools", "all", "."])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(runner_cls.call_args.kwargs["restrict_to"]).is_none()
+
+
+def test_watch_help_describes_config_fallbacks() -> None:
+    """Watch help should explain config-backed tools and debounce defaults."""
+    result = CliRunner().invoke(cli, ["watch", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("watch.tools")
+    assert_that(result.output).contains("watch.debounce_ms")

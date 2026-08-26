@@ -11,8 +11,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
 from assertpy import assert_that
 
+from lintro.utils.tool_utils import VENV_PATTERNS
 from lintro.watch.watcher import (
     LintroEventHandler,
     _build_ignore_spec,
@@ -108,6 +110,32 @@ def test_pyc_files_are_ignored(fake_fs_event: EventBuilder) -> None:
     assert_that(seen).is_empty()
 
 
+@pytest.mark.parametrize(
+    "directory",
+    VENV_PATTERNS,
+)
+def test_environment_directories_are_ignored(
+    tmp_path: Path,
+    directory: str,
+) -> None:
+    """All standard environment directories are ignored by default.
+
+    Args:
+        tmp_path: Temporary watched project root.
+        directory: Environment directory name under test.
+    """
+    environment_file = tmp_path / directory / "lib" / "module.py"
+    environment_file.parent.mkdir(parents=True)
+    environment_file.write_text("x = 1\n")
+
+    batches = _drive_events(
+        [str(tmp_path)],
+        [str(environment_file)],
+    )
+
+    assert_that(batches).is_empty()
+
+
 def test_custom_ignore_patterns_apply(fake_fs_event: EventBuilder) -> None:
     """Custom ignore patterns extend the built-in defaults."""
     handler, seen = _handler(ignore_patterns=["**/generated/**"])
@@ -192,6 +220,28 @@ def test_watch_paths_lifecycle_starts_and_stops(tmp_path: Path) -> None:
     assert_that(observer.scheduled[0][1]).is_true()
 
 
+def test_watch_paths_cleans_up_when_observer_start_fails(tmp_path: Path) -> None:
+    """A partially-started observer is stopped and joined after start fails."""
+    observer = _MockObserver()
+
+    def _fail_start() -> None:
+        observer.started = True
+        msg = "observer start failed"
+        raise RuntimeError(msg)
+
+    observer.start = _fail_start  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="observer start failed"):
+        watch_paths(
+            [str(tmp_path)],
+            on_batch=lambda _batch: None,
+            observer_factory=lambda: observer,
+        )
+
+    assert_that(observer.stopped).is_true()
+    assert_that(observer.joined).is_true()
+
+
 def test_watch_paths_watches_parent_dir_for_file_target(tmp_path: Path) -> None:
     """Watching a single file schedules a recursive watch on its parent."""
     target = tmp_path / "foo.py"
@@ -253,6 +303,7 @@ def _drive_events(
     event_paths: list[str],
     *,
     ignore_patterns: list[str] | None = None,
+    include_venv: bool = False,
 ) -> list[set[str]]:
     """Run watch_paths and feed synthetic modify events to the handler.
 
@@ -260,6 +311,7 @@ def _drive_events(
         watch_targets: Paths passed to watch_paths.
         event_paths: File paths to emit as modification events after start.
         ignore_patterns: Optional extra ignore patterns.
+        include_venv: Whether virtual environment paths should produce events.
 
     Returns:
         The list of emitted batches.
@@ -290,6 +342,7 @@ def _drive_events(
         on_batch=batches.append,
         debounce_ms=50_000,  # long, so only the shutdown flush emits
         ignore_patterns=ignore_patterns,
+        include_venv=include_venv,
         stop_event=stop_event,
         observer_factory=lambda: observer,
     )
@@ -333,38 +386,47 @@ def test_custom_ignore_patterns_extend_defaults(tmp_path: Path) -> None:
     assert_that(batches[0]).is_equal_to({str(normal)})
 
 
-def test_include_venv_forwards_venv_file_events(tmp_path: Path) -> None:
-    """``include_venv`` must not ignore ``.venv`` file events."""
-    venv_file = tmp_path / ".venv" / "lib" / "site.py"
+def test_ignore_patterns_are_relative_to_watch_root(tmp_path: Path) -> None:
+    """An ignored ancestor above the watch root does not drop project files."""
+    project = tmp_path / "build" / "project"
+    source = project / "src" / "app.py"
+    generated = project / "build" / "generated.py"
+    source.parent.mkdir(parents=True)
+    generated.parent.mkdir()
+    source.write_text("x = 1\n")
+    generated.write_text("x = 2\n")
+
+    batches = _drive_events(
+        [str(project)],
+        [str(source), str(generated)],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(source)})
+
+
+@pytest.mark.parametrize(
+    "directory",
+    [name for name in VENV_PATTERNS if name != "node_modules"],
+)
+def test_include_venv_forwards_environment_file_events(
+    tmp_path: Path,
+    directory: str,
+) -> None:
+    """``include_venv`` forwards every virtual environment directory.
+
+    Args:
+        tmp_path: Temporary watched project root.
+        directory: Virtual environment directory name under test.
+    """
+    venv_file = tmp_path / directory / "lib" / "site.py"
     venv_file.parent.mkdir(parents=True)
     venv_file.write_text("x = 1\n")
-    batches: list[set[str]] = []
-    observer = _MockObserver()
-    stop_event = threading.Event()
-    handler_ref: dict[str, Any] = {}
 
-    def _capture_schedule(handler: Any, path: str, recursive: bool = False) -> None:
-        handler_ref["handler"] = handler
-        observer.scheduled.append((path, recursive))
-
-    observer.schedule = _capture_schedule  # type: ignore[method-assign]
-
-    def _fake_start() -> None:
-        observer.started = True
-        handler_ref["handler"].on_modified(
-            type("E", (), {"is_directory": False, "src_path": str(venv_file)})(),
-        )
-        stop_event.set()
-
-    observer.start = _fake_start  # type: ignore[method-assign]
-
-    watch_paths(
+    batches = _drive_events(
         [str(tmp_path)],
-        on_batch=batches.append,
-        debounce_ms=50_000,
+        [str(venv_file)],
         include_venv=True,
-        stop_event=stop_event,
-        observer_factory=lambda: observer,
     )
 
     assert_that(batches).is_length(1)

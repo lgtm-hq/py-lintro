@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.config.watch_config import DEFAULT_DEBOUNCE_MS
 from lintro.watch.debouncer import Debouncer
 from tests.unit.watch.conftest import FakeTimerFactory
 
@@ -20,12 +21,13 @@ def test_single_change_fires_batch_on_timer(
     batches: list[set[str]] = []
     debouncer = Debouncer(
         callback=batches.append,
-        delay_ms=300,
+        delay_ms=DEFAULT_DEBOUNCE_MS,
         timer_factory=fake_timer_factory,
     )
 
     debouncer.on_change("a.py")
     assert_that(batches).is_empty()
+    assert_that(fake_timer_factory.latest.started).is_true()
 
     fake_timer_factory.latest.fire()
 

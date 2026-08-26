@@ -27,6 +27,11 @@ def test_watch_config_rejects_negative_debounce() -> None:
     assert_that(WatchConfig).raises(ValueError).when_called_with(debounce_ms=-5)
 
 
+def test_watch_config_accepts_zero_debounce() -> None:
+    """A zero debounce interval should be accepted for immediate runs."""
+    assert_that(WatchConfig(debounce_ms=0).debounce_ms).is_equal_to(0)
+
+
 def test_parse_watch_config_from_mapping() -> None:
     """A populated mapping is parsed into a WatchConfig."""
     cfg = _parse_watch_config(
@@ -48,8 +53,8 @@ def test_parse_watch_config_from_mapping() -> None:
 
 def test_parse_watch_config_empty_returns_defaults() -> None:
     """An empty or None section yields default config."""
-    assert_that(_parse_watch_config({}).debounce_ms).is_equal_to(300)
-    assert_that(_parse_watch_config(None).debounce_ms).is_equal_to(300)
+    assert_that(_parse_watch_config({})).is_equal_to(WatchConfig())
+    assert_that(_parse_watch_config(None)).is_equal_to(WatchConfig())
 
 
 def test_parse_watch_config_rejects_non_mapping() -> None:
@@ -73,7 +78,12 @@ def test_load_config_reads_watch_section(
     """load_config surfaces a watch section from .lintro-config.yaml."""
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(
-        "watch:\n" "  debounce_ms: 750\n" "  auto_fix: true\n" "  tools: [ruff]\n",
+        "watch:\n"
+        "  debounce_ms: 750\n"
+        "  auto_fix: true\n"
+        "  clear_screen: true\n"
+        "  tools: [ruff]\n"
+        "  ignore: ['**/generated/**']\n",
     )
     monkeypatch.chdir(tmp_path)
 
@@ -81,7 +91,9 @@ def test_load_config_reads_watch_section(
 
     assert_that(cfg.watch.debounce_ms).is_equal_to(750)
     assert_that(cfg.watch.auto_fix).is_true()
+    assert_that(cfg.watch.clear_screen).is_true()
     assert_that(cfg.watch.tools).is_equal_to(["ruff"])
+    assert_that(cfg.watch.ignore).is_equal_to(["**/generated/**"])
 
 
 def test_convert_pyproject_watch_table_is_applied() -> None:
@@ -97,7 +109,9 @@ def test_convert_pyproject_watch_table_is_applied() -> None:
         "[tool.lintro.watch]\n"
         "debounce_ms = 450\n"
         "auto_fix = true\n"
-        'tools = ["ruff"]\n',
+        "clear_screen = true\n"
+        'tools = ["ruff"]\n'
+        'ignore = ["**/generated/**"]\n',
     )
     cfg = build_config_from_dict(
         _convert_pyproject_to_config(parsed["tool"]["lintro"]),
@@ -105,4 +119,6 @@ def test_convert_pyproject_watch_table_is_applied() -> None:
 
     assert_that(cfg.watch.debounce_ms).is_equal_to(450)
     assert_that(cfg.watch.auto_fix).is_true()
+    assert_that(cfg.watch.clear_screen).is_true()
     assert_that(cfg.watch.tools).is_equal_to(["ruff"])
+    assert_that(cfg.watch.ignore).is_equal_to(["**/generated/**"])

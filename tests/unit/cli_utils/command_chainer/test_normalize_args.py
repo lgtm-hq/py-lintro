@@ -60,6 +60,18 @@ def test_normalize_preserves_comma_in_option_value(mock_group: click.Group) -> N
     assert_that(result).is_equal_to(["fmt", "--tools", "ruff,bandit"])
 
 
+def test_normalize_preserves_known_commands_in_option_value() -> None:
+    """Known command names remain intact when they form an option value."""
+    from lintro.cli import cli
+
+    chainer = CommandChainer(cli)
+
+    result = chainer.normalize_args(["check", "--exclude", "w,test"])
+
+    assert_that(result).is_equal_to(["check", "--exclude", "w,test"])
+    assert_that(chainer.command_names).contains("w")
+
+
 def test_normalize_multiple_commands(mock_group: click.Group) -> None:
     """Test normalization of multiple chained commands.
 

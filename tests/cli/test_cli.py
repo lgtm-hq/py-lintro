@@ -158,8 +158,9 @@ def test_main_function() -> None:
         ("fmt", "format"),
         ("ls", "list all available tools"),
         ("tst", "Run tests"),
+        ("w", "Watch paths"),
     ],
-    ids=["chk", "fmt", "ls", "tst"],
+    ids=["chk", "fmt", "ls", "tst", "w"],
 )
 def test_cli_command_aliases(alias: str, expected_text: str) -> None:
     """Test that command aliases work.

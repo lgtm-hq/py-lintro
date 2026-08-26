@@ -24,7 +24,8 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
     "--tools",
     default=None,
     help="Comma-separated list of tools to run (e.g., ruff,mypy). "
-    "Defaults to smart selection based on changed file types.",
+    "Defaults to watch.tools, then smart selection based on changed file types. "
+    "Use 'all' for smart selection across every enabled tool.",
 )
 @click.option(
     "--fix/--no-fix",
@@ -45,7 +46,8 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
     "debounce_ms",
     type=int,
     default=None,
-    help="Debounce interval in milliseconds before re-running (default: 300).",
+    help="Debounce interval in milliseconds before re-running. "
+    "Defaults to watch.debounce_ms, then 300.",
 )
 @click.option(
     "--exclude",
@@ -104,11 +106,14 @@ def watch_command(
     effective_clear = (
         clear_screen if clear_screen is not None else watch_cfg.clear_screen
     )
-    restrict_to: list[str] | None = None
-    if tools:
-        restrict_to = [name.strip() for name in tools.split(",") if name.strip()]
-    elif watch_cfg.tools:
-        restrict_to = list(watch_cfg.tools)
+    configured_tools = (
+        [name.strip() for name in tools.split(",") if name.strip()]
+        if tools
+        else list(watch_cfg.tools)
+    )
+    restrict_to: list[str] | None = configured_tools or None
+    if restrict_to and len(restrict_to) == 1 and restrict_to[0].lower() == "all":
+        restrict_to = None
 
     ignore_patterns = list(watch_cfg.ignore) if watch_cfg.ignore else None
 

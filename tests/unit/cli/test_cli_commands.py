@@ -25,6 +25,7 @@ SUBCOMMANDS: tuple[str, ...] = (
     "setup",
     "test",
     "versions",
+    "watch",
 )
 
 # Human-facing summary phrases that must survive Click's \\f truncation.
@@ -42,6 +43,7 @@ SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "setup": "Set up lintro for your project.",
     "test": "Run tests using pytest.",
     "versions": "Display version information for all supported tools.",
+    "watch": "Watch paths and continuously lint files as they change.",
 }
 
 _DOCSTRING_SECTION_RE = re.compile(
@@ -62,6 +64,8 @@ def test_cli_lists_commands_and_aliases() -> None:
     assert_that(result.output).contains("chk")
     assert_that(result.output).contains("fmt")
     assert_that(result.output).contains("ls")
+    assert_that(result.output).contains("watch")
+    assert_that(result.output).contains("w")
 
 
 @pytest.mark.parametrize("subcommand", SUBCOMMANDS)

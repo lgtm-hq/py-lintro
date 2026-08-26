@@ -319,6 +319,35 @@ def _check_enabled_tools(
         )
 
 
+def _check_watch_tools(
+    watch: dict[str, Any],
+    warnings: list[ValidationMessage],
+) -> None:
+    """Warn about unknown tool names in ``watch.tools``.
+
+    Args:
+        watch: The ``watch`` configuration mapping.
+        warnings: List to append findings to.
+    """
+    names = watch.get("tools")
+    if isinstance(names, str):
+        names = [names]
+    if not isinstance(names, list):
+        return
+    known = known_tool_names()
+    for name in names:
+        if not isinstance(name, str) or name.lower() == "all" or name.lower() in known:
+            continue
+        warnings.append(
+            ValidationMessage(
+                code=ValidationCode.UNKNOWN_TOOL,
+                message=f"unknown tool '{name}'",
+                location="watch.tools",
+                suggestion=_suggest(name.lower(), known),
+            ),
+        )
+
+
 def _check_section_types(
     parsed: dict[str, Any],
     errors: list[ValidationMessage],
@@ -619,6 +648,10 @@ def _schema_check_normalized(
                 result.warnings,
             )
         _check_enabled_tools(execution, result.warnings)
+
+    watch = parsed.get("watch")
+    if isinstance(watch, dict):
+        _check_watch_tools(watch, result.warnings)
 
     if not skip_unknown_keys:
         enforce = parsed.get("enforce")

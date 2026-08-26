@@ -224,14 +224,11 @@ def test_set_options_use_project_files_invalid_type(
 
 def test_build_command_basic(
     vue_tsc_plugin: VueTscPlugin,
-    no_local_node_install: None,
 ) -> None:
     """Build basic command with default options.
 
     Args:
         vue_tsc_plugin: The VueTscPlugin instance to test.
-        no_local_node_install: Fixture removing any project-local Node install
-            from resolution.
     """
     with patch("shutil.which", return_value="/usr/local/bin/vue-tsc"):
         cmd = vue_tsc_plugin._build_command(files=[])
