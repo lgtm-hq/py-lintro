@@ -1677,6 +1677,8 @@ def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
     assert_that(allowed).contains("raw.githubusercontent.com:443")
     assert_that(allowed).contains("astral.sh:443")
     assert_that(allowed).contains("releases.astral.sh:443")
+    assert_that(allowed).contains("release-assets.githubusercontent.com:443")
+    assert_that(allowed).contains("github-releases.githubusercontent.com:443")
 
 
 @pytest.mark.parametrize("job_id", ["test-compat", "test-coverage"])
