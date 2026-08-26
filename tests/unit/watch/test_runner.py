@@ -229,10 +229,10 @@ def test_run_batch_reports_event_kind_relative_to_watch_root(
     assert_that(header).does_not_contain("../")
 
 
-def test_compact_tool_result_includes_status_duration_and_issue(
+def test_compact_tool_result_prioritizes_findings_over_failure_status(
     tmp_path: Path,
 ) -> None:
-    """Continuous rendering should expose the issue contract from #443."""
+    """A completed lint result should show findings even when success is false."""
     target = tmp_path / "foo.py"
     issue = BaseIssue(file=str(target), line=42, message="Missing annotation")
     lines: list[str] = []
@@ -241,7 +241,7 @@ def test_compact_tool_result_includes_status_duration_and_issue(
     runner._render_tool_result(
         ToolResult(
             name="mypy",
-            success=True,
+            success=False,
             issues_count=1,
             issues=[issue],
             duration_seconds=1.34,

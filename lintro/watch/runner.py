@@ -179,11 +179,11 @@ class WatchRunner:
         )
         if result.skipped:
             status = f"⏭️ skipped: {result.skip_reason}"
-        elif not result.success:
-            status = "❌ failed"
         elif result.issues_count:
             noun = "issue" if result.issues_count == 1 else "issues"
             status = f"⚠️ {result.issues_count} {noun}"
+        elif not result.success:
+            status = "❌ failed"
         else:
             status = "✅ passed"
         self.emit(f"  ├─ {result.name}: {status}{duration}")
