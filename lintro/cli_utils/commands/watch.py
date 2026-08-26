@@ -137,7 +137,8 @@ def watch_command(
                 scan_roots=path_list,
             )
         except ValueError as exc:
-            raise click.BadParameter(str(exc), param_hint="--tools") from exc
+            source = "--tools" if tools is not None else "watch.tools"
+            raise click.BadParameter(str(exc), param_hint=source) from exc
         for skipped in selection.skipped:
             console.print(
                 f"[yellow]Skipping {skipped.name}: {skipped.reason}[/yellow]",

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
@@ -64,8 +65,10 @@ def test_include_venv_is_forwarded_to_watcher() -> None:
         result = CliRunner().invoke(cli, ["watch", "--include-venv", "."])
 
     assert_that(result.exit_code).is_equal_to(0)
+    assert_that(runner_cls.call_args.kwargs["auto_fix"]).is_false()
     assert_that(runner_cls.call_args.kwargs["include_venv"]).is_true()
     assert_that(watch_paths.call_args.kwargs["include_venv"]).is_true()
+    assert_that(watch_paths.call_args.kwargs["debounce_ms"]).is_equal_to(300)
     assert_that(watch_paths.call_args.kwargs["on_event"]).is_equal_to(
         runner_cls.return_value.record_event,
     )
@@ -122,6 +125,24 @@ def test_tools_all_uses_smart_selection() -> None:
     assert_that(runner_cls.call_args.kwargs["restrict_to"]).is_none()
 
 
+def test_config_tools_all_uses_smart_selection() -> None:
+    """The ``all`` sentinel should work when sourced from watch.tools."""
+    config = LintroConfig(watch=WatchConfig(tools=["all"]))
+    with (
+        patch(
+            "lintro.cli_utils.commands.watch.load_config",
+            return_value=config,
+        ),
+        patch("lintro.cli_utils.commands.watch.watch_paths"),
+        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+    ):
+        runner_cls.return_value.last_exit_code = 0
+        result = CliRunner().invoke(cli, ["watch", "."])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(runner_cls.call_args.kwargs["restrict_to"]).is_none()
+
+
 def test_watch_help_describes_config_fallbacks() -> None:
     """Watch help should explain config-backed tools and debounce defaults."""
     result = CliRunner().invoke(cli, ["watch", "--help"])
@@ -151,12 +172,35 @@ def test_negative_debounce_is_a_clean_click_error() -> None:
     assert_that(result.output).does_not_contain("Traceback")
 
 
-def test_machine_output_formats_are_rejected() -> None:
+@pytest.mark.parametrize("output_format", ["json", "csv", "markdown"])
+def test_machine_output_formats_are_rejected(output_format: str) -> None:
     """Watch mode should not claim a single-document JSON contract."""
-    result = CliRunner().invoke(cli, ["watch", "--output-format", "json", "."])
+    result = CliRunner().invoke(
+        cli,
+        ["watch", "--output-format", output_format, "."],
+    )
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).contains("Invalid value for '--output-format'")
+
+
+def test_config_tool_error_names_watch_tools_source() -> None:
+    """Config-sourced invalid tools should not be blamed on a missing CLI flag."""
+    config = LintroConfig(watch=WatchConfig(tools=["ruft"]))
+    with (
+        patch(
+            "lintro.cli_utils.commands.watch.load_config",
+            return_value=config,
+        ),
+        patch(
+            "lintro.cli_utils.commands.watch.get_tools_to_run",
+            side_effect=ValueError("Unknown tool 'ruft'"),
+        ),
+    ):
+        result = CliRunner().invoke(cli, ["watch", "."])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("Invalid value for watch.tools")
 
 
 def test_malformed_watch_config_is_a_clean_click_error() -> None:

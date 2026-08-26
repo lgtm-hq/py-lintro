@@ -527,6 +527,8 @@ def _parse_watch_config(data: Any) -> WatchConfig:
             ", ".join(sorted(unknown)),
         )
     filtered = {key: value for key, value in data.items() if key in known_fields}
+    if isinstance(filtered.get("tools"), str):
+        filtered["tools"] = [filtered["tools"]]
     return WatchConfig(**filtered)
 
 

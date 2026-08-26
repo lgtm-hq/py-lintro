@@ -32,6 +32,13 @@ def test_watch_config_accepts_zero_debounce() -> None:
     assert_that(WatchConfig(debounce_ms=0).debounce_ms).is_equal_to(0)
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_watch_config_rejects_boolean_debounce(value: bool) -> None:
+    """YAML booleans must not be accepted as integer debounce values."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        WatchConfig(debounce_ms=value)
+
+
 def test_parse_watch_config_from_mapping() -> None:
     """A populated mapping is parsed into a WatchConfig."""
     cfg = _parse_watch_config(
@@ -49,6 +56,13 @@ def test_parse_watch_config_from_mapping() -> None:
     assert_that(cfg.clear_screen).is_true()
     assert_that(cfg.tools).is_equal_to(["ruff", "mypy"])
     assert_that(cfg.ignore).is_equal_to(["**/build/**"])
+
+
+def test_parse_watch_config_coerces_single_tool_name() -> None:
+    """A scalar tool name should match execution.enabled_tools ergonomics."""
+    cfg = _parse_watch_config({"tools": "ruff"})
+
+    assert_that(cfg.tools).is_equal_to(["ruff"])
 
 
 def test_parse_watch_config_empty_returns_defaults() -> None:
@@ -135,3 +149,12 @@ def test_load_config_rejects_non_mapping_pyproject_watch(
 
     with pytest.raises(ValueError, match="watch config must be a mapping"):
         load_config()
+
+
+def test_load_config_rejects_non_mapping_yaml_watch(tmp_path: Path) -> None:
+    """A scalar YAML watch section should fail through the public loader."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("watch: 500\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="watch config must be a mapping"):
+        load_config(config_path=config_file)

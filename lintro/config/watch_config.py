@@ -50,6 +50,25 @@ class WatchConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     ignore: list[str] = Field(default_factory=list)
 
+    @field_validator("debounce_ms", mode="before")
+    @classmethod
+    def _reject_boolean_debounce(cls, value: object) -> object:
+        """Reject YAML booleans before Pydantic coerces them to integers.
+
+        Args:
+            value: Raw debounce value.
+
+        Returns:
+            The unchanged value for normal integer validation.
+
+        Raises:
+            ValueError: If ``value`` is boolean.
+        """
+        if isinstance(value, bool):
+            msg = "watch.debounce_ms must be an integer, not a boolean"
+            raise ValueError(msg)
+        return value
+
     @field_validator("debounce_ms")
     @classmethod
     def _validate_debounce(cls, value: int) -> int:

@@ -10,6 +10,9 @@ to a terminal to run `lintro check`.
 # Watch the current directory
 lintro watch
 
+# Short alias
+lintro w
+
 # Watch specific paths
 lintro watch src/ tests/
 
@@ -22,7 +25,7 @@ lintro watch --fix
 
 Press `Ctrl+C` to stop watching. Watch mode shuts down cleanly and flushes any in-flight
 run before exiting. Lint findings do not stop the watcher; on shutdown, the process
-returns the most recent batch's exit code.
+returns the most recent batch's exit code (or `0` if no batch ran).
 
 ## How It Works
 
