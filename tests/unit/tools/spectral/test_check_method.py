@@ -144,7 +144,13 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
         spectral_plugin.check([str(spec)], {})
 
     command = mock_run.call_args.kwargs["cmd"]
-    assert_that(command).contains("lint", "--format", "json", "--ruleset")
+    assert_that(command).contains(
+        "lint",
+        "--format",
+        "json",
+        "--ignore-unknown-format",
+        "--ruleset",
+    )
     assert_that(command).contains(str(ruleset.absolute()), "openapi.yaml")
     assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(specs_dir))
     assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)

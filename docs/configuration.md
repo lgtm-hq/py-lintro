@@ -1680,7 +1680,8 @@ Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema docume
 is check-only (no autofixer) and **requires a ruleset**. Lintro discovers a supported
 ruleset upward from the target (or uses the `ruleset` option) and skips as a non-error
 when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.yml`,
-and `*.json` file, not only API documents.
+and `*.json` file; `--ignore-unknown-format` keeps non-API documents from producing
+format warnings.
 
 Spectral is intentionally absent from the language map: enabling it for every YAML or
 JSON project would be too broad. A native `.spectral.*` file at a scan root selects it

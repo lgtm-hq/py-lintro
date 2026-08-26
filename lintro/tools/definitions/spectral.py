@@ -289,6 +289,7 @@ class SpectralPlugin(BaseToolPlugin):
             "lint",
             "--format",
             "json",
+            "--ignore-unknown-format",
             "--ruleset",
             str(ruleset_path.absolute()),
         ]

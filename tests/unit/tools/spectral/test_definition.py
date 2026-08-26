@@ -208,6 +208,15 @@ def test_installer_wires_spectral_through_every_sync_point() -> None:
     assert_that(dockerfile).contains("spectral --version")
 
 
+def test_repository_dogfoods_spectral_without_linting_violation_samples() -> None:
+    """Root ruleset enables dogfood while intentional samples remain excluded."""
+    ruleset = Path(".spectral.yaml").read_text(encoding="utf-8")
+    ignore = Path(".lintro-ignore").read_text(encoding="utf-8")
+
+    assert_that(ruleset).contains("spectral:oas")
+    assert_that(ignore).contains("test_samples/")
+
+
 def test_installer_dry_run_simulates_spectral_verification() -> None:
     """Dry-run output must not report an uninstalled Spectral binary as missing."""
     environment = os.environ.copy()

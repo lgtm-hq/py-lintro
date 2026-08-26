@@ -1,0 +1,3 @@
+# Dogfood Spectral's built-in OpenAPI ruleset on repository API documents.
+---
+extends: ['spectral:oas']

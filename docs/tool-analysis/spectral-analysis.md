@@ -42,7 +42,8 @@ upward from the target for `.spectral.yaml`, `.spectral.yml`, `.spectral.json`, 
 `.spectral.js`, or uses an explicit `ruleset` option. When no ruleset is found, the tool
 **skips gracefully as a non-error** (the same pattern lintro uses for other
 ruleset-gated tools). The file patterns (`*.yaml`, `*.yml`, `*.json`) are inert until a
-project opts in; once enabled, every matching file is checked.
+project opts in; once enabled, every matching file is passed to Spectral with
+`--ignore-unknown-format`, so non-API documents do not produce format warnings.
 
 ## Parser Choice: Native JSON (not shared SARIF)
 
@@ -95,8 +96,8 @@ Spectral's maintained rule-reference files.
 
 ### ✅ Preserved Features
 
-- ✅ Runs `spectral lint --format json` and maps every finding to a structured issue
-  (rule code, message, one-based line/column, JSON path, severity)
+- ✅ Runs `spectral lint --format json --ignore-unknown-format` and maps every finding
+  to a structured issue (rule code, message, one-based line/column, JSON path, severity)
 - ✅ Retains Spectral's JSON path array as a dotted display path
 - ✅ Discovers the four supported `.spectral.*` ruleset filenames upward from the target
 - ✅ Skips gracefully (non-error) when no ruleset exists
