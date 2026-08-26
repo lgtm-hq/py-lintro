@@ -1,3 +1,4 @@
+# Violating OpenAPI fixture intentionally omits operationId, servers, and metadata.
 openapi: 3.0.0
 info:
   title: Sample API

@@ -76,7 +76,7 @@ def spec_with_ruleset(tmp_path: Path) -> Path:
         "tools",
         "config",
         "spectral",
-        "openapi_violations.yaml",
+        "spectral_violations.yaml",
         dest_name="openapi.yaml",
     )
 
@@ -88,7 +88,6 @@ def test_check_detects_violations(spec_with_ruleset: Path) -> None:
         spec_with_ruleset: OpenAPI document with a colocated ruleset.
     """
     plugin = SpectralPlugin()
-    plugin.exclude_patterns = []
     result = plugin.check([str(spec_with_ruleset)], {})
 
     assert_that(result.name).is_equal_to("spectral")
@@ -103,6 +102,37 @@ def test_check_detects_violations(spec_with_ruleset: Path) -> None:
     issue = next(issue for issue in issues if issue.code == "operation-operationId")
     assert_that(issue.path).contains("paths./users.get")
     assert_that(issue.line).is_greater_than(0)
+
+
+def test_check_discovers_parent_ruleset(tmp_path: Path) -> None:
+    """Real CLI execution finds a ruleset above the target document.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "spectral",
+        ".spectral.yaml",
+    )
+    nested = tmp_path / "specs"
+    nested.mkdir()
+    spec = copy_sample(
+        nested,
+        "tools",
+        "config",
+        "spectral",
+        "spectral_violations.yaml",
+        dest_name="openapi.yaml",
+    )
+
+    result = SpectralPlugin().check([str(spec)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
 
 
 def test_check_clean_spec_passes(tmp_path: Path) -> None:
@@ -123,12 +153,11 @@ def test_check_clean_spec_passes(tmp_path: Path) -> None:
         "tools",
         "config",
         "spectral",
-        "openapi_clean.yaml",
+        "spectral_clean.yaml",
         dest_name="openapi.yaml",
     )
 
     plugin = SpectralPlugin()
-    plugin.exclude_patterns = []
     result = plugin.check([str(spec)], {})
 
     assert_that(result.name).is_equal_to("spectral")
@@ -156,7 +185,6 @@ def test_check_detects_violations_in_json_openapi(tmp_path: Path) -> None:
     )
 
     plugin = SpectralPlugin()
-    plugin.exclude_patterns = []
     result = plugin.check([str(spec)], {})
 
     assert_that(result.name).is_equal_to("spectral")
@@ -177,17 +205,18 @@ def test_check_skips_without_ruleset(tmp_path: Path) -> None:
         "tools",
         "config",
         "spectral",
-        "openapi_violations.yaml",
+        "spectral_violations.yaml",
         dest_name="openapi.yaml",
     )
 
     plugin = SpectralPlugin()
-    plugin.exclude_patterns = []
     result = plugin.check([str(spec)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no ruleset")
+    assert_that(result.skipped).is_true()
+    assert_that(result.skip_reason).is_equal_to("no ruleset found")
 
 
 def test_invalid_ruleset_is_not_reported_as_clean(tmp_path: Path) -> None:
@@ -202,12 +231,11 @@ def test_invalid_ruleset_is_not_reported_as_clean(tmp_path: Path) -> None:
         "tools",
         "config",
         "spectral",
-        "openapi_violations.yaml",
+        "spectral_violations.yaml",
         dest_name="openapi.yaml",
     )
 
     plugin = SpectralPlugin()
-    plugin.exclude_patterns = []
     result = plugin.check([str(spec)], {})
 
     assert_that(result.success).is_false()

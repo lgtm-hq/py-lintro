@@ -1,3 +1,4 @@
+# Clean OpenAPI fixture expected to satisfy the recommended spectral:oas rules.
 openapi: 3.0.0
 info:
   title: Sample API

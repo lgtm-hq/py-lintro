@@ -73,7 +73,10 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     assert_that(result.issues_count).is_equal_to(1)
     issue = cast(SpectralIssue, result.issues[0])  # type: ignore[index]
     assert_that(issue.code).is_equal_to("operation-operationId")
-    assert_that(issue.doc_url).contains("docs.stoplight.io/docs/spectral")
+    assert_that(issue.doc_url).contains(
+        "github.com/stoplightio/spectral",
+        "openapi-rules.md#operation-operationId",
+    )
 
 
 def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:
@@ -145,6 +148,26 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
     assert_that(command).contains(str(ruleset.absolute()), "openapi.yaml")
     assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(specs_dir))
     assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)
+
+
+def test_find_ruleset_supports_json_filename(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Discovery recognizes supported non-YAML ruleset filenames.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    ruleset = tmp_path / ".spectral.json"
+    ruleset.write_text('{"extends": ["spectral:oas"]}\n')
+    nested = tmp_path / "specs"
+    nested.mkdir()
+
+    assert_that(spectral_plugin._find_ruleset(search_dir=str(nested))).is_equal_to(
+        str(ruleset),
+    )
 
 
 def test_check_per_call_ruleset_reaches_command(
@@ -248,6 +271,8 @@ def test_check_skips_without_ruleset(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no ruleset")
+    assert_that(result.skipped).is_true()
+    assert_that(result.skip_reason).is_equal_to("no ruleset found")
     mock_run.assert_not_called()
 
 

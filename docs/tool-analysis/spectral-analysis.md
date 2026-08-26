@@ -77,9 +77,10 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 
 - SARIF embeds `helpUri` per built-in rule in `tool.driver.rules[]`, whereas the native
   JSON has no per-finding doc URL. In Spectral 6.16 those URIs target retired
-  `meta.stoplight.io` Markdown pages that return 404. Lintro links recognized built-ins
-  to the live official rulesets guide instead. Custom and JSON Schema codes have no
-  built-in mapping, so their docs link is left empty.
+  `meta.stoplight.io` Markdown pages that return 404. Lintro reconstructs per-rule links
+  against the same maintained reference files in Spectral's official GitHub repository.
+  Custom and JSON Schema codes have no built-in mapping, so their docs link is left
+  empty.
 
 ### Decision
 
@@ -87,8 +88,8 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 when it is lossless for the tool — Spectral's SARIF is **not** lossless: it discards the
 JSON path array and collapses `info`/`hint` severity. The native JSON parser
 (`--format json`) retains both, converting the zero-based offsets to lintro's one-based
-convention. The only SARIF advantage (doc URLs) is recovered with a documentation-URL
-link to Spectral's live rulesets guide.
+convention. The only SARIF advantage (doc URLs) is recovered with per-rule links to
+Spectral's maintained rule-reference files.
 
 ## Lintro Implementation Analysis
 
@@ -104,10 +105,11 @@ link to Spectral's live rulesets guide.
 
 - ⚠️ Check-only; `fix()` raises `NotImplementedError` (Spectral has no fixer)
 - ⚠️ Severity is normalized to lintro's ERROR/WARNING/INFO (hint → INFO)
-- ⚠️ Intentionally absent from the recommended language map; a `.spectral.*` config or
-  explicit `--tools spectral` selection opts a project in
-- ⚠️ Recognized built-in codes link to the live Spectral rulesets guide; custom / JSON
-  Schema codes get no link
+- ⚠️ Intentionally absent from the recommended language map; a scan-root `.spectral.*`
+  file selects it on no-config runs, while initialized configs must add `spectral` to
+  `execution.enabled_tools` (or callers can use `--tools spectral`)
+- ⚠️ Recognized built-in codes link to Spectral's official rule-reference files; custom
+  / JSON Schema codes get no link
 
 ### 🚀 Enhancements
 

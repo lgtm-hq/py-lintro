@@ -33,7 +33,8 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
 
     Returns:
         Serialized issue data with ``file``, ``line``, ``code`` and
-        ``message`` always present and ``doc_url`` included when set.
+        ``message`` always present, ``doc_url`` included when set, and
+        ``path`` included when it is a non-empty string.
     """
     data: dict[str, Any] = {
         "file": getattr(issue, "file", "") or "",

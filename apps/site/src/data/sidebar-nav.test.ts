@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupSectionDocs, sidebarLabel } from './sidebar-nav';
+import { groupSectionDocs, resolveNavGroup, sidebarLabel } from './sidebar-nav';
 
 describe('groupSectionDocs', () => {
   it('groups usage docs with short nav labels', () => {
@@ -52,5 +52,14 @@ describe('groupSectionDocs', () => {
 
     const { groups } = groupSectionDocs('tools', docs);
     expect(groups[0]?.docs[0]?.id).toBe('tools/ruff');
+  });
+
+  it('groups spectral under config without frontmatter', () => {
+    expect(
+      resolveNavGroup({
+        id: 'tools/spectral',
+        data: { title: 'spectral', order: 20 },
+      })
+    ).toBe('config');
   });
 });

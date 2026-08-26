@@ -148,7 +148,8 @@ order and for what changed.
 - `spectral` - OpenAPI/AsyncAPI/JSON Schema linter (`bun add -D @stoplight/spectral-cli`
   or `npm install -D @stoplight/spectral-cli`). Select it with `--tools spectral`, a
   scan-root `.spectral.yaml`/`.yml`/`.json`/`.js` on a no-config run, or
-  `execution.enabled_tools`; after selection it skips when no ruleset is found.
+  `execution.enabled_tools` (add `spectral` after `lintro init`); after selection it
+  skips when no ruleset is found.
 
 ### Checking Versions
 

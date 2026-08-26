@@ -101,6 +101,7 @@ def test_non_list_path_is_empty() -> None:
     """A non-array ``path`` field is treated as document-level (empty)."""
     output = (
         '[{"code": "c", "path": "not-a-list", "message": "m", "severity": 1,'
+        ' "range": {"start": {"line": 0, "character": 0}},'
         ' "source": "f.yaml"}]'
     )
     issue = parse_spectral_output(output)[0]
@@ -184,6 +185,18 @@ def test_null_range_offsets_are_unknown() -> None:
     assert_that(issue.column).is_equal_to(0)
 
 
+def test_invalid_range_offsets_are_unknown() -> None:
+    """Boolean and negative offsets do not become plausible locations."""
+    output = (
+        '[{"code": "c", "path": [], "message": "m", "severity": 1,'
+        ' "range": {"start": {"line": true, "character": -1}},'
+        ' "source": "f.yaml"}]'
+    )
+    issue = parse_spectral_output(output)[0]
+    assert_that(issue.line).is_equal_to(0)
+    assert_that(issue.column).is_equal_to(0)
+
+
 def test_non_dict_entries_skipped() -> None:
     """Non-object array entries are skipped without error."""
     output = '[{"code": "c", "message": "m", "path": []}, "not a dict", 42, null]'
@@ -244,19 +257,26 @@ def test_null_fields_do_not_become_literal_none() -> None:
     """JSON nulls map to empty strings, not the string 'None'."""
     output = (
         '[{"code": "c", "message": "m", "source": null,'
-        ' "severity": 1, "range": {"start": {"line": 0, "character": 0}}}]'
+        ' "path": [null, "info"], "severity": 1,'
+        ' "range": {"start": {"line": 0, "character": 0}}}]'
     )
     issues = parse_spectral_output(output)
     assert_that(issues).is_length(1)
     assert_that(issues[0].file).is_empty()
     assert_that(issues[0].code).is_equal_to("c")
     assert_that(issues[0].message).is_equal_to("m")
+    assert_that(issues[0].path).is_equal_to("info")
 
 
 def test_empty_code_and_message_is_skipped() -> None:
     """A finding with no code and no message is not a blank 1:1 warning."""
-    output = '[{"severity": 1, "source": "f.yaml"}]'
-    assert_that(parse_spectral_output(output)).is_empty()
+    output = (
+        '[{"code": "valid", "message": "kept", "path": []},'
+        ' {"severity": 1, "source": "f.yaml"}]'
+    )
+    issues = parse_spectral_output(output)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("valid")
 
 
 def test_noise_json_array_does_not_hide_findings() -> None:
@@ -270,11 +290,16 @@ def test_noise_json_array_does_not_hide_findings() -> None:
 
 def test_generic_object_array_does_not_hide_findings() -> None:
     """A generic JSON log object cannot masquerade as Spectral output."""
-    output = '[{"message": "npx noise"}]\n' + REAL_OUTPUT
-    issues = parse_spectral_output(output)
-    assert_that([issue.code for issue in issues]).is_equal_to(
-        ["oas3-api-servers", "operation-operationId"],
+    noise_arrays = (
+        '[{"message": "npx noise"}]',
+        '[{"message": "npx noise", "path": "somefile.js"}]',
+        '[{"code": "LOG", "message": "npx noise", "source": "runner"}]',
     )
+    for noise in noise_arrays:
+        issues = parse_spectral_output(f"{noise}\n{REAL_OUTPUT}")
+        assert_that([issue.code for issue in issues]).is_equal_to(
+            ["oas3-api-servers", "operation-operationId"],
+        )
 
 
 def test_empty_array_prefix_does_not_hide_findings() -> None:
@@ -309,3 +334,10 @@ def test_json_serialization_preserves_spectral_path() -> None:
     issue = parse_spectral_output(REAL_OUTPUT)[1]
 
     assert_that(serialize_issue(issue)["path"]).is_equal_to("paths./users.get")
+
+
+def test_json_serialization_omits_empty_spectral_path() -> None:
+    """Document-level findings do not emit an empty machine-readable path."""
+    issue = parse_spectral_output(REAL_OUTPUT)[0]
+
+    assert_that(serialize_issue(issue)).does_not_contain_key("path")

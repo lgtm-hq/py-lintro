@@ -8,7 +8,6 @@ import pytest
 from assertpy import assert_that
 
 from lintro._tool_versions import get_min_version
-from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.core.tool_registry import ManifestRegistry
@@ -16,7 +15,12 @@ from lintro.tools.core.version_parsing import (
     TOOLS_WITH_SIMPLE_VERSION_PATTERN,
     extract_version_from_output,
 )
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.definitions.spectral import (
+    SPECTRAL_DEFAULT_TIMEOUT,
+    SPECTRAL_FILE_PATTERNS,
+    SPECTRAL_RULESET_FILES,
+    SpectralPlugin,
+)
 
 
 def test_definition_name(spectral_plugin: SpectralPlugin) -> None:
@@ -44,10 +48,9 @@ def test_definition_file_patterns(spectral_plugin: SpectralPlugin) -> None:
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
     """
-    patterns = spectral_plugin.definition.file_patterns
-    assert_that(patterns).contains("*.yaml")
-    assert_that(patterns).contains("*.yml")
-    assert_that(patterns).contains("*.json")
+    assert_that(spectral_plugin.definition.file_patterns).is_equal_to(
+        SPECTRAL_FILE_PATTERNS,
+    )
 
 
 def test_definition_native_configs(spectral_plugin: SpectralPlugin) -> None:
@@ -56,12 +59,11 @@ def test_definition_native_configs(spectral_plugin: SpectralPlugin) -> None:
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
     """
-    configs = spectral_plugin.definition.native_configs
-    assert_that(configs).contains(
-        ".spectral.yaml",
-        ".spectral.yml",
-        ".spectral.json",
-        ".spectral.js",
+    assert_that(spectral_plugin.definition.native_configs).is_equal_to(
+        SPECTRAL_RULESET_FILES,
+    )
+    assert_that(spectral_plugin.definition.default_timeout).is_equal_to(
+        SPECTRAL_DEFAULT_TIMEOUT,
     )
 
 
@@ -100,32 +102,36 @@ def test_set_options_rejects_invalid_timeout(spectral_plugin: SpectralPlugin) ->
 
 
 @pytest.mark.parametrize(
-    "code",
+    ("code", "rules_page"),
     [
-        "oas2-schema",
-        "oas3-api-servers",
-        "oas3_1-servers-in-webhook",
-        "openapi-tags",
-        "operation-operationId",
-        "info-contact",
-        "asyncapi-info-contact",
-        "asyncapi-3-tags",
-        "arazzo-workflow-id",
+        ("oas2-schema", "openapi-rules.md"),
+        ("oas3-api-servers", "openapi-rules.md"),
+        ("oas3_1-servers-in-webhook", "openapi-rules.md"),
+        ("openapi-tags", "openapi-rules.md"),
+        ("operation-operationId", "openapi-rules.md"),
+        ("info-contact", "openapi-rules.md"),
+        ("asyncapi-info-contact", "asyncapi-rules.md"),
+        ("asyncapi-3-tags", "asyncapi-rules.md"),
+        ("arazzo-workflow-id", "arazzo-rules.md"),
     ],
 )
-def test_doc_url_routes_known_builtins_to_live_ruleset_docs(
+def test_doc_url_routes_known_builtins_to_official_rule_files(
     spectral_plugin: SpectralPlugin,
     code: str,
+    rules_page: str,
 ) -> None:
-    """Known built-ins link to the live official Spectral rulesets guide.
+    """Known built-ins link to maintained official rule files.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
         code: Spectral rule code.
+        rules_page: Expected rule-reference Markdown filename.
     """
-    assert_that(spectral_plugin.doc_url(code)).is_equal_to(
-        str(DocUrlTemplate.SPECTRAL),
+    url = spectral_plugin.doc_url(code)
+    assert_that(url).starts_with(
+        "https://github.com/stoplightio/spectral/blob/develop/docs/reference/",
     )
+    assert_that(url).contains(f"{rules_page}#{code}")
 
 
 @pytest.mark.parametrize(
@@ -158,7 +164,7 @@ def test_spectral_version_uses_simple_numeric_parser() -> None:
     assert_that(expected).is_not_none()
     assert_that(ToolName.SPECTRAL in TOOLS_WITH_SIMPLE_VERSION_PATTERN).is_true()
     assert_that(
-        extract_version_from_output(f"spectral {expected}", "spectral"),
+        extract_version_from_output(expected, "spectral"),
     ).is_equal_to(
         expected,
     )
@@ -182,6 +188,12 @@ def test_spectral_is_config_selected_not_language_mapped(
 def test_installer_wires_spectral_through_every_sync_point() -> None:
     """Installer help, filtering, installation, and verification stay aligned."""
     script = Path("scripts/utils/install-tools.sh").read_text(encoding="utf-8")
+    verify_line = next(
+        line
+        for line in script.splitlines()
+        if line.strip().startswith("tools_to_verify=")
+    )
+    dockerfile = Path("docker/tools.Dockerfile").read_text(encoding="utf-8")
 
     assert_that(script).contains(
         "- Spectral (OpenAPI/AsyncAPI/JSON Schema linter)",
@@ -190,9 +202,8 @@ def test_installer_wires_spectral_through_every_sync_point() -> None:
         'get_tool_version "@stoplight/spectral-cli"',
         '["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"',
     )
-    assert_that(script).contains(
-        '"shfmt" "spectral" "sqlfluff"',
-    )
+    assert_that(verify_line).contains('"spectral"')
+    assert_that(dockerfile).contains("spectral --version")
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:

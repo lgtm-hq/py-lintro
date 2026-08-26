@@ -197,8 +197,9 @@ class SpectralPlugin(BaseToolPlugin):
 
         Spectral 6.16 emits per-rule SARIF help URIs on a retired host that now
         returns 404. Recognized built-in OpenAPI, AsyncAPI, and Arazzo codes
-        therefore link to the live official rulesets guide. Custom and JSON
-        Schema codes return None rather than implying a built-in mapping.
+        therefore link to the maintained rule files in Spectral's official
+        repository. Custom and JSON Schema codes return None rather than
+        implying a built-in mapping.
 
         Args:
             code: Spectral rule code (e.g., ``oas3-api-servers``).
@@ -210,13 +211,14 @@ class SpectralPlugin(BaseToolPlugin):
         if not code:
             return None
         lowered = code.lower()
-        is_known_builtin = (
-            lowered.startswith(("asyncapi-", "arazzo-"))
-            or lowered in _SPECTRAL_OAS_EXACT_CODES
-            or any(lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES)
-        )
-        if is_known_builtin:
-            return str(DocUrlTemplate.SPECTRAL)
+        if lowered.startswith("asyncapi-"):
+            return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=code)
+        if lowered.startswith("arazzo-"):
+            return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=code)
+        if lowered in _SPECTRAL_OAS_EXACT_CODES or any(
+            lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES
+        ):
+            return DocUrlTemplate.SPECTRAL.format(code=code)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -265,6 +267,8 @@ class SpectralPlugin(BaseToolPlugin):
                     "API linting."
                 ),
                 issues_count=0,
+                skipped=True,
+                skip_reason="no ruleset found",
             )
 
         logger.debug(

@@ -24,9 +24,6 @@ _SEVERITY_BY_LEVEL: dict[int, str] = {
     3: "hint",
 }
 _SPECTRAL_IDENTITY_KEYS: frozenset[str] = frozenset({"code", "message"})
-_SPECTRAL_LOCATION_KEYS: frozenset[str] = frozenset(
-    {"source", "range", "path"},
-)
 
 
 def _looks_like_spectral_payload(data: Any) -> bool:
@@ -35,9 +32,10 @@ def _looks_like_spectral_payload(data: Any) -> bool:
     Node/npx/bunx and Spectral itself can emit a valid JSON array that is not
     the findings payload (``["warning"]``, a bracketed log line). Accept only
     a list containing an object with both a finding identity (``code`` or
-    ``message``) and location data (``source``, ``range``, or ``path``). A
-    generic preamble such as ``[{"message": "npx noise"}]`` must not hide the
-    later diagnostics array. An empty list is not treated as a hit either.
+    ``message``) and Spectral-shaped location data (a list-valued ``path`` or
+    object-valued ``range``). Generic log objects often have ``message``,
+    ``source``, or string-valued ``path`` keys and must not hide the later
+    diagnostics array. An empty list is not treated as a hit either.
 
     Args:
         data: A decoded JSON value.
@@ -51,7 +49,10 @@ def _looks_like_spectral_payload(data: Any) -> bool:
         if (
             isinstance(item, dict)
             and _SPECTRAL_IDENTITY_KEYS.intersection(item)
-            and _SPECTRAL_LOCATION_KEYS.intersection(item)
+            and (
+                isinstance(item.get("path"), list)
+                or isinstance(item.get("range"), dict)
+            )
         ):
             return True
     return False
@@ -150,7 +151,7 @@ def _parse_entry(entry: dict[str, Any]) -> SpectralIssue | None:
     # "." for display; empty for document-level findings.
     raw_path = entry.get("path", [])
     if isinstance(raw_path, list):
-        path = ".".join(str(segment) for segment in raw_path)
+        path = ".".join(str(segment) for segment in raw_path if segment is not None)
     else:
         path = ""
 
