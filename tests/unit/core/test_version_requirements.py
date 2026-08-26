@@ -97,6 +97,8 @@ def test_compare_versions(version1: str, version2: str, expected: int) -> None:
         ("clippy", "clippy 0.1.75 (abcdef123 2024-01-01)", "1.75.0"),
         # typos: the binary is "typos" but `--version` prints the crate name.
         ("typos", "typos-cli 1.49.0", "1.49.0"),
+        # Spectral prints a bare semantic version.
+        ("spectral", "6.16.1", "6.16.1"),
     ],
 )
 def test_extract_version_from_output(

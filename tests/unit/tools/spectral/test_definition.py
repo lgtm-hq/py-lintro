@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.tools.core.tool_registry import ManifestRegistry
+from lintro.tools.core.version_parsing import TOOLS_WITH_SIMPLE_VERSION_PATTERN
 from lintro.tools.definitions.spectral import SpectralPlugin
 
 
@@ -119,16 +122,47 @@ def test_doc_url_routes_by_ruleset_prefix(
     assert_that(url).contains(anchor)
 
 
-def test_doc_url_skips_custom_and_empty_codes(
+@pytest.mark.parametrize(
+    "code",
+    [
+        "",
+        "my-org-rule",
+        "no-unused-path",
+        "info-company-extension",
+        "schema-required",
+    ],
+)
+def test_doc_url_skips_custom_and_json_schema_codes(
     spectral_plugin: SpectralPlugin,
+    code: str,
 ) -> None:
     """Custom / JSON Schema codes must not inherit the OpenAPI rules page.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
+        code: Rule code without a known built-in documentation mapping.
     """
-    assert_that(spectral_plugin.doc_url("my-org-rule")).is_none()
-    assert_that(spectral_plugin.doc_url("")).is_none()
+    assert_that(spectral_plugin.doc_url(code)).is_none()
+
+
+def test_spectral_version_uses_simple_numeric_parser() -> None:
+    """Spectral's numeric ``--version`` output uses the shared parser."""
+    assert_that(ToolName.SPECTRAL in TOOLS_WITH_SIMPLE_VERSION_PATTERN).is_true()
+
+
+def test_spectral_is_config_selected_not_language_mapped(
+    spectral_plugin: SpectralPlugin,
+) -> None:
+    """Recommended language detection must not enable Spectral for all YAML."""
+    registry = ManifestRegistry.load()
+    mapped = {name for tools in registry.language_map.values() for name in tools}
+    native_configs = spectral_plugin.definition.native_configs
+
+    assert_that(mapped).does_not_contain("spectral")
+    assert_that(native_configs).contains(
+        ".spectral.yaml",
+    )
+    assert_that(native_configs).contains(".spectral.yml")
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:

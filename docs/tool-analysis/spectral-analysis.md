@@ -37,12 +37,12 @@ Spectral **requires a ruleset** — without one it exits non-zero with "No rules
 been found." OpenAPI/AsyncAPI documents are ordinary YAML/JSON files, so linting every
 YAML/JSON file in a repository would be noisy and wrong.
 
-Lintro therefore **only runs Spectral when a ruleset is present**. The plugin discovers
-a `.spectral.*` file upward from the target (mirroring Spectral's own resolution) or
-uses an explicit `ruleset` option. When no ruleset is found, the tool **skips gracefully
-as a non-error** (the same pattern lintro uses for other ruleset-gated tools). This
-makes the file patterns (`*.yaml`, `*.yml`, `*.json`) safe: they are inert until a
-project opts in with a ruleset.
+Lintro therefore **only runs Spectral when a ruleset is present**. The plugin searches
+upward from the target for `.spectral.yaml`, `.spectral.yml`, `.spectral.json`, or
+`.spectral.js`, or uses an explicit `ruleset` option. When no ruleset is found, the tool
+**skips gracefully as a non-error** (the same pattern lintro uses for other
+ruleset-gated tools). The file patterns (`*.yaml`, `*.yml`, `*.json`) are inert until a
+project opts in; once enabled, every matching file is checked.
 
 ## Parser Choice: Native JSON (not shared SARIF)
 
@@ -66,10 +66,9 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 
 ### Where SARIF is lossy for Spectral
 
-- **JSON pointer path is dropped.** Spectral's native JSON carries a `path` array
-  pointing at the exact node in the API document (e.g. `paths./users.get`). This is
-  Spectral's defining location signal for structured specs and the SARIF output omits it
-  entirely.
+- **JSON path array is dropped.** Spectral's native JSON carries a `path` array pointing
+  at the exact node in the API document (e.g. `paths./users.get`). This is Spectral's
+  defining location signal for structured specs and the SARIF output omits it entirely.
 - **Severity fidelity is reduced.** Spectral's four diagnostic levels (error=0, warn=1,
   info=2, hint=3) collapse in SARIF: both `info` and `hint` map to `note`, erasing a
   distinction the native JSON preserves.
@@ -85,7 +84,7 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 
 **Native JSON parser.** Per the evaluation's rule — adopt the shared SARIF parser only
 when it is lossless for the tool — Spectral's SARIF is **not** lossless: it discards the
-JSON-pointer `path` and collapses `info`/`hint` severity. The native JSON parser
+JSON path array and collapses `info`/`hint` severity. The native JSON parser
 (`--format json`) retains both, converting the zero-based offsets to lintro's one-based
 convention. The only SARIF advantage (doc URLs) is recovered with a documentation-URL
 template.
@@ -96,14 +95,16 @@ template.
 
 - ✅ Runs `spectral lint --format json` and maps every finding to a structured issue
   (rule code, message, one-based line/column, JSON path, severity)
-- ✅ Retains the JSON-pointer `path` that SARIF drops
-- ✅ Discovers `.spectral.*` rulesets upward from the target, matching Spectral
+- ✅ Retains Spectral's JSON path array as a dotted display path
+- ✅ Discovers the four supported `.spectral.*` ruleset filenames upward from the target
 - ✅ Skips gracefully (non-error) when no ruleset exists
 
 ### ⚠️ Defaults and Notes
 
 - ⚠️ Check-only; `fix()` raises `NotImplementedError` (Spectral has no fixer)
 - ⚠️ Severity is normalized to lintro's ERROR/WARNING/INFO (hint → INFO)
+- ⚠️ Intentionally absent from the recommended language map; a `.spectral.*` config or
+  explicit `--tools spectral` selection opts a project in
 - ⚠️ Doc URLs are prefix-routed to the OpenAPI, AsyncAPI, or Arazzo rules page; custom /
   JSON Schema codes have no per-rule index and get no link
 

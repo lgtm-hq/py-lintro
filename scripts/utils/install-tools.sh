@@ -81,6 +81,7 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - Spectral (OpenAPI/AsyncAPI/JSON Schema linter)
   - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)

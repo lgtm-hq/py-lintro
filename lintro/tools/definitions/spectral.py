@@ -49,24 +49,34 @@ SPECTRAL_RULESET_FILES: list[str] = [
     ".spectral.json",
     ".spectral.js",
 ]
-# Built-in Spectral 6.16 rule codes that live on the OpenAPI rules page but
-# do not start with ``oas``. Custom / JSON Schema codes have no fragment map
-# and must not inherit this page.
+# Built-in Spectral 6.16 rule-code families that live on the OpenAPI rules page.
+# Keep broad, generic prefixes such as ``no-`` and ``info-`` out: custom rules can
+# legitimately use them and must not inherit a misleading OpenAPI link.
 _SPECTRAL_OAS_PREFIXES: tuple[str, ...] = (
-    "array-items",
-    "contact-",
-    "duplicated-entry-in-enum",
-    "info-",
-    "license-",
-    "no-",
     "oas2-",
     "oas3-",
     "oas3_",
     "openapi-",
     "operation-",
-    "path-",
-    "tag-",
-    "typed-enum",
+)
+_SPECTRAL_OAS_EXACT_CODES: frozenset[str] = frozenset(
+    {
+        "array-items",
+        "contact-properties",
+        "duplicated-entry-in-enum",
+        "info-contact",
+        "info-description",
+        "info-license",
+        "license-url",
+        "no-$ref-siblings",
+        "no-eval-in-markdown",
+        "no-script-tags-in-markdown",
+        "path-declarations-must-exist",
+        "path-keys-no-trailing-slash",
+        "path-not-include-query",
+        "tag-description",
+        "typed-enum",
+    },
 )
 
 
@@ -135,7 +145,11 @@ class SpectralPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
-    def _find_ruleset(self, search_dir: str | None = None) -> str | None:
+    def _find_ruleset(
+        self,
+        search_dir: str | None = None,
+        options: dict[str, object] | None = None,
+    ) -> str | None:
         """Locate a Spectral ruleset.
 
         Uses an explicitly configured ruleset when provided; otherwise searches
@@ -144,11 +158,14 @@ class SpectralPlugin(BaseToolPlugin):
 
         Args:
             search_dir: Directory to start searching from. Defaults to CWD.
+            options: Effective options for this invocation. Defaults to the
+                plugin's configured options.
 
         Returns:
             Path to the ruleset if found, otherwise None.
         """
-        ruleset = self.options.get("ruleset")
+        effective_options = self.options if options is None else options
+        ruleset = effective_options.get("ruleset")
         if ruleset:
             return str(ruleset)
 
@@ -199,7 +216,9 @@ class SpectralPlugin(BaseToolPlugin):
             return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=code)
         if lowered.startswith("arazzo-"):
             return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=code)
-        if any(lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES):
+        if lowered in _SPECTRAL_OAS_EXACT_CODES or any(
+            lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES
+        ):
             return DocUrlTemplate.SPECTRAL.format(code=code)
         return None
 
@@ -226,7 +245,10 @@ class SpectralPlugin(BaseToolPlugin):
 
         # Spectral requires a ruleset. Without one it cannot lint, so skip
         # gracefully instead of surfacing an error (stylelint/vale pattern).
-        ruleset = self._find_ruleset(search_dir=paths[0] if paths else None)
+        ruleset = self._find_ruleset(
+            search_dir=paths[0] if paths else None,
+            options=merged_options,
+        )
         if not ruleset:
             logger.debug(
                 "[SpectralPlugin] No ruleset found; skipping. Add a "
@@ -277,6 +299,7 @@ class SpectralPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=timeout_result.output,
                 issues_count=timeout_result.issues_count,
             )

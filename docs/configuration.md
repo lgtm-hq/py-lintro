@@ -1677,9 +1677,14 @@ lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
 #### Spectral Configuration
 
 Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents. It
-is check-only (no autofixer) and **requires a ruleset** — lintro only runs Spectral when
-one is present and skips it gracefully otherwise, so it never lints arbitrary YAML/JSON
-files.
+is check-only (no autofixer) and **requires a ruleset**. Lintro discovers a supported
+ruleset upward from the target (or uses the `ruleset` option) and skips as a non-error
+when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.yml`,
+and `*.json` file, not only API documents.
+
+Spectral is intentionally absent from the language map: enabling it for every YAML or
+JSON project would be too broad. A native `.spectral.*` config selects it for unscoped
+runs; users can also name it with `--tools spectral`.
 
 **Native Config Detection:**
 
@@ -1720,7 +1725,7 @@ extends: ['spectral:oas'] # or ["spectral:asyncapi"]
 **Usage Examples:**
 
 ```bash
-# Lint an OpenAPI document (requires a .spectral.yaml ruleset alongside it)
+# Lint an OpenAPI document (rulesets are discovered upward from the target)
 lintro check --tools spectral openapi.yaml
 
 # Use an explicit ruleset

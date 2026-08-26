@@ -108,6 +108,79 @@ def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -
     assert_that(result.output).is_none()
 
 
+def test_check_discovers_parent_ruleset_and_builds_json_command(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check discovers a parent ruleset and passes the required CLI flags.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    ruleset = tmp_path / ".spectral.yaml"
+    ruleset.write_text('extends: ["spectral:oas"]\n')
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    spec = specs_dir / "openapi.yaml"
+    spec.write_text("openapi: 3.0.0\n")
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess",
+            return_value=(True, "[]"),
+        ) as mock_run,
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(specs_dir)
+        spectral_plugin.check([str(spec)], {})
+
+    command = mock_run.call_args.kwargs["cmd"]
+    assert_that(command).contains("lint", "--format", "json", "--ruleset")
+    assert_that(command).contains(str(ruleset.absolute()))
+
+
+def test_check_per_call_ruleset_reaches_command(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """A per-call ruleset override reaches the Spectral command.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    spec = tmp_path / "openapi.yaml"
+    spec.write_text("openapi: 3.0.0\n")
+    ruleset = tmp_path / "custom.spectral.yaml"
+    ruleset.write_text("rules: {}\n")
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess",
+            return_value=(True, "[]"),
+        ) as mock_run,
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        spectral_plugin.check([str(spec)], {"ruleset": str(ruleset)})
+
+    command = mock_run.call_args.kwargs["cmd"]
+    assert_that(command).contains("--ruleset", str(ruleset.absolute()))
+
+
 def test_check_skips_without_ruleset(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
@@ -190,6 +263,7 @@ def test_check_handles_timeout(
 
     assert_that(result.name).is_equal_to("spectral")
     assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
 
 
 def test_check_runtime_error_is_not_clean(
