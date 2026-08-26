@@ -83,6 +83,30 @@ def test_moved_event_uses_destination(fake_fs_event: EventBuilder) -> None:
     assert_that(seen).is_equal_to(["/proj/src/renamed.py"])
 
 
+def test_event_callback_receives_change_kinds(fake_fs_event: EventBuilder) -> None:
+    """Accepted filesystem events should retain their user-facing kind."""
+    seen: list[tuple[str, str]] = []
+    handler = LintroEventHandler(
+        on_change=lambda _path: None,
+        ignore_spec=_build_ignore_spec([]),
+        on_event=lambda path, kind: seen.append((path, kind)),
+    )
+
+    handler.on_created(fake_fs_event("/proj/src/new.py"))
+    handler.on_modified(fake_fs_event("/proj/src/new.py"))
+    handler.on_moved(
+        fake_fs_event("/proj/src/new.py", dest_path="/proj/src/moved.py"),
+    )
+
+    assert_that(seen).is_equal_to(
+        [
+            ("/proj/src/new.py", "created"),
+            ("/proj/src/new.py", "modified"),
+            ("/proj/src/moved.py", "moved"),
+        ],
+    )
+
+
 def test_git_directory_is_ignored(fake_fs_event: EventBuilder) -> None:
     """Changes under .git are filtered out by default."""
     handler, seen = _handler()
@@ -221,17 +245,21 @@ def test_watch_paths_lifecycle_starts_and_stops(tmp_path: Path) -> None:
 
 
 def test_watch_paths_cleans_up_when_observer_start_fails(tmp_path: Path) -> None:
-    """A partially-started observer is stopped and joined after start fails."""
+    """Observer cleanup cannot mask the original start exception."""
     observer = _MockObserver()
 
     def _fail_start() -> None:
-        observer.started = True
-        msg = "observer start failed"
+        msg = "original startup failure"
+        raise RuntimeError(msg)
+
+    def _fail_join(*_args: Any, **_kwargs: Any) -> None:
+        msg = "cannot join thread before it is started"
         raise RuntimeError(msg)
 
     observer.start = _fail_start  # type: ignore[method-assign]
+    observer.join = _fail_join  # type: ignore[method-assign]
 
-    with pytest.raises(RuntimeError, match="observer start failed"):
+    with pytest.raises(RuntimeError, match="original startup failure"):
         watch_paths(
             [str(tmp_path)],
             on_batch=lambda _batch: None,
@@ -239,7 +267,7 @@ def test_watch_paths_cleans_up_when_observer_start_fails(tmp_path: Path) -> None
         )
 
     assert_that(observer.stopped).is_true()
-    assert_that(observer.joined).is_true()
+    assert_that(observer.joined).is_false()
 
 
 def test_watch_paths_watches_parent_dir_for_file_target(tmp_path: Path) -> None:
@@ -380,6 +408,41 @@ def test_custom_ignore_patterns_extend_defaults(tmp_path: Path) -> None:
         [str(tmp_path)],
         [str(generated), str(git_index), str(normal)],
         ignore_patterns=["**/generated/**"],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(normal)})
+
+
+def test_custom_negation_cannot_reenable_mandatory_ignore(tmp_path: Path) -> None:
+    """Custom negations must not re-enable built-in ignored directories."""
+    normal = tmp_path / "real.py"
+    normal.write_text("x = 1\n")
+    git_index = tmp_path / ".git" / "index"
+    git_index.parent.mkdir()
+    git_index.write_text("ref\n")
+
+    batches = _drive_events(
+        [str(tmp_path)],
+        [str(git_index), str(normal)],
+        ignore_patterns=["!**/.git/**"],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(normal)})
+
+
+def test_lintro_run_output_is_ignored(tmp_path: Path) -> None:
+    """A watch run must not retrigger itself from generated report files."""
+    report = tmp_path / ".lintro" / "run-1" / "report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# Report\n", encoding="utf-8")
+    normal = tmp_path / "real.py"
+    normal.write_text("x = 1\n")
+
+    batches = _drive_events(
+        [str(tmp_path)],
+        [str(report), str(normal)],
     )
 
     assert_that(batches).is_length(1)

@@ -38,7 +38,6 @@ export const SECTION_GROUP_LABELS: Partial<Record<DocCategory, Record<string, st
 export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'getting-started/getting-started': 'start',
   'usage/configuration': 'setup',
-  'usage/watch-mode': 'setup',
   'usage/docker': 'setup',
   'usage/github-integration': 'ci',
   'usage/ai-features': 'extend',

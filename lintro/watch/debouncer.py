@@ -103,7 +103,10 @@ class Debouncer:
         self._pending: set[str] = set()
         self._timer: TimerLike | None = None
         self._lock = threading.Lock()
+        self._idle = threading.Condition(self._lock)
         self._run_lock = threading.Lock()
+        self._generation = 0
+        self._callbacks_in_flight = 0
 
     @property
     def pending(self) -> set[str]:
@@ -132,16 +135,28 @@ class Debouncer:
         """
         if self._timer is not None:
             self._timer.cancel()
-        self._timer = self._timer_factory(self.delay_ms / 1000.0, self._fire)
+        self._generation += 1
+        generation = self._generation
+        self._timer = self._timer_factory(
+            self.delay_ms / 1000.0,
+            lambda: self._fire(generation),
+        )
         self._timer.start()
 
-    def _fire(self) -> None:
+    def _fire(self, generation: int) -> None:
         """Timer callback: emit the pending batch if non-empty."""
-        with self._lock:
+        with self._idle:
+            if generation != self._generation:
+                return
             batch = set(self._pending)
             self._pending.clear()
             self._timer = None
-        self._invoke_callback(batch=batch)
+            if batch:
+                self._callbacks_in_flight += 1
+        try:
+            self._invoke_callback(batch=batch)
+        finally:
+            self._finish_callback(batch=batch)
 
     def flush(self) -> None:
         """Immediately emit any pending batch, bypassing the timer.
@@ -153,13 +168,22 @@ class Debouncer:
 
     def _fire_now(self) -> None:
         """Cancel the timer and emit the pending batch synchronously."""
-        with self._lock:
+        with self._idle:
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
+            self._generation += 1
             batch = set(self._pending)
             self._pending.clear()
-        self._invoke_callback(batch=batch)
+            if batch:
+                self._callbacks_in_flight += 1
+        try:
+            self._invoke_callback(batch=batch)
+        finally:
+            self._finish_callback(batch=batch)
+        with self._idle:
+            while self._callbacks_in_flight:
+                self._idle.wait()
 
     def _invoke_callback(self, *, batch: set[str]) -> None:
         """Run the batch callback, serialized with any in-flight run.
@@ -172,10 +196,19 @@ class Debouncer:
         with self._run_lock:
             self._callback(batch)
 
+    def _finish_callback(self, *, batch: set[str]) -> None:
+        """Mark a non-empty callback as complete and wake flush waiters."""
+        if not batch:
+            return
+        with self._idle:
+            self._callbacks_in_flight -= 1
+            self._idle.notify_all()
+
     def cancel(self) -> None:
         """Discard any pending batch and cancel the timer without firing."""
         with self._lock:
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
+            self._generation += 1
             self._pending.clear()

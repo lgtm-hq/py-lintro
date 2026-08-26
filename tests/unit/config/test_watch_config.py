@@ -122,3 +122,16 @@ def test_convert_pyproject_watch_table_is_applied() -> None:
     assert_that(cfg.watch.clear_screen).is_true()
     assert_that(cfg.watch.tools).is_equal_to(["ruff"])
     assert_that(cfg.watch.ignore).is_equal_to(["**/generated/**"])
+
+
+def test_load_config_rejects_non_mapping_pyproject_watch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scalar ``tool.lintro.watch`` value should fail like scalar YAML."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.lintro]\nwatch = 500\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="watch config must be a mapping"):
+        load_config()

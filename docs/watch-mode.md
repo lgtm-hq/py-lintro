@@ -30,11 +30,13 @@ $ lintro watch src/
 👀 Watching for changes in src/...
 Press Ctrl+C to stop
 
-[12:34:56] changed: src/foo.py
-  ... tool results ...
+[12:34:56] foo.py modified
+  ├─ ruff: ✅ passed (0.12s)
+  ├─ mypy: ⚠️ 1 issue (1.34s)
+  │  foo.py:42: Missing type annotation
 
-[12:35:12] changed: src/bar.py
-  ... tool results ...
+[12:35:12] bar.py created
+  ├─ ruff: ✅ passed (0.08s)
 ```
 
 ### Smart Tool Selection
@@ -49,12 +51,13 @@ tool's own file patterns, so it stays in sync with the tool registry automatical
 | `*.rs`       | clippy, rustfmt           |
 | `*.yaml`     | yamllint, prettier        |
 
-Catch-all scanners (`*` patterns such as gitleaks, trufflehog, commitlint, typos) and
-advisory review finders are skipped unless you name them in `--tools` or `watch.tools`.
-pytest is never selected; use `lintro test`.
+Catch-all scanners (`*` patterns such as gitleaks, trufflehog, commitlint, typos) are
+skipped unless you name them in `--tools` or `watch.tools`. Advisory review finders and
+pytest are not valid watch tools; use `lintro review` or `lintro test` instead.
 
-Use `--tools` to further narrow the set that runs. `--fix` keeps only tools that can
-format.
+Use `--tools` to further narrow the set that runs. Watch validates the names at startup
+and reports disabled or incompatible tools immediately. `--fix` requires every
+explicitly selected tool to support formatting.
 
 ### Debouncing
 
@@ -78,15 +81,15 @@ Configuration `watch.ignore` **extends** those built-ins; it cannot re-enable `.
 
 ## Options
 
-| Flag                     | Description                                                |
-| ------------------------ | ---------------------------------------------------------- |
-| `--tools`                | Tool allowlist; `all` uses smart selection.                |
-| `--fix` / `--no-fix`     | Force fix mode on or off (overrides `watch.auto_fix`).     |
-| `--clear` / `--no-clear` | Force screen clear on or off (overrides config).           |
-| `--debounce`             | Debounce interval in milliseconds (default `300`).         |
-| `--exclude`              | Comma-separated exclude patterns passed to the tools.      |
-| `--include-venv`         | Include virtual environment directories.                   |
-| `--output-format`        | Output format: `plain`, `grid`, `markdown`, `json`, `csv`. |
+| Flag                     | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `--tools`                | Tool allowlist; `all` uses smart selection.            |
+| `--fix` / `--no-fix`     | Force fix mode on or off (overrides `watch.auto_fix`). |
+| `--clear` / `--no-clear` | Force screen clear on or off (overrides config).       |
+| `--debounce`             | Debounce interval in milliseconds (default `300`).     |
+| `--exclude`              | Comma-separated exclude patterns passed to the tools.  |
+| `--include-venv`         | Include virtual environment directories.               |
+| `--output-format`        | Continuous output format: `plain` or `grid`.           |
 
 ## Configuration
 

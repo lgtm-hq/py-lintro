@@ -22,6 +22,7 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from lintro.config.watch_config import DEFAULT_DEBOUNCE_MS
+from lintro.utils.path_filtering import should_exclude_path
 from lintro.utils.tool_utils import VENV_PATTERNS
 from lintro.watch.debouncer import Debouncer
 
@@ -91,6 +92,7 @@ VENV_IGNORE_PATTERNS: tuple[str, ...] = tuple(
 
 DEFAULT_IGNORE_PATTERNS: list[str] = [
     "**/.git/**",
+    "**/.lintro/**",
     "**/__pycache__/**",
     "**/.mypy_cache/**",
     "**/.ruff_cache/**",
@@ -148,6 +150,7 @@ class LintroEventHandler(FileSystemEventHandler):
         ignore_spec: pathspec.GitIgnoreSpec,
         path_filter: Callable[[str], bool] | None = None,
         ignore_roots: Iterable[Path] | None = None,
+        on_event: Callable[[str, str], None] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -160,23 +163,28 @@ class LintroEventHandler(FileSystemEventHandler):
                 dropped. When ``None``, every non-ignored path is forwarded.
             ignore_roots: Optional roots that ignore patterns are relative to.
                 Ancestors above these roots do not participate in matching.
+            on_event: Optional callback receiving each accepted path and event kind.
         """
         super().__init__()
         self._on_change = on_change
         self._ignore_spec = ignore_spec
         self._path_filter = path_filter
         self._ignore_roots = tuple(ignore_roots or ())
+        self._on_event = on_event
 
-    def _handle(self, path: str) -> None:
+    def _handle(self, path: str, kind: str) -> None:
         """Forward a path to ``on_change`` unless it is ignored or out of scope.
 
         Args:
             path: Filesystem path from the event.
+            kind: Human-readable filesystem event kind.
         """
         if self._is_ignored(path):
             return
         if self._path_filter is not None and not self._path_filter(path):
             return
+        if self._on_event is not None:
+            self._on_event(path, kind)
         self._on_change(path)
 
     def _is_ignored(self, path: str) -> bool:
@@ -208,7 +216,7 @@ class LintroEventHandler(FileSystemEventHandler):
             event: The watchdog event.
         """
         if not event.is_directory:
-            self._handle(_event_path(event.src_path))
+            self._handle(_event_path(event.src_path), "modified")
 
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle a file creation event.
@@ -217,7 +225,7 @@ class LintroEventHandler(FileSystemEventHandler):
             event: The watchdog event.
         """
         if not event.is_directory:
-            self._handle(_event_path(event.src_path))
+            self._handle(_event_path(event.src_path), "created")
 
     def on_moved(self, event: FileSystemEvent) -> None:
         """Handle a file move/rename event.
@@ -227,7 +235,7 @@ class LintroEventHandler(FileSystemEventHandler):
         """
         if not event.is_directory:
             dest = getattr(event, "dest_path", None)
-            self._handle(_event_path(dest if dest else event.src_path))
+            self._handle(_event_path(dest if dest else event.src_path), "moved")
 
 
 def _event_path(raw: str | bytes) -> str:
@@ -248,6 +256,7 @@ def watch_paths(
     paths: list[str],
     *,
     on_batch: Callable[[set[str]], object],
+    on_event: Callable[[str, str], None] | None = None,
     debounce_ms: int = DEFAULT_DEBOUNCE_MS,
     ignore_patterns: list[str] | None = None,
     include_venv: bool = False,
@@ -265,6 +274,7 @@ def watch_paths(
             recursively.
         on_batch: Called with the set of changed paths after each debounce
             interval settles.
+        on_event: Optional callback receiving accepted paths and event kinds.
         debounce_ms: Debounce interval in milliseconds.
         ignore_patterns: Extra gitignore-style patterns to exclude. These are
             appended to :data:`DEFAULT_IGNORE_PATTERNS` (the built-ins always
@@ -280,10 +290,8 @@ def watch_paths(
     # Built-in ignores always apply; caller patterns extend them so a custom
     # entry cannot silently re-enable noisy directories (.git, node_modules,
     # caches, virtualenvs, *.pyc).
-    patterns = default_ignore_patterns(include_venv=include_venv)
-    if ignore_patterns:
-        patterns.extend(ignore_patterns)
-    ignore_spec = _build_ignore_spec(patterns)
+    mandatory_patterns = default_ignore_patterns(include_venv=include_venv)
+    ignore_spec = _build_ignore_spec([])
 
     # When a single file is watched we schedule its parent directory
     # recursively, so restrict forwarded events to the requested files (and to
@@ -300,9 +308,16 @@ def watch_paths(
 
     def _in_scope(candidate: str) -> bool:
         resolved = Path(candidate).resolve()
-        if resolved in watched_files:
-            return True
-        return any(resolved.is_relative_to(directory) for directory in watched_dirs)
+        anchors = tuple(
+            str(path) for path in watched_dirs | {path.parent for path in watched_files}
+        )
+        if should_exclude_path(candidate, mandatory_patterns, anchors):
+            return False
+        if ignore_patterns and should_exclude_path(candidate, ignore_patterns, anchors):
+            return False
+        return resolved in watched_files or any(
+            resolved.is_relative_to(directory) for directory in watched_dirs
+        )
 
     debouncer = Debouncer(callback=on_batch, delay_ms=debounce_ms)
     handler = LintroEventHandler(
@@ -310,17 +325,26 @@ def watch_paths(
         ignore_spec=ignore_spec,
         path_filter=_in_scope,
         ignore_roots=watched_dirs | {path.parent for path in watched_files},
+        on_event=on_event,
     )
 
     factory: Callable[[], ObserverLike] = observer_factory or Observer
     observer = factory()
-    for path in paths:
-        watch_target = path if Path(path).is_dir() else str(Path(path).parent)
-        observer.schedule(handler, watch_target, recursive=True)
-
     event = stop_event or threading.Event()
+    observer_started = False
     try:
-        observer.start()
+        for path in paths:
+            watch_target = path if Path(path).is_dir() else str(Path(path).parent)
+            observer.schedule(handler, watch_target, recursive=True)
+        try:
+            observer.start()
+        except BaseException:
+            observer.stop()
+            is_alive = getattr(observer, "is_alive", None)
+            if callable(is_alive) and is_alive():
+                observer.join()
+            raise
+        observer_started = True
         _emit_startup(console, paths)
 
         while not event.is_set():
@@ -329,8 +353,9 @@ def watch_paths(
     except KeyboardInterrupt:
         pass
     finally:
-        observer.stop()
-        observer.join()
+        if observer_started:
+            observer.stop()
+            observer.join()
         debouncer.flush()
         debouncer.cancel()
         if console is not None:

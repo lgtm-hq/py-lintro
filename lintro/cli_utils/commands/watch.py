@@ -11,6 +11,9 @@ import click
 from rich.console import Console
 
 from lintro.config.config_loader import load_config
+from lintro.enums.action import Action
+from lintro.exceptions.errors import ConfigurationError
+from lintro.utils.execution.tool_configuration import get_tools_to_run
 from lintro.watch.runner import WatchRunner
 from lintro.watch.watcher import watch_paths
 
@@ -44,7 +47,7 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
 @click.option(
     "--debounce",
     "debounce_ms",
-    type=int,
+    type=click.IntRange(min=0),
     default=None,
     help="Debounce interval in milliseconds before re-running. "
     "Defaults to watch.debounce_ms, then 300.",
@@ -63,7 +66,7 @@ DEFAULT_PATHS: tuple[str, ...] = (".",)
 @click.option(
     "--output-format",
     default="grid",
-    type=click.Choice(["plain", "grid", "markdown", "json", "csv"]),
+    type=click.Choice(["plain", "grid"]),
     help="Output format for displaying results.",
 )
 def watch_command(
@@ -94,7 +97,11 @@ def watch_command(
         output_format: Output format for results.
     """
     console = Console()
-    watch_cfg = load_config().watch
+    try:
+        config = load_config()
+    except (ConfigurationError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    watch_cfg = config.watch
 
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
@@ -114,6 +121,24 @@ def watch_command(
     restrict_to: list[str] | None = configured_tools or None
     if restrict_to and len(restrict_to) == 1 and restrict_to[0].lower() == "all":
         restrict_to = None
+    if restrict_to is not None:
+        action = Action.FIX if effective_fix else Action.CHECK
+        try:
+            selection = get_tools_to_run(
+                tools=",".join(restrict_to),
+                action=action,
+                lintro_config=config,
+                scan_roots=path_list,
+            )
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="--tools") from exc
+        for skipped in selection.skipped:
+            console.print(
+                f"[yellow]Skipping {skipped.name}: {skipped.reason}[/yellow]",
+            )
+        restrict_to = selection.to_run
+        if not restrict_to:
+            raise click.UsageError("No enabled watch tools remain after validation.")
 
     ignore_patterns = list(watch_cfg.ignore) if watch_cfg.ignore else None
 
@@ -130,13 +155,20 @@ def watch_command(
         exclude=exclude,
         include_venv=include_venv,
         emit=_emit,
+        watch_paths=path_list,
     )
 
-    watch_paths(
-        path_list,
-        on_batch=runner.run_batch,
-        debounce_ms=effective_debounce,
-        ignore_patterns=ignore_patterns,
-        include_venv=include_venv,
-        console=console,
-    )
+    try:
+        watch_paths(
+            path_list,
+            on_batch=runner.run_batch,
+            on_event=runner.record_event,
+            debounce_ms=effective_debounce,
+            ignore_patterns=ignore_patterns,
+            include_venv=include_venv,
+            console=console,
+        )
+    except (OSError, RuntimeError) as exc:
+        raise click.ClickException(f"Watch failed: {exc}") from exc
+    if runner.last_exit_code:
+        raise click.exceptions.Exit(runner.last_exit_code)

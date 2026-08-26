@@ -77,6 +77,30 @@ def test_each_change_resets_the_timer(
     assert_that(fake_timer_factory.timers).is_length(2)
 
 
+def test_cancelled_timer_cannot_drain_replacement_batch(
+    fake_timer_factory: FakeTimerFactory,
+) -> None:
+    """A stale timer firing late cannot consume the active timer's batch."""
+    batches: list[set[str]] = []
+    debouncer = Debouncer(
+        callback=batches.append,
+        delay_ms=300,
+        timer_factory=fake_timer_factory,
+    )
+
+    debouncer.on_change("a.py")
+    stale = fake_timer_factory.latest
+    debouncer.on_change("b.py")
+    active = fake_timer_factory.latest
+
+    stale.fire()
+    assert_that(batches).is_empty()
+    assert_that(debouncer.pending).is_equal_to({"a.py", "b.py"})
+
+    active.fire()
+    assert_that(batches).is_equal_to([{"a.py", "b.py"}])
+
+
 def test_empty_batch_does_not_invoke_callback(
     fake_timer_factory: FakeTimerFactory,
 ) -> None:
@@ -223,6 +247,48 @@ def test_overlapping_fires_are_serialized(
     assert_that(order).is_equal_to(
         ["start:a.py", "end:a.py", "start:b.py", "end:b.py"],
     )
+
+
+def test_flush_waits_for_active_callback(
+    fake_timer_factory: FakeTimerFactory,
+) -> None:
+    """An empty flush does not return while a callback remains in progress."""
+    import threading
+
+    callback_started = threading.Event()
+    release_callback = threading.Event()
+    flush_started = threading.Event()
+    flush_done = threading.Event()
+
+    def _slow(_batch: set[str]) -> None:
+        callback_started.set()
+        release_callback.wait(timeout=2)
+
+    debouncer = Debouncer(
+        callback=_slow,
+        delay_ms=300,
+        timer_factory=fake_timer_factory,
+    )
+    debouncer.on_change("a.py")
+
+    callback_worker = threading.Thread(target=fake_timer_factory.latest.fire)
+    callback_worker.start()
+    assert_that(callback_started.wait(timeout=2)).is_true()
+
+    def _flush() -> None:
+        flush_started.set()
+        debouncer.flush()
+        flush_done.set()
+
+    flush_worker = threading.Thread(target=_flush)
+    flush_worker.start()
+    assert_that(flush_started.wait(timeout=2)).is_true()
+    assert_that(flush_done.wait(timeout=0.1)).is_false()
+
+    release_callback.set()
+    callback_worker.join(timeout=2)
+    flush_worker.join(timeout=2)
+    assert_that(flush_done.is_set()).is_true()
 
 
 @pytest.mark.parametrize("delay_ms", [0, 1, 300, 1000])

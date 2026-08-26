@@ -15,6 +15,8 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.watch.runner import WatchRunner
 
 
@@ -54,6 +56,11 @@ def _make_run_tools(
         group_by: str,
         output_format: str,
         verbose: bool,
+        yes: bool,
+        no_art: bool,
+        run_post_checks: bool,
+        on_tool_result: Callable[[ToolResult], None],
+        render_summary: bool,
     ) -> int:
         recorder["calls"] += 1
         recorder["kwargs"] = {
@@ -66,6 +73,11 @@ def _make_run_tools(
             "group_by": group_by,
             "output_format": output_format,
             "verbose": verbose,
+            "yes": yes,
+            "no_art": no_art,
+            "run_post_checks": run_post_checks,
+            "on_tool_result": on_tool_result,
+            "render_summary": render_summary,
         }
         return exit_code
 
@@ -90,6 +102,10 @@ def test_run_batch_checks_by_default(
     assert_that(recorder["calls"]).is_equal_to(1)
     assert_that(recorder["kwargs"]["action"]).is_equal_to(Action.CHECK)
     assert_that(recorder["kwargs"]["paths"]).contains(str(target))
+    assert_that(recorder["kwargs"]["yes"]).is_true()
+    assert_that(recorder["kwargs"]["no_art"]).is_true()
+    assert_that(recorder["kwargs"]["run_post_checks"]).is_false()
+    assert_that(recorder["kwargs"]["render_summary"]).is_false()
 
 
 def test_run_batch_fixes_when_auto_fix(
@@ -124,6 +140,23 @@ def test_run_batch_skips_nonexistent_files(
 
     assert_that(result).is_equal_to(0)
     assert_that(recorder["calls"]).is_equal_to(0)
+
+
+def test_run_batch_discards_event_metadata_for_vanished_files(
+    tmp_path: Path,
+    recorder: dict[str, Any],
+) -> None:
+    """Atomic-save temp paths should not accumulate event metadata forever."""
+    missing = str(tmp_path / ".foo.py.tmp")
+    runner = WatchRunner(
+        emit=lambda _line: None,
+        run_tools=_make_run_tools(recorder),
+    )
+    runner.record_event(missing, "created")
+
+    runner.run_batch({missing})
+
+    assert_that(runner._event_kinds).is_empty()
 
 
 def test_run_batch_reports_no_matching_tools(
@@ -169,7 +202,54 @@ def test_run_batch_prints_timestamped_header(
     header = next((line for line in lines if line.startswith("[")), None)
     assert_that(header).is_not_none()
     assert_that(header).contains("foo.py")
-    assert_that(header).matches(r"^\[\d{2}:\d{2}:\d{2}\] changed:")
+    assert_that(header).matches(r"^\[\d{2}:\d{2}:\d{2}\] .*foo\.py modified$")
+
+
+def test_run_batch_reports_event_kind_relative_to_watch_root(
+    tmp_path: Path,
+    recorder: dict[str, Any],
+) -> None:
+    """Continuous headers should include event kind without ``../`` prefixes."""
+    watched = tmp_path / "src"
+    watched.mkdir()
+    target = watched / "foo.py"
+    target.write_text("x = 1\n")
+    lines: list[str] = []
+    runner = WatchRunner(
+        watch_paths=[str(watched)],
+        emit=lines.append,
+        run_tools=_make_run_tools(recorder),
+    )
+    runner.record_event(str(target), "created")
+
+    runner.run_batch({str(target)})
+
+    header = next(line for line in lines if line.startswith("["))
+    assert_that(header).contains("foo.py created")
+    assert_that(header).does_not_contain("../")
+
+
+def test_compact_tool_result_includes_status_duration_and_issue(
+    tmp_path: Path,
+) -> None:
+    """Continuous rendering should expose the issue contract from #443."""
+    target = tmp_path / "foo.py"
+    issue = BaseIssue(file=str(target), line=42, message="Missing annotation")
+    lines: list[str] = []
+    runner = WatchRunner(watch_paths=[str(tmp_path)], emit=lines.append)
+
+    runner._render_tool_result(
+        ToolResult(
+            name="mypy",
+            success=True,
+            issues_count=1,
+            issues=[issue],
+            duration_seconds=1.34,
+        ),
+    )
+
+    assert_that(lines[0]).contains("mypy: ⚠️ 1 issue (1.34s)")
+    assert_that(lines[1]).contains("foo.py:42: Missing annotation")
 
 
 def test_run_batch_clears_screen_when_enabled(
@@ -247,3 +327,20 @@ def test_run_batch_catches_executor_value_error(
 
     assert_that(result).is_equal_to(1)
     assert_that(any("advisory AI finder" in line for line in lines)).is_true()
+
+
+def test_run_batch_contains_unexpected_executor_error(
+    tmp_path: Path,
+) -> None:
+    """One backend exception should not terminate later watch batches."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+    lines: list[str] = []
+
+    def _raise(**_kwargs: Any) -> int:
+        raise RuntimeError("backend unavailable")
+
+    runner = WatchRunner(emit=lines.append, run_tools=_raise)
+
+    assert_that(runner.run_batch({str(target)})).is_equal_to(1)
+    assert_that(lines).contains("  Error: RuntimeError: backend unavailable")

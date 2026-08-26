@@ -748,7 +748,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
-        elif key_lower == "watch" and isinstance(value, dict):
+        elif key_lower == "watch":
             result["watch"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.

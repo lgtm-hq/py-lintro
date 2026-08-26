@@ -290,60 +290,41 @@ def _check_tool_names(
         errors.append(_tool_value_type_error(name, tool_data))
 
 
-def _check_enabled_tools(
-    execution: dict[str, Any],
+def _check_named_tool_list(
+    section: dict[str, Any],
+    *,
+    key: str,
+    location: str,
+    allow_all: bool,
     warnings: list[ValidationMessage],
 ) -> None:
-    """Warn about unknown tool names in ``execution.enabled_tools``.
+    """Warn about unknown names in a configuration tool list.
 
     Args:
-        execution: The ``execution`` mapping.
+        section: Configuration mapping containing the list.
+        key: Key holding the tool names.
+        location: Validation location shown to users.
+        allow_all: Whether the ``all`` sentinel is valid.
         warnings: List to append findings to.
     """
-    enabled = execution.get("enabled_tools")
-    if isinstance(enabled, str):
-        enabled = [enabled]
-    if not isinstance(enabled, list):
-        return
-    known = known_tool_names()
-    for name in enabled:
-        if not isinstance(name, str) or name.lower() in known:
-            continue
-        warnings.append(
-            ValidationMessage(
-                code=ValidationCode.UNKNOWN_TOOL,
-                message=f"unknown tool '{name}'",
-                location="execution.enabled_tools",
-                suggestion=_suggest(name.lower(), known),
-            ),
-        )
-
-
-def _check_watch_tools(
-    watch: dict[str, Any],
-    warnings: list[ValidationMessage],
-) -> None:
-    """Warn about unknown tool names in ``watch.tools``.
-
-    Args:
-        watch: The ``watch`` configuration mapping.
-        warnings: List to append findings to.
-    """
-    names = watch.get("tools")
+    names = section.get(key)
     if isinstance(names, str):
         names = [names]
     if not isinstance(names, list):
         return
     known = known_tool_names()
     for name in names:
-        if not isinstance(name, str) or name.lower() == "all" or name.lower() in known:
+        if not isinstance(name, str):
+            continue
+        normalized = name.lower()
+        if normalized in known or (allow_all and normalized == "all"):
             continue
         warnings.append(
             ValidationMessage(
                 code=ValidationCode.UNKNOWN_TOOL,
                 message=f"unknown tool '{name}'",
-                location="watch.tools",
-                suggestion=_suggest(name.lower(), known),
+                location=location,
+                suggestion=_suggest(normalized, known),
             ),
         )
 
@@ -647,11 +628,23 @@ def _schema_check_normalized(
                 "execution",
                 result.warnings,
             )
-        _check_enabled_tools(execution, result.warnings)
+        _check_named_tool_list(
+            execution,
+            key="enabled_tools",
+            location="execution.enabled_tools",
+            allow_all=False,
+            warnings=result.warnings,
+        )
 
     watch = parsed.get("watch")
     if isinstance(watch, dict):
-        _check_watch_tools(watch, result.warnings)
+        _check_named_tool_list(
+            watch,
+            key="tools",
+            location="watch.tools",
+            allow_all=True,
+            warnings=result.warnings,
+        )
 
     if not skip_unknown_keys:
         enforce = parsed.get("enforce")
