@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess symbols are only referenced for patching/exception types; no process is spawned
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -105,10 +106,8 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     assert_that(result.issues_count).is_equal_to(1)
     issues = result.issues or []
     assert_that(issues).is_length(1)
-    issue = issues[0]
+    issue = cast(SpectralIssue, issues[0])
     assert_that(issue).is_instance_of(SpectralIssue)
-    if not isinstance(issue, SpectralIssue):
-        raise AssertionError("expected a SpectralIssue")
     assert_that(issue.code).is_equal_to("operation-operationId")
     assert_that(issue.doc_url).contains(
         "github.com/stoplightio/spectral",
