@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess symbols are only referenced for patching/exception types; no process is spawned
 from pathlib import Path
-from typing import cast
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.spectral import SpectralPlugin
 
 MOCK_OUTPUT = (
@@ -19,11 +19,18 @@ MOCK_OUTPUT = (
 )
 
 
-def _mock_ctx(tmp_path: Path) -> MagicMock:
+def _mock_ctx(
+    tmp_path: Path,
+    *,
+    files: list[str] | None = None,
+    rel_files: list[str] | None = None,
+) -> MagicMock:
     """Build a mock execution context for check().
 
     Args:
         tmp_path: Temporary directory for the fake target file.
+        files: Absolute files discovered for this execution.
+        rel_files: Paths relative to the execution directory.
 
     Returns:
         MagicMock: A context object mimicking _prepare_execution output.
@@ -33,9 +40,34 @@ def _mock_ctx(tmp_path: Path) -> MagicMock:
     ctx.early_result = None
     ctx.timeout = 30
     ctx.cwd = str(tmp_path)
-    ctx.rel_files = ["openapi.yaml"]
-    ctx.files = [str(tmp_path / "openapi.yaml")]
+    ctx.files = files or [str(tmp_path / "openapi.yaml")]
+    ctx.rel_files = rel_files or [Path(path).name for path in ctx.files]
     return ctx
+
+
+def _process(
+    *,
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+) -> SubprocessResult:
+    """Build a separated-stream subprocess result for Spectral tests.
+
+    Args:
+        returncode: Simulated Spectral process exit code.
+        stdout: Simulated JSON standard output.
+        stderr: Simulated diagnostic standard error.
+
+    Returns:
+        SubprocessResult with a backward-compatible combined output.
+    """
+    output = "\n".join(part for part in (stdout, stderr) if part)
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        output=output,
+    )
 
 
 def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:
@@ -56,8 +88,8 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
         ),
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
-            return_value=(False, MOCK_OUTPUT),
+            "_run_subprocess_result",
+            return_value=_process(returncode=1, stdout=MOCK_OUTPUT),
         ),
         patch.object(
             spectral_plugin,
@@ -71,11 +103,16 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     assert_that(result.name).is_equal_to("spectral")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    issue = cast(SpectralIssue, result.issues[0])  # type: ignore[index]
+    issues = result.issues or []
+    assert_that(issues).is_length(1)
+    issue = issues[0]
+    assert_that(issue).is_instance_of(SpectralIssue)
+    if not isinstance(issue, SpectralIssue):
+        raise AssertionError("expected a SpectralIssue")
     assert_that(issue.code).is_equal_to("operation-operationId")
     assert_that(issue.doc_url).contains(
         "github.com/stoplightio/spectral",
-        "openapi-rules.md#operation-operationId",
+        "openapi-rules.md#operation-operationid",
     )
 
 
@@ -95,7 +132,11 @@ def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -
             "_find_ruleset",
             return_value=str(tmp_path / ".spectral.yaml"),
         ),
-        patch.object(spectral_plugin, "_run_subprocess", return_value=(True, "[]")),
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            return_value=_process(stdout="[]", stderr="[Warning] runner noise"),
+        ),
         patch.object(
             spectral_plugin,
             "_get_spectral_command",
@@ -110,6 +151,44 @@ def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -
     assert_that(result.output).is_none()
 
 
+def test_check_fails_when_successful_stdout_is_not_json(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Successful but malformed stdout cannot become a clean pass.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / "openapi.yaml").write_text("openapi: 3.0.0\n")
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_find_ruleset",
+            return_value=str(tmp_path / ".spectral.yaml"),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            return_value=_process(stdout="not-json"),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        result = spectral_plugin.check([str(tmp_path / "openapi.yaml")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("not-json")
+
+
 def test_check_discovers_parent_ruleset_and_builds_json_command(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
@@ -120,10 +199,10 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
         spectral_plugin: The SpectralPlugin instance under test.
         tmp_path: Temporary directory path for test files.
     """
-    ruleset = tmp_path / ".spectral.yaml"
-    ruleset.write_text('extends: ["spectral:oas"]\n')
     specs_dir = tmp_path / "specs"
     specs_dir.mkdir()
+    ruleset = specs_dir / ".spectral.yaml"
+    ruleset.write_text('extends: ["spectral:oas"]\n')
     spec = specs_dir / "openapi.yaml"
     spec.write_text("openapi: 3.0.0\n")
 
@@ -131,8 +210,8 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
-            return_value=(True, "[]"),
+            "_run_subprocess_result",
+            return_value=_process(stdout="[]"),
         ) as mock_run,
         patch.object(
             spectral_plugin,
@@ -140,8 +219,12 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
             return_value=["spectral"],
         ),
     ):
-        mock_prepare.return_value = _mock_ctx(specs_dir)
-        spectral_plugin.check([str(spec)], {})
+        mock_prepare.return_value = _mock_ctx(
+            tmp_path,
+            files=[str(spec)],
+            rel_files=["specs/openapi.yaml"],
+        )
+        spectral_plugin.check([str(tmp_path)], {})
 
     command = mock_run.call_args.kwargs["cmd"]
     assert_that(command).contains(
@@ -151,29 +234,33 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
         "--ignore-unknown-format",
         "--ruleset",
     )
-    assert_that(command).contains(str(ruleset.absolute()), "openapi.yaml")
-    assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(specs_dir))
+    assert_that(command).contains(str(ruleset.absolute()), "specs/openapi.yaml")
+    assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(tmp_path))
     assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)
 
 
-def test_find_ruleset_supports_json_filename(
+def test_find_ruleset_supports_all_declared_filenames(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
 ) -> None:
-    """Discovery recognizes supported non-YAML ruleset filenames.
+    """Discovery recognizes every declared Spectral ruleset filename.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
         tmp_path: Temporary directory path for test files.
     """
-    ruleset = tmp_path / ".spectral.json"
-    ruleset.write_text('{"extends": ["spectral:oas"]}\n')
-    nested = tmp_path / "specs"
-    nested.mkdir()
+    for index, filename in enumerate(
+        (".spectral.yaml", ".spectral.yml", ".spectral.json", ".spectral.js"),
+    ):
+        case_dir = tmp_path / str(index)
+        nested = case_dir / "specs"
+        nested.mkdir(parents=True)
+        ruleset = case_dir / filename
+        ruleset.write_text("rules: {}\n")
 
-    assert_that(spectral_plugin._find_ruleset(search_dir=str(nested))).is_equal_to(
-        str(ruleset),
-    )
+        assert_that(
+            spectral_plugin._find_ruleset(search_dir=str(nested)),
+        ).is_equal_to(str(ruleset))
 
 
 def test_check_per_call_ruleset_reaches_command(
@@ -195,8 +282,8 @@ def test_check_per_call_ruleset_reaches_command(
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
-            return_value=(True, "[]"),
+            "_run_subprocess_result",
+            return_value=_process(stdout="[]"),
         ) as mock_run,
         patch.object(
             spectral_plugin,
@@ -209,6 +296,44 @@ def test_check_per_call_ruleset_reaches_command(
 
     command = mock_run.call_args.kwargs["cmd"]
     assert_that(command).contains("--ruleset", str(ruleset.absolute()))
+
+
+def test_check_configured_ruleset_reaches_command(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """A ruleset set on the plugin reaches the Spectral command.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    spec = tmp_path / "openapi.yaml"
+    spec.write_text("openapi: 3.0.0\n")
+    ruleset = tmp_path / "configured.spectral.yaml"
+    ruleset.write_text("rules: {}\n")
+    spectral_plugin.set_options(ruleset=ruleset.name)
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            return_value=_process(stdout="[]"),
+        ) as mock_run,
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        spectral_plugin.check([str(spec)], {})
+
+    assert_that(mock_run.call_args.kwargs["cmd"]).contains(
+        "--ruleset",
+        str(ruleset.absolute()),
+    )
 
 
 def test_check_searches_all_input_paths_for_ruleset(
@@ -236,8 +361,8 @@ def test_check_searches_all_input_paths_for_ruleset(
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
-            return_value=(True, "[]"),
+            "_run_subprocess_result",
+            return_value=_process(stdout="[]"),
         ) as mock_run,
         patch.object(
             spectral_plugin,
@@ -245,7 +370,11 @@ def test_check_searches_all_input_paths_for_ruleset(
             return_value=["spectral"],
         ),
     ):
-        mock_prepare.return_value = _mock_ctx(second_dir)
+        mock_prepare.return_value = _mock_ctx(
+            tmp_path,
+            files=[str(first_spec), str(second_spec)],
+            rel_files=["first/first.yaml", "second/second.yaml"],
+        )
         spectral_plugin.check([str(first_spec), str(second_spec)], {})
 
     assert_that(mock_run.call_args.kwargs["cmd"]).contains(
@@ -269,7 +398,7 @@ def test_check_skips_without_ruleset(
     with (
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(spectral_plugin, "_find_ruleset", return_value=None),
-        patch.object(spectral_plugin, "_run_subprocess") as mock_run,
+        patch.object(spectral_plugin, "_run_subprocess_result") as mock_run,
     ):
         mock_prepare.return_value = _mock_ctx(tmp_path)
         result = spectral_plugin.check([str(tmp_path / "openapi.yaml")], {})
@@ -278,7 +407,7 @@ def test_check_skips_without_ruleset(
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no ruleset")
     assert_that(result.skipped).is_true()
-    assert_that(result.skip_reason).is_equal_to("no ruleset found")
+    assert_that(result.skip_reason).contains("no ruleset")
     mock_run.assert_not_called()
 
 
@@ -324,7 +453,7 @@ def test_check_handles_timeout(
         ),
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=subprocess.TimeoutExpired(cmd=["spectral"], timeout=30),
         ),
         patch.object(
@@ -363,8 +492,8 @@ def test_check_runtime_error_is_not_clean(
         ),
         patch.object(
             spectral_plugin,
-            "_run_subprocess",
-            return_value=(False, runtime_error),
+            "_run_subprocess_result",
+            return_value=_process(returncode=2, stderr=runtime_error),
         ),
         patch.object(
             spectral_plugin,

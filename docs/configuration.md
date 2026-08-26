@@ -1674,14 +1674,17 @@ lintro check styles/ --tools stylelint --tool-options "stylelint:config=.styleli
 lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
 ```
 
+### API Description Tools
+
 #### Spectral Configuration
 
 Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents. It
 is check-only (no autofixer) and **requires a ruleset**. Lintro discovers a supported
 ruleset upward from the target (or uses the `ruleset` option) and skips as a non-error
 when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.yml`,
-and `*.json` file; `--ignore-unknown-format` keeps non-API documents from producing
-format warnings.
+and `*.json` file. Lintro always supplies Spectral's internal `--ignore-unknown-format`
+flag so non-API documents do not produce format warnings; the flag is not a
+`--tool-options` setting.
 
 Spectral is intentionally absent from the language map: enabling it for every YAML or
 JSON project would be too broad. A native `.spectral.*` file at a scan root selects it
@@ -1734,6 +1737,8 @@ lintro check --tools spectral openapi.yaml
 # Use an explicit ruleset
 lintro check --tools spectral --tool-options "spectral:ruleset=.spectral.custom.yaml"
 ```
+
+### Additional TypeScript Tools
 
 #### Oxfmt Configuration
 

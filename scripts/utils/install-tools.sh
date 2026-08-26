@@ -1979,6 +1979,8 @@ main() {
 	fi
 
 	for tool in "${tools_to_verify[@]}"; do
+		# Dry-run simulates the entire installer, including verification. A real
+		# PATH probe here would falsely report every not-yet-installed tool.
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would verify $tool is available"
 			continue

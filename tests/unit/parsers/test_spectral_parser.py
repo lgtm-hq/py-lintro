@@ -10,7 +10,10 @@ from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
-from lintro.parsers.spectral.spectral_parser import parse_spectral_output
+from lintro.parsers.spectral.spectral_parser import (
+    has_spectral_json_payload,
+    parse_spectral_output,
+)
 from lintro.utils.json_output import serialize_issue
 
 # Real capture: two findings from spectral:oas on a minimal OpenAPI 3.0 spec.
@@ -208,6 +211,10 @@ def test_non_dict_entries_skipped() -> None:
 def test_empty_json_array_is_clean() -> None:
     """An empty Spectral findings array yields no issues."""
     assert_that(parse_spectral_output("[]")).is_empty()
+    assert_that(
+        has_spectral_json_payload("[]No results with severity error found!"),
+    ).is_true()
+    assert_that(has_spectral_json_payload("not-json")).is_false()
 
 
 def test_missing_and_unknown_severity_default_to_warning() -> None:
@@ -296,10 +303,16 @@ def test_generic_object_array_does_not_hide_findings() -> None:
         '[{"code": "LOG", "message": "npx noise", "source": "runner"}]',
     )
     for noise in noise_arrays:
+        assert_that(parse_spectral_output(noise)).is_empty()
         issues = parse_spectral_output(f"{noise}\n{REAL_OUTPUT}")
         assert_that([issue.code for issue in issues]).is_equal_to(
             ["oas3-api-servers", "operation-operationId"],
         )
+    assert_that(
+        parse_spectral_output(
+            '[]\n[{"code": "LOG", "message": "noise", "source": "runner"}]',
+        ),
+    ).is_empty()
 
 
 def test_empty_array_prefix_does_not_hide_findings() -> None:

@@ -216,7 +216,7 @@ def test_check_skips_without_ruleset(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("no ruleset")
     assert_that(result.skipped).is_true()
-    assert_that(result.skip_reason).is_equal_to("no ruleset found")
+    assert_that(result.skip_reason).contains("no ruleset")
 
 
 def test_invalid_ruleset_is_not_reported_as_clean(tmp_path: Path) -> None:

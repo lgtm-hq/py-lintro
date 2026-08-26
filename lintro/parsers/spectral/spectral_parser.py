@@ -58,6 +58,37 @@ def _looks_like_spectral_payload(data: Any) -> bool:
     return False
 
 
+def has_spectral_json_payload(output: str | None) -> bool:
+    """Return whether output contains a valid Spectral JSON array.
+
+    A clean Spectral run emits ``[]`` and may append informational runner text
+    to the same stream. Finding runs emit a non-empty Spectral-shaped array.
+    This helper distinguishes both valid forms from malformed successful output.
+
+    Args:
+        output: Raw Spectral standard output, possibly with runner noise.
+
+    Returns:
+        True when a clean or finding payload can be decoded.
+    """
+    if not output:
+        return False
+    decoder = json.JSONDecoder()
+    idx = output.find("[")
+    while idx != -1:
+        try:
+            candidate, _ = decoder.raw_decode(output, idx)
+        except (json.JSONDecodeError, ValueError):
+            idx = output.find("[", idx + 1)
+            continue
+        if isinstance(candidate, list) and (
+            not candidate or _looks_like_spectral_payload(candidate)
+        ):
+            return True
+        idx = output.find("[", idx + 1)
+    return False
+
+
 def _one_based_offset(value: object) -> int:
     """Convert a zero-based Spectral offset to a 1-based location, or 0.
 

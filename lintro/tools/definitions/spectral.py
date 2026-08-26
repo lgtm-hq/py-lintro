@@ -21,7 +21,10 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.spectral.spectral_parser import parse_spectral_output
+from lintro.parsers.spectral.spectral_parser import (
+    has_spectral_json_payload,
+    parse_spectral_output,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -149,6 +152,7 @@ class SpectralPlugin(BaseToolPlugin):
         self,
         search_dir: str | None = None,
         options: dict[str, object] | None = None,
+        stop_dir: str | None = None,
     ) -> str | None:
         """Locate a Spectral ruleset.
 
@@ -160,6 +164,8 @@ class SpectralPlugin(BaseToolPlugin):
             search_dir: Directory to start searching from. Defaults to CWD.
             options: Effective options for this invocation. Defaults to the
                 plugin's configured options.
+            stop_dir: Highest directory discovery may inspect. Defaults to an
+                unbounded upward search.
 
         Returns:
             Path to the ruleset if found, otherwise None.
@@ -170,7 +176,21 @@ class SpectralPlugin(BaseToolPlugin):
             return str(ruleset)
 
         start_dir = Path(search_dir).absolute() if search_dir else Path.cwd()
-        found = find_file_upward(start_dir, SPECTRAL_RULESET_FILES)
+        if start_dir.is_file():
+            start_dir = start_dir.parent
+        max_depth: int | None = None
+        if stop_dir:
+            boundary = Path(stop_dir).absolute()
+            try:
+                relative = start_dir.relative_to(boundary)
+                max_depth = len(relative.parts) + 1
+            except ValueError:
+                max_depth = 1
+        found = find_file_upward(
+            start_dir,
+            SPECTRAL_RULESET_FILES,
+            max_depth=max_depth,
+        )
         if found is not None:
             logger.debug(
                 f"[SpectralPlugin] Found ruleset: {found} (searched from {start_dir})",
@@ -212,13 +232,13 @@ class SpectralPlugin(BaseToolPlugin):
             return None
         lowered = code.lower()
         if lowered.startswith("asyncapi-"):
-            return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=code)
+            return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=lowered)
         if lowered.startswith("arazzo-"):
-            return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=code)
+            return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=lowered)
         if lowered in _SPECTRAL_OAS_EXACT_CODES or any(
             lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES
         ):
-            return DocUrlTemplate.SPECTRAL.format(code=code)
+            return DocUrlTemplate.SPECTRAL.format(code=lowered)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -244,12 +264,24 @@ class SpectralPlugin(BaseToolPlugin):
 
         # Spectral requires a ruleset. Without one it cannot lint, so skip
         # gracefully instead of surfacing an error (stylelint/vale pattern).
-        search_paths: list[str | None] = [*paths] if paths else [None]
+        execution_root = ctx.cwd or str(Path.cwd())
+        directory_targets = [
+            str(Path(path).absolute()) for path in paths if Path(path).is_dir()
+        ]
+        discovery_boundary = (
+            directory_targets[0] if len(directory_targets) == 1 else None
+        )
+        search_paths = list(
+            dict.fromkeys(str(Path(file_path).parent) for file_path in ctx.files),
+        )
+        if not search_paths:
+            search_paths = [execution_root]
         ruleset: str | None = None
         for search_path in search_paths:
             ruleset = self._find_ruleset(
                 search_dir=search_path,
                 options=merged_options,
+                stop_dir=discovery_boundary,
             )
             if ruleset:
                 break
@@ -297,7 +329,7 @@ class SpectralPlugin(BaseToolPlugin):
         logger.debug(f"[SpectralPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
         try:
-            success, output = self._run_subprocess(
+            process = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -316,16 +348,32 @@ class SpectralPlugin(BaseToolPlugin):
                 issues_count=timeout_result.issues_count,
             )
 
-        issues = parse_spectral_output(output=output)
+        issues = parse_spectral_output(output=process.stdout)
 
         # Spectral exits 1 when findings exist (which produce parseable JSON).
         # A non-zero exit with nothing parsed is a runtime failure (invalid
         # ruleset, missing runtime) — never report that as a clean pass.
-        if not success and not issues:
+        if not process.success and not issues:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=output or "Spectral exited with an error and no results.",
+                output=process.output
+                or "Spectral exited with an error and no results.",
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
+        # Successful Spectral JSON is either a findings array or exactly an
+        # empty array. Any other non-empty stdout means parsing failed; do not
+        # silently convert warning-only output into a clean pass.
+        if (
+            process.success
+            and not issues
+            and not has_spectral_json_payload(process.stdout)
+        ):
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=process.output or "Spectral output could not be parsed.",
                 issues_count=0,
                 cwd=ctx.cwd,
             )
@@ -335,7 +383,7 @@ class SpectralPlugin(BaseToolPlugin):
         issues_count: int = len(issues)
         success_flag: bool = issues_count == 0
 
-        final_output: str | None = output
+        final_output: str | None = process.output
         if success_flag:
             final_output = None
 

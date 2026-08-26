@@ -17,12 +17,7 @@ from lintro.tools.core.version_parsing import (
     TOOLS_WITH_SIMPLE_VERSION_PATTERN,
     extract_version_from_output,
 )
-from lintro.tools.definitions.spectral import (
-    SPECTRAL_DEFAULT_TIMEOUT,
-    SPECTRAL_FILE_PATTERNS,
-    SPECTRAL_RULESET_FILES,
-    SpectralPlugin,
-)
+from lintro.tools.definitions.spectral import SpectralPlugin
 
 
 def test_definition_name(spectral_plugin: SpectralPlugin) -> None:
@@ -51,7 +46,7 @@ def test_definition_file_patterns(spectral_plugin: SpectralPlugin) -> None:
         spectral_plugin: The SpectralPlugin instance under test.
     """
     assert_that(spectral_plugin.definition.file_patterns).is_equal_to(
-        SPECTRAL_FILE_PATTERNS,
+        ["*.yaml", "*.yml", "*.json"],
     )
 
 
@@ -62,11 +57,14 @@ def test_definition_native_configs(spectral_plugin: SpectralPlugin) -> None:
         spectral_plugin: The SpectralPlugin instance under test.
     """
     assert_that(spectral_plugin.definition.native_configs).is_equal_to(
-        SPECTRAL_RULESET_FILES,
+        [
+            ".spectral.yaml",
+            ".spectral.yml",
+            ".spectral.json",
+            ".spectral.js",
+        ],
     )
-    assert_that(spectral_plugin.definition.default_timeout).is_equal_to(
-        SPECTRAL_DEFAULT_TIMEOUT,
-    )
+    assert_that(spectral_plugin.definition.default_timeout).is_equal_to(30)
 
 
 def test_definition_version_command(spectral_plugin: SpectralPlugin) -> None:
@@ -133,7 +131,7 @@ def test_doc_url_routes_known_builtins_to_official_rule_files(
     assert_that(url).starts_with(
         "https://github.com/stoplightio/spectral/blob/develop/docs/reference/",
     )
-    assert_that(url).contains(f"{rules_page}#{code}")
+    assert_that(url).contains(f"{rules_page}#{code.lower()}")
 
 
 @pytest.mark.parametrize(
