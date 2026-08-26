@@ -71,7 +71,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUSTC: "1.97.1",
-    ToolName.RUSTFMT: "1.9.0",
+    ToolName.RUSTFMT: "1.10.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
