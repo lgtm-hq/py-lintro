@@ -194,6 +194,34 @@ def test_check_detects_violations_in_json_openapi(tmp_path: Path) -> None:
     assert_that({issue.code for issue in issues}).contains("oas3-api-servers")
 
 
+def test_check_detects_violations_in_yml_openapi(tmp_path: Path) -> None:
+    """The ``*.yml`` pattern is exercised by the real Spectral CLI.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "spectral",
+        ".spectral.yaml",
+    )
+    spec = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "spectral",
+        "spectral_violations.yaml",
+        dest_name="openapi.yml",
+    )
+
+    result = SpectralPlugin().check([str(spec)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
 def test_check_skips_without_ruleset(tmp_path: Path) -> None:
     """Spectral skips gracefully when no ruleset is present.
 
@@ -240,4 +268,7 @@ def test_invalid_ruleset_is_not_reported_as_clean(tmp_path: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.skipped).is_false()
+    assert_that(result.timed_out).is_false()
     assert_that(result.output).is_not_empty()
+    assert_that((result.output or "").lower()).contains("ruleset")

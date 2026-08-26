@@ -211,10 +211,24 @@ def test_non_dict_entries_skipped() -> None:
 def test_empty_json_array_is_clean() -> None:
     """An empty Spectral findings array yields no issues."""
     assert_that(parse_spectral_output("[]")).is_empty()
+
+
+def test_payload_helper_distinguishes_valid_json_from_prose() -> None:
+    """Payload detection accepts clean/findings arrays and rejects prose."""
     assert_that(
         has_spectral_json_payload("[]No results with severity error found!"),
     ).is_true()
+    assert_that(has_spectral_json_payload(REAL_OUTPUT)).is_true()
     assert_that(has_spectral_json_payload("not-json")).is_false()
+
+
+def test_suffix_json_noise_does_not_hide_findings() -> None:
+    """A later JSON log object cannot replace an earlier findings payload."""
+    output = REAL_OUTPUT + '\n[{"message": "runner summary"}]'
+    issues = parse_spectral_output(output)
+    assert_that([issue.code for issue in issues]).is_equal_to(
+        ["oas3-api-servers", "operation-operationId"],
+    )
 
 
 def test_missing_and_unknown_severity_default_to_warning() -> None:

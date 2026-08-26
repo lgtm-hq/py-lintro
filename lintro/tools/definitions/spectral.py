@@ -34,6 +34,7 @@ from lintro.tools.core.option_validators import (
     validate_str,
 )
 from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.utils.path_filtering import find_project_root
 from lintro.utils.path_utils import find_file_upward
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
@@ -110,12 +111,7 @@ class SpectralPlugin(BaseToolPlugin):
             file_patterns=SPECTRAL_FILE_PATTERNS,
             priority=SPECTRAL_DEFAULT_PRIORITY,
             conflicts_with=[],
-            native_configs=[
-                ".spectral.yaml",
-                ".spectral.yml",
-                ".spectral.json",
-                ".spectral.js",
-            ],
+            native_configs=list(SPECTRAL_RULESET_FILES),
             version_command=["spectral", "--version"],
             min_version=get_min_version(ToolName.SPECTRAL),
             default_options={
@@ -265,12 +261,7 @@ class SpectralPlugin(BaseToolPlugin):
         # Spectral requires a ruleset. Without one it cannot lint, so skip
         # gracefully instead of surfacing an error (stylelint/vale pattern).
         execution_root = ctx.cwd or str(Path.cwd())
-        directory_targets = [
-            str(Path(path).absolute()) for path in paths if Path(path).is_dir()
-        ]
-        discovery_boundary = (
-            directory_targets[0] if len(directory_targets) == 1 else None
-        )
+        discovery_boundary = find_project_root(execution_root)
         search_paths = list(
             dict.fromkeys(str(Path(file_path).parent) for file_path in ctx.files),
         )
@@ -286,6 +277,7 @@ class SpectralPlugin(BaseToolPlugin):
             if ruleset:
                 break
         if not ruleset:
+            ruleset_names = ", ".join(SPECTRAL_RULESET_FILES)
             logger.debug(
                 "[SpectralPlugin] No ruleset found; skipping. Add a "
                 ".spectral.yaml to enable Spectral.",
@@ -294,9 +286,8 @@ class SpectralPlugin(BaseToolPlugin):
                 name=self.definition.name,
                 success=True,
                 output=(
-                    "Skipping spectral: no ruleset found. Add a .spectral.yaml "
-                    "(or .spectral.yml/.spectral.json/.spectral.js) to enable "
-                    "API linting."
+                    "Skipping spectral: no ruleset found. Add one of "
+                    f"{ruleset_names} to enable API linting."
                 ),
                 issues_count=0,
                 skipped=True,

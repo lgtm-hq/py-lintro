@@ -200,7 +200,8 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
     """
     specs_dir = tmp_path / "specs"
     specs_dir.mkdir()
-    ruleset = specs_dir / ".spectral.yaml"
+    (tmp_path / ".git").mkdir()
+    ruleset = tmp_path / ".spectral.yaml"
     ruleset.write_text('extends: ["spectral:oas"]\n')
     spec = specs_dir / "openapi.yaml"
     spec.write_text("openapi: 3.0.0\n")
@@ -223,7 +224,7 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
             files=[str(spec)],
             rel_files=["specs/openapi.yaml"],
         )
-        spectral_plugin.check([str(tmp_path)], {})
+        spectral_plugin.check([str(specs_dir)], {})
 
     command = mock_run.call_args.kwargs["cmd"]
     assert_that(command).contains(
