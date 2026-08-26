@@ -134,6 +134,7 @@ def test_check_clean_spec_passes(tmp_path: Path) -> None:
     assert_that(result.name).is_equal_to("spectral")
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).is_none()
 
 
 def test_check_detects_violations_in_json_openapi(tmp_path: Path) -> None:

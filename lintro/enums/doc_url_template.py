@@ -42,13 +42,10 @@ class DocUrlTemplate(StrEnum):
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"
-    SPECTRAL = (
-        "https://meta.stoplight.io/docs/spectral/docs/reference/openapi-rules.md#{code}"
-    )
-    SPECTRAL_ASYNCAPI = "https://meta.stoplight.io/docs/spectral/docs/reference/asyncapi-rules.md#{code}"
-    SPECTRAL_ARAZZO = (
-        "https://meta.stoplight.io/docs/spectral/docs/reference/arazzo-rules.md#{code}"
-    )
+    # Spectral 6.16's SARIF helpUri values point to retired meta.stoplight.io
+    # Markdown pages that now return 404. Use the live official rulesets guide
+    # until Stoplight publishes stable per-rule URLs.
+    SPECTRAL = "https://docs.stoplight.io/docs/spectral/e5b9616d6d50c-custom-rulesets"
     SQLFLUFF = "https://docs.sqlfluff.com/en/stable/rules.html#{code}"
     STYLELINT = "https://stylelint.io/user-guide/rules/{code}"
     TAPLO = "https://taplo.tamasfe.dev/"

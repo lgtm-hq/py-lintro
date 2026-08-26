@@ -73,8 +73,7 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     assert_that(result.issues_count).is_equal_to(1)
     issue = cast(SpectralIssue, result.issues[0])  # type: ignore[index]
     assert_that(issue.code).is_equal_to("operation-operationId")
-    assert_that(issue.doc_url).contains("meta.stoplight.io")
-    assert_that(issue.doc_url).contains("#operation-operationId")
+    assert_that(issue.doc_url).contains("docs.stoplight.io/docs/spectral")
 
 
 def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:
@@ -143,7 +142,9 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
 
     command = mock_run.call_args.kwargs["cmd"]
     assert_that(command).contains("lint", "--format", "json", "--ruleset")
-    assert_that(command).contains(str(ruleset.absolute()))
+    assert_that(command).contains(str(ruleset.absolute()), "openapi.yaml")
+    assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(specs_dir))
+    assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)
 
 
 def test_check_per_call_ruleset_reaches_command(
@@ -175,10 +176,53 @@ def test_check_per_call_ruleset_reaches_command(
         ),
     ):
         mock_prepare.return_value = _mock_ctx(tmp_path)
-        spectral_plugin.check([str(spec)], {"ruleset": str(ruleset)})
+        spectral_plugin.check([str(spec)], {"ruleset": ruleset.name})
 
     command = mock_run.call_args.kwargs["cmd"]
     assert_that(command).contains("--ruleset", str(ruleset.absolute()))
+
+
+def test_check_searches_all_input_paths_for_ruleset(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Ruleset discovery considers later input paths, not only the first.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first_spec = first_dir / "first.yaml"
+    second_spec = second_dir / "second.yaml"
+    first_spec.write_text("openapi: 3.0.0\n")
+    second_spec.write_text("openapi: 3.0.0\n")
+    ruleset = second_dir / ".spectral.yaml"
+    ruleset.write_text('extends: ["spectral:oas"]\n')
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess",
+            return_value=(True, "[]"),
+        ) as mock_run,
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(second_dir)
+        spectral_plugin.check([str(first_spec), str(second_spec)], {})
+
+    assert_that(mock_run.call_args.kwargs["cmd"]).contains(
+        "--ruleset",
+        str(ruleset.absolute()),
+    )
 
 
 def test_check_skips_without_ruleset(

@@ -1683,8 +1683,10 @@ when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.
 and `*.json` file, not only API documents.
 
 Spectral is intentionally absent from the language map: enabling it for every YAML or
-JSON project would be too broad. A native `.spectral.*` config selects it for unscoped
-runs; users can also name it with `--tools spectral`.
+JSON project would be too broad. A native `.spectral.*` file at a scan root selects it
+on a no-config first run; after `lintro init`, add `spectral` to
+`execution.enabled_tools`. Users can also name it with `--tools spectral`; once
+selected, Spectral still skips unless discovery or the `ruleset` option finds a ruleset.
 
 **Native Config Detection:**
 

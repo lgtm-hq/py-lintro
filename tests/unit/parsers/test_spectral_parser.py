@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.parsers.spectral.spectral_parser import parse_spectral_output
+from lintro.utils.json_output import serialize_issue
 
 # Real capture: two findings from spectral:oas on a minimal OpenAPI 3.0 spec.
 # Note spectral reports zero-based line/character offsets.
@@ -185,7 +186,7 @@ def test_null_range_offsets_are_unknown() -> None:
 
 def test_non_dict_entries_skipped() -> None:
     """Non-object array entries are skipped without error."""
-    output = '[{"code": "c", "message": "m"}, "not a dict", 42, null]'
+    output = '[{"code": "c", "message": "m", "path": []}, "not a dict", 42, null]'
     issues = parse_spectral_output(output)
     assert_that(issues).is_length(1)
     assert_that(issues[0].code).is_equal_to("c")
@@ -198,8 +199,8 @@ def test_empty_json_array_is_clean() -> None:
 
 def test_missing_and_unknown_severity_default_to_warning() -> None:
     """Missing or out-of-range severities use Spectral's warning default."""
-    missing = '[{"code": "c", "message": "missing"}]'
-    unknown = '[{"code": "c", "message": "unknown", "severity": 99}]'
+    missing = '[{"code": "c", "message": "missing", "path": []}]'
+    unknown = '[{"code": "c", "message": "unknown", "path": [], "severity": 99}]'
 
     assert_that(parse_spectral_output(missing)[0].severity).is_equal_to("warning")
     assert_that(parse_spectral_output(unknown)[0].severity).is_equal_to("warning")
@@ -267,6 +268,23 @@ def test_noise_json_array_does_not_hide_findings() -> None:
     )
 
 
+def test_generic_object_array_does_not_hide_findings() -> None:
+    """A generic JSON log object cannot masquerade as Spectral output."""
+    output = '[{"message": "npx noise"}]\n' + REAL_OUTPUT
+    issues = parse_spectral_output(output)
+    assert_that([issue.code for issue in issues]).is_equal_to(
+        ["oas3-api-servers", "operation-operationId"],
+    )
+
+
+def test_empty_array_prefix_does_not_hide_findings() -> None:
+    """A clean-array prefix cannot hide a later findings payload."""
+    issues = parse_spectral_output("[]\n" + REAL_OUTPUT)
+    assert_that([issue.code for issue in issues]).is_equal_to(
+        ["oas3-api-servers", "operation-operationId"],
+    )
+
+
 def test_display_row_includes_json_path_in_message() -> None:
     """The JSON path is visible in the unified display row."""
     issue = parse_spectral_output(REAL_OUTPUT)[1]
@@ -275,3 +293,19 @@ def test_display_row_includes_json_path_in_message() -> None:
         'Operation must have "operationId". [paths./users.get]',
     )
     assert_that(row["path"]).is_equal_to("paths./users.get")
+
+
+def test_display_path_is_not_hidden_by_message_substring() -> None:
+    """A path substring in prose does not suppress the bracketed location."""
+    issue = SpectralIssue(message="information is required", path="info")
+
+    assert_that(issue.to_display_row()["message"]).is_equal_to(
+        "information is required [info]",
+    )
+
+
+def test_json_serialization_preserves_spectral_path() -> None:
+    """Machine-readable JSON exposes Spectral's structured location."""
+    issue = parse_spectral_output(REAL_OUTPUT)[1]
+
+    assert_that(serialize_issue(issue)["path"]).is_equal_to("paths./users.get")

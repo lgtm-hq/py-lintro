@@ -44,6 +44,9 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
     doc_url = getattr(issue, "doc_url", "") or ""
     if doc_url:
         data["doc_url"] = doc_url
+    raw_path = getattr(issue, "path", "")
+    if isinstance(raw_path, str) and raw_path:
+        data["path"] = raw_path
     raw_category = getattr(issue, "category", None)
     if isinstance(raw_category, str) and raw_category:
         data["category"] = raw_category

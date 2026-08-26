@@ -23,8 +23,9 @@ _SEVERITY_BY_LEVEL: dict[int, str] = {
     2: "info",
     3: "hint",
 }
-_SPECTRAL_FINDING_KEYS: frozenset[str] = frozenset(
-    {"code", "message", "source", "range", "path", "severity"},
+_SPECTRAL_IDENTITY_KEYS: frozenset[str] = frozenset({"code", "message"})
+_SPECTRAL_LOCATION_KEYS: frozenset[str] = frozenset(
+    {"source", "range", "path"},
 )
 
 
@@ -33,8 +34,10 @@ def _looks_like_spectral_payload(data: Any) -> bool:
 
     Node/npx/bunx and Spectral itself can emit a valid JSON array that is not
     the findings payload (``["warning"]``, a bracketed log line). Accept only
-    a list that contains at least one object with Spectral finding keys. An
-    empty list is not treated as a hit so a later real payload is not hidden.
+    a list containing an object with both a finding identity (``code`` or
+    ``message``) and location data (``source``, ``range``, or ``path``). A
+    generic preamble such as ``[{"message": "npx noise"}]`` must not hide the
+    later diagnostics array. An empty list is not treated as a hit either.
 
     Args:
         data: A decoded JSON value.
@@ -45,7 +48,11 @@ def _looks_like_spectral_payload(data: Any) -> bool:
     if not isinstance(data, list) or not data:
         return False
     for item in data:
-        if isinstance(item, dict) and _SPECTRAL_FINDING_KEYS.intersection(item.keys()):
+        if (
+            isinstance(item, dict)
+            and _SPECTRAL_IDENTITY_KEYS.intersection(item)
+            and _SPECTRAL_LOCATION_KEYS.intersection(item)
+        ):
             return True
     return False
 

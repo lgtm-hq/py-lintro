@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
+from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.core.tool_registry import ManifestRegistry
-from lintro.tools.core.version_parsing import TOOLS_WITH_SIMPLE_VERSION_PATTERN
+from lintro.tools.core.version_parsing import (
+    TOOLS_WITH_SIMPLE_VERSION_PATTERN,
+    extract_version_from_output,
+)
 from lintro.tools.definitions.spectral import SpectralPlugin
 
 
@@ -93,33 +100,32 @@ def test_set_options_rejects_invalid_timeout(spectral_plugin: SpectralPlugin) ->
 
 
 @pytest.mark.parametrize(
-    ("code", "page_fragment", "anchor"),
+    "code",
     [
-        ("oas3-api-servers", "openapi-rules.md", "#oas3-api-servers"),
-        ("operation-operationId", "openapi-rules.md", "#operation-operationId"),
-        ("asyncapi-info-contact", "asyncapi-rules.md", "#asyncapi-info-contact"),
-        ("asyncapi-3-tags", "asyncapi-rules.md", "#asyncapi-3-tags"),
-        ("arazzo-workflow-id", "arazzo-rules.md", "#arazzo-workflow-id"),
+        "oas2-schema",
+        "oas3-api-servers",
+        "oas3_1-servers-in-webhook",
+        "openapi-tags",
+        "operation-operationId",
+        "info-contact",
+        "asyncapi-info-contact",
+        "asyncapi-3-tags",
+        "arazzo-workflow-id",
     ],
 )
-def test_doc_url_routes_by_ruleset_prefix(
+def test_doc_url_routes_known_builtins_to_live_ruleset_docs(
     spectral_plugin: SpectralPlugin,
     code: str,
-    page_fragment: str,
-    anchor: str,
 ) -> None:
-    """doc_url picks the OpenAPI, AsyncAPI, or Arazzo rules page by prefix.
+    """Known built-ins link to the live official Spectral rulesets guide.
 
     Args:
         spectral_plugin: The SpectralPlugin instance under test.
         code: Spectral rule code.
-        page_fragment: Filename of the ruleset docs page.
-        anchor: Expected URL fragment for the rule.
     """
-    url = spectral_plugin.doc_url(code)
-    assert_that(url).contains("meta.stoplight.io")
-    assert_that(url).contains(page_fragment)
-    assert_that(url).contains(anchor)
+    assert_that(spectral_plugin.doc_url(code)).is_equal_to(
+        str(DocUrlTemplate.SPECTRAL),
+    )
 
 
 @pytest.mark.parametrize(
@@ -147,7 +153,15 @@ def test_doc_url_skips_custom_and_json_schema_codes(
 
 def test_spectral_version_uses_simple_numeric_parser() -> None:
     """Spectral's numeric ``--version`` output uses the shared parser."""
+    expected = get_min_version(ToolName.SPECTRAL)
+
+    assert_that(expected).is_not_none()
     assert_that(ToolName.SPECTRAL in TOOLS_WITH_SIMPLE_VERSION_PATTERN).is_true()
+    assert_that(
+        extract_version_from_output(f"spectral {expected}", "spectral"),
+    ).is_equal_to(
+        expected,
+    )
 
 
 def test_spectral_is_config_selected_not_language_mapped(
@@ -163,6 +177,22 @@ def test_spectral_is_config_selected_not_language_mapped(
         ".spectral.yaml",
     )
     assert_that(native_configs).contains(".spectral.yml")
+
+
+def test_installer_wires_spectral_through_every_sync_point() -> None:
+    """Installer help, filtering, installation, and verification stay aligned."""
+    script = Path("scripts/utils/install-tools.sh").read_text(encoding="utf-8")
+
+    assert_that(script).contains(
+        "- Spectral (OpenAPI/AsyncAPI/JSON Schema linter)",
+        '"spectral" "sqlfluff"',
+        'if should_install "spectral"; then',
+        'get_tool_version "@stoplight/spectral-cli"',
+        '["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"',
+    )
+    assert_that(script).contains(
+        '"shfmt" "spectral" "sqlfluff"',
+    )
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:

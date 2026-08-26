@@ -34,11 +34,12 @@ class SpectralIssue(BaseIssue):
     path: str = field(default="")
 
     def to_display_row(self) -> dict[str, str]:
-        """Include the JSON path in table, JSON, and SARIF-out rows.
+        """Include the JSON path in display-oriented rows.
 
         Native JSON was chosen over SARIF to keep Spectral's path array. The
         unified formatter only renders the standard display keys, so the path
-        is appended to ``message`` when present.
+        is appended to ``message`` when present. Machine-readable JSON exposes
+        it separately through ``serialize_issue``.
 
         Returns:
             Display row with the JSON path visible in ``message``.
@@ -47,6 +48,6 @@ class SpectralIssue(BaseIssue):
         if self.path:
             row["path"] = self.path
             message = row.get("message", "")
-            if self.path not in message:
+            if f"[{self.path}]" not in message:
                 row["message"] = f"{message} [{self.path}]" if message else self.path
         return row

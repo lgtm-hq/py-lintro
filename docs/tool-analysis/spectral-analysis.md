@@ -11,7 +11,7 @@ parser-choice decision.
 
 - **API-document linting**: OpenAPI 2.0/3.0/3.1, AsyncAPI, and JSON Schema
 - **Custom rulesets**: `.spectral.yaml`/`.yml`/`.json`/`.js`, extending built-in
-  rulesets (`spectral:oas`, `spectral:asyncapi`)
+  rulesets (`spectral:oas`, `spectral:asyncapi`, `spectral:arazzo`)
 - **Built-in best-practice rules**: operation descriptions, unique operation IDs,
   defined path parameters, example validation, and many more
 - **Multiple formatters**: `json`, `stylish`, `sarif`, `junit`, `html`,
@@ -76,9 +76,10 @@ Both formats were captured from the **same run** (`spectral:oas` on a minimal Op
 ### Where SARIF would help
 
 - SARIF embeds `helpUri` per built-in rule in `tool.driver.rules[]`, whereas the native
-  JSON has no per-finding doc URL. Lintro compensates with prefix-routed documentation
-  templates (`openapi-rules.md`, `asyncapi-rules.md`, `arazzo-rules.md`). Custom and
-  JSON Schema codes have no fragment map, so their docs link is left empty.
+  JSON has no per-finding doc URL. In Spectral 6.16 those URIs target retired
+  `meta.stoplight.io` Markdown pages that return 404. Lintro links recognized built-ins
+  to the live official rulesets guide instead. Custom and JSON Schema codes have no
+  built-in mapping, so their docs link is left empty.
 
 ### Decision
 
@@ -87,7 +88,7 @@ when it is lossless for the tool — Spectral's SARIF is **not** lossless: it di
 JSON path array and collapses `info`/`hint` severity. The native JSON parser
 (`--format json`) retains both, converting the zero-based offsets to lintro's one-based
 convention. The only SARIF advantage (doc URLs) is recovered with a documentation-URL
-template.
+link to Spectral's live rulesets guide.
 
 ## Lintro Implementation Analysis
 
@@ -105,8 +106,8 @@ template.
 - ⚠️ Severity is normalized to lintro's ERROR/WARNING/INFO (hint → INFO)
 - ⚠️ Intentionally absent from the recommended language map; a `.spectral.*` config or
   explicit `--tools spectral` selection opts a project in
-- ⚠️ Doc URLs are prefix-routed to the OpenAPI, AsyncAPI, or Arazzo rules page; custom /
-  JSON Schema codes have no per-rule index and get no link
+- ⚠️ Recognized built-in codes link to the live Spectral rulesets guide; custom / JSON
+  Schema codes get no link
 
 ### 🚀 Enhancements
 
@@ -159,6 +160,7 @@ offsets are zero-based and converted to one-based in lintro.
 
 - **`spectral:oas`** — OpenAPI 2.0/3.0/3.1 best practices
 - **`spectral:asyncapi`** — AsyncAPI best practices
+- **`spectral:arazzo`** — Arazzo 1.0 workflow best practices
 
 A project enables Spectral by adding a ruleset that extends one of these:
 

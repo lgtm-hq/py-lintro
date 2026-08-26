@@ -195,12 +195,10 @@ class SpectralPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return the Spectral documentation URL for the given rule.
 
-        Built-in rulesets publish separate pages. ``asyncapi-*`` and
-        ``arazzo-*`` codes go to those indexes; OpenAPI codes (``oas2-`` /
-        ``oas3-`` plus unprefixed OAS names such as ``operation-operationId``)
-        stay on the OpenAPI page. Custom and JSON Schema codes have no
-        per-rule fragment map, so they return None rather than a misleading
-        OAS URL.
+        Spectral 6.16 emits per-rule SARIF help URIs on a retired host that now
+        returns 404. Recognized built-in OpenAPI, AsyncAPI, and Arazzo codes
+        therefore link to the live official rulesets guide. Custom and JSON
+        Schema codes return None rather than implying a built-in mapping.
 
         Args:
             code: Spectral rule code (e.g., ``oas3-api-servers``).
@@ -212,14 +210,13 @@ class SpectralPlugin(BaseToolPlugin):
         if not code:
             return None
         lowered = code.lower()
-        if lowered.startswith("asyncapi-"):
-            return DocUrlTemplate.SPECTRAL_ASYNCAPI.format(code=code)
-        if lowered.startswith("arazzo-"):
-            return DocUrlTemplate.SPECTRAL_ARAZZO.format(code=code)
-        if lowered in _SPECTRAL_OAS_EXACT_CODES or any(
-            lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES
-        ):
-            return DocUrlTemplate.SPECTRAL.format(code=code)
+        is_known_builtin = (
+            lowered.startswith(("asyncapi-", "arazzo-"))
+            or lowered in _SPECTRAL_OAS_EXACT_CODES
+            or any(lowered.startswith(prefix) for prefix in _SPECTRAL_OAS_PREFIXES)
+        )
+        if is_known_builtin:
+            return str(DocUrlTemplate.SPECTRAL)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -245,10 +242,15 @@ class SpectralPlugin(BaseToolPlugin):
 
         # Spectral requires a ruleset. Without one it cannot lint, so skip
         # gracefully instead of surfacing an error (stylelint/vale pattern).
-        ruleset = self._find_ruleset(
-            search_dir=paths[0] if paths else None,
-            options=merged_options,
-        )
+        search_paths: list[str | None] = [*paths] if paths else [None]
+        ruleset: str | None = None
+        for search_path in search_paths:
+            ruleset = self._find_ruleset(
+                search_dir=search_path,
+                options=merged_options,
+            )
+            if ruleset:
+                break
         if not ruleset:
             logger.debug(
                 "[SpectralPlugin] No ruleset found; skipping. Add a "
@@ -274,12 +276,17 @@ class SpectralPlugin(BaseToolPlugin):
                 f"[SpectralPlugin] Files to check (first 10): {ctx.files[:10]}",
             )
 
+        ruleset_path = Path(ruleset).expanduser()
+        if not ruleset_path.is_absolute():
+            execution_dir = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+            ruleset_path = execution_dir / ruleset_path
+
         cmd: list[str] = self._get_spectral_command(cwd=ctx.cwd) + [
             "lint",
             "--format",
             "json",
             "--ruleset",
-            str(Path(ruleset).absolute()),
+            str(ruleset_path.absolute()),
         ]
         cmd.extend(ctx.rel_files)
         logger.debug(f"[SpectralPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
