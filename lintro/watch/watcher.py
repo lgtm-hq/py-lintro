@@ -286,6 +286,9 @@ def watch_paths(
             a fresh event is created and the loop runs until KeyboardInterrupt.
         observer_factory: Optional factory returning a watchdog-Observer-like
             object. Injectable for tests; defaults to ``watchdog.Observer``.
+
+    Raises:
+        BaseException: Re-raised when native observer startup fails.
     """
     # Built-in ignores always apply; caller patterns extend them so a custom
     # entry cannot silently re-enable noisy directories (.git, node_modules,

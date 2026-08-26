@@ -95,6 +95,12 @@ def watch_command(
         exclude: Comma-separated exclude patterns.
         include_venv: Whether to include virtualenv directories.
         output_format: Output format for results.
+
+    Raises:
+        click.BadParameter: If an explicit tool name or action is invalid.
+        click.ClickException: If configuration or observer startup fails.
+        click.UsageError: If validation leaves no enabled watch tools.
+        click.exceptions.Exit: If the latest lint batch has a nonzero exit code.
     """
     console = Console()
     try:
