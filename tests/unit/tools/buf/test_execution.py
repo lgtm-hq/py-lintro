@@ -118,6 +118,121 @@ def test_check_reports_format_issues(buf_plugin: BufPlugin, tmp_path: Path) -> N
     assert_that(issue.code).is_equal_to("FORMAT")
 
 
+def test_check_reports_lint_and_format_issues(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check keeps both lint and format findings in one pass.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax="proto3";\npackage a;\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(100, _LINT_ISSUE),
+                _result(100, _FORMAT_DIFF),
+            ],
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues).is_not_none()
+    codes = [cast(BufIssue, issue).code for issue in result.issues]  # type: ignore[union-attr]
+    assert_that(codes).contains("PACKAGE_LOWER_SNAKE_CASE")
+    assert_that(codes).contains("FORMAT")
+
+
+def test_check_reports_compile_json(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Compile errors in lint JSON surface through check().
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text("not proto\n")
+    compile_json = (
+        '{"path":"a.proto","start_line":1,"start_column":1,"end_line":1,'
+        '"end_column":9,"type":"COMPILE","message":"syntax error"}'
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[_result(100, compile_json), _result(0, "")],
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).is_not_none()
+    issue = cast(BufIssue, result.issues[0])  # type: ignore[index]
+    assert_that(issue.code).is_equal_to("COMPILE")
+
+
+def test_check_passes_lint_and_format_flags(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check invokes buf lint JSON and format --diff --exit-code.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n\npackage a.v1;\n')
+    recorded: list[list[str]] = []
+
+    def _capture(
+        *,
+        cmd: list[str],
+        timeout: int,
+        cwd: str | None,
+    ) -> SubprocessResult:
+        del timeout, cwd
+        recorded.append(cmd)
+        return _result(0, "")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=_capture,
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(recorded).is_length(2)
+    assert_that(recorded[0]).contains("lint")
+    assert_that(recorded[0]).contains("--error-format")
+    assert_that(recorded[0]).contains("json")
+    assert_that(recorded[1]).contains("format")
+    assert_that(recorded[1]).contains("--diff")
+    assert_that(recorded[1]).contains("--exit-code")
+
+
 def test_check_no_proto_files(buf_plugin: BufPlugin, tmp_path: Path) -> None:
     """Check returns success when no proto files match.
 

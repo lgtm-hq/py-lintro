@@ -40,6 +40,7 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_str,
 )
+from lintro.tools.core.timeout_utils import create_timeout_result
 
 # Constants for Buf configuration
 BUF_DEFAULT_TIMEOUT: int = 30
@@ -141,7 +142,11 @@ class BufPlugin(BaseToolPlugin):
         initial_count: int | None = None,
         initial_issues: list[BufIssue] | None = None,
     ) -> ToolResult:
-        """Handle timeout errors consistently.
+        """Handle timeout errors using the shared timeout contract (#1768).
+
+        A timeout is an execution failure, not a lint finding: it must not
+        invent a ``TIMEOUT`` issue. Findings already parsed before the
+        deadline are kept; ``timed_out`` carries the timeout signal.
 
         Args:
             timeout_val: The timeout value that was exceeded.
@@ -151,39 +156,28 @@ class BufPlugin(BaseToolPlugin):
         Returns:
             Standardized timeout error result.
         """
-        timeout_msg = (
-            f"Buf execution timed out ({timeout_val}s limit exceeded).\n\n"
-            "This may indicate:\n"
-            "  - Large protobuf tree taking too long to process\n"
-            "  - Need to increase timeout via --tool-options buf:timeout=N"
+        timeout_result = create_timeout_result(
+            tool=self,
+            timeout=timeout_val,
         )
-        timeout_issue = BufIssue(
-            file="execution",
-            line=0,
-            column=0,
-            level="error",
-            code="TIMEOUT",
-            message=f"Buf execution timed out ({timeout_val}s limit exceeded)",
-        )
-        if initial_count is not None and initial_count > 0:
-            combined_issues = (initial_issues or []) + [timeout_issue]
+        collected = list(initial_issues or [])
+        if initial_count is not None:
             return ToolResult(
                 name=self.definition.name,
-                success=False,
-                output=timeout_msg,
-                issues_count=len(combined_issues),
-                issues=combined_issues,
+                success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
+                output=timeout_result.output,
+                issues_count=len(collected),
+                issues=collected,
                 initial_issues_count=initial_count,
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
             )
-        # ``check`` has no fix counters, but any findings parsed before the
-        # timeout must survive it — dropping them would under-report.
-        collected = (initial_issues or []) + [timeout_issue]
         return ToolResult(
             name=self.definition.name,
-            success=False,
-            output=timeout_msg,
+            success=timeout_result.success,
+            timed_out=timeout_result.timed_out,
+            output=timeout_result.output,
             issues_count=len(collected),
             issues=collected,
         )

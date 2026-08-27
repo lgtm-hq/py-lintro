@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.buf import BufPlugin
@@ -21,8 +22,8 @@ def test_doc_url_for_lint_rule(buf_plugin: BufPlugin) -> None:
         buf_plugin: The plugin under test.
     """
     url = buf_plugin.doc_url("PACKAGE_LOWER_SNAKE_CASE")
-    assert_that(url).is_not_none()
-    assert_that(url).contains("buf.build")
+    assert_that(url).is_equal_to(DocUrlTemplate.BUF)
+    assert_that(url).is_equal_to("https://buf.build/docs/lint/rules/")
 
 
 def test_doc_url_none_for_non_rule_codes(buf_plugin: BufPlugin) -> None:
@@ -40,7 +41,7 @@ def test_check_timeout_returns_error_result(
     buf_plugin: BufPlugin,
     tmp_path: Path,
 ) -> None:
-    """A subprocess timeout during check yields a TIMEOUT issue.
+    """A subprocess timeout during check uses the shared timeout contract.
 
     Args:
         buf_plugin: The plugin under test.
@@ -61,17 +62,16 @@ def test_check_timeout_returns_error_result(
             result = buf_plugin.check([str(proto)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues).is_not_none()
-    issue = cast(BufIssue, result.issues[0])  # type: ignore[index]
-    assert_that(issue.code).is_equal_to("TIMEOUT")
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("timed out")
 
 
 def test_fix_timeout_returns_error_result(
     buf_plugin: BufPlugin,
     tmp_path: Path,
 ) -> None:
-    """A subprocess timeout during fix yields a TIMEOUT issue.
+    """A subprocess timeout during fix uses the shared timeout contract.
 
     Args:
         buf_plugin: The plugin under test.
@@ -92,9 +92,9 @@ def test_fix_timeout_returns_error_result(
             result = buf_plugin.fix([str(proto)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.issues).is_not_none()
-    issue = cast(BufIssue, result.issues[-1])  # type: ignore[index]
-    assert_that(issue.code).is_equal_to("TIMEOUT")
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("timed out")
 
 
 def test_doc_url_none_for_timeout(buf_plugin: BufPlugin) -> None:
@@ -144,8 +144,9 @@ def test_check_timeout_keeps_parsed_lint_issues(
             result = buf_plugin.check([str(proto)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
     codes = [cast(BufIssue, issue).code for issue in result.issues]  # type: ignore[union-attr]
     assert_that(codes).contains("PACKAGE_LOWER_SNAKE_CASE")
-    assert_that(codes).contains("TIMEOUT")
+    assert_that(codes).does_not_contain("TIMEOUT")

@@ -2843,7 +2843,7 @@ lintro format --tools taplo --tool-options taplo:indent_string="    "
 lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
 ```
 
-#### Buf Configuration
+### Buf Configuration
 
 **File:** `buf.yaml` (or `buf.work.yaml` for multi-module workspaces)
 
@@ -2865,8 +2865,8 @@ lint:
 
 | Option             | Type    | Description                                     |
 | ------------------ | ------- | ----------------------------------------------- |
-| `config`           | string  | Path to a `buf.yaml` file or inline config data |
-| `disable_symlinks` | boolean | Do not follow symlinks when reading sources     |
+| `config`           | string  | Path to a `buf.yaml` (CLI `--tool-options` cannot pass inline YAML) |
+| `disable_symlinks` | boolean | Do not follow symlinks when reading sources                         |
 
 **Usage Examples:**
 
