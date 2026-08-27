@@ -29,6 +29,7 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_list,
 )
+from lintro.tools.core.timeout_utils import create_timeout_result
 
 # Constants for Checkov configuration
 CHECKOV_DEFAULT_TIMEOUT: int = 120
@@ -223,16 +224,21 @@ class CheckovPlugin(BaseToolPlugin):
                 capture_output=True,
                 text=True,
                 timeout=ctx.timeout,
+                cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
+            timeout_result = create_timeout_result(
+                tool=self,
+                timeout=ctx.timeout,
+                cmd=cmd,
+            )
             return ToolResult(
                 name=self.definition.name,
-                success=False,
-                output=(
-                    f"Checkov execution timed out ({ctx.timeout}s limit exceeded). "
-                    "Increase via --tool-options checkov:timeout=N."
-                ),
-                issues_count=0,
+                success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
+                output=timeout_result.output,
+                issues_count=timeout_result.issues_count,
+                cwd=ctx.cwd,
             )
         except (OSError, ValueError, RuntimeError) as exc:
             logger.error(f"Failed to run Checkov: {exc}")
@@ -276,13 +282,35 @@ class CheckovPlugin(BaseToolPlugin):
             )
 
         issues = parse_checkov_output(json.dumps(data))
+        # Checkov uses 0 for a clean report and 1 when failed checks exist.
+        # Any other exit (or exit 1 with nothing parsed) is a runtime error
+        # and must not read as a clean security pass.
+        if issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=None,
+                issues_count=len(issues),
+                issues=issues,
+                parse_failures_count=0,
+                cwd=ctx.cwd,
+            )
+        if completed.returncode == 0:
+            return ToolResult(
+                name=self.definition.name,
+                success=True,
+                output=None,
+                issues_count=0,
+                parse_failures_count=0,
+                cwd=ctx.cwd,
+            )
         return ToolResult(
             name=self.definition.name,
-            success=len(issues) == 0,
-            output=None,
-            issues_count=len(issues),
-            issues=issues,
+            success=False,
+            output=stderr or "Checkov exited with an error and no failed checks.",
+            issues_count=0,
             parse_failures_count=0,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

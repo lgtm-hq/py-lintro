@@ -62,7 +62,7 @@ def test_parses_real_failed_check() -> None:
     issue = issues[0]
     assert_that(issue).is_instance_of(CheckovIssue)
     assert_that(issue.check_id).is_equal_to("CKV_AWS_260")
-    assert_that(issue.file).is_equal_to("/checkov_violations.tf")
+    assert_that(issue.file).is_equal_to("/repo/checkov_violations.tf")
     assert_that(issue.line).is_equal_to(10)
     assert_that(issue.end_line).is_equal_to(19)
     assert_that(issue.resource).is_equal_to("aws_security_group.allow_all")
@@ -82,7 +82,7 @@ def test_display_row_maps_check_id_to_code() -> None:
 
     row = issue.to_display_row()
     assert_that(row["code"]).is_equal_to("CKV_AWS_260")
-    assert_that(row["file"]).is_equal_to("/checkov_violations.tf")
+    assert_that(row["file"]).is_equal_to("/repo/checkov_violations.tf")
 
 
 def test_missing_severity_falls_back_to_default() -> None:
@@ -144,6 +144,27 @@ def test_multi_framework_list_output_is_flattened() -> None:
     assert_that({i.check_id for i in issues}).is_equal_to(
         {"CKV_AWS_260", "CKV_SECRET_6"},
     )
+
+
+def test_prefers_file_abs_path_over_repo_relative_file_path() -> None:
+    """Checkov file_path is often a fake absolute path; use file_abs_path."""
+    issues = parse_checkov_output(_report([_REAL_FAILED_CHECK]))
+
+    assert_that(issues[0].file).is_equal_to("/repo/checkov_violations.tf")
+
+
+def test_falls_back_to_file_path_when_abs_path_missing() -> None:
+    """file_path is used when Checkov omits file_abs_path."""
+    check = {
+        "check_id": "CKV_AWS_1",
+        "check_name": "name",
+        "file_path": "/only.tf",
+        "file_line_range": [1, 1],
+        "resource": "r",
+    }
+
+    issues = parse_checkov_output(_report([check]))
+    assert_that(issues[0].file).is_equal_to("/only.tf")
 
 
 def test_passed_and_skipped_checks_are_ignored() -> None:

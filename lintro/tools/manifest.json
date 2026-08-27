@@ -157,7 +157,8 @@
       "name": "checkov",
       "version": "3.3.6",
       "install": {
-        "type": "binary"
+        "type": "pip",
+        "package": "checkov"
       },
       "tier": "tools",
       "category": "external",

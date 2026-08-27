@@ -381,7 +381,7 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
         langs.add("protobuf")
 
     # Terraform (HCL sources anywhere in the tree, vendored dirs pruned)
-    if _has_source_files(cwd, ".tf"):
+    if _has_source_files(cwd, ".tf", ".tf.json"):
         langs.add("terraform")
 
     # YAML (beyond compose / lintro config / Actions workflows).

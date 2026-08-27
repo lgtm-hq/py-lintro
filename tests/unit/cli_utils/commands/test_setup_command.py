@@ -125,6 +125,30 @@ def test_detect_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert_that(langs).contains("docker")
 
 
+def test_detect_terraform_via_tf_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Terraform from a lone ``*.tf`` source file."""
+    (tmp_path / "main.tf").write_text('resource "null_resource" "x" {}\n')
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("terraform")
+
+
+def test_detect_terraform_via_tf_json_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Terraform from JSON-encoded ``*.tf.json`` sources."""
+    (tmp_path / "main.tf.json").write_text("{}\n")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("terraform")
+
+
 def test_detect_github_actions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

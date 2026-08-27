@@ -45,9 +45,9 @@ and Terraform modules. The plugin keeps every run offline:
   upload. This is enforced by construction: the command builder has no code path that
   adds an API key.
 
-These flags are the plugin defaults (`skip_download=True`); disabling them is possible
-via `--tool-options checkov:skip_download=false` for users who explicitly want network
-access.
+`--skip-download` is the plugin default (`skip_download=True`). Setting
+`skip_download=false` only omits that flag; `--download-external-modules False` is
+always passed, so Checkov still does not fetch remote Terraform modules.
 
 ## Parser choice: native JSON, not SARIF
 

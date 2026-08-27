@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from subprocess import (  # nosec B404 - only the CompletedProcess dataclass is used
     CompletedProcess,
@@ -204,6 +205,72 @@ def test_check_unparseable_stdout_fails_closed(
     result = _run_check(checkov_plugin, tf_file, completed)
     assert_that(result.success).is_false()
     assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_timeout_sets_timed_out(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """A subprocess timeout uses the shared contract, not a clean pass."""
+    tf_file = tmp_path / "main.tf"
+    tf_file.write_text('resource "aws_s3_bucket" "b" {}\n')
+
+    with (
+        patch(_VERIFY_VERSION, return_value=None),
+        patch(
+            _SUBPROCESS_RUN,
+            side_effect=subprocess.TimeoutExpired(cmd=["checkov"], timeout=120),
+        ),
+    ):
+        result = checkov_plugin.check([str(tf_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_error_exit_with_empty_failed_checks_fails_closed(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """Error-exit JSON with no failed checks is not a clean security pass."""
+    tf_file = tmp_path / "main.tf"
+    tf_file.write_text('resource "aws_s3_bucket" "b" {}\n')
+
+    completed = CompletedProcess(
+        args=["checkov"],
+        returncode=2,
+        stdout=_report([]),
+        stderr="module graph failed",
+    )
+
+    result = _run_check(checkov_plugin, tf_file, completed)
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("module graph failed")
+
+
+def test_check_invokes_subprocess_with_project_cwd(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """check() runs Checkov from the prepared project cwd."""
+    tf_file = tmp_path / "main.tf"
+    tf_file.write_text('resource "aws_s3_bucket" "b" {}\n')
+    completed = CompletedProcess(
+        args=["checkov"],
+        returncode=0,
+        stdout=_report([]),
+        stderr="",
+    )
+
+    with (
+        patch(_VERIFY_VERSION, return_value=None),
+        patch(_SUBPROCESS_RUN, return_value=completed) as mock_run,
+    ):
+        checkov_plugin.check([str(tf_file)], {})
+
+    assert_that(mock_run.call_args.kwargs.get("cwd")).is_not_none()
 
 
 def test_fix_raises_not_implemented(checkov_plugin: CheckovPlugin) -> None:

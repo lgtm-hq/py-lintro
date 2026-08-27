@@ -88,7 +88,10 @@ def _parse_failed_check(check: dict[str, Any]) -> CheckovIssue | None:
     """
     try:
         check_id = validate_str_field(check.get("check_id"), "check_id")
-        file_path = validate_str_field(check.get("file_path"), "file_path")
+        file_path = validate_str_field(
+            check.get("file_abs_path") or check.get("file_path"),
+            "file_path",
+        )
 
         if not check_id or not file_path:
             logger.warning("Skipping checkov issue missing check_id or file_path")
