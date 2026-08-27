@@ -499,6 +499,7 @@ export LINTRO_AI_MAX_COST_USD=uncapped # sentinel; a positive number is a USD ca
 | `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
 | `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
 | `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
+| `LINTRO_NO_CACHE`                | Force-clear discovery/config caches on each invoke           | -         |
 | `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
 | `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
 | `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |

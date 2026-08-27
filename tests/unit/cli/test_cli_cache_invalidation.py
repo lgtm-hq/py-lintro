@@ -5,6 +5,7 @@ when the config inputs change between in-process invocations, rather than
 unconditionally on every invocation (see issue #1231).
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -181,3 +182,105 @@ def test_fingerprint_changes_with_working_directory(
     fingerprint_b = cli_module._compute_config_fingerprint()
 
     assert_that(fingerprint_a).is_not_equal_to(fingerprint_b)
+
+
+def test_no_cache_accepts_other_truthy_values(
+    project_dir: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Truthy ``LINTRO_NO_CACHE`` values other than ``1`` still force a clear.
+
+    Args:
+        project_dir: Isolated project directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    calls = _spy_clear_functions(monkeypatch=monkeypatch)
+    monkeypatch.setenv("LINTRO_NO_CACHE", "true")
+    runner = CliRunner()
+    first = runner.invoke(cli, ["list-tools"])
+    second = runner.invoke(cli, ["list-tools"])
+    assert_that(first.exit_code).is_equal_to(0)
+    assert_that(second.exit_code).is_equal_to(0)
+    assert_that(calls["discovery"][0]).is_equal_to(2)
+
+
+def test_path_change_clears_discovery_cache(
+    project_dir: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ``PATH`` change between invokes clears the discovery cache.
+
+    Args:
+        project_dir: Isolated project directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.tools.core import runtime_discovery
+    from lintro.tools.core.runtime_discovery import DiscoveredTool
+
+    runner = CliRunner()
+    first = runner.invoke(cli, ["list-tools"])
+    assert_that(first.exit_code).is_equal_to(0)
+    runtime_discovery._discovery_cache.tools["__sentinel__"] = DiscoveredTool(
+        name="__sentinel__",
+    )
+    monkeypatch.setenv("PATH", os.environ.get("PATH", "") + ":/tmp/lintro-fake-bin")
+    second = runner.invoke(cli, ["list-tools"])
+    assert_that(second.exit_code).is_equal_to(0)
+    assert_that("__sentinel__" in runtime_discovery._discovery_cache.tools).is_false()
+
+
+def test_parent_config_change_clears_pyproject_cache(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Editing a parent ``.lintro-config.yaml`` invalidates cached pyproject data.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.utils import config as config_mod
+
+    (tmp_path / "pyproject.toml").write_text('[tool.lintro]\ntool_order = "priority"\n')
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    monkeypatch.setattr(cli_module, "_last_config_fingerprint", None)
+    monkeypatch.delenv("LINTRO_NO_CACHE", raising=False)
+
+    runner = CliRunner()
+    first = runner.invoke(cli, ["list-tools"])
+    assert_that(first.exit_code).is_equal_to(0)
+
+    pyproject = (tmp_path / "pyproject.toml").resolve()
+    config_mod._pyproject_data_cache[pyproject] = {"sentinel": True}
+    (tmp_path / ".lintro-config.yaml").write_text("execution:\n  parallel: true\n")
+    second = runner.invoke(cli, ["list-tools"])
+    assert_that(second.exit_code).is_equal_to(0)
+    assert_that(config_mod._pyproject_data_cache.get(pyproject)).is_not_equal_to(
+        {"sentinel": True},
+    )
+
+
+def test_unchanged_config_keeps_pyproject_cache_data(
+    project_dir: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A second invoke with unchanged inputs keeps cached pyproject data.
+
+    Args:
+        project_dir: Isolated project directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.utils import config as config_mod
+
+    runner = CliRunner()
+    first = runner.invoke(cli, ["list-tools"])
+    assert_that(first.exit_code).is_equal_to(0)
+    pyproject = (project_dir / "pyproject.toml").resolve()
+    config_mod._pyproject_data_cache[pyproject] = {"sentinel": True}
+    second = runner.invoke(cli, ["list-tools"])
+    assert_that(second.exit_code).is_equal_to(0)
+    assert_that(config_mod._pyproject_data_cache.get(pyproject)).is_equal_to(
+        {"sentinel": True},
+    )
