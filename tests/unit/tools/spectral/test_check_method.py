@@ -115,6 +115,41 @@ def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> N
     )
 
 
+def test_warning_findings_fail_even_when_spectral_exits_zero(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Parsed warnings make the tool fail independently of process exit code.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_find_ruleset",
+            return_value=str(tmp_path / ".spectral.yaml"),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            return_value=_process(stdout=MOCK_OUTPUT),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        result = spectral_plugin.check([str(tmp_path / "openapi.yaml")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+
+
 def test_check_without_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:
     """Check returns success and suppresses output when clean.
 
@@ -263,6 +298,24 @@ def test_find_ruleset_supports_all_declared_filenames(
         ).is_equal_to(str(ruleset))
 
 
+def test_find_ruleset_returns_none_without_config(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """An empty project tree has no implicit Spectral ruleset.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    assert_that(
+        spectral_plugin._find_ruleset(
+            search_dir=str(tmp_path),
+            stop_dir=str(tmp_path),
+        ),
+    ).is_none()
+
+
 def test_check_per_call_ruleset_reaches_command(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
@@ -383,6 +436,44 @@ def test_check_searches_all_input_paths_for_ruleset(
     )
 
 
+def test_missing_explicit_ruleset_fails_closed(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unreadable explicit ruleset is a runtime failure, not a skip.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    missing_ruleset = tmp_path / "missing.spectral.yaml"
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            return_value=_process(
+                returncode=2,
+                stderr=f"Could not read ruleset at {missing_ruleset}",
+            ),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        result = spectral_plugin.check(
+            [str(tmp_path / "openapi.yaml")],
+            {"ruleset": str(missing_ruleset)},
+        )
+
+    assert_that(result.success).is_false()
+    assert_that(result.skipped).is_false()
+    assert_that(result.output).contains("Could not read ruleset")
+
+
 def test_check_skips_without_ruleset(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
@@ -468,6 +559,7 @@ def test_check_handles_timeout(
     assert_that(result.name).is_equal_to("spectral")
     assert_that(result.success).is_false()
     assert_that(result.timed_out).is_true()
+    assert_that(result.output).contains("timed out")
 
 
 def test_check_runtime_error_is_not_clean(
