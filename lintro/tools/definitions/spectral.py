@@ -21,6 +21,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.parsers.spectral.spectral_parser import (
     has_spectral_json_payload,
     parse_spectral_output,
@@ -78,6 +79,7 @@ _SPECTRAL_OAS_EXACT_CODES: frozenset[str] = frozenset(
         "path-declarations-must-exist",
         "path-keys-no-trailing-slash",
         "path-not-include-query",
+        "path-params",
         "tag-description",
         "typed-enum",
     },
@@ -258,25 +260,33 @@ class SpectralPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Spectral requires a ruleset. Without one it cannot lint, so skip
-        # gracefully instead of surfacing an error (stylelint/vale pattern).
+        # Spectral accepts one ruleset per process. Group matched files by the
+        # nearest ruleset discovered from each file so nested project configs
+        # cannot leak onto unrelated files. An explicit option intentionally
+        # overrides discovery for the whole invocation.
         execution_root = ctx.cwd or str(Path.cwd())
         discovery_boundary = find_project_root(execution_root)
-        search_paths = list(
-            dict.fromkeys(str(Path(file_path).parent) for file_path in ctx.files),
-        )
-        if not search_paths:
-            search_paths = [execution_root]
-        ruleset: str | None = None
-        for search_path in search_paths:
-            ruleset = self._find_ruleset(
-                search_dir=search_path,
-                options=merged_options,
-                stop_dir=discovery_boundary,
-            )
-            if ruleset:
-                break
-        if not ruleset:
+        ruleset_groups: dict[str, list[str]] = {}
+        explicit_ruleset = merged_options.get("ruleset")
+        if explicit_ruleset:
+            ruleset_path = Path(str(explicit_ruleset)).expanduser()
+            if not ruleset_path.is_absolute():
+                ruleset_path = Path(execution_root) / ruleset_path
+            ruleset_groups[str(ruleset_path.absolute())] = list(ctx.rel_files)
+        else:
+            for file_path, rel_file in zip(ctx.files, ctx.rel_files, strict=True):
+                ruleset = self._find_ruleset(
+                    search_dir=str(Path(file_path).parent),
+                    options=merged_options,
+                    stop_dir=discovery_boundary,
+                )
+                if ruleset:
+                    ruleset_groups.setdefault(
+                        str(Path(ruleset).absolute()),
+                        [],
+                    ).append(rel_file)
+
+        if not ruleset_groups:
             ruleset_names = ", ".join(SPECTRAL_RULESET_FILES)
             logger.debug(
                 "[SpectralPlugin] No ruleset found; skipping. Add a "
@@ -295,95 +305,94 @@ class SpectralPlugin(BaseToolPlugin):
             )
 
         logger.debug(
-            f"[SpectralPlugin] Discovered {len(ctx.files)} files matching "
-            f"patterns: {self.definition.file_patterns}",
+            f"[SpectralPlugin] Discovered {len(ctx.files)} matching files in "
+            f"{len(ruleset_groups)} ruleset group(s)",
         )
         if ctx.files:
             logger.debug(
                 f"[SpectralPlugin] Files to check (first 10): {ctx.files[:10]}",
             )
 
-        ruleset_path = Path(ruleset).expanduser()
-        if not ruleset_path.is_absolute():
-            execution_dir = Path(ctx.cwd) if ctx.cwd else Path.cwd()
-            ruleset_path = execution_dir / ruleset_path
-
-        cmd: list[str] = self._get_spectral_command(cwd=ctx.cwd) + [
-            "lint",
-            "--format",
-            "json",
-            "--ignore-unknown-format",
-            "--ruleset",
-            str(ruleset_path.absolute()),
-        ]
-        cmd.extend(ctx.rel_files)
-        logger.debug(f"[SpectralPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
-
-        try:
-            process = self._run_subprocess_result(
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
+        command_prefix = self._get_spectral_command(cwd=ctx.cwd)
+        all_issues: list[SpectralIssue] = []
+        finding_outputs: list[str] = []
+        for ruleset, rel_files in ruleset_groups.items():
+            cmd = [
+                *command_prefix,
+                "lint",
+                "--format",
+                "json",
+                "--ignore-unknown-format",
+                "--ruleset",
+                ruleset,
+                *rel_files,
+            ]
+            logger.debug(
+                f"[SpectralPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})",
             )
-        except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
-                timeout=ctx.timeout,
-                cmd=cmd,
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-            )
+            try:
+                process = self._run_subprocess_result(
+                    cmd=cmd,
+                    timeout=ctx.timeout,
+                    cwd=ctx.cwd,
+                )
+            except subprocess.TimeoutExpired:
+                timeout_result = create_timeout_result(
+                    tool=self,
+                    timeout=ctx.timeout,
+                    cmd=cmd,
+                )
+                return ToolResult(
+                    name=self.definition.name,
+                    success=timeout_result.success,
+                    timed_out=timeout_result.timed_out,
+                    output=timeout_result.output,
+                    issues_count=timeout_result.issues_count,
+                    cwd=ctx.cwd,
+                )
 
-        issues = parse_spectral_output(output=process.stdout)
+            issues = parse_spectral_output(output=process.stdout)
+            # Spectral exits 1 when findings exist. Any other failed process
+            # with nothing parsed is a runtime failure, never a clean pass.
+            if not process.success and not issues:
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=process.output
+                    or "Spectral exited with an error and no results.",
+                    issues_count=0,
+                    cwd=ctx.cwd,
+                )
+            # Successful output must contain either findings or a decoded empty
+            # array; malformed warning-only output fails closed.
+            if (
+                process.success
+                and not issues
+                and not has_spectral_json_payload(process.stdout)
+            ):
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=process.output or "Spectral output could not be parsed.",
+                    issues_count=0,
+                    cwd=ctx.cwd,
+                )
+            all_issues.extend(issues)
+            if issues and process.output:
+                finding_outputs.append(process.output)
 
-        # Spectral exits 1 when findings exist (which produce parseable JSON).
-        # A non-zero exit with nothing parsed is a runtime failure (invalid
-        # ruleset, missing runtime) — never report that as a clean pass.
-        if not process.success and not issues:
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=process.output
-                or "Spectral exited with an error and no results.",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-        # Successful Spectral JSON is either a findings array or exactly an
-        # empty array. Any other non-empty stdout means parsing failed; do not
-        # silently convert warning-only output into a clean pass.
-        if (
-            process.success
-            and not issues
-            and not has_spectral_json_payload(process.stdout)
-        ):
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=process.output or "Spectral output could not be parsed.",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-
-        for issue in issues:
+        for issue in all_issues:
             issue.doc_url = self.doc_url(issue.code) or ""
-        issues_count: int = len(issues)
+        issues_count = len(all_issues)
         success_flag: bool = issues_count == 0
-
-        final_output: str | None = process.output
-        if success_flag:
-            final_output = None
+        final_output = "\n".join(finding_outputs) or None
 
         return ToolResult(
             name=self.definition.name,
             success=success_flag,
             output=final_output,
             issues_count=issues_count,
-            issues=issues,
+            issues=all_issues,
             cwd=ctx.cwd,
         )
 

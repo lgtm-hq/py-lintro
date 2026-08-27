@@ -389,6 +389,60 @@ def test_check_configured_ruleset_reaches_command(
     )
 
 
+def test_check_runs_each_nested_ruleset_group_separately(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """Files with different nearest rulesets run in separate processes.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / ".git").mkdir()
+    files: list[str] = []
+    rel_files: list[str] = []
+    rulesets: list[Path] = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        ruleset = directory / ".spectral.yaml"
+        ruleset.write_text('extends: ["spectral:oas"]\n')
+        spec = directory / "openapi.yaml"
+        spec.write_text("openapi: 3.0.0\n")
+        files.append(str(spec))
+        rel_files.append(f"{name}/openapi.yaml")
+        rulesets.append(ruleset)
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess_result",
+            side_effect=[_process(stdout="[]"), _process(stdout="[]")],
+        ) as mock_run,
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(
+            tmp_path,
+            files=files,
+            rel_files=rel_files,
+        )
+        result = spectral_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(mock_run.call_count).is_equal_to(2)
+    commands = [call.kwargs["cmd"] for call in mock_run.call_args_list]
+    for ruleset, rel_file in zip(rulesets, rel_files, strict=True):
+        matching = [command for command in commands if str(ruleset) in command]
+        assert_that(matching).is_length(1)
+        assert_that(matching[0]).contains(rel_file)
+
+
 def test_check_searches_all_input_paths_for_ruleset(
     spectral_plugin: SpectralPlugin,
     tmp_path: Path,
@@ -433,6 +487,10 @@ def test_check_searches_all_input_paths_for_ruleset(
     assert_that(mock_run.call_args.kwargs["cmd"]).contains(
         "--ruleset",
         str(ruleset.absolute()),
+        "second/second.yaml",
+    )
+    assert_that(mock_run.call_args.kwargs["cmd"]).does_not_contain(
+        "first/first.yaml",
     )
 
 

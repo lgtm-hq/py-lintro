@@ -110,6 +110,7 @@ def test_set_options_rejects_invalid_timeout(spectral_plugin: SpectralPlugin) ->
         ("openapi-tags", "openapi-rules.md"),
         ("operation-operationId", "openapi-rules.md"),
         ("info-contact", "openapi-rules.md"),
+        ("path-params", "openapi-rules.md"),
         ("asyncapi-info-contact", "asyncapi-rules.md"),
         ("asyncapi-3-tags", "asyncapi-rules.md"),
         ("arazzo-workflow-id", "arazzo-rules.md"),
