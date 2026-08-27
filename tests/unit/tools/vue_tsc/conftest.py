@@ -11,8 +11,15 @@ from lintro.tools.definitions.vue_tsc import VueTscPlugin
 
 
 @pytest.fixture
-def vue_tsc_plugin() -> Generator[VueTscPlugin, None, None]:
+def vue_tsc_plugin(
+    no_local_node_install: None,
+) -> Generator[VueTscPlugin, None, None]:
     """Provide a VueTscPlugin instance for testing.
+
+    Args:
+        no_local_node_install: Ensure command resolution is independent of the
+            checkout's installed Node dependencies before constructing the
+            plugin and caching its version command.
 
     Yields:
         VueTscPlugin: A VueTscPlugin instance with version check mocked.

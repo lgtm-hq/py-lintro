@@ -35,6 +35,7 @@ from lintro.config.lintro_config import (
     OutputConfig,
     ReviewConfig,
     ScoreConfig,
+    WatchConfig,
 )
 from lintro.enums.validation_code import ValidationCode
 from lintro.utils.config import STRUCTURAL_SECTIONS, _find_pyproject
@@ -68,6 +69,7 @@ KNOWN_TOOL_KEYS: frozenset[str] = frozenset(LintroToolConfig.model_fields)
 KNOWN_REVIEW_KEYS: frozenset[str] = frozenset(ReviewConfig.model_fields)
 KNOWN_SCORE_KEYS: frozenset[str] = frozenset(ScoreConfig.model_fields)
 KNOWN_OUTPUT_KEYS: frozenset[str] = frozenset(OutputConfig.model_fields)
+KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
 
 # Sections whose typed parser calls ``.get``/``.items`` on its input without a
 # type guard. YAML spells an empty section as ``enforce:`` which deserializes
@@ -288,31 +290,41 @@ def _check_tool_names(
         errors.append(_tool_value_type_error(name, tool_data))
 
 
-def _check_enabled_tools(
-    execution: dict[str, Any],
+def _check_named_tool_list(
+    section: dict[str, Any],
+    *,
+    key: str,
+    location: str,
+    allow_all: bool,
     warnings: list[ValidationMessage],
 ) -> None:
-    """Warn about unknown tool names in ``execution.enabled_tools``.
+    """Warn about unknown names in a configuration tool list.
 
     Args:
-        execution: The ``execution`` mapping.
+        section: Configuration mapping containing the list.
+        key: Key holding the tool names.
+        location: Validation location shown to users.
+        allow_all: Whether the ``all`` sentinel is valid.
         warnings: List to append findings to.
     """
-    enabled = execution.get("enabled_tools")
-    if isinstance(enabled, str):
-        enabled = [enabled]
-    if not isinstance(enabled, list):
+    names = section.get(key)
+    if isinstance(names, str):
+        names = [names]
+    if not isinstance(names, list):
         return
     known = known_tool_names()
-    for name in enabled:
-        if not isinstance(name, str) or name.lower() in known:
+    for name in names:
+        if not isinstance(name, str):
+            continue
+        normalized = name.lower()
+        if normalized in known or (allow_all and normalized == "all"):
             continue
         warnings.append(
             ValidationMessage(
                 code=ValidationCode.UNKNOWN_TOOL,
                 message=f"unknown tool '{name}'",
-                location="execution.enabled_tools",
-                suggestion=_suggest(name.lower(), known),
+                location=location,
+                suggestion=_suggest(normalized, known),
             ),
         )
 
@@ -524,6 +536,7 @@ def _check_raw_pyproject_lintro(
         "review": KNOWN_REVIEW_KEYS,
         "score": KNOWN_SCORE_KEYS,
         "output": KNOWN_OUTPUT_KEYS,
+        "watch": KNOWN_WATCH_KEYS,
     }
 
     for key, value in data.items():
@@ -615,7 +628,23 @@ def _schema_check_normalized(
                 "execution",
                 result.warnings,
             )
-        _check_enabled_tools(execution, result.warnings)
+        _check_named_tool_list(
+            execution,
+            key="enabled_tools",
+            location="execution.enabled_tools",
+            allow_all=False,
+            warnings=result.warnings,
+        )
+
+    watch = parsed.get("watch")
+    if isinstance(watch, dict):
+        _check_named_tool_list(
+            watch,
+            key="tools",
+            location="watch.tools",
+            allow_all=True,
+            warnings=result.warnings,
+        )
 
     if not skip_unknown_keys:
         enforce = parsed.get("enforce")
@@ -631,6 +660,7 @@ def _schema_check_normalized(
             ("review", KNOWN_REVIEW_KEYS),
             ("score", KNOWN_SCORE_KEYS),
             ("output", KNOWN_OUTPUT_KEYS),
+            ("watch", KNOWN_WATCH_KEYS),
         ):
             data = parsed.get(section)
             if isinstance(data, dict):

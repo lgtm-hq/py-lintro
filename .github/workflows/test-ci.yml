@@ -120,7 +120,8 @@ jobs:
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the pypi preset baseline. Test jobs only
+      # non-empty value must include the pypi preset baseline plus setup-uv's
+      # GitHub Releases fallback while the Astral mirror lags. Test jobs only
       # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
       # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
       # replace-mode so egress-preset: pypi cannot reintroduce them or
@@ -133,6 +134,8 @@ jobs:
         objects.githubusercontent.com:443
         raw.githubusercontent.com:443
         pipelines.actions.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
         astral.sh:443
@@ -169,7 +172,8 @@ jobs:
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the pypi preset baseline. Test jobs only
+      # non-empty value must include the pypi preset baseline plus setup-uv's
+      # GitHub Releases fallback while the Astral mirror lags. Test jobs only
       # DOWNLOAD from real PyPI (pypi.org + files.pythonhosted.org). Publish
       # hosts (test.pypi.org, upload.pypi.org) are unused here; keep
       # replace-mode so egress-preset: pypi cannot reintroduce them or
@@ -182,6 +186,8 @@ jobs:
         objects.githubusercontent.com:443
         raw.githubusercontent.com:443
         pipelines.actions.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
         astral.sh:443
@@ -271,6 +277,7 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
             raw.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443

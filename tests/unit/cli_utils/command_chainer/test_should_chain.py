@@ -52,6 +52,18 @@ def test_should_not_chain_comma_in_argument(mock_group: click.Group) -> None:
     assert_that(chainer.should_chain(["fmt", "--tools", "ruff,bandit"])).is_false()
 
 
+def test_should_not_chain_known_commands_in_option_value() -> None:
+    """Known command names in an option value are not a command chain."""
+    from lintro.cli import cli
+
+    chainer = CommandChainer(cli)
+
+    assert_that(
+        chainer.should_chain(["check", "--exclude", "w,test"]),
+    ).is_false()
+    assert_that(chainer.command_names).contains("w")
+
+
 def test_should_not_chain_empty_args(mock_group: click.Group) -> None:
     """Test that empty args do not trigger chaining.
 

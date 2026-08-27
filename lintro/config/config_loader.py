@@ -31,6 +31,7 @@ from lintro.config.review_config import (
     ReviewConfig,
 )
 from lintro.config.score_config import ScoreConfig
+from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.path_utils import find_file_upward
@@ -498,6 +499,39 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     return ScoreConfig(**filtered)
 
 
+def _parse_watch_config(data: Any) -> WatchConfig:
+    """Parse the ``watch`` configuration section.
+
+    Args:
+        data: Raw ``watch`` section from config.
+
+    Returns:
+        WatchConfig: Parsed watch configuration.
+
+    Raises:
+        ValueError: When the watch section is not a mapping.
+    """
+    if data is None:
+        return WatchConfig()
+    if not isinstance(data, dict):
+        msg = f"watch config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return WatchConfig()
+
+    known_fields = set(WatchConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown watch config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    if isinstance(filtered.get("tools"), str):
+        filtered["tools"] = [filtered["tools"]]
+    return WatchConfig(**filtered)
+
+
 class _PyprojectLintroCatalog(NamedTuple):
     """Name catalog shared by the pyproject converter and validator.
 
@@ -560,6 +594,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             "score",
             "tool",
             "tools",
+            "watch",
             ConfigKey.POST_CHECKS.value.lower(),
             ConfigKey.VERSIONS.value.lower(),
         }
@@ -627,6 +662,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "review": {},
         "score": {},
         "output": {},
+        "watch": {},
     }
 
     catalog = _pyproject_lintro_catalog()
@@ -714,6 +750,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
+        elif key_lower == "watch":
+            result["watch"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -862,6 +900,7 @@ def build_config_from_dict(
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
+    watch_config = _parse_watch_config(data.get("watch", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -872,6 +911,7 @@ def build_config_from_dict(
         review=review_config,
         score=score_config,
         output=output_config,
+        watch=watch_config,
         config_path=resolved_path,
     )
 

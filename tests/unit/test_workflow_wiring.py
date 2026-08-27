@@ -1677,6 +1677,8 @@ def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
     assert_that(allowed).contains("raw.githubusercontent.com:443")
     assert_that(allowed).contains("astral.sh:443")
     assert_that(allowed).contains("releases.astral.sh:443")
+    assert_that(allowed).contains("release-assets.githubusercontent.com:443")
+    assert_that(allowed).contains("github-releases.githubusercontent.com:443")
 
 
 @pytest.mark.parametrize("job_id", ["test-compat", "test-coverage"])
@@ -1701,6 +1703,26 @@ def test_test_jobs_omit_pypi_publish_endpoints(job_id: str) -> None:
     assert_that(allowed).does_not_contain("test.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.test.pypi.org:443")
+
+
+@pytest.mark.parametrize("job_id", ["test-compat", "test-coverage"])
+def test_test_jobs_allow_setup_uv_github_release_fallback(job_id: str) -> None:
+    """Test jobs must allow setup-uv fallback while the Astral mirror lags.
+
+    The explicit allowlist uses replace semantics. When a newly published uv
+    version is not yet mirrored at releases.astral.sh, setup-uv falls back to
+    GitHub Releases and follows redirects to the release-asset hosts.
+
+    Args:
+        job_id: Test job whose egress allowlist is under test.
+    """
+    workflow = _load_workflow(name="test-ci.yml")
+    allowed = set(workflow["jobs"][job_id]["with"]["allowed-endpoints"].split())
+
+    assert_that(allowed).contains(
+        "release-assets.githubusercontent.com:443",
+        "github-releases.githubusercontent.com:443",
+    )
 
 
 def test_deploy_pages_pins_bundler_with_github_token() -> None:

@@ -379,10 +379,10 @@ lintro watch --tools ruff,prettier
 
 **Tasks:**
 
-- [ ] Integrate file watcher (watchdog)
-- [ ] Implement debouncing
-- [ ] Design output for continuous mode
-- [ ] Handle tool conflicts in watch
+- [x] Integrate file watcher (watchdog)
+- [x] Implement debouncing
+- [x] Design output for continuous mode
+- [x] Handle tool conflicts in watch
 
 ### P3: Language Server Protocol (LSP)
 

@@ -1,18 +1,7 @@
-"""Execute phase of a Lintro run.
+"""Execute tools into a run artifact and optionally render its output.
 
-The runner is split into two phases (issue #1823):
-
-1. :func:`execute_run` selects tools, runs them, aggregates their results,
-   scores the run, and resolves the exit code. It writes no files, emits no
-   output document, and imports nothing from :mod:`lintro.ai`. Its product is
-   a :class:`~lintro.models.core.run_artifact.RunArtifact`.
-2. :func:`lintro.utils.execution.run_renderer.render_run` turns that artifact
-   into console/JSON/SARIF/CSV output and the run's files.
-
-:func:`run_lint_tools_simple` remains as a thin, AI-free wrapper over both, so
-every existing caller keeps its exit-code contract. Callers that want AI
-enhancement run it between the two phases; see
-:func:`lintro.ai.interface.enhance_artifact`.
+The execute/render split from issue #1823 keeps execution AI-free while
+``run_lint_tools_simple`` preserves the legacy one-call exit-code contract.
 """
 
 from __future__ import annotations
@@ -390,6 +379,7 @@ def execute_run(
     incremental: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    run_post_checks: bool = True,
     ignore_conflicts: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
@@ -419,6 +409,7 @@ def execute_run(
         auto_install: Whether to auto-install Node.js deps if node_modules is
             missing.
         yes: Skip confirmation prompt and proceed immediately.
+        run_post_checks: Whether configured post-check tools may run.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         fail_under: When set, force exit code 1 if the computed health score
             is strictly below this threshold (CI gate).
@@ -500,7 +491,7 @@ def execute_run(
         )
 
     # Load post-checks config early to exclude those tools from main phase
-    post_cfg_early = load_post_checks_config()
+    post_cfg_early = load_post_checks_config() if run_post_checks else {}
     post_enabled_early = bool(post_cfg_early.get("enabled", False))
     post_tools_early: set[str] = (
         {t.lower() for t in (post_cfg_early.get("tools", []) or [])}
@@ -641,22 +632,23 @@ def execute_run(
         )
 
     # Execute post-checks if configured
-    total_issues, total_fixed, total_remaining = execute_post_checks(
-        action=ctx.action,
-        paths=paths,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        logger=logger,
-        all_results=all_results,
-        total_issues=total_issues,
-        total_fixed=total_fixed,
-        total_remaining=total_remaining,
-        diff_base=resolved_diff_base,
-    )
+    if run_post_checks:
+        total_issues, total_fixed, total_remaining = execute_post_checks(
+            action=ctx.action,
+            paths=paths,
+            exclude=exclude,
+            include_venv=include_venv,
+            group_by=group_by,
+            output_format=output_format,
+            verbose=verbose,
+            raw_output=raw_output,
+            logger=logger,
+            all_results=all_results,
+            total_issues=total_issues,
+            total_fixed=total_fixed,
+            total_remaining=total_remaining,
+            diff_base=resolved_diff_base,
+        )
 
     # Dry-run: post-checks may append additional check-mode results. Restrict
     # every result to its would-fix subset and re-derive the totals so the
@@ -701,6 +693,7 @@ def run_lint_tools_simple(
     no_log: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    run_post_checks: bool = True,
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
     transport: str | None = None,
@@ -709,13 +702,10 @@ def run_lint_tools_simple(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    on_tool_result: Callable[[ToolResult], None] | None = None,
+    render_summary: bool = True,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
-
-    A thin wrapper over :func:`build_run_context`, :func:`execute_run`, and
-    :func:`lintro.utils.execution.run_renderer.render_run`. It runs no AI:
-    callers that want AI enhancement drive the three phases themselves and
-    insert :func:`lintro.ai.interface.enhance_artifact` between them.
 
     Args:
         action: Action to perform ("check", "fmt", "test").
@@ -735,28 +725,17 @@ def run_lint_tools_simple(
         no_log: Whether to disable file logging (not yet implemented).
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
+        run_post_checks: Whether configured post-check tools may run.
         ai_fix: Accepted for signature compatibility; this wrapper runs no AI.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Accepted for signature compatibility; this wrapper runs no AI.
-        dry_run: Preview what ``fmt`` would fix without modifying files. When
-            set with a ``fmt`` action, tools run in read-only check mode using
-            the fixable tool set; the reported issues are exactly what a real
-            ``fmt`` run would address. Exit code mirrors check semantics: 0 when
-            nothing would be fixed, 1 when fixes are available.
-        score: When True with human-readable output, print only the 0-100
-            health score line and suppress the normal execution summary.
-        fail_under: When set, exit with code 1 if the computed health score is
-            strictly below this threshold (CI gate).
-        diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
-            files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
-            the repository default base; any other value is used as the base
-            ref. Non-git directories fall back to a full scan with a warning.
-        no_art: When True, suppress decorative ASCII art regardless of the
-            ``output.art`` config value. Art is also suppressed automatically
-            when ``output.art`` is ``False`` or stdout is not a TTY.
-
-    Programming errors raised while a tool executes (``TypeError``,
-    ``AttributeError``) propagate to the caller.
+        dry_run: Preview what ``fmt`` would fix without modifying files.
+        score: Print only the numeric health score for human output.
+        fail_under: Fail when the computed health score is below this value.
+        diff_base: Git base ref used to limit scanned files.
+        no_art: Suppress decorative ASCII art.
+        on_tool_result: Optional custom live renderer for each completed tool.
+        render_summary: Whether to render the normal final report and summary.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -770,37 +749,47 @@ def run_lint_tools_simple(
         dry_run=dry_run,
         group_by=group_by,
     )
-    from lintro.utils.execution.run_renderer import make_result_display
+    try:
+        from lintro.utils.execution.run_renderer import make_result_display
 
-    artifact = execute_run(
-        ctx=ctx,
-        paths=paths,
-        tools=tools,
-        tool_options=tool_options,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        incremental=incremental,
-        auto_install=auto_install,
-        yes=yes,
-        ignore_conflicts=ignore_conflicts,
-        fail_under=fail_under,
-        diff_base=diff_base,
-        on_tool_result=make_result_display(
+        result_display = on_tool_result or make_result_display(
             logger=ctx.logger,
             output_format=output_format,
             raw_output=raw_output,
             action=ctx.action,
             group_by=group_by,
-        ),
-    )
-    render_run(
-        artifact,
-        ctx=ctx,
-        output_format=output_format,
-        output_file=output_file,
-    )
-    return artifact.exit_code
+        )
+        artifact = execute_run(
+            ctx=ctx,
+            paths=paths,
+            tools=tools,
+            tool_options=tool_options,
+            exclude=exclude,
+            include_venv=include_venv,
+            group_by=group_by,
+            output_format=output_format,
+            verbose=verbose,
+            raw_output=raw_output,
+            incremental=incremental,
+            auto_install=auto_install,
+            yes=yes,
+            run_post_checks=run_post_checks,
+            ignore_conflicts=ignore_conflicts,
+            fail_under=fail_under,
+            diff_base=diff_base,
+            on_tool_result=result_display,
+        )
+        if render_summary:
+            render_run(
+                artifact,
+                ctx=ctx,
+                output_format=output_format,
+                output_file=output_file,
+            )
+        return artifact.exit_code
+    finally:
+        ctx.output_manager.mark_run_complete()
+        try:
+            ctx.output_manager.cleanup_old_runs()
+        except OSError as exc:
+            ctx.logger.warning(f"Warning: Failed to clean up old runs: {exc}")

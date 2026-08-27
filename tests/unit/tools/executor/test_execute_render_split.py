@@ -12,6 +12,7 @@ import io
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from assertpy import assert_that
@@ -617,3 +618,43 @@ def test_render_run_is_a_no_op_for_an_early_exit(
 
     assert_that(capsys.readouterr().out).is_empty()
     assert_that(ctx.output_manager.reports_written).is_equal_to(0)
+
+
+def test_simple_runner_finalizes_output_after_execution_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The convenience runner should release its active marker on exceptions."""
+    output_manager = MagicMock()
+    output_manager.cleanup_old_runs.side_effect = OSError("permission denied")
+    ctx = MagicMock(
+        output_manager=output_manager,
+        logger=MagicMock(),
+        action=Action.CHECK,
+    )
+    monkeypatch.setattr(te, "build_run_context", lambda **_kwargs: ctx)
+    monkeypatch.setattr(
+        "lintro.utils.execution.run_renderer.make_result_display",
+        lambda **_kwargs: None,
+    )
+
+    def _fail_execute(**_kwargs: object) -> RunArtifact:
+        raise RuntimeError("execution failed")
+
+    monkeypatch.setattr(te, "execute_run", _fail_execute)
+
+    with pytest.raises(RuntimeError, match="execution failed"):
+        te.run_lint_tools_simple(
+            action=Action.CHECK,
+            paths=["."],
+            tools="ruff",
+            tool_options=None,
+            exclude=None,
+            include_venv=False,
+            group_by="file",
+            output_format="grid",
+            verbose=False,
+        )
+
+    output_manager.mark_run_complete.assert_called_once_with()
+    output_manager.cleanup_old_runs.assert_called_once_with()
+    ctx.logger.warning.assert_called_once()
