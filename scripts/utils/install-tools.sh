@@ -1455,22 +1455,25 @@ main() {
 		# Install spectral via bun (OpenAPI/AsyncAPI/JSON Schema linting)
 		echo -e "${BLUE}Installing spectral...${NC}"
 
-		# Ensure bun is available (should already be installed for prettier)
-		if ! ensure_bun_installed; then
-			exit 1
-		fi
-
 		# Read spectral version from _tool_versions.py (single source of truth)
 		# Uses package alias: "@stoplight/spectral-cli" -> ToolName.SPECTRAL
 		SPECTRAL_VERSION=$(get_tool_version "@stoplight/spectral-cli") || exit 1
 
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install @stoplight/spectral-cli@${SPECTRAL_VERSION} globally via bun"
-		elif bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
-			echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+		elif command -v spectral &>/dev/null; then
+			echo -e "${GREEN}✓ spectral already installed${NC}"
 		else
-			echo -e "${RED}✗ Failed to install spectral${NC}"
-			exit 1
+			# Ensure bun is available (should already be installed for prettier)
+			if ! ensure_bun_installed; then
+				exit 1
+			fi
+			if bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
+				echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to install spectral${NC}"
+				exit 1
+			fi
 		fi
 	fi # spectral
 
