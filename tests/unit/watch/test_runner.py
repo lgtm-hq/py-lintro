@@ -235,6 +235,26 @@ def test_run_batch_reports_no_matching_tools(
     assert_that(any("no matching tools" in line for line in lines)).is_true()
 
 
+def test_no_matching_tools_preserves_last_executed_exit_code(
+    tmp_path: Path,
+    recorder: dict[str, Any],
+) -> None:
+    """An empty selection must not erase the last real lint failure."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+
+    runner = WatchRunner(
+        emit=lambda _line: None,
+        run_tools=_make_run_tools(recorder, exit_code=1),
+    )
+    runner.run_batch({str(target)})
+    runner.restrict_to = ["definitely-not-a-real-tool"]
+    result = runner.run_batch({str(target)})
+
+    assert_that(result).is_equal_to(0)
+    assert_that(runner.last_exit_code).is_equal_to(1)
+
+
 def test_run_batch_prints_timestamped_header(
     tmp_path: Path,
     recorder: dict[str, Any],

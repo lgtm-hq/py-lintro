@@ -105,7 +105,6 @@ class WatchRunner:
 
         if not selected:
             self.emit("  (no matching tools for changed files)")
-            self._last_exit_code = 0
             return 0
 
         action = Action.FIX if self.auto_fix else Action.CHECK
