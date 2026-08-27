@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.132.0] - 2026-08-27
+
+### Added
+
+- **tools**: add spectral for OpenAPI/AsyncAPI/JSON Schema linting (#1154) (7aa4e9a)
+
 ## [0.131.5] - 2026-08-25
 
 ### Fixed
