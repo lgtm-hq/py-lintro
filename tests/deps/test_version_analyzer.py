@@ -28,6 +28,8 @@ def analyzer() -> VersionAnalyzer:
         (">=1.2.0,<2.0.0", Ecosystem.PYTHON, VersionSpecType.RANGE),
         (">=1.0.0", Ecosystem.PYTHON, VersionSpecType.UNBOUNDED),
         ("1.2.*", Ecosystem.PYTHON, VersionSpecType.WILDCARD),
+        ("1.2.X", Ecosystem.PYTHON, VersionSpecType.WILDCARD),
+        ("1.X", Ecosystem.NPM, VersionSpecType.WILDCARD),
         ("*", Ecosystem.PYTHON, VersionSpecType.ANY),
         ("", Ecosystem.PYTHON, VersionSpecType.ANY),
         ("1.2.3", Ecosystem.NPM, VersionSpecType.EXACT),

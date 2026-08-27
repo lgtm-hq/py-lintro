@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.config.config_loader import load_config
 from lintro.config.deps_config import DepsPolicy
+from lintro.exceptions.errors import ConfigurationError
 
 
 def test_load_config_parses_deps_section(tmp_path: Path) -> None:
@@ -34,6 +35,10 @@ def test_load_config_parses_deps_section(tmp_path: Path) -> None:
     assert_that(config.deps.policy).is_equal_to(DepsPolicy.STRICT)
     assert_that(config.deps.exceptions).is_length(1)
     assert_that(config.deps.exceptions[0].package).is_equal_to("pytest")
+    assert_that(config.deps.exceptions[0].allowed_types).is_equal_to(
+        ["tilde", "caret"],
+    )
+    assert_that(config.deps.exceptions[0].reason).is_equal_to("test tooling")
 
 
 def test_load_config_defaults_deps_when_absent(tmp_path: Path) -> None:
@@ -63,3 +68,34 @@ def test_load_config_rejects_unknown_deps_key(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unknown deps config key"):
         load_config(config_path=config_file, allow_pyproject_fallback=False)
+
+
+def test_load_config_rejects_non_mapping_deps_in_yaml(tmp_path: Path) -> None:
+    """A scalar YAML ``deps`` section fails closed.
+
+    Args:
+        tmp_path: Temporary directory.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("deps: true\n")
+
+    with pytest.raises(ConfigurationError, match="deps config must be a mapping"):
+        load_config(config_path=config_file, allow_pyproject_fallback=False)
+
+
+def test_load_config_rejects_non_mapping_deps_in_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scalar ``[tool.lintro] deps`` table fails closed.
+
+    Args:
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.lintro]\ndeps = true\n")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigurationError, match="deps config must be a mapping"):
+        load_config(allow_pyproject_fallback=True)

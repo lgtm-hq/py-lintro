@@ -184,4 +184,4 @@ class VersionAnalyzer:
         Returns:
             bool: ``True`` for patterns like ``1.2.*`` or ``1.x``.
         """
-        return bool(_WILDCARD_RE.search(spec))
+        return bool(_WILDCARD_RE.search(spec.lower()))

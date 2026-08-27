@@ -21,15 +21,55 @@ __all__ = [
     "PyprojectParser",
     "RequirementsParser",
     "SUPPORTED_FILENAMES",
+    "is_supported_manifest",
     "parse_file",
 ]
 
 # Files the validator knows how to parse, in discovery order.
 SUPPORTED_FILENAMES: tuple[str, ...] = (
     "pyproject.toml",
+    "requirements.txt",
     "package.json",
     "Cargo.toml",
 )
+
+_SUPPORTED_NAME_SET: frozenset[str] = frozenset(
+    name.lower() for name in SUPPORTED_FILENAMES
+)
+
+
+def is_requirements_manifest(path: Path) -> bool:
+    """Return whether ``path`` is a pip requirements file.
+
+    Matches ``requirements*.txt``, ``*requirements.txt``, and ``*.txt``
+    files directly under a ``requirements/`` directory.
+
+    Args:
+        path: Candidate manifest path.
+
+    Returns:
+        bool: ``True`` when the requirements parser should handle the file.
+    """
+    name = path.name.lower()
+    if name.endswith(".txt") and (
+        name.startswith("requirements") or name.endswith("requirements.txt")
+    ):
+        return True
+    return path.parent.name.lower() == "requirements" and name.endswith(".txt")
+
+
+def is_supported_manifest(path: Path) -> bool:
+    """Return whether ``path`` is a known dependency manifest.
+
+    Args:
+        path: Candidate manifest path.
+
+    Returns:
+        bool: ``True`` when :func:`parse_file` can parse the file.
+    """
+    return path.name.lower() in _SUPPORTED_NAME_SET or is_requirements_manifest(
+        path,
+    )
 
 
 def parse_file(path: Path) -> list[Dependency]:
@@ -39,7 +79,7 @@ def parse_file(path: Path) -> list[Dependency]:
         path: Path to a supported manifest file.
 
     Returns:
-        list[Dependency]: Parsed dependencies (empty when unsupported).
+        list[Dependency]: Parsed dependencies.
 
     Raises:
         ValueError: When the file name is not a supported manifest.
@@ -51,7 +91,7 @@ def parse_file(path: Path) -> list[Dependency]:
         return PackageJsonParser().parse(path)
     if name == "cargo.toml":
         return CargoParser().parse(path)
-    if name.startswith("requirements") and name.endswith(".txt"):
+    if is_requirements_manifest(path):
         return RequirementsParser().parse(path)
     msg = f"Unsupported dependency manifest: {path.name}"
     raise ValueError(msg)

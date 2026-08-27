@@ -5,6 +5,8 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass
 
+from packaging.utils import canonicalize_name
+
 from lintro.config.deps_config import DepsConfig, DepsPolicy, PackageException
 from lintro.deps.models import Dependency, VersionSpecType, VersionViolation
 
@@ -185,8 +187,10 @@ class PolicyEngine:
         Returns:
             PackageException | None: The matching exception, if any.
         """
+        canonical = canonicalize_name(name)
         for exception in self.config.exceptions:
-            if fnmatch.fnmatch(name.lower(), exception.package.lower()):
+            pattern = canonicalize_name(exception.package)
+            if fnmatch.fnmatch(canonical, pattern):
                 return exception
         return None
 

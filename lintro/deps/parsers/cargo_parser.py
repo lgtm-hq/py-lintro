@@ -28,7 +28,7 @@ class CargoParser:
         ``build-dependencies``, platform-specific ``[target.*]`` tables, and
         ``[workspace.dependencies]``. Member entries declared as
         ``{ workspace = true }`` are resolved against the workspace table when
-        it is present in the same manifest.
+        it is present in the same manifest, or in a parent ``Cargo.toml``.
 
         Args:
             path: Path to the ``Cargo.toml`` file.
@@ -43,18 +43,22 @@ class CargoParser:
         deps: list[Dependency] = []
 
         workspace = data.get("workspace")
-        workspace_deps: dict[str, Any] = {}
+        local_workspace_deps: dict[str, Any] = {}
         if isinstance(workspace, dict) and isinstance(
             workspace.get("dependencies"),
             dict,
         ):
-            workspace_deps = workspace["dependencies"]
-            deps.extend(self._from_table(workspace_deps, file, {}))
+            local_workspace_deps = workspace["dependencies"]
+            deps.extend(self._from_table(local_workspace_deps, file, {}))
+
+        resolve_from = local_workspace_deps or self._find_parent_workspace_deps(
+            path,
+        )
 
         for section in _DEP_SECTIONS:
             table = data.get(section)
             if isinstance(table, dict):
-                deps.extend(self._from_table(table, file, workspace_deps))
+                deps.extend(self._from_table(table, file, resolve_from))
 
         # Platform-specific deps: [target.'cfg(...)'.dependencies]
         target = data.get("target")
@@ -65,7 +69,7 @@ class CargoParser:
                 for section in _DEP_SECTIONS:
                     nested = target_table.get(section)
                     if isinstance(nested, dict):
-                        deps.extend(self._from_table(nested, file, workspace_deps))
+                        deps.extend(self._from_table(nested, file, resolve_from))
 
         return self._dedupe(deps)
 
@@ -126,6 +130,34 @@ class CargoParser:
                 ),
             )
         return deps
+
+    @staticmethod
+    def _find_parent_workspace_deps(path: Path) -> dict[str, Any]:
+        """Walk parents for a ``[workspace.dependencies]`` table.
+
+        Args:
+            path: Member ``Cargo.toml`` being parsed.
+
+        Returns:
+            dict[str, Any]: Workspace dependency table, or empty when none
+            is found.
+        """
+        for parent in path.resolve().parents:
+            candidate = parent / "Cargo.toml"
+            if not candidate.is_file():
+                continue
+            try:
+                with candidate.open("rb") as handle:
+                    data = tomllib.load(handle)
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+            workspace = data.get("workspace")
+            if not isinstance(workspace, dict):
+                continue
+            deps_table = workspace.get("dependencies")
+            if isinstance(deps_table, dict):
+                return deps_table
+        return {}
 
     @staticmethod
     def _inherits_workspace(constraint: Any) -> bool:

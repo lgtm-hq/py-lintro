@@ -110,6 +110,24 @@ def test_package_exception_glob_match() -> None:
     assert_that(engine.validate(deps)).is_empty()
 
 
+def test_package_exception_glob_matches_pep503_normalized_name() -> None:
+    """Exception globs match PEP 503 names (``_`` vs ``-``)."""
+    config = DepsConfig(
+        policy=DepsPolicy.STRICT,
+        exceptions=[
+            PackageException(
+                package="google-cloud-*",
+                allowed_types=["caret"],
+            ),
+        ],
+    )
+    engine = PolicyEngine(config)
+    deps = [
+        _dep("google_cloud_storage", "^1.0", VersionSpecType.CARET, True),
+    ]
+    assert_that(engine.validate(deps)).is_empty()
+
+
 def test_custom_policy_uses_explicit_fields() -> None:
     """Custom policy honors explicit allowed/disallowed fields."""
     config = DepsConfig(

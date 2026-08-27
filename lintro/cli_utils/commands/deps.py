@@ -13,7 +13,7 @@ from rich.table import Table
 from lintro.config.config_loader import get_config
 from lintro.config.deps_config import DepsConfig, DepsPolicy
 from lintro.deps.models import Dependency, DepsCheckResult, VersionViolation
-from lintro.deps.parsers import SUPPORTED_FILENAMES, parse_file
+from lintro.deps.parsers import is_supported_manifest, parse_file
 from lintro.deps.policy_engine import PolicyEngine
 
 __all__ = ["deps_command"]
@@ -117,8 +117,12 @@ def deps_command(
         message = "No dependency manifests found."
         if strict_discovery:
             message = f"{message} (--strict-discovery)"
+        empty = DepsCheckResult()
         if output_format == "json":
-            click.echo(json_lib.dumps({"error": message}, indent=2))
+            _render_json(
+                empty,
+                parse_errors=[message] if strict_discovery else [],
+            )
         else:
             color = "red" if strict_discovery else "yellow"
             Console().print(f"[{color}]{message}[/{color}]")
@@ -200,17 +204,34 @@ def _discover_manifests(root: Path) -> list[Path]:
         list[Path]: Discovered manifest paths, sorted for stable output.
     """
     found: list[Path] = []
-    for path in root.rglob("*"):
-        if any(part in _SKIP_DIRS for part in path.parts):
+    resolved_root = root.resolve()
+    for path in resolved_root.rglob("*"):
+        if _is_skipped(path, resolved_root):
             continue
-        if not path.is_file():
-            continue
-        name = path.name.lower()
-        if name in {n.lower() for n in SUPPORTED_FILENAMES} or (
-            name.startswith("requirements") and name.endswith(".txt")
-        ):
+        if path.is_file() and is_supported_manifest(path):
             found.append(path)
     return sorted(found)
+
+
+def _is_skipped(path: Path, root: Path) -> bool:
+    """Return whether ``path`` sits under a skip-dir relative to ``root``.
+
+    Absolute ancestors of the scan root are ignored so a checkout whose
+    resolved path contains ``build`` or ``dist`` (for example a Docker
+    ``WORKDIR /build``) still discovers manifests at the root.
+
+    Args:
+        path: Candidate file or directory path.
+        root: Scan root that discovery started from.
+
+    Returns:
+        bool: ``True`` when a relative path component is in ``_SKIP_DIRS``.
+    """
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return any(part in _SKIP_DIRS for part in relative.parts)
 
 
 def _run_checks(

@@ -100,7 +100,7 @@ def test_requirements_parser(tmp_path: Path) -> None:
         "\n".join(
             [
                 "# a comment",
-                "-r other.txt",
+                "--index-url https://example.com/simple",
                 "requests>=2.28.0",
                 "flask==2.3.0  # inline",
                 "numpy>=1.20,<2.0",
@@ -354,6 +354,169 @@ def test_cargo_parser_workspace_dependencies(tmp_path: Path) -> None:
     assert_that(_by_name(deps, "serde").spec_type).is_equal_to(VersionSpecType.CARET)
     assert_that(_by_name(deps, "anyhow").spec_type).is_equal_to(
         VersionSpecType.UNBOUNDED,
+    )
+
+
+def test_requirements_parser_strips_inline_hash_options(tmp_path: Path) -> None:
+    """A hashed pin is parsed instead of rejected as an invalid spec.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text(
+        "requests==2.31.0 --hash=sha256:abcd1234\n",
+    )
+    deps = RequirementsParser().parse(manifest)
+    assert_that(deps).is_length(1)
+    assert_that(deps[0].name).is_equal_to("requests")
+    assert_that(deps[0].spec_type).is_equal_to(VersionSpecType.EXACT)
+
+
+def test_requirements_parser_follows_equals_include(tmp_path: Path) -> None:
+    """``--requirement=`` includes are parsed.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    included = tmp_path / "pins.txt"
+    included.write_text("click==8.1.0\n")
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text(f"--requirement={included}\n")
+    deps = RequirementsParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"click"})
+
+
+def test_requirements_parser_skips_url_lines(tmp_path: Path) -> None:
+    """PEP 508 URL locators in requirements files are skipped.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text(
+        "requests==2.31.0\ndemo @ git+https://example.com/demo.git\n",
+    )
+    deps = RequirementsParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"requests"})
+
+
+def test_requirements_parser_breaks_include_cycles(tmp_path: Path) -> None:
+    """Cyclic ``-r`` includes do not recurse forever.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    first = tmp_path / "a.txt"
+    second = tmp_path / "b.txt"
+    first.write_text("-r b.txt\nflask==2.3.0\n")
+    second.write_text("-r a.txt\n")
+    deps = RequirementsParser().parse(first)
+    assert_that({d.name for d in deps}).is_equal_to({"flask"})
+
+
+def test_requirements_parser_follows_includes(tmp_path: Path) -> None:
+    """``-r`` includes are parsed relative to the referencing file.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    included = tmp_path / "base.txt"
+    included.write_text("flask==2.3.0\n")
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text("-r base.txt\nrequests==2.31.0\n")
+    deps = RequirementsParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"flask", "requests"})
+
+
+def test_requirements_parser_missing_include_raises(tmp_path: Path) -> None:
+    """A missing ``-r`` include fails closed.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "requirements.txt"
+    manifest.write_text("-r missing.txt\n")
+    parser = RequirementsParser()
+    assert_that(parser.parse).raises(ValueError).when_called_with(
+        manifest,
+    ).contains("not found")
+
+
+def test_parse_file_dev_requirements_and_requirements_dir(
+    tmp_path: Path,
+) -> None:
+    """parse_file accepts ``*requirements.txt`` and ``requirements/*.txt``.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    dev = tmp_path / "dev-requirements.txt"
+    dev.write_text("pytest==8.0.0\n")
+    req_dir = tmp_path / "requirements"
+    req_dir.mkdir()
+    nested = req_dir / "base.txt"
+    nested.write_text("click==8.1.0\n")
+    assert_that(parse_file(dev)[0].name).is_equal_to("pytest")
+    assert_that(parse_file(nested)[0].name).is_equal_to("click")
+
+
+def test_pyproject_parser_skips_url_requirements(tmp_path: Path) -> None:
+    """PEP 508 URL/VCS locators are skipped instead of flagged as unbounded.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                "dependencies = [",
+                '  "requests==2.31.0",',
+                '  "demo @ git+https://example.com/demo.git",',
+                "]",
+            ],
+        ),
+    )
+    deps = PyprojectParser().parse(manifest)
+    assert_that({d.name for d in deps}).is_equal_to({"requests"})
+
+
+def test_cargo_parser_resolves_parent_workspace_member(tmp_path: Path) -> None:
+    """A member ``{ workspace = true }`` reads the parent workspace table.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    root = tmp_path / "Cargo.toml"
+    root.write_text(
+        "\n".join(
+            [
+                "[workspace]",
+                'members = ["member"]',
+                "[workspace.dependencies]",
+                'serde = "1.0.100"',
+            ],
+        ),
+    )
+    member_dir = tmp_path / "member"
+    member_dir.mkdir()
+    member = member_dir / "Cargo.toml"
+    member.write_text(
+        "\n".join(
+            [
+                "[dependencies]",
+                "serde = { workspace = true }",
+                'rand = "0.8"',
+            ],
+        ),
+    )
+    deps = CargoParser().parse(member)
+    assert_that({d.name for d in deps}).is_equal_to({"serde", "rand"})
+    assert_that(_by_name(deps, "serde").spec_type).is_equal_to(
+        VersionSpecType.CARET,
     )
 
 

@@ -689,7 +689,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
 
     Raises:
         ValueError: If a nested ``execution`` or ``enforce`` value is not a
-            mapping.
+            mapping. A non-mapping ``deps`` value is passed through so
+            :func:`_parse_deps_config` can fail closed.
     """
     result: dict[str, Any] = {
         "enforce": {},
@@ -791,7 +792,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["output"] = value
         elif key_lower == "watch":
             result["watch"] = value
-        elif key_lower == "deps" and isinstance(value, dict):
+        elif key_lower == "deps":
+            # Pass through non-mappings so ``_parse_deps_config`` fail-closes
+            # instead of treating ``deps = true`` as an unrecognized key.
             result["deps"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.

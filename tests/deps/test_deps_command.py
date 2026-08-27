@@ -10,6 +10,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
+from lintro.config.config_loader import clear_config_cache
 
 
 @pytest.fixture
@@ -256,3 +257,155 @@ def test_deps_npm_alternatives_flagged_end_to_end(
     assert_that(result.exit_code).is_equal_to(1)
     payload = json.loads(result.output)
     assert_that(payload["violations"][0]["package"]).is_equal_to("mixed")
+
+
+def test_deps_json_empty_discovery_uses_standard_schema(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty discovery JSON uses the result schema, not ``{"error": ...}``.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    result = cli_runner.invoke(cli, ["deps", "--format", "json"])
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["passed"]).is_true()
+    assert_that(payload["total"]).is_equal_to(0)
+    assert_that(payload["violation_count"]).is_equal_to(0)
+    assert_that(payload["parse_errors"]).is_equal_to([])
+    assert_that(payload["violations"]).is_equal_to([])
+    assert_that("error" in payload).is_false()
+
+
+def test_deps_json_strict_discovery_uses_standard_schema(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strict empty discovery stays on the standard JSON schema.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    result = cli_runner.invoke(
+        cli,
+        ["deps", "--format", "json", "--strict-discovery"],
+    )
+    assert_that(result.exit_code).is_equal_to(1)
+    payload = json.loads(result.output)
+    assert_that(payload["passed"]).is_false()
+    assert_that(payload["parse_errors"]).is_length(1)
+    assert_that("error" in payload).is_false()
+
+
+def test_deps_discovery_keeps_manifest_when_root_is_skip_name(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scan root named ``build`` still discovers its own manifests.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    root = tmp_path / "build"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["pydantic==2.0"]',
+            ],
+        ),
+    )
+    monkeypatch.chdir(root)
+    result = cli_runner.invoke(cli, ["deps", "--format", "json"])
+    payload = json.loads(result.output)
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(payload["total"]).is_equal_to(1)
+
+
+def test_deps_discovery_skips_nested_build_dir(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifests under a relative ``build/`` directory are not discovered.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["pydantic==2.0"]',
+            ],
+        ),
+    )
+    nested = tmp_path / "build"
+    nested.mkdir()
+    (nested / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "nested"',
+                'dependencies = ["requests>=2.0"]',
+            ],
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+    result = cli_runner.invoke(cli, ["deps", "--format", "json"])
+    payload = json.loads(result.output)
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(payload["total"]).is_equal_to(1)
+    assert_that(payload["violations"]).is_equal_to([])
+
+
+def test_deps_auto_discovery_applies_repo_config(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``lintro deps`` discovers manifests and honors repo config.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    (tmp_path / ".lintro-config.yaml").write_text("deps:\n  policy: strict\n")
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                'dependencies = ["pydantic==2.0", "requests>=2.28.0"]',
+            ],
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+    try:
+        result = cli_runner.invoke(cli, ["deps", "--format", "json"])
+    finally:
+        clear_config_cache()
+    assert_that(result.exit_code).is_equal_to(1)
+    payload = json.loads(result.output)
+    flagged = {item["package"] for item in payload["violations"]}
+    assert_that(flagged).contains("requests")

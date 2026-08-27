@@ -203,6 +203,8 @@ class PyprojectParser:
             except InvalidRequirement:
                 invalid.append(entry)
                 continue
+            if requirement.url:
+                continue
             deps.append(
                 build_dependency(
                     name=requirement.name,
