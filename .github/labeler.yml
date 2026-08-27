@@ -11,7 +11,7 @@
 #   scripts/ci/release-*, scripts/ci/homebrew/**, scripts/ci/npm/**
 #     → ci + release
 #   scripts/ci/classify-release-tag.py, check-release-version-skew.py,
-#     and finalize-version-pr.py → ci + release
+#     finalize-version-pr.py, and scripts/release/** → ci + release
 #   scripts/ci/testing/** → ci + testing
 #   test_samples/**/*.md → testing + documentation
 #   npm/**/package.json → release only
@@ -29,6 +29,7 @@ ci:
           - '.github/workflows/**'
           - '.github/actions/**'
           - 'scripts/ci/**'
+          - 'scripts/release/**'
           - 'scripts/docker/**'
           - 'Dockerfile'
           - 'docker-compose.yml'
@@ -94,6 +95,7 @@ release:
           - 'scripts/ci/classify-release-tag.py'
           - 'scripts/ci/check-release-version-skew.py'
           - 'scripts/ci/finalize-version-pr.py'
+          - 'scripts/release/**'
           - 'scripts/ci/homebrew/**'
           - 'scripts/ci/npm/**'
 

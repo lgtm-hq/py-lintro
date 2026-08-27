@@ -89,6 +89,27 @@ def test_scripts_readme_coverage() -> None:
         )
 
 
+def test_release_scripts_catalogued_outside_ci_table() -> None:
+    """SPDX/Version-PR generators live under Release Scripts, not CI/CD."""
+    content = Path("scripts/README.md").read_text(encoding="utf-8")
+    ci_heading = "### 🔧 CI/CD Scripts (`ci/`)"
+    release_heading = "### 🏷️ Release Scripts (`release/`)"
+    docker_heading = "### 🐳 Docker Scripts (`docker/`)"
+    assert_that(content).contains(ci_heading)
+    assert_that(content).contains(release_heading)
+
+    ci_section = content[content.index(ci_heading) : content.index(release_heading)]
+    release_section = content[
+        content.index(release_heading) : content.index(docker_heading)
+    ]
+    assert_that(ci_section).does_not_contain("generate_spdx_data.py")
+    assert_that(ci_section).does_not_contain("prepare_version_artifacts.py")
+    assert_that(release_section).contains("generate_spdx_data.py")
+    assert_that(release_section).contains("prepare_version_artifacts.py")
+    assert_that(release_section).contains("SECURITY.md")
+    assert_that(release_section).contains("version-update-script")
+
+
 def test_cli_help_works() -> None:
     """Test that lintro --help works and shows expected commands."""
     try:

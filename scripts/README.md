@@ -12,6 +12,7 @@ scripts/
 ├── ci/           # CI/CD and GitHub Actions scripts
 ├── docker/       # Docker-related scripts
 ├── local/        # Local development scripts
+├── release/      # Release Version-PR artifact generators
 └── utils/        # Utility scripts and shared functions
 ```
 
@@ -91,6 +92,7 @@ renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 
 Scripts for GitHub Actions workflows and continuous integration.
 
+
 | Script                               | Purpose                                                                    | Usage                                                                                                                      |
 | ------------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `coverage-manager.sh`                | Unified coverage ops (extract/badge/comment/threshold)                     | `./scripts/utils/coverage-manager.sh --help`                                                                               |
@@ -146,7 +148,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown             | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                           |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown                  | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                                                                      |
 | `update-security-support.py`         | Stamp `SECURITY.md` support table to the current `major.minor` line        | `python3 scripts/ci/update-security-support.py 0.81.0`                                                                     |
-| `finalize-version-pr.py`             | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)        | `python3 scripts/ci/finalize-version-pr.py`                                                                                |
+| `finalize-version-pr.py`             | Standalone CHANGELOG + SECURITY.md + pin-sync composer (not the Version-PR hook) | `python3 scripts/ci/finalize-version-pr.py`                                                                          |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                          | `./scripts/ci/test-install-package.sh wheel`                                                                               |
 | `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv                   | `./scripts/ci/test-built-package-integration.sh`                                                                           |
 | `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                            | `./scripts/ci/test-venv-setup.sh`                                                                                          |
@@ -195,6 +197,19 @@ in `lgtm-hq/homebrew-tap`.
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
 | `wait-for-pypi.sh`    | Poll PyPI until package version is available | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                           |
 | `get-release-info.sh` | Resolve release tag and prerelease metadata  | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh` |
+
+### 🏷️ Release Scripts (`release/`)
+
+Scripts invoked by the release Version-PR workflow to refresh committed derived
+artifacts. `prepare_version_artifacts.py` is the `version-update-script` hook: it
+reflows CHANGELOG.md, stamps SECURITY.md, refreshes SPDX data, then runs
+non-fatal pin sync. `finalize-version-pr.py` in `ci/` remains a standalone
+composer without SPDX.
+
+| Script                         | Purpose                                                                        | Usage                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `generate_spdx_data.py`        | Generate `lintro/licenses/_spdx_data.py` from SPDX licenses.json               | `python3 scripts/release/generate_spdx_data.py [--check]` |
+| `prepare_version_artifacts.py` | Version-PR hook: CHANGELOG, SECURITY.md, SPDX refresh, then non-fatal pin sync | `python3 scripts/release/prepare_version_artifacts.py`    |
 
 ### 🐳 Docker Scripts (`docker/`)
 
