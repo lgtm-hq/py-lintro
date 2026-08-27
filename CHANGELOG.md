@@ -11,9 +11,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **cli**: add `lintro watch` / `w` for debounced continuous linting on file changes
-  (#1168)
-
 ### Changed
 
 ### Deprecated
@@ -23,6 +20,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.133.0] - 2026-08-27
+
+### Added
+
+- **cli**: add watch mode for continuous linting (#1168) (2f09fd4)
+- **cli**: add `lintro watch` / `w` for debounced continuous linting on file changes
+  (#1168)
 
 ## [0.132.0] - 2026-08-27
 
