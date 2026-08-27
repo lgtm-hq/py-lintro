@@ -962,6 +962,23 @@ def test_commitlint_runner_fallback_uses_scoped_package(
     assert_that(cmd[4]).is_equal_to("commitlint")
 
 
+def test_spectral_runner_fallback_uses_scoped_package(
+    no_local_node_install: None,
+) -> None:
+    """Spectral's npm package is ``@stoplight/spectral-cli``, binary is ``spectral``.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("npx")):
+        cmd = builder.get_command("spectral", ToolName.SPECTRAL)
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("@stoplight/spectral-cli@")
+    assert_that(cmd[4]).is_equal_to("spectral")
+
+
 # =============================================================================
 # CargoBuilder tests
 # =============================================================================

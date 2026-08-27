@@ -145,6 +145,11 @@ order and for what changed.
   `bun add -D svelte-check` or `npm install -D svelte-check`)
 - `vue-tsc` - Vue TypeScript type checker for `.vue` files (`bun add -D vue-tsc` or
   `npm install -D vue-tsc`)
+- `spectral` - OpenAPI/AsyncAPI/JSON Schema linter (`bun add -D @stoplight/spectral-cli`
+  or `npm install -D @stoplight/spectral-cli`). Select it with `--tools spectral`, a
+  scan-root `.spectral.yaml`/`.yml`/`.json`/`.js` on a no-config run, or
+  `execution.enabled_tools` (add `spectral` after `lintro init`); after selection it
+  skips when no ruleset is found.
 
 ### Checking Versions
 

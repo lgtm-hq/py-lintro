@@ -927,6 +927,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".pre-commit-hooks.yaml",
         ".prettierignore",
         ".prettierrc.json",
+        ".spectral.yaml",
         ".stylelintrc.json",
         ".typos.toml",
         ".vale.ini",

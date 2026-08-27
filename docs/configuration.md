@@ -936,7 +936,7 @@ Rationale:
 **Every Node.js tool resolves the same way.** There is one chain, implemented once in
 `NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
 `astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
-`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
+`prettier`, `spectral`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
 1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
    checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
@@ -1743,6 +1743,70 @@ lintro format --tools oxfmt --tool-options "oxfmt:ignore_path=.oxfmtignore"
 
 # Increase timeout
 lintro format --tools oxfmt --tool-options "oxfmt:timeout=60"
+```
+
+### API Description Tools
+
+#### Spectral Configuration
+
+Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents. It
+is check-only (no autofixer) and **requires a ruleset**. Lintro discovers a supported
+ruleset upward from the target (or uses the `ruleset` option) and skips as a non-error
+when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.yml`,
+and `*.json` file. Lintro always supplies Spectral's internal `--ignore-unknown-format`
+flag so non-API documents do not produce format warnings; the flag is not a
+`--tool-options` setting.
+
+Spectral is intentionally absent from the language map: enabling it for every YAML or
+JSON project would be too broad. A native `.spectral.*` file at a scan root selects it
+on a no-config first run; after `lintro init`, add `spectral` to
+`execution.enabled_tools`. Users can also name it with `--tools spectral`; once
+selected, Spectral still skips unless discovery or the `ruleset` option finds a ruleset.
+
+**Native Config Detection:**
+
+Lintro detects (and Spectral requires) one of these ruleset files:
+
+- `.spectral.yaml`
+- `.spectral.yml`
+- `.spectral.json`
+- `.spectral.js`
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D @stoplight/spectral-cli
+
+# npm
+npm install -D @stoplight/spectral-cli
+```
+
+Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
+
+**File:** `.spectral.yaml`
+
+```yaml
+extends: ['spectral:oas'] # or ["spectral:asyncapi"]
+```
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                      |
+| --------- | ------- | ------------------------------------------------ |
+| `ruleset` | string  | Explicit path to a ruleset (overrides discovery) |
+| `timeout` | integer | Execution timeout in seconds (default: 30)       |
+
+**Usage Examples:**
+
+```bash
+# Lint an OpenAPI document (rulesets are discovered upward from the target)
+lintro check --tools spectral openapi.yaml
+
+# Use an explicit ruleset
+lintro check --tools spectral --tool-options "spectral:ruleset=.spectral.custom.yaml"
 ```
 
 ### Web Framework Tools

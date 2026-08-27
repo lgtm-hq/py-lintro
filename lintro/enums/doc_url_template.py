@@ -42,6 +42,12 @@ class DocUrlTemplate(StrEnum):
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"
+    # Spectral 6.16's SARIF helpUri values point to retired meta.stoplight.io
+    # pages. Link to the same maintained rule files in Spectral's official
+    # repository instead.
+    SPECTRAL = "https://github.com/stoplightio/spectral/blob/develop/docs/reference/openapi-rules.md#{code}"
+    SPECTRAL_ASYNCAPI = "https://github.com/stoplightio/spectral/blob/develop/docs/reference/asyncapi-rules.md#{code}"
+    SPECTRAL_ARAZZO = "https://github.com/stoplightio/spectral/blob/develop/docs/reference/arazzo-rules.md#{code}"
     SQLFLUFF = "https://docs.sqlfluff.com/en/stable/rules.html#{code}"
     STYLELINT = "https://stylelint.io/user-guide/rules/{code}"
     TAPLO = "https://taplo.tamasfe.dev/"

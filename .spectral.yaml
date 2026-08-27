@@ -1,0 +1,3 @@
+# Enable Spectral dogfood; unmatched repository YAML/JSON formats are ignored.
+---
+extends: ['spectral:oas']
