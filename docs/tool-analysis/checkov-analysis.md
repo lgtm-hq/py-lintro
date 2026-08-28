@@ -120,6 +120,14 @@ placing the `checkov` shim on `PATH` while keeping its dependencies out of lintr
 environment. The pinned version lives in `lintro/_tool_versions.py` (`ToolName.CHECKOV`)
 and is kept current by a Renovate custom manager against the `checkov` PyPI package.
 
+## Default selection
+
+Checkov is listed in `language_map.security` as well as `terraform`. A no-config
+`lintro check` that detects Terraform (or any run that includes the security set) will
+invoke Checkov when the binary is on `PATH`. That can fail previously green Terraform
+CI. Opt out with `tools.checkov.enabled: false`, or skip policies with
+`--tool-options checkov:skip_checks=CKV_…`.
+
 ## Limitations
 
 - **No autofix.** Checkov reports misconfigurations only; `fix()` raises

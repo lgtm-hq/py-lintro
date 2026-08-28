@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - TimeoutExpired type only; no process spawn
 from pathlib import Path
 from subprocess import (  # nosec B404 - only the CompletedProcess dataclass is used
     CompletedProcess,
@@ -271,6 +271,33 @@ def test_check_invokes_subprocess_with_project_cwd(
         checkov_plugin.check([str(tf_file)], {})
 
     assert_that(mock_run.call_args.kwargs.get("cwd")).is_not_none()
+
+
+def test_check_passes_hermetic_flags_to_subprocess(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """check() must invoke the hermetic builder argv, not a divergent command."""
+    tf_file = tmp_path / "main.tf"
+    tf_file.write_text('resource "aws_s3_bucket" "b" {}\n')
+    completed = CompletedProcess(
+        args=["checkov"],
+        returncode=0,
+        stdout=_report([]),
+        stderr="",
+    )
+
+    with (
+        patch(_VERIFY_VERSION, return_value=None),
+        patch(_SUBPROCESS_RUN, return_value=completed) as mock_run,
+    ):
+        checkov_plugin.check([str(tf_file)], {})
+
+    cmd = mock_run.call_args.args[0]
+    assert_that(cmd[:3]).is_equal_to(["checkov", "--output", "json"])
+    assert_that(cmd).contains("--skip-download")
+    assert_that(cmd).contains("--download-external-modules", "False")
+    assert_that(" ".join(cmd)).does_not_contain("--bc-api-key")
 
 
 def test_fix_raises_not_implemented(checkov_plugin: CheckovPlugin) -> None:

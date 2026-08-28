@@ -2946,6 +2946,11 @@ lintro check --tools checkov --tool-options "checkov:checks=CKV_AWS_260"
 > runs with a Prisma Cloud / Bridgecrew platform API key. In the default offline mode,
 > findings normalize to lintro's default severity and link to the Checkov policy index.
 
+Checkov is also listed in `language_map.security`, so a no-config run that detects
+Terraform (or any security-tool environment with `checkov` on `PATH`) will invoke it.
+That can fail previously green Terraform CI. Disable the tool with
+`tools.checkov.enabled: false`, or skip individual policies with `checkov:skip_checks`.
+
 #### Actionlint Configuration
 
 Actionlint validates GitHub Actions workflows. Lintro discovers workflow files under
