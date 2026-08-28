@@ -18,6 +18,7 @@ from typing import Any, NamedTuple
 
 from loguru import logger
 
+from lintro.config.deps_config import DepsConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -499,6 +500,42 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     return ScoreConfig(**filtered)
 
 
+def _parse_deps_config(data: Any) -> DepsConfig:
+    """Parse the ``deps`` configuration section.
+
+    Args:
+        data: Raw ``deps`` section from config.
+
+    Returns:
+        DepsConfig: Parsed dependency policy configuration.
+
+    Raises:
+        ValueError: When the deps section is not a mapping, or contains an
+            unknown key. Because ``deps`` gates dependency-spec enforcement, a
+            misspelled key (for example ``pollicy`` for ``policy``) must fail
+            loudly rather than silently fall back to the default policy and let
+            specs that should fail pass in CI.
+    """
+    if data is None:
+        return DepsConfig()
+    if not isinstance(data, dict):
+        msg = f"deps config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return DepsConfig()
+
+    known_fields = set(DepsConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        known = ", ".join(sorted(known_fields))
+        msg = (
+            f"Unknown deps config key(s): {', '.join(sorted(unknown))}. "
+            f"Valid keys are: {known}"
+        )
+        raise ValueError(msg)
+    return DepsConfig(**data)
+
+
 def _parse_watch_config(data: Any) -> WatchConfig:
     """Parse the ``watch`` configuration section.
 
@@ -589,6 +626,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
         | {
             "ai",
             "defaults",
+            "deps",
             "output",
             "review",
             "score",
@@ -651,7 +689,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
 
     Raises:
         ValueError: If a nested ``execution`` or ``enforce`` value is not a
-            mapping.
+            mapping. A non-mapping ``deps`` value is passed through so
+            :func:`_parse_deps_config` can fail closed.
     """
     result: dict[str, Any] = {
         "enforce": {},
@@ -663,6 +702,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "score": {},
         "output": {},
         "watch": {},
+        "deps": {},
     }
 
     catalog = _pyproject_lintro_catalog()
@@ -752,6 +792,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["output"] = value
         elif key_lower == "watch":
             result["watch"] = value
+        elif key_lower == "deps":
+            # Pass through non-mappings so ``_parse_deps_config`` fail-closes
+            # instead of treating ``deps = true`` as an unrecognized key.
+            result["deps"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -901,6 +945,7 @@ def build_config_from_dict(
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
     watch_config = _parse_watch_config(data.get("watch", {}))
+    deps_config = _parse_deps_config(data.get("deps", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -912,6 +957,7 @@ def build_config_from_dict(
         score=score_config,
         output=output_config,
         watch=watch_config,
+        deps=deps_config,
         config_path=resolved_path,
     )
 
