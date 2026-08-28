@@ -96,6 +96,7 @@ release (see [pre-commit integration](../docs/pre-commit.md)). Driven by
 | Script                      | Purpose                                                    | Usage                                                                              |
 | --------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `resolve-version.sh`        | Resolve the release tag/version and prerelease flag        | `RELEASE_TAG=v1.2.3 ./scripts/ci/mirror/resolve-version.sh`                        |
+| `wait-for-pypi-wheel.sh`    | Poll PyPI until a `bdist_wheel` exists for the version     | `./scripts/ci/mirror/wait-for-pypi-wheel.sh lintro 1.2.3`                          |
 | `bump_pin.py`               | Rewrite/verify the `lintro==X.Y.Z` pin in mirror pyproject | `python3 scripts/ci/mirror/bump_pin.py --pyproject pyproject.toml --version 1.2.3` |
 | `publish-mirror-release.sh` | Bump pin, merge the version-bump PR, and tag the mirror    | `GH_TOKEN=… ./scripts/ci/mirror/publish-mirror-release.sh 1.2.3`                   |
 
