@@ -68,6 +68,14 @@ push_tag() {
 	log_success "Pushed mirror tag ${TAG}"
 }
 
+# Fresh Actions checkouts have no remote-tracking ref for the bump branch, so
+# --force-with-lease would treat the remote as empty and refuse to update an
+# existing retry branch. Fetch first so the lease compares the real SHA.
+push_bump_branch() {
+	git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" 2>/dev/null || true
+	git push --force-with-lease origin "HEAD:${BRANCH}"
+}
+
 if git diff --quiet -- pyproject.toml; then
 	log_info "Mirror already pins lintro==${VERSION}; ensuring tag exists"
 	git fetch origin main --quiet
@@ -87,7 +95,7 @@ Sync the pinned lintro wheel to the ${TAG} py-lintro release.
 Refs lgtm-hq/py-lintro (mirror-release automation)"
 
 log_info "Pushing branch ${BRANCH}"
-git push --force-with-lease origin "HEAD:$BRANCH"
+push_bump_branch()
 
 PR_TITLE="chore: bump lintro to ${VERSION}"
 PR_BODY="Automated version bump: pins the published \`lintro==${VERSION}\` wheel to match py-lintro ${TAG}. Merged and tagged \`${TAG}\` by mirror-release automation."
@@ -112,7 +120,7 @@ fi
 log_info "Rebasing bump branch onto latest origin/main before merge"
 git fetch origin main --quiet
 git rebase origin/main
-git push --force-with-lease origin "HEAD:$BRANCH"
+push_bump_branch()
 
 log_info "Merging mirror PR #${pr_number}"
 gh pr merge "$pr_number" --squash --delete-branch

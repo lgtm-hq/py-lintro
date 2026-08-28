@@ -43,7 +43,9 @@ log_info "Waiting for ${PACKAGE_NAME} ${VERSION} wheel on PyPI..."
 log_info "URL: ${PYPI_URL}"
 
 for i in $(seq 1 "$MAX_ATTEMPTS"); do
-	RESPONSE=$(curl -sf "$PYPI_URL" 2>/dev/null || echo "")
+	RESPONSE=$(
+		curl -sf --connect-timeout 10 --max-time 30 "$PYPI_URL" 2>/dev/null || echo ""
+	)
 
 	if [[ -z "$RESPONSE" ]]; then
 		log_info "Attempt ${i}/${MAX_ATTEMPTS}: Package metadata not yet available, waiting ${DELAY_SECONDS}s..."

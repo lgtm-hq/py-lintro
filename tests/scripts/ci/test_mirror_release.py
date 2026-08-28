@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[3]
 MIRROR_DIR = ROOT / "scripts" / "ci" / "mirror"
 RESOLVE_SCRIPT = MIRROR_DIR / "resolve-version.sh"
 BUMP_SCRIPT = MIRROR_DIR / "bump_pin.py"
+WAIT_WHEEL_SCRIPT = MIRROR_DIR / "wait-for-pypi-wheel.sh"
+PUBLISH_SCRIPT = MIRROR_DIR / "publish-mirror-release.sh"
 CLASSIFY_SCRIPT = ROOT / "scripts" / "ci" / "classify-release-tag.py"
 
 
@@ -206,3 +208,84 @@ def test_bump_multiple_pins_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Expected exactly one"):
         module.bump(path=pyproject, version="1.0.0")
+
+
+def test_resolve_version_rejects_empty_tag() -> None:
+    """Whitespace-only RELEASE_TAG fails closed instead of publishing."""
+    result = _run_resolve(release_tag="   ")
+
+    assert_that(result.returncode).is_not_equal_to(0)
+
+
+def test_publish_script_fetches_bump_branch_before_lease() -> None:
+    """Retry pushes fetch the existing bump branch so --force-with-lease works."""
+    body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
+
+    assert_that(body).contains("push_bump_branch()")
+    assert_that(body).contains(
+        'git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"',
+    )
+    assert_that(body).contains('git push --force-with-lease origin "HEAD:${BRANCH}"')
+    assert_that(body.count("push_bump_branch")).is_greater_than_or_equal_to(3)
+
+
+def _write_fake_curl(bin_dir: Path, payload: str) -> None:
+    """Install a curl stub that prints *payload* and ignores URL/flags."""
+    curl = bin_dir / "curl"
+    curl.write_text(
+        "#!/usr/bin/env bash\n"
+        "cat <<'EOF'\n"
+        f"{payload}\n"
+        "EOF\n",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
+
+
+def _run_wait_wheel(
+    *,
+    bin_dir: Path,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run wait-for-pypi-wheel.sh with a stub curl ahead of PATH."""
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(  # nosec B603 - fixed argv against repo script; shell=False
+        [str(WAIT_WHEEL_SCRIPT), "lintro", "1.2.3", "1", "0"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=ROOT,
+    )
+
+
+def test_wait_for_pypi_wheel_requires_bdist_wheel(tmp_path: Path) -> None:
+    """sdist-only PyPI metadata is not enough to pass the wheel gate."""
+    _write_fake_curl(tmp_path, '{"urls":[{"packagetype":"sdist"}]}')
+    result = _run_wait_wheel(bin_dir=tmp_path)
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr + result.stdout).contains("Timeout")
+
+
+def test_wait_for_pypi_wheel_accepts_bdist_wheel(tmp_path: Path) -> None:
+    """A bdist_wheel URL in the PyPI JSON is sufficient."""
+    _write_fake_curl(tmp_path, '{"urls":[{"packagetype":"bdist_wheel"}]}')
+    result = _run_wait_wheel(bin_dir=tmp_path)
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr + result.stdout).contains("wheel is available")
+
+
+def test_wait_for_pypi_wheel_times_out_without_metadata(tmp_path: Path) -> None:
+    """Empty curl output (metadata not published yet) exits 1 after attempts."""
+    curl = tmp_path / "curl"
+    curl.write_text("#!/usr/bin/env bash\nexit 22\n", encoding="utf-8")
+    curl.chmod(0o755)
+    result = _run_wait_wheel(bin_dir=tmp_path)
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr + result.stdout).contains("Timeout")

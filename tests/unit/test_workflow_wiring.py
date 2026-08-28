@@ -1959,7 +1959,9 @@ def test_mirror_release_job_has_timeout() -> None:
     """Mirror bump inherits a bounded job timeout instead of the 6-hour default."""
     workflow = _load_workflow(name="mirror-release.yml")
 
-    assert_that(workflow["jobs"]["mirror-bump"]).contains_key("timeout-minutes")
+    timeout = workflow["jobs"]["mirror-bump"]["timeout-minutes"]
+    assert_that(timeout).is_instance_of(int)
+    assert_that(timeout).is_equal_to(20)
 
 
 def test_mirror_release_triggers_on_published_release() -> None:
