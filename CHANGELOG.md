@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.135.1] - 2026-08-28
+
+### Fixed
+
+- **docker**: bridge buf into app image until next tools digest (#2190) (4e318c6)
+
 ## [0.135.0] - 2026-08-28
 
 ### Added
