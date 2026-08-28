@@ -1,4 +1,4 @@
-"""Tests for ``_generator.inputs`` readers and validators."""
+"""Tests for ``lintro_build.versions.inputs`` readers and validators."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+
+from lintro_build.versions.inputs import _collect_dep_strings
 
 _NON_EXACT_NPM_SPECS = [
     ">=1.0.0",
@@ -283,12 +285,8 @@ def test_read_requirements_pin_ignores_hash_continuations(
     assert_that(version).is_equal_to("9.9.9")
 
 
-def test_collect_dep_strings_skips_non_dep_tables(gen: ModuleType) -> None:
-    """Strings outside known dep tables are ignored.
-
-    Args:
-        gen: Imported generator module.
-    """
+def test_collect_dep_strings_skips_non_dep_tables() -> None:
+    """Strings outside known dep tables are ignored."""
     data = {
         "project": {
             "dependencies": ["pytest>=9.0.3"],
@@ -305,7 +303,7 @@ def test_collect_dep_strings_skips_non_dep_tables(gen: ModuleType) -> None:
             "lintro": {"banner": "looks-like-a-package>=1.0.0"},
         },
     }
-    found = sorted(gen._collect_dep_strings(data))
+    found = sorted(_collect_dep_strings(data))
     assert_that(found).is_equal_to(
         [
             "mypy>=1.19.1",
@@ -317,19 +315,15 @@ def test_collect_dep_strings_skips_non_dep_tables(gen: ModuleType) -> None:
     )
 
 
-def test_collect_dep_strings_skips_pep735_include_group(gen: ModuleType) -> None:
-    """PEP 735 ``include-group`` dict entries are ignored.
-
-    Args:
-        gen: Imported generator module.
-    """
+def test_collect_dep_strings_skips_pep735_include_group() -> None:
+    """PEP 735 ``include-group`` dict entries are ignored."""
     data = {
         "dependency-groups": {
             "test": ["pytest>=9.0.3", {"include-group": "dev"}],
             "dev": ["ruff>=0.15.9"],
         },
     }
-    found = sorted(gen._collect_dep_strings(data))
+    found = sorted(_collect_dep_strings(data))
     assert_that(found).is_equal_to(["pytest>=9.0.3", "ruff>=0.15.9"])
 
 

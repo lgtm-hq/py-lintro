@@ -1,64 +1,35 @@
 """Shared fixtures for tool-version generator tests.
 
-Loads the hyphen-named entry script via ``importlib.spec_from_file_location``
-(also bootstrapping ``sys.path`` so its sibling ``_generator`` package
-becomes importable), and exposes a fake-repo fixture plus a
-``retargeted_gen`` fixture for end-to-end ``main()`` tests.
+The generator implementation lives in the importable ``lintro_build.versions``
+package; the ``gen`` fixture exposes it, and ``retargeted_gen`` binds its
+``main`` entry point to a fake-repo ``GeneratorPaths`` for end-to-end tests.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from collections.abc import Generator
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
+
+import lintro_build.versions as versions_package
+from lintro_build.versions.generate import main as generate_main
+from lintro_build.versions.paths import GeneratorPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-tool-versions.py"
 
 
-def _load_generator_module(module_name: str) -> ModuleType:
-    """Import the generator entry script under ``module_name``.
-
-    Args:
-        module_name: Name used to register the loaded module in ``sys.modules``.
-
-    Returns:
-        Imported module exposing top-level helpers and path constants. Private
-        package helpers exercised by tests are attached as module attributes for
-        ergonomic access.
-    """
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        SCRIPT_PATH,
-    )
-    if spec is None or spec.loader is None:
-        pytest.fail(f"could not load generator script at {SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    # Register before exec so frozen-dataclass machinery
-    # (sys.modules.get(cls.__module__).__dict__) resolves cleanly.
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-
-    # Expose private package helpers needed by tests.
-    from _generator.inputs import _collect_dep_strings  # noqa: PLC0415
-
-    module._collect_dep_strings = _collect_dep_strings  # type: ignore[attr-defined]
-    return module
-
-
 @pytest.fixture(scope="session")
 def gen() -> ModuleType:
-    """Import the generator entry script as a module.
+    """Expose the generator package for unit tests.
 
     Returns:
-        Imported module exposing top-level helpers and path constants.
+        The ``lintro_build.versions`` package.
     """
-    return _load_generator_module("generate_tool_versions")
+    return versions_package
 
 
 @pytest.fixture
@@ -136,24 +107,33 @@ dependencies = ["pytest>=9.0.3"]
 
 
 @pytest.fixture
-def retargeted_gen(fake_repo: Path) -> ModuleType:
-    """Fresh generator module with its module-level paths pointed at ``fake_repo``.
-
-    The hyphen-named import means mypy cannot statically resolve these
-    attributes, hence the per-line type-ignore.
+def retargeted_gen(fake_repo: Path) -> SimpleNamespace:
+    """Generator entry point bound to ``GeneratorPaths`` for the fake repo.
 
     Args:
         fake_repo: Fake repo fixture root.
 
     Returns:
-        A generator module instance with paths bound to the fake repo.
+        Namespace exposing ``main`` (paths pre-bound), the bound ``paths``,
+        and the exit-code constants.
     """
-    module = _load_generator_module(f"generate_tool_versions_{id(fake_repo)}")
-    module.REPO_ROOT = fake_repo  # type: ignore[attr-defined]
-    module.SEED_PATH = fake_repo / "lintro" / "_tool_packages.py"  # type: ignore[attr-defined]
-    module.TOOL_VERSIONS_PATH = fake_repo / "lintro" / "_tool_versions.py"  # type: ignore[attr-defined]
-    module.PACKAGE_JSON_PATH = fake_repo / "package.json"  # type: ignore[attr-defined]
-    module.PYPROJECT_PATH = fake_repo / "pyproject.toml"  # type: ignore[attr-defined]
-    module.MANIFEST_PATH = fake_repo / "lintro" / "tools" / "manifest.json"  # type: ignore[attr-defined]
-    module.GENERATED_PATH = fake_repo / "lintro" / "_generated_versions.py"  # type: ignore[attr-defined]
-    return module
+    paths = GeneratorPaths.from_repo_root(fake_repo)
+
+    def _main(argv: list[str] | None = None) -> int:
+        """Run the generator against the fake repo.
+
+        Args:
+            argv: CLI arguments to pass through.
+
+        Returns:
+            Process exit code.
+        """
+        return generate_main(argv, paths=paths)
+
+    return SimpleNamespace(
+        main=_main,
+        paths=paths,
+        EXIT_OK=versions_package.EXIT_OK,
+        EXIT_DRIFT=versions_package.EXIT_DRIFT,
+        EXIT_INPUT_ERROR=versions_package.EXIT_INPUT_ERROR,
+    )

@@ -6,8 +6,8 @@ import json
 import re
 from typing import Any
 
-from _generator.errors import GenerationError
-from _generator.seed import Seed
+from .errors import GenerationError
+from .seed import Seed
 
 # Install types that resolve from ``binary_versions`` parsed out of
 # ``lintro/_tool_versions.py``. Update this set when the manifest schema gains a

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import ModuleType
+from types import SimpleNamespace
 
 import pytest
 from assertpy import assert_that
 
 
-def test_main_writes_outputs(retargeted_gen: ModuleType, fake_repo: Path) -> None:
+def test_main_writes_outputs(retargeted_gen: SimpleNamespace, fake_repo: Path) -> None:
     """Default mode writes both generated module and manifest.
 
     Args:
@@ -29,7 +29,7 @@ def test_main_writes_outputs(retargeted_gen: ModuleType, fake_repo: Path) -> Non
 
 
 def test_main_reads_semgrep_from_requirements_file(
-    retargeted_gen: ModuleType,
+    retargeted_gen: SimpleNamespace,
     fake_repo: Path,
 ) -> None:
     """Semgrep's version comes from requirements-semgrep.txt, not pyproject.
@@ -64,7 +64,7 @@ def test_main_reads_semgrep_from_requirements_file(
     assert_that(manifest_path.read_text()).contains('"version": "9.9.9"')
 
 
-def test_main_check_clean_exits_zero(retargeted_gen: ModuleType) -> None:
+def test_main_check_clean_exits_zero(retargeted_gen: SimpleNamespace) -> None:
     """``--check`` exits 0 on a tree already in sync.
 
     Args:
@@ -88,7 +88,7 @@ def _bump_oxfmt_version(fake_repo: Path, version: str) -> None:
 
 
 def test_main_check_drift_exits_one(
-    retargeted_gen: ModuleType,
+    retargeted_gen: SimpleNamespace,
     fake_repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -111,7 +111,7 @@ def test_main_check_drift_exits_one(
 
 
 def test_pin_bump_then_regenerate_passes_check(
-    retargeted_gen: ModuleType,
+    retargeted_gen: SimpleNamespace,
     fake_repo: Path,
 ) -> None:
     """Simulated Renovate pin bump plus regeneration clears the drift gate.
@@ -132,7 +132,7 @@ def test_pin_bump_then_regenerate_passes_check(
 
 
 def test_main_input_error_exits_two(
-    retargeted_gen: ModuleType,
+    retargeted_gen: SimpleNamespace,
     fake_repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -151,8 +151,27 @@ def test_main_input_error_exits_two(
     assert_that(capsys.readouterr().err).contains("oxfmt")
 
 
+def test_main_missing_manifest_exits_two(
+    retargeted_gen: SimpleNamespace,
+    fake_repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing manifest yields exit code 2, not an unhandled ``OSError``.
+
+    Args:
+        retargeted_gen: Generator module pointed at the fake repo.
+        fake_repo: Fake repo fixture root.
+        capsys: Pytest stdout/stderr capture.
+    """
+    (fake_repo / "lintro" / "tools" / "manifest.json").unlink()
+
+    rc = retargeted_gen.main([])
+    assert_that(rc).is_equal_to(retargeted_gen.EXIT_INPUT_ERROR)
+    assert_that(capsys.readouterr().err).contains("manifest.json")
+
+
 def test_main_invalid_manifest_exits_two(
-    retargeted_gen: ModuleType,
+    retargeted_gen: SimpleNamespace,
     fake_repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
