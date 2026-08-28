@@ -11,10 +11,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **cli**: `--profile` reports per-tool timing. Timing is always captured; the
-  flag only controls rendering. JSON uses `files_with_issues` (distinct issue
-  paths) and the same issue merge as `results[]`. Crashed tools keep their
-  duration in the table.
+- **cli**: `--profile` reports per-tool timing. Timing is always captured; the flag only
+  controls rendering. JSON uses `files_with_issues` (distinct issue paths) and the same
+  issue merge as `results[]`. Crashed tools keep their duration in the table.
 
 ### Changed
 
