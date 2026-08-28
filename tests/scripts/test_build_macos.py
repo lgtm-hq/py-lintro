@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess  # nosec B404 - only CalledProcessError is referenced in test doubles
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -137,6 +138,43 @@ def test_build_binary_regenerates_artifacts_before_nuitka(
         getattr(module, builder_attr)(**builder_kwargs)
 
     assert_that(calls[:2]).is_equal_to(["regenerate", "command"])
+
+
+@pytest.mark.parametrize(
+    ("script_name", "builder_attr", "builder_kwargs"),
+    _BUILD_VARIANTS,
+    ids=["platform=macos", "platform=linux"],
+)
+def test_build_binary_fails_when_regeneration_fails(
+    script_name: str,
+    builder_attr: str,
+    builder_kwargs: dict[str, str],
+) -> None:
+    """A failing generator aborts the build with exit code 1.
+
+    Args:
+        script_name: Build script under test.
+        builder_attr: Name of its top-level build function.
+        builder_kwargs: Keyword arguments the build function requires.
+    """
+    module = _load_build_module(script_name)
+
+    def _boom(cmd: list[str], **kwargs: object) -> None:
+        """Simulate a generator subprocess failure.
+
+        Args:
+            cmd: The argv list passed to subprocess.run.
+            **kwargs: Ignored keyword arguments.
+
+        Raises:
+            subprocess.CalledProcessError: Always.
+        """
+        raise subprocess.CalledProcessError(returncode=2, cmd=cmd)
+
+    with patch.object(module.subprocess, "run", _boom):
+        rc = getattr(module, builder_attr)(**builder_kwargs)
+
+    assert_that(rc).is_equal_to(1)
 
 
 @pytest.mark.parametrize(

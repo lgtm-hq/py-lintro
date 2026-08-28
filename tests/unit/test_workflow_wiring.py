@@ -1758,6 +1758,52 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 # (fork-PR / nightly fallback) is gated in dogfood-nightly.yml.
 
 
+def _regenerate_step_index(steps: list[dict[str, object]]) -> int:
+    """Return the index of the version-artifact regeneration step.
+
+    Args:
+        steps: A workflow job's step list.
+
+    Returns:
+        Index of the step running ``generate-tool-versions.py``.
+    """
+    for index, step in enumerate(steps):
+        if "generate-tool-versions.py" in str(step.get("run", "")):
+            return index
+    pytest.fail("no generate-tool-versions.py step found")
+
+
+def test_docker_ci_regenerates_manifest_before_verify() -> None:
+    """The manifest gate regenerates the artifacts before verifying (#2179).
+
+    Once the artifacts stop being committed (epic #2176 phase 4), a missing
+    or reordered regeneration step would only fail in live CI; this locks
+    the wiring at unit-test time.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["integration-test"]["steps"]
+    regen_index = _regenerate_step_index(steps)
+    verify_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    )
+    assert_that(regen_index).is_less_than(verify_index)
+
+
+def test_dogfood_nightly_regenerates_manifest_before_verify() -> None:
+    """The nightly pinned-digest gate regenerates before verifying (#2179)."""
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    steps = nightly["jobs"]["verify-pinned-image-tools"]["steps"]
+    regen_index = _regenerate_step_index(steps)
+    verify_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    )
+    assert_that(regen_index).is_less_than(verify_index)
+
+
 def test_docker_ci_integration_verifies_ci_image_tools() -> None:
     """integration-test runs the manifest-vs-image gate on the built CI image."""
     docker_ci = _load_workflow(name="docker-ci.yml")
