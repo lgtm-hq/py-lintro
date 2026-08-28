@@ -65,6 +65,15 @@ The configuration system works in a specific order:
      that need a project dependency tree (`tsc`, `vue-tsc`, `svelte-check`,
      `astro-check`). Unset by default, in which case Lintro falls back to container
      auto-detection (enabled inside containers, disabled otherwise)
+   - `tool_snapshot_ttl`: Seconds to cache tool capability probes under
+     `.lintro-cache/tool-snapshots.json` (default: `600`). Binary path + mtime changes
+     invalidate immediately. Unavailable (empty-path) entries are re-checked with a
+     `PATH` lookup, so a binary installed inside the TTL window is picked up on the
+     next probe instead of staying cached as missing. Use `lintro check --no-cache`
+     to force a fresh probe.
+   - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
+     Default `false` — missing tools report `status: unavailable` with a remediation
+     hint and do not count as a lint failure.
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -277,6 +286,12 @@ A timed-out tool reports:
   is invented, and the timeout never reaches `summary.total_issues`. Issues legitimately
   detected _before_ the timeout (for example the pre-fix check of a `format` run) are
   still reported.
+
+Every per-tool object also includes `status`, one of `ok`, `failed`, `skipped`, or
+`unavailable` (see `lintro.enums.tool_result_status.ToolResultStatus`). Missing
+binaries set `status: unavailable` and `unavailable: true`; they are not a lint
+failure unless `execution.strict_missing_tools` is enabled. `lintro list-tools`
+table output has a matching Status column.
 
 `summary.timed_out_tools` lists the tools that timed out, in execution order:
 

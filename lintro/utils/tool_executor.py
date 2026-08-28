@@ -478,6 +478,13 @@ def execute_run(
             color="cyan",
         )
 
+    # Warm the shared capability snapshot cache in parallel so per-tool
+    # verify_tool_version calls hit memory/disk instead of re-probing.
+    if tools_to_run:
+        from lintro.tools.core.snapshots import probe_all_tools
+
+        probe_all_tools(tool_names=list(tools_to_run))
+
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
         return finalize_artifact(

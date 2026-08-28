@@ -117,6 +117,14 @@ def test_get_is_case_insensitive(tool_name_variant: str) -> None:
     assert_that(tool.definition.name.lower()).is_equal_to("ruff")
 
 
+def test_get_accepts_underscore_alias_for_hyphenated_tool() -> None:
+    """Manifest underscore names resolve hyphen-registered plugins."""
+    tool = ToolRegistry.get("astro_check")
+
+    assert_that(tool).is_not_none()
+    assert_that(tool.definition.name.lower()).is_equal_to("astro-check")
+
+
 # =============================================================================
 # Tests for ToolRegistry.get_all
 # =============================================================================
@@ -242,6 +250,22 @@ def test_is_registered_returns_correct_boolean(tool_name: str, expected: bool) -
     result = ToolRegistry.is_registered(tool_name)
 
     assert_that(result).is_equal_to(expected)
+
+
+def test_is_registered_and_get_origin_resolve_underscore_alias(
+    clean_registry: None,
+) -> None:
+    """Hyphenated registry keys are visible via underscore aliases.
+
+    Args:
+        clean_registry: Fixture to ensure clean registry state.
+    """
+    plugin_class = create_fake_plugin(name="alias-origin-tool")
+    ToolRegistry.register(plugin_class=plugin_class, origin="testdist")
+
+    assert_that(ToolRegistry.is_registered("alias_origin_tool")).is_true()
+    assert_that(ToolRegistry.get_origin("alias_origin_tool")).is_equal_to("testdist")
+    assert_that(ToolRegistry.get_origin("missing_tool")).is_equal_to("unknown")
 
 
 # =============================================================================

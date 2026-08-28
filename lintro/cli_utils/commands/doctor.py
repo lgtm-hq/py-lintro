@@ -482,6 +482,7 @@ def doctor_command(
 
     # Determine which tools to check (names were validated above). Bound once
     # so the post-fix recheck below cannot drift from the initial selection.
+    # collect_tool_checks warms the shared snapshot cache in parallel.
     probe_tools = partial(
         collect_tool_checks,
         registry=registry,
@@ -640,6 +641,9 @@ def doctor_command(
 
     if fix and has_fixable:
         unresolved = _run_fix(display_console, prod_results, context, registry)
+        from lintro.tools.core.snapshots import clear_snapshot_cache
+
+        clear_snapshot_cache()
         rechecked = probe_tools()
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
