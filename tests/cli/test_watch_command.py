@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -269,6 +272,28 @@ def test_last_batch_exit_code_is_process_exit_code() -> None:
     assert_that(result.exit_code).is_equal_to(1)
 
 
+def _run_isolated_cli_probe(script: str) -> subprocess.CompletedProcess[str]:
+    """Run a CLI import probe in a fresh interpreter.
+
+    Reloading ``lintro.cli`` in-process leaves later tests patching a
+    different module object than ``main`` was imported from.
+
+    Args:
+        script: Python source to execute with ``python -c``.
+
+    Returns:
+        The completed subprocess result.
+    """
+    return subprocess.run(  # nosec B603 - fixed interpreter and inline script
+        [sys.executable, "-c", script],
+        capture_output=True,
+        check=False,
+        cwd=Path(__file__).resolve().parents[2],
+        env=os.environ.copy(),
+        text=True,
+    )
+
+
 def test_importing_cli_does_not_load_watchdog() -> None:
     """Importing the CLI must not import watchdog.
 
@@ -276,70 +301,63 @@ def test_importing_cli_does_not_load_watchdog() -> None:
     that may predate the watchdog dependency. ``lintro check`` has to start
     in that environment.
     """
-    import importlib
-    import sys
+    script = """
+import sys
 
-    watchdog_names = [
-        name
-        for name in sys.modules
-        if name == "watchdog" or name.startswith("watchdog.")
-    ]
-    for name in watchdog_names:
+import lintro.cli
+import lintro.cli_utils.commands.watch as command_mod
+
+leftover = [
+    name
+    for name in sys.modules
+    if name == "watchdog" or name.startswith("watchdog.")
+]
+if leftover:
+    raise SystemExit(f"watchdog imported: {leftover}")
+if lintro.cli.watch_command.name != "watch":
+    raise SystemExit("cli watch command not registered")
+if command_mod.watch_command.name != "watch":
+    raise SystemExit("watch command module not loaded")
+"""
+    result = _run_isolated_cli_probe(script=script)
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).is_empty()
+
+
+def test_importing_cli_survives_missing_watchdog() -> None:
+    """CLI import must succeed when watchdog is not installed."""
+    script = """
+import builtins
+import sys
+
+from click.testing import CliRunner
+
+real_import = builtins.__import__
+
+
+def _blocked_import(
+    name,
+    globals=None,
+    locals=None,
+    fromlist=(),
+    level=0,
+):
+    if name == "watchdog" or name.startswith("watchdog."):
+        raise ModuleNotFoundError("No module named 'watchdog'")
+    return real_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = _blocked_import
+for name in list(sys.modules):
+    if name == "watchdog" or name.startswith("watchdog."):
         del sys.modules[name]
 
-    cli_mod = importlib.reload(sys.modules["lintro.cli"])
-    command_mod = importlib.reload(sys.modules["lintro.cli_utils.commands.watch"])
+import lintro.cli
 
-    leftover = [
-        name
-        for name in sys.modules
-        if name == "watchdog" or name.startswith("watchdog.")
-    ]
-    assert_that(leftover).is_empty()
-    assert_that(cli_mod.watch_command.name).is_equal_to("watch")
-    assert_that(command_mod.watch_command.name).is_equal_to("watch")
-
-
-def test_importing_cli_survives_missing_watchdog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """CLI import must succeed when watchdog is not installed."""
-    import builtins
-    import importlib
-    import sys
-
-    real_import = builtins.__import__
-
-    def _blocked_import(
-        name: str,
-        globals: dict[str, Any] | None = None,
-        locals: dict[str, Any] | None = None,
-        fromlist: tuple[str, ...] = (),
-        level: int = 0,
-    ) -> Any:
-        if name == "watchdog" or name.startswith("watchdog."):
-            raise ModuleNotFoundError("No module named 'watchdog'")
-        return real_import(
-            name,
-            globals,
-            locals,
-            fromlist,
-            level,
-        )
-
-    monkeypatch.setattr(builtins, "__import__", _blocked_import)
-    for name in list(sys.modules):
-        if name == "watchdog" or name.startswith("watchdog."):
-            del sys.modules[name]
-    for name in (
-        "lintro.cli",
-        "lintro.cli_utils.commands.watch",
-        "lintro.watch.watcher",
-    ):
-        sys.modules.pop(name, None)
-
-    cli_mod = importlib.import_module("lintro.cli")
-    result = CliRunner().invoke(cli_mod.cli, ["check", "--help"])
-
-    assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains("Usage:")
+result = CliRunner().invoke(lintro.cli.cli, ["check", "--help"])
+if result.exit_code != 0 or "Usage:" not in result.output:
+    raise SystemExit(result.output or result.exception)
+"""
+    result = _run_isolated_cli_probe(script=script)
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).is_empty()
