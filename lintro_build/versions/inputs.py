@@ -9,8 +9,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from _generator.errors import GenerationError
-from _generator.seed import extract_assign_target
+from .errors import GenerationError
+from .seed import extract_assign_target
 
 # Specifier pattern for ``pkg[extras]>=version`` style PEP 508 strings.
 _SPEC_RE = re.compile(

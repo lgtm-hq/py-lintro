@@ -12,7 +12,7 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
-from _generator.errors import GenerationError
+from .errors import GenerationError
 
 
 @dataclass(frozen=True, slots=True)
