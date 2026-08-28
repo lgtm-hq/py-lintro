@@ -128,6 +128,8 @@ def test_tool_exception_maps_to_failed_result(
     assert_that(name).is_equal_to("value_tool")
     assert_that(result.success).is_false()
     assert_that(result.output).contains("Parallel execution failed", "boom")
+    assert_that(result.duration_seconds).is_not_none()
+    assert_that(result.duration_seconds).is_greater_than_or_equal_to(0.0)
 
 
 def test_malformed_result_does_not_corrupt_results(
@@ -166,3 +168,5 @@ def test_malformed_result_does_not_corrupt_results(
     assert_that(name).is_equal_to("mock_tool")
     assert_that(result.success).is_false()
     assert_that(result.output).contains("malformed result")
+    assert_that(result.duration_seconds).is_not_none()
+    assert_that(result.duration_seconds).is_greater_than_or_equal_to(0.0)

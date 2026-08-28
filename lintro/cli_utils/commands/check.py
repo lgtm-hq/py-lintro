@@ -164,6 +164,11 @@ DEFAULT_ACTION: str = "check"
     is_flag=True,
     help="Suppress the decorative ASCII art printed after the run.",
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -189,6 +194,7 @@ def check_command(
     score: bool,
     fail_under: float | None,
     no_art: bool,
+    profile: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -221,6 +227,7 @@ def check_command(
         score: bool: Print only the health score, suppressing the summary.
         fail_under: float | None: Exit 1 if the health score is below this value.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
+        profile: bool: Whether to emit a per-tool performance profile.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
@@ -273,6 +280,7 @@ def check_command(
             score=score,
             fail_under=fail_under,
             no_art=no_art,
+            profile=profile,
         )
     except ConfigurationError as exc:
         click.echo(str(exc), err=True)
