@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import subprocess  # nosec B404 - drives repo shell scripts with shell=False
+import sys
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -141,7 +142,7 @@ def test_bump_check_reports_drift(tmp_path: Path) -> None:
 
     ok = subprocess.run(  # nosec B603 - fixed argv; shell=False
         [
-            "python3",
+            sys.executable,
             str(BUMP_SCRIPT),
             "--pyproject",
             str(pyproject),
@@ -155,7 +156,7 @@ def test_bump_check_reports_drift(tmp_path: Path) -> None:
     )
     drift = subprocess.run(  # nosec B603 - fixed argv; shell=False
         [
-            "python3",
+            sys.executable,
             str(BUMP_SCRIPT),
             "--pyproject",
             str(pyproject),
