@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.136.0] - 2026-08-28
+
+### Added
+
+- **deps**: add dependency version policy validation (#1177) (1f846b0)
+
+### Changed
+
+- **tools**: split manifest.json into committed source and generated output (#2194)
+  (6ddbdab)
+- **release**: automate lintro-pre-commit mirror version bumps (#1176) (74fe1ef)
+- **scripts**: consolidate artifact generators into an importable build package (#2189)
+  (db0815c)
+
 ## [0.135.1] - 2026-08-28
 
 ### Fixed
