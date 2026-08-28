@@ -1118,6 +1118,12 @@ jobs:
       - name: Smoke Test Base Image
         if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/smoke-test-base-image.sh
+      - name: Regenerate version artifacts for manifest verification
+        # No-op while the artifacts are committed (#2179); load-bearing once
+        # the flip (epic #2176 phase 4) stops committing them, so the verify
+        # step below reads a manifest that exists in the checkout.
+        if: needs.changes.outputs.pipeline != 'false'
+        run: python3 scripts/ci/generate-tool-versions.py
       - name: Verify CI image tools against manifest
         # Manifest-vs-image drift gate (#1511): run verify-manifest-tools.py
         # inside the freshly built CI image so a manifest entry the image

@@ -5,7 +5,7 @@ This turns the ``lintro-verify`` new-tool checklist into a merge gate
 the full set of integration surfaces and to keep its sources of truth in
 agreement:
 
-- ``lintro/tools/manifest.json`` entry
+- ``lintro/tools/manifest.src.json`` entry
 - ``DEFAULT_TOOL_PRIORITIES`` drives the *effective* priority (no dead
   ``priority=`` declarations that silently fall back to 50)
 - manifest ``tags`` agree with the definition's ``tool_type``
@@ -47,7 +47,7 @@ from lintro.utils.unified_config import get_tool_priority
 
 # ── Repository layout ──────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = REPO_ROOT / "lintro" / "tools" / "manifest.json"
+MANIFEST_PATH = REPO_ROOT / "lintro" / "tools" / "manifest.src.json"
 TOOL_ANALYSIS_DIR = REPO_ROOT / "docs" / "tool-analysis"
 CONFIGURATION_DOC = REPO_ROOT / "docs" / "configuration.md"
 README = REPO_ROOT / "README.md"
@@ -151,7 +151,11 @@ def _expected_tags(tool_type: ToolType) -> set[str]:
 
 
 def _load_manifest_tools() -> dict[str, dict[str, object]]:
-    """Return ``{name: entry}`` parsed from ``manifest.json``.
+    """Return ``{name: entry}`` parsed from ``manifest.src.json``.
+
+    The hand-authored source (#2178) carries everything completeness checks
+    need (names, install metadata, tags) and stays committed after the
+    rendered manifest stops being committed.
 
     Returns:
         Mapping of manifest tool name to its raw entry dict.

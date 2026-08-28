@@ -109,6 +109,30 @@ def build_nuitka_command(*, arch: str, verbose: bool = False) -> list[str]:
     return cmd
 
 
+def regenerate_version_artifacts() -> None:
+    """Regenerate the version artifacts from their sources (#2179).
+
+    The binary bundles ``_generated_versions.py``, ``manifest.json``, and
+    ``_builtin_index.py``; regenerating before assembling the Nuitka command
+    makes the build self-contained instead of trusting checkout state. A
+    no-op while the artifacts are committed; load-bearing once they stop
+    being committed (epic #2176 phase 4). The ``INCLUDE_DATA_FILES``
+    existence guards below remain the backstop.
+
+    Raises:
+        subprocess.CalledProcessError: If either generator fails.
+    """
+    for script in (
+        "scripts/ci/generate-tool-versions.py",
+        "scripts/ci/generate-builtin-tool-index.py",
+    ):
+        subprocess.run(  # nosec B603 - fixed argv, repo-owned script, shell=False
+            [sys.executable, str(PROJECT_ROOT / script)],
+            cwd=PROJECT_ROOT,
+            check=True,
+        )
+
+
 def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     """Build a standalone macOS binary using Nuitka.
 
@@ -126,7 +150,11 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
+        regenerate_version_artifacts()
         cmd = build_nuitka_command(arch=arch, verbose=verbose)
+    except subprocess.CalledProcessError as exc:
+        print(f"Version artifact generation failed: {exc}", file=sys.stderr)
+        return 1
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 1

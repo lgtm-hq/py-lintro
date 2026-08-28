@@ -32,10 +32,21 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
+COPY lintro_build/ /app/lintro_build/
 COPY requirements-semgrep.txt /app/requirements-semgrep.txt
+COPY scripts/ci/generate-tool-versions.py /app/scripts/ci/generate-tool-versions.py
+COPY scripts/ci/generate-builtin-tool-index.py /app/scripts/ci/generate-builtin-tool-index.py
 COPY scripts/utils/install-semgrep.sh /app/scripts/utils/install-semgrep.sh
 COPY scripts/utils/install-tools.sh /app/scripts/utils/install-tools.sh
 COPY scripts/utils/utils.sh /app/scripts/utils/utils.sh
+
+# Regenerate the version artifacts from their sources (#2179): this COPY of
+# lintro/ overwrites the tools stage's regenerated artifacts with the build
+# context's, so the app layer regenerates for itself. A no-op while the
+# artifacts are committed; load-bearing once they stop being committed
+# (epic #2176 phase 4).
+RUN python3 scripts/ci/generate-tool-versions.py && \
+    python3 scripts/ci/generate-builtin-tool-index.py
 
 ARG WITH_AI=false
 

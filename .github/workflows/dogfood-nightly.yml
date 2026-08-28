@@ -88,6 +88,10 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Regenerate version artifacts for manifest verification
+        # No-op while the artifacts are committed (#2179); load-bearing once
+        # the flip (epic #2176 phase 4) stops committing them.
+        run: python3 scripts/ci/generate-tool-versions.py
       - name: Verify pinned digest tools against manifest
         env:
           # Same pinned release image dogfood-full lints with; bumped as one

@@ -114,9 +114,19 @@ RUN ARCH=$(uname -m) && \
     rm -rf /tmp/go*
 
 COPY lintro/ /app/lintro/
+COPY lintro_build/ /app/lintro_build/
 COPY scripts/ /app/scripts/
 COPY package.json /app/package.json
+COPY pyproject.toml /app/pyproject.toml
 COPY requirements-semgrep.txt /app/requirements-semgrep.txt
+
+# Regenerate the version artifacts from their sources so the image build is
+# self-contained (#2179): install-tools.sh hard-imports
+# lintro._generated_versions with no fallback. A no-op while the artifacts
+# are committed (regeneration reproduces identical bytes); load-bearing once
+# they stop being committed (epic #2176 phase 4).
+RUN python3 scripts/ci/generate-tool-versions.py && \
+    python3 scripts/ci/generate-builtin-tool-index.py
 
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup

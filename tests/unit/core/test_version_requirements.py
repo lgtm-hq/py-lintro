@@ -162,16 +162,22 @@ def test_get_min_version_raises_keyerror_for_unknown_tool() -> None:
         get_min_version("nonexistent_tool")  # type: ignore[arg-type]
 
 
-def test_explicit_manifest_min_version_is_a_strict_floor() -> None:
+def test_explicit_manifest_min_version_is_a_strict_floor(
+    generated_version_artifacts: Path,
+) -> None:
     """Manifest ``min_version`` stays below the recommended pin.
 
     Renovate updates ``version`` only. An explicit ``min_version`` is the
     parser-compatibility floor so a still-installed previous pin is not
-    skipped after a recommended bump.
+    skipped after a recommended bump. Reads the generator's rendered output
+    (#2179) so the check keeps working once the manifest stops being
+    committed.
+
+    Args:
+        generated_version_artifacts: Session dir with the rendered manifest.
     """
-    repo_root = Path(__file__).resolve().parents[3]
     manifest = json.loads(
-        (repo_root / "lintro" / "tools" / "manifest.json").read_text(),
+        (generated_version_artifacts / "manifest.json").read_text(),
     )
     explicit: list[dict[str, str]] = [
         entry
@@ -215,7 +221,8 @@ def test_all_external_tools_registered_in_tool_versions() -> None:
     from lintro._tool_versions import get_all_expected_versions
 
     repo_root = Path(__file__).resolve().parents[3]
-    manifest_path = repo_root / "lintro" / "tools" / "manifest.json"
+    # Names-only read: the hand-authored source stays committed after #2178.
+    manifest_path = repo_root / "lintro" / "tools" / "manifest.src.json"
 
     # Non-npm tools should be in TOOL_VERSIONS
     expected_non_npm_tools = {

@@ -183,12 +183,12 @@ def main(
         return EXIT_INPUT_ERROR
 
     gen_diff = diff_text(
-        str(paths.generated_path.relative_to(paths.repo_root)),
+        _diff_label(paths.generated_path, paths.repo_root),
         current_generated,
         generated_text,
     )
     manifest_diff = diff_text(
-        str(paths.manifest_path.relative_to(paths.repo_root)),
+        _diff_label(paths.manifest_path, paths.repo_root),
         current_manifest,
         manifest_text,
     )
@@ -208,6 +208,24 @@ def main(
     paths.generated_path.write_text(generated_text)
     paths.manifest_path.write_text(manifest_text)
     return EXIT_OK
+
+
+def _diff_label(path: Path, repo_root: Path) -> str:
+    """Format a unified-diff header label for an output path.
+
+    Args:
+        path: Output file path.
+        repo_root: Repository root for relative formatting.
+
+    Returns:
+        The path relative to ``repo_root`` when it lies inside it, else the
+        absolute path — callers may redirect outputs elsewhere (e.g. test
+        fixtures rendering into a temp dir, #2179).
+    """
+    try:
+        return str(path.relative_to(repo_root))
+    except ValueError:
+        return str(path)
 
 
 def _read_current_output(path: Path) -> str:

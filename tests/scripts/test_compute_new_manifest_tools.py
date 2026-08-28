@@ -151,16 +151,34 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _src_manifest(names: list[str]) -> str:
+    """Render a manifest.src.json string declaring the given tool names.
+
+    Args:
+        names: Tool names to include.
+
+    Returns:
+        str: The source-manifest JSON (no tool version keys, #2178).
+    """
+    return json.dumps(
+        {"version": 2, "tools": [{"name": n} for n in names]},
+    )
+
+
 def _write_manifest_file(repo: Path, names: list[str]) -> None:
-    """Write the repo manifest declaring the given tool names.
+    """Write the repo manifest pair declaring the given tool names.
+
+    Mirrors the real repository layout since #2178: the hand-authored
+    ``manifest.src.json`` (no versions) plus the rendered ``manifest.json``.
 
     Args:
         repo: Repository root.
         names: Tool names to declare.
     """
-    manifest = repo / "lintro" / "tools" / "manifest.json"
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(_manifest(names))
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    (tools_dir / "manifest.json").write_text(_manifest(names))
+    (tools_dir / "manifest.src.json").write_text(_src_manifest(names))
 
 
 def _run_sh(
@@ -261,6 +279,33 @@ def test_sh_new_manifest_treats_all_as_added(tmp_path: Path) -> None:
     result = _run_sh(repo, base_ref="main")
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout.strip()).is_equal_to("ruff,terraform")
+
+
+def test_sh_pre_split_merge_base_falls_back_to_manifest_json(
+    tmp_path: Path,
+) -> None:
+    """A merge-base without manifest.src.json diffs against manifest.json.
+
+    Transition window for #2178: bases that predate the manifest split carry
+    only the rendered manifest; the added diff must use it rather than
+    treating every current tool as new.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "manifest.json").write_text(_manifest(["ruff", "black"]))
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "pre-split base (manifest.json only)")
+    _git(repo, "checkout", "-b", "feature")
+    _write_manifest_file(repo, ["ruff", "black", "terraform"])
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "split manifest and add terraform")
+    result = _run_sh(repo, base_ref="main")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("terraform")
+    assert_that(result.stderr).contains("pre-split base")
 
 
 def test_sh_unresolvable_base_fails_closed(tmp_path: Path) -> None:

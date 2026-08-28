@@ -29,6 +29,40 @@ def _discover_tools() -> None:
     discover_all_tools()
 
 
+@pytest.fixture(scope="session")
+def generated_version_artifacts(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Render the version artifacts from repo sources into a session tmp dir.
+
+    Tests that need rendered ``version`` values read the generator's output
+    directly instead of the checkout's committed copies, so they keep working
+    once the artifacts stop being committed (#2179, epic #2176).
+
+    Args:
+        tmp_path_factory: Pytest session-scoped temp directory factory.
+
+    Returns:
+        Directory containing ``manifest.json`` and ``_generated_versions.py``.
+    """
+    from dataclasses import replace
+
+    from lintro_build.versions.generate import main as generate_versions
+    from lintro_build.versions.paths import GeneratorPaths
+
+    repo_root = Path(__file__).resolve().parents[1]
+    out_dir = tmp_path_factory.mktemp("generated-version-artifacts")
+    paths = replace(
+        GeneratorPaths.from_repo_root(repo_root),
+        manifest_path=out_dir / "manifest.json",
+        generated_path=out_dir / "_generated_versions.py",
+    )
+    rc = generate_versions([], paths=paths)
+    if rc != 0:
+        pytest.fail(f"version-artifact generation failed with exit code {rc}")
+    return out_dir
+
+
 """Shared fixtures used across tests in this repository."""
 
 
