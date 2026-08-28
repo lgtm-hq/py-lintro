@@ -47,7 +47,7 @@ REQUIREMENTS_PYPI_SOURCES: dict[str, str] = {
 }
 
 
-def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str]:
+def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str, str]:
     """Compute desired ``_generated_versions.py`` and ``manifest.json`` text.
 
     Args:
@@ -55,7 +55,9 @@ def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str]:
         paths: Generator input/output paths.
 
     Returns:
-        Tuple of (generated module text, manifest text).
+        Tuple of (generated module text, desired manifest text, current
+        manifest text). The current text is returned so callers can diff
+        without re-reading the manifest.
 
     Raises:
         GenerationError: If any input is missing, malformed, or inconsistent.
@@ -114,7 +116,7 @@ def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str]:
 
     generated_text = render_generated_module(npm_versions, pypi_versions)
     manifest_text = render_manifest(manifest_current, target_versions)
-    return generated_text, manifest_text
+    return generated_text, manifest_text, manifest_current
 
 
 def diff_text(label: str, current: str, desired: str) -> str:
@@ -165,15 +167,14 @@ def main(
 
     try:
         seed = parse_seed(paths.seed_path)
-        generated_text, manifest_text = collect_outputs(seed, paths)
-        current_manifest = _read_current_manifest(paths)
+        generated_text, manifest_text, current_manifest = collect_outputs(
+            seed,
+            paths,
+        )
+        current_generated = _read_current_generated(paths)
     except GenerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
-
-    current_generated = (
-        paths.generated_path.read_text() if paths.generated_path.exists() else ""
-    )
 
     gen_diff = diff_text(
         str(paths.generated_path.relative_to(paths.repo_root)),
@@ -203,20 +204,26 @@ def main(
     return EXIT_OK
 
 
-def _read_current_manifest(paths: GeneratorPaths) -> str:
-    """Read the committed manifest text for diffing.
+def _read_current_generated(paths: GeneratorPaths) -> str:
+    """Read the committed generated-module text for diffing.
 
     Args:
         paths: Generator input/output paths.
 
     Returns:
-        Current ``manifest.json`` contents.
+        Current ``_generated_versions.py`` contents, or empty when the file
+        does not exist yet.
 
     Raises:
-        GenerationError: If the manifest cannot be read, so a vanished file
-            surfaces as exit code 2 rather than an unhandled ``OSError``.
+        GenerationError: If the path exists but cannot be read (e.g. it is a
+            directory), so the failure surfaces as exit code 2 rather than an
+            unhandled ``OSError``.
     """
+    if not paths.generated_path.exists():
+        return ""
     try:
-        return paths.manifest_path.read_text()
+        return paths.generated_path.read_text()
     except OSError as exc:
-        raise GenerationError(f"manifest.json could not be read: {exc}") from exc
+        raise GenerationError(
+            f"_generated_versions.py could not be read: {exc}",
+        ) from exc

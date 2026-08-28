@@ -117,11 +117,15 @@ def test_generate_all_reports_index_drift(fake_repo: Path) -> None:
     )
 
 
-def test_generate_all_input_error_beats_drift(fake_repo: Path) -> None:
+def test_generate_all_input_error_beats_drift(
+    fake_repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """An input error dominates drift, and both generators still run.
 
     Args:
         fake_repo: Fake repo fixture root.
+        capsys: Pytest stdout/stderr capture.
     """
     lintro_build.generate_all(fake_repo)
 
@@ -133,3 +137,6 @@ def test_generate_all_input_error_beats_drift(fake_repo: Path) -> None:
     assert_that(lintro_build.generate_all(fake_repo, check=True)).is_equal_to(
         lintro_build.EXIT_INPUT_ERROR,
     )
+    captured = capsys.readouterr()
+    assert_that(captured.err).contains("package.json")
+    assert_that(captured.out).contains("out of date")

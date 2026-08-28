@@ -62,8 +62,11 @@ def test_scripts_readme_coverage() -> None:
     for script_file in (_REPO_ROOT / "scripts").rglob("*.sh"):
         # Skip files inside private (underscore-prefixed) packages; those are
         # implementation detail of a documented entry script, not separately
-        # invokable scripts.
-        if any(part.startswith("_") for part in script_file.parts):
+        # invokable scripts. Filter on repo-relative components so a private
+        # directory above the checkout cannot skip everything.
+        if any(
+            part.startswith("_") for part in script_file.relative_to(_REPO_ROOT).parts
+        ):
             continue
         script_files.add(script_file.name)
     for script_file in (_REPO_ROOT / "scripts").rglob("*.py"):
@@ -71,8 +74,11 @@ def test_scripts_readme_coverage() -> None:
             continue
         # Skip files inside private (underscore-prefixed) packages; those are
         # implementation detail of a documented entry script, not separately
-        # invokable scripts.
-        if any(part.startswith("_") for part in script_file.parts):
+        # invokable scripts. Filter on repo-relative components so a private
+        # directory above the checkout cannot skip everything.
+        if any(
+            part.startswith("_") for part in script_file.relative_to(_REPO_ROOT).parts
+        ):
             continue
         script_files.add(script_file.name)
 
