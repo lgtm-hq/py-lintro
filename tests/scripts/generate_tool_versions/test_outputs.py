@@ -92,6 +92,23 @@ def test_render_manifest_skips_untargeted_tools(gen: ModuleType) -> None:
     assert_that(new_text.count('"version"')).is_equal_to(1)
 
 
+def test_render_manifest_preserves_crlf_terminators(gen: ModuleType) -> None:
+    """CRLF source text round-trips with CRLF on the inserted line.
+
+    Args:
+        gen: Imported generator module.
+    """
+    src = _SRC_MANIFEST.replace("\n", "\r\n")
+
+    new_text = gen.render_manifest(
+        src_text=src,
+        target_versions={"oxfmt": "0.43.0"},
+    )
+
+    assert_that(new_text).contains('"version": "0.43.0",\r\n')
+    assert_that("\n" in new_text.replace("\r\n", "")).is_false()
+
+
 def test_render_manifest_rejects_version_in_src(gen: ModuleType) -> None:
     """A tool ``version`` key in the source is a split-brain error.
 

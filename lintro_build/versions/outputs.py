@@ -147,11 +147,31 @@ def render_manifest(src_text: str, target_versions: dict[str, str]) -> str:
     text = src_text
     for name, version in target_versions.items():
         pattern = re.compile(
-            rf'^(?P<indent>[ \t]*)"name": "{re.escape(name)}",\n',
+            rf'^(?P<indent>[ \t]*)"name": "{re.escape(name)}",(?P<nl>\r?\n)',
             re.MULTILINE,
         )
-        insertion = rf'\g<0>\g<indent>"version": "{version}",' + "\n"
-        text, count = pattern.subn(insertion, text)
+
+        def _insert(match: re.Match[str], version: str = version) -> str:
+            """Append a version line after the matched name line.
+
+            A callable replacement keeps the version string literal —
+            ``re.subn`` would otherwise interpret backslashes or group
+            references inside it. The matched line terminator is reused so
+            CRLF working trees (e.g. Windows checkouts under text=auto)
+            round-trip unchanged.
+
+            Args:
+                match: The matched ``"name": "..."`` line.
+                version: Resolved version for this tool.
+
+            Returns:
+                The matched text followed by the new version line.
+            """
+            indent = match.group("indent")
+            newline = match.group("nl")
+            return f'{match.group(0)}{indent}"version": "{version}",{newline}'
+
+        text, count = pattern.subn(_insert, text)
         if count == 0:
             raise GenerationError(
                 f"manifest.src.json has no '{name}' entry with a matching "
