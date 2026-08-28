@@ -57,14 +57,56 @@ def test_build_nuitka_command_raises_when_manifest_missing(tmp_path: Path) -> No
             build_macos.build_nuitka_command(arch="arm64")
 
 
-def test_build_binary_regenerates_artifacts_before_nuitka() -> None:
+def _load_build_module(script_name: str) -> ModuleType:
+    """Import a build script module without executing its main entry point.
+
+    Args:
+        script_name: Basename of the build script under ``scripts/build/``.
+
+    Returns:
+        Loaded build module.
+    """
+    script_path = _REPO_ROOT / "scripts" / "build" / script_name
+    module_name = script_path.stem
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_BUILD_VARIANTS = [
+    ("build_macos.py", "build_macos_binary", {"arch": "arm64"}),
+    ("build_linux.py", "build_linux_binary", {}),
+]
+
+
+@pytest.mark.parametrize(
+    ("script_name", "builder_attr", "builder_kwargs"),
+    _BUILD_VARIANTS,
+    ids=["platform=macos", "platform=linux"],
+)
+def test_build_binary_regenerates_artifacts_before_nuitka(
+    script_name: str,
+    builder_attr: str,
+    builder_kwargs: dict[str, str],
+) -> None:
     """The build regenerates the version artifacts before assembling Nuitka args.
 
     Regeneration makes the binary build self-contained (#2179): the bundled
     ``manifest.json`` / ``_generated_versions.py`` / ``_builtin_index.py``
     come from the sources, not from checkout state.
+
+    Args:
+        script_name: Build script under test.
+        builder_attr: Name of its top-level build function.
+        builder_kwargs: Keyword arguments the build function requires.
     """
-    build_macos = _load_build_macos_module()
+    module = _load_build_module(script_name)
     calls: list[str] = []
 
     def _record(*args: object, **kwargs: object) -> None:
@@ -84,22 +126,33 @@ def test_build_binary_regenerates_artifacts_before_nuitka() -> None:
         return ["nuitka"]
 
     with (
-        patch.object(build_macos, "regenerate_version_artifacts", _record),
-        patch.object(build_macos, "build_nuitka_command", _fake_command),
+        patch.object(module, "regenerate_version_artifacts", _record),
+        patch.object(module, "build_nuitka_command", _fake_command),
         patch.object(
-            build_macos.subprocess,
+            module.subprocess,
             "run",
             lambda *a, **k: type("R", (), {"returncode": 0})(),
         ),
     ):
-        build_macos.build_macos_binary(arch="arm64")
+        getattr(module, builder_attr)(**builder_kwargs)
 
     assert_that(calls[:2]).is_equal_to(["regenerate", "command"])
 
 
-def test_regenerate_version_artifacts_invokes_both_generators() -> None:
-    """Both generator scripts run with check=True from the project root."""
-    build_macos = _load_build_macos_module()
+@pytest.mark.parametrize(
+    "script_name",
+    ["build_macos.py", "build_linux.py"],
+    ids=["platform=macos", "platform=linux"],
+)
+def test_regenerate_version_artifacts_invokes_both_generators(
+    script_name: str,
+) -> None:
+    """Both generator scripts run with check=True from the project root.
+
+    Args:
+        script_name: Build script under test.
+    """
+    module = _load_build_module(script_name)
     invoked: list[str] = []
 
     def _fake_run(cmd: list[str], **kwargs: object) -> None:
@@ -111,9 +164,10 @@ def test_regenerate_version_artifacts_invokes_both_generators() -> None:
         """
         invoked.append(Path(cmd[-1]).name)
         assert_that(kwargs.get("check")).is_true()
+        assert_that(str(kwargs.get("cwd"))).is_equal_to(str(module.PROJECT_ROOT))
 
-    with patch.object(build_macos.subprocess, "run", _fake_run):
-        build_macos.regenerate_version_artifacts()
+    with patch.object(module.subprocess, "run", _fake_run):
+        module.regenerate_version_artifacts()
 
     assert_that(invoked).is_equal_to(
         ["generate-tool-versions.py", "generate-builtin-tool-index.py"],

@@ -45,6 +45,10 @@ Environment:
                  (default: tools).
   MANIFEST       Optional. Manifest path relative to the repo root
                  (default: lintro/tools/manifest.json).
+  MANIFEST_SRC   Optional. Hand-authored manifest source used for the
+                 added-tool diff (#2178)
+                 (default: lintro/tools/manifest.src.json). Set it alongside
+                 MANIFEST when pointing the gate at custom manifests.
   BASE_REF       Optional. PR base branch (github.base_ref). When set, tools
                  the PR newly adds to the manifest are computed (diff vs the
                  merge-base) and passed as --allow-missing, so their absent
@@ -75,6 +79,7 @@ fi
 : "${IMAGE:?IMAGE is required (e.g. ghcr.io/lgtm-hq/py-lintro:ci-123)}"
 : "${TIERS:=tools}"
 : "${MANIFEST:=lintro/tools/manifest.json}"
+: "${MANIFEST_SRC:=lintro/tools/manifest.src.json}"
 : "${BASE_REF:=}"
 : "${ALLOW_MISSING:=}"
 : "${ALLOW_VERSION_LAG:=}"
@@ -101,12 +106,12 @@ fi
 
 # Compute allowlists (#1565 / #1582). Explicit ALLOW_* wins (tests); otherwise
 # derive from BASE_REF via the fail-closed helper. On main/nightly (no
-# BASE_REF) the helper returns empty -> full enforcement. EMIT=added uses the
-# helper's own default manifest (the committed manifest.src.json, #2178);
-# EMIT=version-changed needs the rendered version fields, so it keeps this
-# script's MANIFEST.
+# BASE_REF) the helper returns empty -> full enforcement. EMIT=added diffs
+# the hand-authored MANIFEST_SRC (names only, committed after the flip,
+# #2178); EMIT=version-changed needs the rendered version fields, so it
+# keeps this script's MANIFEST.
 if [[ -z "$ALLOW_MISSING" ]]; then
-	ALLOW_MISSING="$(BASE_REF="$BASE_REF" EMIT=added \
+	ALLOW_MISSING="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST_SRC" EMIT=added \
 		"${script_dir}/compute-new-manifest-tools.sh")"
 fi
 if [[ -z "$ALLOW_VERSION_LAG" ]]; then

@@ -169,9 +169,10 @@ def test_explicit_manifest_min_version_is_a_strict_floor(
 
     Renovate updates ``version`` only. An explicit ``min_version`` is the
     parser-compatibility floor so a still-installed previous pin is not
-    skipped after a recommended bump. Reads the generator's rendered output
-    (#2179) so the check keeps working once the manifest stops being
-    committed.
+    skipped after a recommended bump. The JSON side reads the generator's
+    rendered output (#2179); the runtime helpers under test still read the
+    working tree's artifacts, which the setup flow regenerates once they
+    stop being committed (epic #2176 phase 4).
 
     Args:
         generated_version_artifacts: Session dir with the rendered manifest.

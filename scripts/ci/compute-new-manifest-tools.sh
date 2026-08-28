@@ -5,9 +5,11 @@ set -euo pipefail
 
 # compute-new-manifest-tools.sh
 #
-# Print the comma-separated set of tool names a PR changes in
-# lintro/tools/manifest.json, computed as a git diff against the merge-base
-# with the PR base branch. The manifest-vs-image gate
+# Print the comma-separated set of tool names a PR changes in the manifest,
+# computed as a git diff against the merge-base with the PR base branch.
+# EMIT=added diffs the hand-authored lintro/tools/manifest.src.json (#2178);
+# EMIT=version-changed diffs the rendered lintro/tools/manifest.json, which
+# carries the version fields. The manifest-vs-image gate
 # (verify-image-manifest-tools.sh) feeds this to verify-manifest-tools.py:
 #
 #   EMIT=added (default) → --allow-missing: a newly-added tool's absent binary
@@ -133,7 +135,7 @@ trap 'rm -f "$old_manifest"' EXIT
 # manifest.src.json, so the added diff falls back to the rendered manifest
 # there — names are identical in both files.
 if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
-	if [[ "$EMIT" == "added" ]] &&
+	if [[ "$EMIT" == "added" && "$MANIFEST" == "lintro/tools/manifest.src.json" ]] &&
 		git show "${merge_base}:lintro/tools/manifest.json" >"$old_manifest" 2>/dev/null; then
 		log_info "No ${MANIFEST} at merge-base ${merge_base}; using manifest.json (pre-split base)"
 	else
