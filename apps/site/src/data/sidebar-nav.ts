@@ -63,6 +63,7 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/html-validate': 'frameworks',
   'tools/yamllint': 'config',
   'tools/markdownlint': 'config',
+  'tools/buf': 'config',
   'tools/typos': 'config',
   'tools/spectral': 'config',
   'tools/actionlint': 'ci-ops',

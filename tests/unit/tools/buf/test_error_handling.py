@@ -1,0 +1,152 @@
+"""Tests for BufPlugin error handling and documentation URLs."""
+
+from __future__ import annotations
+
+import subprocess  # nosec B404 - TimeoutExpired is used as a mocked exception type; no process is spawned
+from pathlib import Path
+from typing import cast
+from unittest.mock import patch
+
+from assertpy import assert_that
+
+from lintro.enums.doc_url_template import DocUrlTemplate
+from lintro.parsers.buf.buf_issue import BufIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
+from lintro.tools.definitions.buf import BufPlugin
+
+
+def test_doc_url_for_lint_rule(buf_plugin: BufPlugin) -> None:
+    """Lint rule codes resolve to the buf rules documentation page.
+
+    Args:
+        buf_plugin: The plugin under test.
+    """
+    url = buf_plugin.doc_url("PACKAGE_LOWER_SNAKE_CASE")
+    assert_that(url).is_equal_to(DocUrlTemplate.BUF)
+    assert_that(url).is_equal_to("https://buf.build/docs/lint/rules/")
+
+
+def test_doc_url_none_for_non_rule_codes(buf_plugin: BufPlugin) -> None:
+    """Compile/format/empty codes have no rule documentation URL.
+
+    Args:
+        buf_plugin: The plugin under test.
+    """
+    assert_that(buf_plugin.doc_url("COMPILE")).is_none()
+    assert_that(buf_plugin.doc_url("FORMAT")).is_none()
+    assert_that(buf_plugin.doc_url("")).is_none()
+
+
+def test_check_timeout_returns_error_result(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A subprocess timeout during check uses the shared timeout contract.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd="buf", timeout=30),
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("timed out")
+
+
+def test_fix_timeout_returns_error_result(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A subprocess timeout during fix uses the shared timeout contract.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd="buf", timeout=30),
+        ):
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("timed out")
+
+
+def test_doc_url_none_for_timeout(buf_plugin: BufPlugin) -> None:
+    """The internal TIMEOUT code has no buf rule documentation page.
+
+    Args:
+        buf_plugin: The plugin under test.
+    """
+    assert_that(buf_plugin.doc_url("TIMEOUT")).is_none()
+
+
+def test_check_timeout_keeps_parsed_lint_issues(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """Lint issues parsed before a format-phase timeout survive the timeout.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\npackage a;\n')
+    lint_json = (
+        '{"path":"a.proto","start_line":2,"start_column":1,"end_line":2,'
+        '"end_column":11,"type":"PACKAGE_LOWER_SNAKE_CASE","message":"m"}'
+    )
+    lint_result = SubprocessResult(
+        returncode=100,
+        stdout=lint_json,
+        stderr="",
+        output=lint_json,
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                lint_result,
+                subprocess.TimeoutExpired(cmd="buf", timeout=30),
+            ],
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.timed_out).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.issues).is_not_none()
+    codes = [cast(BufIssue, issue).code for issue in result.issues]  # type: ignore[union-attr]
+    assert_that(codes).contains("PACKAGE_LOWER_SNAKE_CASE")
+    assert_that(codes).does_not_contain("TIMEOUT")

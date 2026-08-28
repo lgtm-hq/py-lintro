@@ -839,6 +839,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | yamllint      | 35       | Linter           |
 | pydoclint     | 40       | Linter           |
 | bandit        | 45       | Security         |
+| buf           | 50       | Linter/Formatter |
 | hadolint      | 50       | Infrastructure   |
 | vale          | 50       | Linter (docs)    |
 | actionlint    | 55       | Infrastructure   |
@@ -2841,6 +2842,52 @@ lintro format --tools taplo --tool-options taplo:indent_string="    "
 # Use custom schema for validation
 lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
 ```
+
+### Buf Configuration
+
+**File:** `buf.yaml` (or `buf.work.yaml` for multi-module workspaces)
+
+buf works with or without a `buf.yaml`. When no config is present, buf lints against its
+`STANDARD` default rule set with the current directory as the module root. Add a
+`buf.yaml` to select rule categories (`MINIMAL`, `BASIC`, `STANDARD`) or to opt into
+`COMMENTS`/`UNARY_RPC`:
+
+```yaml
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+```
+
+**Available Options:**
+
+| Option             | Type    | Description                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `config`           | string  | Path to a `buf.yaml` (CLI `--tool-options` cannot pass inline YAML) |
+| `disable_symlinks` | boolean | Do not follow symlinks when reading sources                         |
+
+**Usage Examples:**
+
+```bash
+# Lint Protocol Buffer files (buf lint)
+lintro check --tools buf
+
+# Format .proto files in place (buf format --write)
+lintro format --tools buf
+
+# Use an explicit buf.yaml (path relative to the project root)
+lintro check --tools buf --tool-options buf:config=proto/buf.yaml
+```
+
+> **Note on module roots:** lintro runs buf from your **project root** — the nearest
+> ancestor of the selected `.proto` files holding a project marker (`.git`,
+> `pyproject.toml`, `package.json`, ...), not their common parent directory. A relative
+> `config` path is therefore resolved from the project root. buf's directory-based rules
+> (e.g. `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that same
+> directory, so add a `buf.yaml` with a `modules` `path` when your protos live in a
+> subdirectory and their packages are not laid out relative to the project root.
 
 ### Infrastructure Tools
 

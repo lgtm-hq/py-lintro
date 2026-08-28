@@ -262,10 +262,11 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
     """Detect all languages and ecosystems in a project tree.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
-    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, YAML, Markdown, TOML,
-    HTML, CSS, and dotenv files by inspecting manifests, directories, and
-    source-file extensions. Language tools still run in source-only trees that
-    have no ``pyproject.toml`` / ``package.json`` / ``Cargo.toml``. Nested
+    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, Protocol Buffers,
+    YAML, Markdown, TOML, HTML, CSS, and dotenv files by inspecting manifests,
+    directories, and source-file extensions. Language tools still run in
+    source-only trees that have no ``pyproject.toml`` / ``package.json`` /
+    ``Cargo.toml``. Nested
     YAML/Markdown/shell files count; a single root README.md does not enable
     Markdown tools. JS/TS toolchain configs (``commitlint.config.js``,
     ``eslint.config.*``, …) are not treated as application source. Dotenv
@@ -374,6 +375,10 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
     # SQL
     if _has_source_files(cwd, ".sql"):
         langs.add("sql")
+
+    # Protocol Buffers
+    if _has_source_files(cwd, ".proto"):
+        langs.add("protobuf")
 
     # YAML (beyond compose / lintro config / Actions workflows).
     if _has_project_file(cwd, match=_is_yaml_content):
