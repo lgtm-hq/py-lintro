@@ -1,11 +1,12 @@
 """Orchestration for the tool-version generator.
 
-Computes and writes ``lintro/_generated_versions.py`` and the ``version``
-fields of ``lintro/tools/manifest.json`` from the canonical sources. The seed
-mapping at ``lintro/_tool_packages.py`` declares which packages are tools (and
-which ``ToolName`` they own) and which are companions. Semgrep is read from
-``requirements-semgrep.txt`` instead of ``pyproject.toml`` so its resolver
-stays isolated (#2104).
+Computes and writes ``lintro/_generated_versions.py`` and renders
+``lintro/tools/manifest.json`` from the hand-authored
+``lintro/tools/manifest.src.json`` plus the canonical version sources. The
+seed mapping at ``lintro/_tool_packages.py`` declares which packages are
+tools (and which ``ToolName`` they own) and which are companions. Semgrep is
+read from ``requirements-semgrep.txt`` instead of ``pyproject.toml`` so its
+resolver stays isolated (#2104).
 
 Modes:
     default: write outputs, exit 0.
@@ -22,6 +23,7 @@ import argparse
 import difflib
 import json
 import sys
+from pathlib import Path
 
 from ..exit_codes import EXIT_DRIFT, EXIT_INPUT_ERROR, EXIT_OK
 from .errors import GenerationError
@@ -47,17 +49,19 @@ REQUIREMENTS_PYPI_SOURCES: dict[str, str] = {
 }
 
 
-def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str, str]:
+def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str]:
     """Compute desired ``_generated_versions.py`` and ``manifest.json`` text.
+
+    The manifest is rendered from the hand-authored ``manifest.src.json``
+    plus the resolved versions; the committed ``manifest.json`` is a pure
+    output and never read here.
 
     Args:
         seed: Parsed seed mapping.
         paths: Generator input/output paths.
 
     Returns:
-        Tuple of (generated module text, desired manifest text, current
-        manifest text). The current text is returned so callers can diff
-        without re-reading the manifest.
+        Tuple of (generated module text, rendered manifest text).
 
     Raises:
         GenerationError: If any input is missing, malformed, or inconsistent.
@@ -100,14 +104,18 @@ def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str, str]:
     binary_versions = read_binary_tool_versions(paths.tool_versions_path)
 
     try:
-        manifest_current = paths.manifest_path.read_text()
-        manifest_data = json.loads(manifest_current)
+        manifest_src = paths.manifest_src_path.read_text()
+        manifest_src_data = json.loads(manifest_src)
     except OSError as exc:
-        raise GenerationError(f"manifest.json could not be read: {exc}") from exc
+        raise GenerationError(
+            f"manifest.src.json could not be read: {exc}",
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise GenerationError(f"manifest.json is not valid JSON: {exc}") from exc
+        raise GenerationError(
+            f"manifest.src.json is not valid JSON: {exc}",
+        ) from exc
     target_versions = build_target_versions(
-        manifest_data=manifest_data,
+        manifest_data=manifest_src_data,
         npm_versions=npm_versions,
         pypi_versions=pypi_versions,
         binary_versions=binary_versions,
@@ -115,8 +123,8 @@ def collect_outputs(seed: Seed, paths: GeneratorPaths) -> tuple[str, str, str]:
     validate_seed_coverage(seed, target_versions)
 
     generated_text = render_generated_module(npm_versions, pypi_versions)
-    manifest_text = render_manifest(manifest_current, target_versions)
-    return generated_text, manifest_text, manifest_current
+    manifest_text = render_manifest(manifest_src, target_versions)
+    return generated_text, manifest_text
 
 
 def diff_text(label: str, current: str, desired: str) -> str:
@@ -167,11 +175,9 @@ def main(
 
     try:
         seed = parse_seed(paths.seed_path)
-        generated_text, manifest_text, current_manifest = collect_outputs(
-            seed,
-            paths,
-        )
-        current_generated = _read_current_generated(paths)
+        generated_text, manifest_text = collect_outputs(seed, paths)
+        current_generated = _read_current_output(paths.generated_path)
+        current_manifest = _read_current_output(paths.manifest_path)
     except GenerationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
@@ -204,26 +210,24 @@ def main(
     return EXIT_OK
 
 
-def _read_current_generated(paths: GeneratorPaths) -> str:
-    """Read the committed generated-module text for diffing.
+def _read_current_output(path: Path) -> str:
+    """Read a generated output file's current text for diffing.
 
     Args:
-        paths: Generator input/output paths.
+        path: Path of the generated output file.
 
     Returns:
-        Current ``_generated_versions.py`` contents, or empty when the file
-        does not exist yet.
+        Current contents, or empty when the file does not exist yet (an
+        absent output is simply "everything is new", not an input error).
 
     Raises:
         GenerationError: If the path exists but cannot be read (e.g. it is a
             directory), so the failure surfaces as exit code 2 rather than an
             unhandled ``OSError``.
     """
-    if not paths.generated_path.exists():
+    if not path.exists():
         return ""
     try:
-        return paths.generated_path.read_text()
+        return path.read_text()
     except OSError as exc:
-        raise GenerationError(
-            f"_generated_versions.py could not be read: {exc}",
-        ) from exc
+        raise GenerationError(f"{path.name} could not be read: {exc}") from exc

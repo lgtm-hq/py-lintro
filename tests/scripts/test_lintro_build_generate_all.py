@@ -41,13 +41,12 @@ def fake_repo(tmp_path: Path) -> Path:
         json.dumps({"devDependencies": {"oxfmt": "^0.43.0"}}, indent=2),
     )
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "fake"\n')
-    (tmp_path / "lintro" / "tools" / "manifest.json").write_text(
+    (tmp_path / "lintro" / "tools" / "manifest.src.json").write_text(
         json.dumps(
             {
                 "tools": [
                     {
                         "name": "oxfmt",
-                        "version": "0.0.0",
                         "install": {"type": "npm", "package": "oxfmt"},
                     },
                 ],

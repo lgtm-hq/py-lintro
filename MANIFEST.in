@@ -6,6 +6,9 @@ include pyproject.toml
 recursive-include assets *
 recursive-include lintro/ascii-art *
 recursive-include lintro/tools *.json
+# Generator input, not a distributable artifact (#2178); the rendered
+# manifest.json is what ships. Mirrors [tool.setuptools.exclude-package-data].
+exclude lintro/tools/manifest.src.json
 recursive-include lintro/ai/prompts/templates *.md *.json
 
 # Include any additional documentation

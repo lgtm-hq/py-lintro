@@ -1,0 +1,546 @@
+{
+  "version": 2,
+  "profiles": {
+    "minimal": {
+      "description": "Core Python linting only (fast CI)",
+      "tools": ["ruff", "black", "mypy", "bandit"]
+    },
+    "recommended": {
+      "description": "Project-appropriate tools based on detected languages",
+      "strategy": "auto-detect"
+    },
+    "complete": {
+      "description": "All supported tools",
+      "strategy": "all"
+    },
+    "full": {
+      "description": "All supported tools (alias for complete)",
+      "strategy": "all"
+    },
+    "python": {
+      "description": "Python linting and formatting tools",
+      "tools": ["ruff", "black", "mypy", "bandit", "pydoclint", "yamllint"]
+    },
+    "web": {
+      "description": "JavaScript and TypeScript tools",
+      "tools": ["prettier", "oxlint", "oxfmt", "tsc"]
+    },
+    "ci": {
+      "description": "Linters and security tools only (no formatters)",
+      "strategy": "filter",
+      "exclude_types": ["formatter"]
+    }
+  },
+  "language_map": {
+    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
+    "javascript": ["oxlint", "oxfmt", "prettier"],
+    "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
+    "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
+    "go": ["golangci_lint", "semgrep"],
+    "ruby": ["semgrep"],
+    "sql": ["sqlfluff"],
+    "protobuf": ["buf"],
+    "shell": ["shellcheck", "shfmt"],
+    "docker": ["hadolint"],
+    "yaml": ["yamllint"],
+    "markdown": ["markdownlint", "vale"],
+    "html": ["html_validate"],
+    "toml": ["taplo"],
+    "dotenv": ["dotenv_linter"],
+    "css": ["stylelint"],
+    "scss": ["stylelint"],
+    "less": ["stylelint"],
+    "sass": ["stylelint"],
+    "github_actions": ["actionlint"],
+    "security": ["gitleaks", "osv_scanner", "semgrep", "trufflehog"],
+    "astro": ["astro_check", "prettier"],
+    "svelte": ["svelte_check", "prettier"],
+    "vue": ["vue_tsc", "prettier"],
+    "restructuredtext": ["vale"],
+    "asciidoc": ["vale"],
+    "plaintext": ["vale"]
+  },
+  "tools": [
+    {
+      "name": "actionlint",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["actionlint", "--version"],
+      "languages": ["github_actions"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "astro_check",
+      "min_version": "7.1.3",
+      "install": {
+        "type": "npm",
+        "package": "astro",
+        "bin": "astro"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["astro", "--version"],
+      "languages": ["astro"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "bandit",
+      "install": {
+        "type": "pip",
+        "package": "bandit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["bandit", "--version"],
+      "languages": ["python"],
+      "tags": ["linter", "security"]
+    },
+    {
+      "name": "black",
+      "install": {
+        "type": "pip",
+        "package": "black"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["black", "--version"],
+      "languages": ["python"],
+      "tags": ["formatter"]
+    },
+    {
+      "name": "buf",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["buf", "--version"],
+      "languages": ["protobuf"],
+      "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "cargo_audit",
+      "install": {
+        "type": "cargo",
+        "package": "cargo-audit"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["cargo", "audit", "--version"],
+      "languages": ["rust"],
+      "tags": ["security"]
+    },
+    {
+      "name": "cargo_deny",
+      "install": {
+        "type": "cargo",
+        "package": "cargo-deny"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["cargo", "deny", "--version"],
+      "languages": ["rust"],
+      "tags": ["linter", "security"]
+    },
+    {
+      "name": "clippy",
+      "install": {
+        "type": "rustup",
+        "component": "clippy"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["cargo", "clippy", "--version"],
+      "languages": ["rust"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "commitlint",
+      "install": {
+        "type": "npm",
+        "package": "@commitlint/cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["commitlint", "--version"],
+      "languages": ["git"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "dotenv_linter",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["dotenv-linter", "--version"],
+      "languages": ["dotenv"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "gitleaks",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["gitleaks", "version"],
+      "languages": ["security"],
+      "tags": ["security"]
+    },
+    {
+      "name": "golangci_lint",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["golangci-lint", "version"],
+      "languages": ["go"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "hadolint",
+      "min_version": "2.14.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["hadolint", "--version"],
+      "languages": ["docker"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "html_validate",
+      "min_version": "11.5.6",
+      "install": {
+        "type": "npm",
+        "package": "html-validate"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["html-validate", "--version"],
+      "languages": ["html"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "markdownlint",
+      "install": {
+        "type": "npm",
+        "package": "markdownlint-cli2"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["markdownlint-cli2", "--version"],
+      "languages": ["markdown"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "mypy",
+      "install": {
+        "type": "pip",
+        "package": "mypy"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["mypy", "--version"],
+      "languages": ["python"],
+      "tags": ["linter", "type_checker"]
+    },
+    {
+      "name": "osv_scanner",
+      "min_version": "2.4.0",
+      "install": {
+        "type": "binary",
+        "package": "osv-scanner"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["osv-scanner", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
+    },
+    {
+      "name": "oxfmt",
+      "min_version": "0.60.0",
+      "install": {
+        "type": "npm",
+        "package": "oxfmt"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["oxfmt", "--version"],
+      "languages": ["javascript", "typescript"],
+      "tags": ["formatter"]
+    },
+    {
+      "name": "oxlint",
+      "min_version": "1.75.0",
+      "install": {
+        "type": "npm",
+        "package": "oxlint"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["oxlint", "--version"],
+      "languages": ["javascript", "typescript"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "pip_audit",
+      "install": {
+        "type": "pip",
+        "package": "pip-audit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pip-audit", "--version"],
+      "languages": ["python"],
+      "tags": ["security"]
+    },
+    {
+      "name": "prettier",
+      "install": {
+        "type": "npm",
+        "package": "prettier"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["prettier", "--version"],
+      "languages": ["javascript", "typescript", "astro", "svelte", "vue"],
+      "tags": ["formatter"]
+    },
+    {
+      "name": "pydoclint",
+      "install": {
+        "type": "pip",
+        "package": "pydoclint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pydoclint", "--version"],
+      "languages": ["python"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "pytest",
+      "install": {
+        "type": "pip",
+        "package": "pytest"
+      },
+      "tier": "dev",
+      "category": "bundled",
+      "version_command": ["pytest", "--version"],
+      "languages": ["python"],
+      "tags": ["testing"]
+    },
+    {
+      "name": "ruff",
+      "install": {
+        "type": "pip",
+        "package": "ruff"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["ruff", "--version"],
+      "languages": ["python"],
+      "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "rustc",
+      "install": {
+        "type": "rustup"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["rustc", "--version"],
+      "languages": ["rust"],
+      "tags": ["compiler"]
+    },
+    {
+      "name": "rustfmt",
+      "install": {
+        "type": "rustup",
+        "component": "rustfmt"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["rustfmt", "--version"],
+      "languages": ["rust"],
+      "tags": ["formatter"]
+    },
+    {
+      "name": "semgrep",
+      "install": {
+        "type": "pip",
+        "package": "semgrep"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["semgrep", "--version"],
+      "languages": ["python", "go", "ruby", "security"],
+      "tags": ["linter", "security"]
+    },
+    {
+      "name": "shellcheck",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["shellcheck", "--version"],
+      "languages": ["shell"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "shfmt",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["shfmt", "--version"],
+      "languages": ["shell"],
+      "tags": ["formatter"]
+    },
+    {
+      "name": "spectral",
+      "install": {
+        "type": "npm",
+        "package": "@stoplight/spectral-cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["spectral", "--version"],
+      "languages": ["openapi", "asyncapi", "json", "yaml"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "sqlfluff",
+      "install": {
+        "type": "pip",
+        "package": "sqlfluff"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["sqlfluff", "--version"],
+      "languages": ["sql"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "stylelint",
+      "install": {
+        "type": "npm",
+        "package": "stylelint",
+        "bin": "stylelint"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["stylelint", "--version"],
+      "languages": ["css", "scss", "sass", "less"],
+      "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "svelte_check",
+      "min_version": "4.7.3",
+      "install": {
+        "type": "npm",
+        "package": "svelte-check",
+        "bin": "svelte-check"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["svelte-check", "--version"],
+      "languages": ["svelte"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "taplo",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["taplo", "--version"],
+      "languages": ["toml"],
+      "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "trufflehog",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["trufflehog", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
+    },
+    {
+      "name": "tsc",
+      "install": {
+        "type": "npm",
+        "package": "typescript",
+        "bin": "tsc"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["tsc", "--version"],
+      "languages": ["typescript"],
+      "tags": ["linter", "type_checker"]
+    },
+    {
+      "name": "typos",
+      "install": {
+        "type": "cargo",
+        "package": "typos-cli"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["typos", "--version"],
+      "languages": ["text"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "vale",
+      "min_version": "3.15.2",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["vale", "--version"],
+      "languages": ["markdown", "restructuredtext", "asciidoc", "plaintext"],
+      "tags": ["linter", "documentation"]
+    },
+    {
+      "name": "vue_tsc",
+      "install": {
+        "type": "npm",
+        "package": "vue-tsc",
+        "bin": "vue-tsc"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["bash", "scripts/ci/resolve-vue-tsc-version.sh"],
+      "languages": ["vue"],
+      "tags": ["linter", "type_checker"]
+    },
+    {
+      "name": "yamllint",
+      "install": {
+        "type": "pip",
+        "package": "yamllint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["yamllint", "--version"],
+      "languages": ["yaml"],
+      "tags": ["linter"]
+    }
+  ]
+}
