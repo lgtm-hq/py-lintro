@@ -206,6 +206,12 @@ class AsyncToolExecutor:
 
             Returns:
                 Tuple of (tool_name, ToolResult).
+
+            Raises:
+                KeyboardInterrupt: Re-raised so the process can abort.
+                SystemExit: Re-raised so process exit is not swallowed.
+                asyncio.CancelledError: Re-raised so task cancellation is not
+                    treated as a tool failure.
             """
             started_at[name] = time.monotonic()
             tool_opts = options.get(name, {})

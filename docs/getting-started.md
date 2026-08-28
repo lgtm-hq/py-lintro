@@ -501,10 +501,10 @@ lintro check --output-format grid --group-by code
 ### Performance Profiling
 
 Add `--profile` to `check` or `format` to see how long each main-phase tool took.
-Executors always record those timings (including under parallel execution); the
-flag only controls whether they are rendered. Post-checks are omitted. The table
-is human and JSON only — `--score` and csv/sarif/markdown stdout stay unchanged.
-The `CUMULATIVE` row is the sum of per-tool seconds, not parallel wall-clock.
+Executors always record those timings (including under parallel execution); the flag
+only controls whether they are rendered. Post-checks are omitted. The table is human and
+JSON only — `--score` and csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row
+is the sum of per-tool seconds, not parallel wall-clock.
 
 ```bash
 # Show a per-tool timing table with optimization suggestions
@@ -536,8 +536,8 @@ Suggestions:
 
 The `Issue files` column (JSON `files_with_issues`) counts the distinct files each tool
 reported issues on — not files scanned — so a clean run reports 0. `issues_found` uses
-the same detected/remaining merge as JSON `results[]`. In JSON mode the profile is
-added additively under a top-level `profile` key (`cumulative_tool_duration`, `tools[]`,
+the same detected/remaining merge as JSON `results[]`. In JSON mode the profile is added
+additively under a top-level `profile` key (`cumulative_tool_duration`, `tools[]`,
 `suggestions[]`) and the existing `results`/`summary` schema is unchanged.
 
 ## Tips and Tricks
