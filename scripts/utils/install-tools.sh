@@ -1119,7 +1119,14 @@ main() {
 		# check at runtime.
 		buf_needs_install=1
 		if [ $DRY_RUN -eq 0 ] && command -v buf &>/dev/null; then
-			installed_version=$(buf --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			# A failed buf binary or unparseable --version must not abort
+			# the installer under set -euo pipefail; treat that as "not
+			# installed" so the download branch still runs.
+			installed_version=$(
+				buf --version 2>/dev/null |
+					grep -oE '[0-9]+\.[0-9]+\.[0-9]+' |
+					head -1 || true
+			)
 			if [ -n "$installed_version" ] && version_ge "$installed_version" "$BUF_VERSION"; then
 				echo -e "${GREEN}✓ buf v${installed_version} already installed (>= v${BUF_VERSION})${NC}"
 				buf_needs_install=0
