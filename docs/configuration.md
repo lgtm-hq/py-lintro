@@ -2863,8 +2863,8 @@ lint:
 
 **Available Options:**
 
-| Option             | Type    | Description                                     |
-| ------------------ | ------- | ----------------------------------------------- |
+| Option             | Type    | Description                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------- |
 | `config`           | string  | Path to a `buf.yaml` (CLI `--tool-options` cannot pass inline YAML) |
 | `disable_symlinks` | boolean | Do not follow symlinks when reading sources                         |
 

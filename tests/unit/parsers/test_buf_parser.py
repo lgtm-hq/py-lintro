@@ -132,12 +132,12 @@ def test_parse_buf_output_unicode_message() -> None:
     """Unicode characters in messages are preserved."""
     output = (
         '{"path":"v.proto","start_line":1,"start_column":1,"end_line":1,'
-        '"end_column":2,"type":"R","message":"caractère invalide"}'
+        '"end_column":2,"type":"R","message":"caractère non valide"}'
     )
     result = parse_buf_output(output)
 
     assert_that(result).is_length(1)
-    assert_that(result[0].message).contains("invalide")
+    assert_that(result[0].message).contains("caractère")
 
 
 def test_parse_buf_output_ansi_codes_stripped() -> None:

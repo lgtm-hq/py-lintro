@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - TimeoutExpired is used as a mocked exception type; no process is spawned
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch

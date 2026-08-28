@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess runs a fixed bash probe; shell=False
 from pathlib import Path
 
 from assertpy import assert_that
