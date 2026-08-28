@@ -16,7 +16,6 @@ import pytest
 
 import lintro_build.versions as versions_package
 from lintro_build.versions.generate import main as generate_main
-from lintro_build.versions.inputs import _collect_dep_strings
 from lintro_build.versions.paths import GeneratorPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -28,12 +27,8 @@ def gen() -> ModuleType:
     """Expose the generator package for unit tests.
 
     Returns:
-        The ``lintro_build.versions`` package, with the private
-        ``_collect_dep_strings`` helper attached for ergonomic access.
+        The ``lintro_build.versions`` package.
     """
-    versions_package._collect_dep_strings = (  # type: ignore[attr-defined]
-        _collect_dep_strings
-    )
     return versions_package
 
 

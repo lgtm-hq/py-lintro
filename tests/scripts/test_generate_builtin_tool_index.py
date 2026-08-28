@@ -123,7 +123,7 @@ def test_render_index_emits_importable_tuple(tmp_path: Path) -> None:
     """
     rendered_path = tmp_path / "_rendered_index.py"
     rendered_path.write_text(
-        builtin_index.render_index(["black", "ruff"], ["black", "ruff"]),
+        builtin_index.render_index(["black", "ruff"], ["ruff"]),
     )
 
     spec = importlib.util.spec_from_file_location("_rendered_index", rendered_path)
@@ -133,6 +133,7 @@ def test_render_index_emits_importable_tuple(tmp_path: Path) -> None:
     spec.loader.exec_module(rendered_module)
 
     assert_that(rendered_module.BUILTIN_TOOL_MODULES).is_equal_to(("black", "ruff"))
+    assert_that(rendered_module.REGISTERING_TOOL_MODULES).is_equal_to(("ruff",))
 
 
 def test_resolve_paths_follows_repo_layout(tmp_path: Path) -> None:
@@ -168,6 +169,7 @@ def test_check_passes_against_real_repo() -> None:
     assert_that(result.returncode).described_as(
         result.stdout + result.stderr,
     ).is_equal_to(0)
+    assert_that(result.stdout).contains("is up to date")
 
 
 @pytest.fixture

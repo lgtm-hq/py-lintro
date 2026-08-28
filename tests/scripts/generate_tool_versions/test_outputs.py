@@ -1,4 +1,4 @@
-"""Tests for ``_generator.outputs`` renderers and target resolution."""
+"""Tests for ``lintro_build.versions.outputs`` renderers and target resolution."""
 
 from __future__ import annotations
 

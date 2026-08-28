@@ -942,6 +942,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "justfile",
         "LICENSE",
         "lintro",
+        "lintro_build",
         "MANIFEST.in",
         "npm",
         "package.json",
