@@ -18,6 +18,7 @@ class ToolName(StrEnum):
     BUF = auto()
     CARGO_AUDIT = auto()
     CARGO_DENY = auto()
+    CHECKOV = auto()
     CLIPPY = auto()
     COMMITLINT = auto()
     DOTENV_LINTER = auto()

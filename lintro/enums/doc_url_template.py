@@ -29,6 +29,7 @@ class DocUrlTemplate(StrEnum):
     BUF = "https://buf.build/docs/lint/rules/"
     CARGO_AUDIT = "https://rustsec.org/advisories/{code}"
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
+    CHECKOV = "https://www.checkov.io/5.Policy%20Index/all.html"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
     COMMITLINT = "https://commitlint.js.org/reference/rules.html"
     GOLANGCI_LINT = "https://golangci-lint.run/usage/linters/#{code}"

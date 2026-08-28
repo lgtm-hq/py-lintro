@@ -11,7 +11,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **tools**: add checkov Infrastructure-as-Code security scanner (#1156)
+
 ### Changed
+
+- **tools**: Checkov is part of the default `security` language set. Terraform trees
+  with `checkov` on `PATH` will start failing previously green `lintro check` runs. Opt
+  out with `tools.checkov.enabled: false` or skip policies via
+  `--tool-options checkov:skip_checks=...`.
 
 ### Deprecated
 
