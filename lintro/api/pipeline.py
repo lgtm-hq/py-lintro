@@ -211,8 +211,10 @@ def run_lint_artifact(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
-        profile: When True, collect per-tool wall-clock timings and render a
-            profiling summary after the run.
+        profile: When True, render the per-tool timing table (human output) or
+            attach a ``profile`` key (JSON). Executors always record main-tool
+            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
+            stdout stay unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
             ``lintro test`` sets this to False because AI never applies to the
             test action. It gates :func:`~lintro.ai.interface.enhance_artifact`
@@ -365,8 +367,10 @@ def run_lint_with_ai(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
-        profile: When True, collect per-tool wall-clock timings and render a
-            profiling summary after the run.
+        profile: When True, render the per-tool timing table (human output) or
+            attach a ``profile`` key (JSON). Executors always record main-tool
+            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
+            stdout stay unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
 
     Returns:

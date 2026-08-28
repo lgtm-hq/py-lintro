@@ -49,6 +49,27 @@ def test_slow_threshold_flags_secondary_tools() -> None:
     assert_that(any("mypy took" in s for s in suggestions)).is_false()
 
 
+def test_slow_threshold_is_strictly_greater_than() -> None:
+    """A tool exactly at the threshold is not reported as over it."""
+    timings = [
+        ToolTiming(tool="mypy", duration=12.0),
+        ToolTiming(tool="bandit", duration=5.0),
+    ]
+
+    suggestions = get_suggestions(timings, slow_threshold=5.0)
+
+    assert_that(any("bandit took" in s for s in suggestions)).is_false()
+
+
+def test_pylint_hint_only_when_pylint_ran() -> None:
+    """The pylint jobs hint appears only when pylint is present."""
+    with_pylint = get_suggestions([ToolTiming(tool="pylint", duration=1.0)])
+    without_pylint = get_suggestions([ToolTiming(tool="ruff", duration=1.0)])
+
+    assert_that(any("--jobs" in s for s in with_pylint)).is_true()
+    assert_that(any("--jobs" in s for s in without_pylint)).is_false()
+
+
 def test_darglint_deprecation_hint() -> None:
     """Darglint gets a deprecation/replacement hint when it ran."""
     suggestions = get_suggestions([ToolTiming(tool="darglint", duration=3.0)])

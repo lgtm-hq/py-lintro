@@ -41,7 +41,9 @@ class RunContext:
             decorative console UI to stderr.
         score_only: Whether stdout must carry only the numeric health score.
         group_by: How to group issues in formatted and JSON output.
-        profile: Whether to emit a per-tool performance profile.
+        profile: Whether to emit the human/JSON performance profile. Timings
+            are recorded for main-phase tools regardless; this flag only
+            gates rendering.
     """
 
     action: Action

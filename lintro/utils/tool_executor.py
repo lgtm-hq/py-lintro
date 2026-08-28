@@ -100,7 +100,8 @@ def build_run_context(
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
         group_by: How to group issues in formatted and JSON output.
-        profile: Whether to collect and emit per-tool performance timings.
+        profile: Whether to emit the human/JSON performance profile. Main-tool
+            timings are recorded regardless; this flag only gates rendering.
 
     Returns:
         RunContext: The shared context for this run.

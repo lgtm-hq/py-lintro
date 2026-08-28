@@ -63,7 +63,7 @@ def get_suggestions(
     for timing in timings:
         if timing is slowest:
             continue
-        if timing.duration >= slow_threshold:
+        if timing.duration > slow_threshold:
             suggestions.append(
                 f"{timing.tool} took {timing.duration:.2f}s "
                 f"(over the {slow_threshold:.0f}s threshold)",
