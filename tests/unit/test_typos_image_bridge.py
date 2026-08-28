@@ -23,7 +23,9 @@ def test_ci_dockerfile_bridges_typos_until_tools_digest_includes_it() -> None:
     text = _DOCKERFILE.read_text(encoding="utf-8")
     assert_that(text).contains("COPY scripts/utils/install-tools.sh")
     assert_that(text).contains("COPY scripts/utils/utils.sh")
-    install_at = text.find("install-tools.sh --docker --tools typos,spectral")
+    install_at = text.find(
+        "install-tools.sh --docker --tools typos,spectral,buf,checkov",
+    )
     smoke_at = text.find("typos --version")
     spectral_smoke_at = text.find("spectral --version")
     assert_that(install_at).is_not_equal_to(-1)
@@ -41,7 +43,9 @@ def test_ci_dockerfile_bridges_spectral_until_tools_digest_includes_it() -> None
     publishes a tools digest that already contains it.
     """
     text = _DOCKERFILE.read_text(encoding="utf-8")
-    install_at = text.find("install-tools.sh --docker --tools typos,spectral")
+    install_at = text.find(
+        "install-tools.sh --docker --tools typos,spectral,buf,checkov",
+    )
     smoke_at = text.find("spectral --version")
     assert_that(install_at).is_not_equal_to(-1)
     assert_that(smoke_at).is_not_equal_to(-1)
@@ -69,3 +73,53 @@ def test_install_tools_script_installs_spectral() -> None:
     assert_that(skip_at).is_less_than(bun_add_at)
     tools_df = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")
     assert_that(tools_df).contains("spectral --version")
+
+
+def test_ci_dockerfile_bridges_buf_until_tools_digest_includes_it() -> None:
+    """Buf landed on main in #1155 but the app image still FROMs an older digest.
+
+    The manifest-vs-image gate on main has no ``--allow-missing``, so the
+    freshly built CI image must install buf itself until Renovate publishes
+    a tools digest that already contains it. After #1155, main failed
+    ``buf --version`` with exit 127.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    install_at = text.find(
+        "install-tools.sh --docker --tools typos,spectral,buf,checkov",
+    )
+    smoke_at = text.find("buf --version")
+    assert_that(install_at).is_not_equal_to(-1)
+    assert_that(smoke_at).is_not_equal_to(-1)
+    assert_that(install_at).is_less_than(smoke_at)
+
+
+def test_ci_dockerfile_bridges_checkov_until_tools_digest_includes_it() -> None:
+    """Checkov is new in this PR and will be absent from the pinned tools digest.
+
+    Same main-push enforcement as buf: without a bridge install the
+    manifest-vs-image gate fails with ``binary_missing``.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    install_at = text.find(
+        "install-tools.sh --docker --tools typos,spectral,buf,checkov",
+    )
+    smoke_at = text.find("checkov --version")
+    assert_that(install_at).is_not_equal_to(-1)
+    assert_that(smoke_at).is_not_equal_to(-1)
+    assert_that(install_at).is_less_than(smoke_at)
+
+
+def test_install_tools_script_installs_buf() -> None:
+    """The shared installer must have a buf block the Dockerfile can invoke."""
+    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    assert_that(text).contains('should_install "buf"')
+    tools_df = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")
+    assert_that(tools_df).contains("buf --version")
+
+
+def test_install_tools_script_installs_checkov() -> None:
+    """The shared installer must have a checkov block the Dockerfile can invoke."""
+    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    assert_that(text).contains('should_install "checkov"')
+    tools_df = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")
+    assert_that(tools_df).contains("checkov --version")

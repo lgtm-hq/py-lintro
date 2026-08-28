@@ -57,11 +57,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
-# next published digest. Bridge typos and spectral here so dogfood and
+# next published digest. Bridge newly added tools here so dogfood and
 # the manifest-vs-image gate actually run them instead of failing with
 # binary_missing. No-op once the digest already has them on PATH.
+# buf (#1155) and checkov (#1156) are absent from the current pin; main
+# failed the buf version probe with exit 127 after the #1155 merge (#2176).
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,checkov
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -92,7 +94,7 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 RUN echo "Smoke-testing tool stack..." && \
     ruff --version && prettier --version && rustfmt --version && \
     shellcheck --version && semgrep --version && typos --version && \
-    spectral --version && \
+    spectral --version && buf --version && checkov --version && \
     echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
