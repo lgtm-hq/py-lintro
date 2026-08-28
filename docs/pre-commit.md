@@ -122,7 +122,8 @@ from source. This is the endorsed hermetic path — the same model
 
 The mirror's `rev:` tracks the lintro version it pins. For each **stable** py-lintro
 release, CI waits for the published wheel on PyPI, bumps the mirror pin, and tags the
-mirror automatically once `MIRROR_REPO_TOKEN` is configured. Prerelease tags are skipped.
+mirror automatically once `MIRROR_REPO_TOKEN` is configured. Prerelease tags are
+skipped.
 
 ## Alternative: isolated Python environment from this repo
 

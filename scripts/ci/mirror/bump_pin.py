@@ -94,9 +94,6 @@ def _current_pin(*, content: str) -> str:
 
     Returns:
         The pinned version string.
-
-    Raises:
-        ValueError: If no ``lintro==`` pin is present.
     """
     data = tomllib.loads(content)
     requirement = _find_lintro_requirement(data=data)
@@ -112,6 +109,9 @@ def bump(*, path: Path, version: str) -> bool:
 
     Returns:
         True if the file was modified, False if it already matched.
+
+    Raises:
+        ValueError: If the pinned requirement string is not unique in the file.
     """
     content = _read(path=path)
     data = tomllib.loads(content)
