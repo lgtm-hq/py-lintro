@@ -221,22 +221,19 @@ def test_publish_script_fetches_bump_branch_before_lease() -> None:
     """Retry pushes fetch the existing bump branch so --force-with-lease works."""
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
-    assert_that(body).contains("push_bump_branch()")
+    assert_that(body).contains("push_bump_branch()")  # definition
     assert_that(body).contains(
         'git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"',
     )
     assert_that(body).contains('git push --force-with-lease origin "HEAD:${BRANCH}"')
-    assert_that(body.count("push_bump_branch")).is_greater_than_or_equal_to(3)
+    assert_that(body.count("\npush_bump_branch\n")).is_equal_to(2)
 
 
 def _write_fake_curl(bin_dir: Path, payload: str) -> None:
     """Install a curl stub that prints *payload* and ignores URL/flags."""
     curl = bin_dir / "curl"
     curl.write_text(
-        "#!/usr/bin/env bash\n"
-        "cat <<'EOF'\n"
-        f"{payload}\n"
-        "EOF\n",
+        "#!/usr/bin/env bash\n" "cat <<'EOF'\n" f"{payload}\n" "EOF\n",
         encoding="utf-8",
     )
     curl.chmod(0o755)

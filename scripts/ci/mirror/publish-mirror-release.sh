@@ -95,7 +95,7 @@ Sync the pinned lintro wheel to the ${TAG} py-lintro release.
 Refs lgtm-hq/py-lintro (mirror-release automation)"
 
 log_info "Pushing branch ${BRANCH}"
-push_bump_branch()
+push_bump_branch
 
 PR_TITLE="chore: bump lintro to ${VERSION}"
 PR_BODY="Automated version bump: pins the published \`lintro==${VERSION}\` wheel to match py-lintro ${TAG}. Merged and tagged \`${TAG}\` by mirror-release automation."
@@ -120,7 +120,7 @@ fi
 log_info "Rebasing bump branch onto latest origin/main before merge"
 git fetch origin main --quiet
 git rebase origin/main
-push_bump_branch()
+push_bump_branch
 
 log_info "Merging mirror PR #${pr_number}"
 gh pr merge "$pr_number" --squash --delete-branch

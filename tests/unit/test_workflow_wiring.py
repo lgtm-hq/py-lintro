@@ -2050,7 +2050,9 @@ def test_mirror_release_skips_prereleases() -> None:
     assert_that(mirror_checkout["if"]).contains(guard)
     assert_that(mirror_checkout["if"]).contains(github_guard)
 
-    setup_python = [s for s in steps if s.get("uses", "").startswith("actions/setup-python@")]
+    setup_python = [
+        s for s in steps if s.get("uses", "").startswith("actions/setup-python@")
+    ]
     assert_that(setup_python).is_empty()
 
 
