@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.134.0"
+version = "0.135.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -211,6 +211,7 @@ packages = [
   "lintro.parsers.vale",
   "lintro.parsers.vue_tsc",
   "lintro.plugins",
+  "lintro.profiling",
   "lintro.tools",
   "lintro.tools.core",
   "lintro.tools.core.install_strategies",

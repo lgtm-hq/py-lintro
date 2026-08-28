@@ -177,6 +177,7 @@ def run_lint_artifact(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
     ai_enabled: bool = True,
 ) -> RunArtifact:
     """Execute a run, apply AI enhancement, render it, and return the artifact.
@@ -210,6 +211,10 @@ def run_lint_artifact(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
+        profile: When True, render the per-tool timing table (human output) or
+            attach a ``profile`` key (JSON). Executors always record main-tool
+            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
+            stdout stay unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
             ``lintro test`` sets this to False because AI never applies to the
             test action. It gates :func:`~lintro.ai.interface.enhance_artifact`
@@ -234,6 +239,7 @@ def run_lint_artifact(
         no_art=no_art,
         dry_run=dry_run,
         group_by=group_by,
+        profile=profile,
     )
     _capture_fmt_checkpoint(ctx=ctx, paths=paths)
     artifact = execute_run(
@@ -324,6 +330,7 @@ def run_lint_with_ai(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
     ai_enabled: bool = True,
 ) -> int:
     """Run the full AI-aware pipeline and return only the process exit code.
@@ -360,6 +367,10 @@ def run_lint_with_ai(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
+        profile: When True, render the per-tool timing table (human output) or
+            attach a ``profile`` key (JSON). Executors always record main-tool
+            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
+            stdout stay unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
 
     Returns:
@@ -391,5 +402,6 @@ def run_lint_with_ai(
         fail_under=fail_under,
         diff_base=diff_base,
         no_art=no_art,
+        profile=profile,
         ai_enabled=ai_enabled,
     ).exit_code

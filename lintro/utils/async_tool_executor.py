@@ -162,6 +162,38 @@ class AsyncToolExecutor:
         """
         options = options_per_tool or {}
 
+        from lintro.models.core.tool_result import ToolResult
+
+        def _make_failed_result(
+            name: str,
+            message: str,
+            *,
+            duration_seconds: float,
+        ) -> tuple[str, ToolResult]:
+            """Build a failed ``ToolResult`` entry for the given tool.
+
+            Args:
+                name: Name of the tool the result belongs to.
+                message: Human-readable failure description.
+                duration_seconds: Elapsed time before the failure, so crashed
+                    tools still appear in the ``--profile`` table/JSON.
+
+            Returns:
+                A ``(tool_name, ToolResult)`` tuple with ``success=False``.
+            """
+            return (
+                name,
+                ToolResult(
+                    name=name,
+                    success=False,
+                    output=message,
+                    issues_count=0,
+                    duration_seconds=duration_seconds,
+                ),
+            )
+
+        started_at: dict[str, float] = {}
+
         async def run_with_name(
             name: str,
             tool: BaseToolPlugin,
@@ -174,15 +206,32 @@ class AsyncToolExecutor:
 
             Returns:
                 Tuple of (tool_name, ToolResult).
+
+            Raises:
+                KeyboardInterrupt: Re-raised so the process can abort.
+                SystemExit: Re-raised so process exit is not swallowed.
+                asyncio.CancelledError: Re-raised so task cancellation is not
+                    treated as a tool failure.
             """
+            started_at[name] = time.monotonic()
             tool_opts = options.get(name, {})
-            result = await self.run_tool_async(
-                tool,
-                paths,
-                action,
-                tool_opts,
-                max_fix_retries=max_fix_retries,
-            )
+            try:
+                result = await self.run_tool_async(
+                    tool,
+                    paths,
+                    action,
+                    tool_opts,
+                    max_fix_retries=max_fix_retries,
+                )
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
+                logger.error(f"Tool {name} failed with exception: {exc}")
+                return _make_failed_result(
+                    name=name,
+                    message=f"Parallel execution failed: {exc}",
+                    duration_seconds=time.monotonic() - started_at[name],
+                )
             if on_result:
                 on_result(name, result)
             return (name, result)
@@ -190,30 +239,11 @@ class AsyncToolExecutor:
         tasks = [run_with_name(name, tool) for name, tool in tools]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        from lintro.models.core.tool_result import ToolResult
-
-        def _make_failed_result(
-            name: str,
-            message: str,
-        ) -> tuple[str, ToolResult]:
-            """Build a failed ``ToolResult`` entry for the given tool.
-
-            Args:
-                name: Name of the tool the result belongs to.
-                message: Human-readable failure description.
-
-            Returns:
-                A ``(tool_name, ToolResult)`` tuple with ``success=False``.
-            """
-            return (
-                name,
-                ToolResult(
-                    name=name,
-                    success=False,
-                    output=message,
-                    issues_count=0,
-                ),
-            )
+        def _elapsed(name: str) -> float:
+            started = started_at.get(name)
+            if started is None:
+                return 0.0
+            return time.monotonic() - started
 
         # ``asyncio.gather(return_exceptions=True)`` aggregates *any* raised
         # value, including ``BaseException`` subclasses that are not
@@ -247,6 +277,7 @@ class AsyncToolExecutor:
                     _make_failed_result(
                         name=tool_name,
                         message=f"Parallel execution failed: {result}",
+                        duration_seconds=_elapsed(tool_name),
                     ),
                 )
                 continue
@@ -270,6 +301,7 @@ class AsyncToolExecutor:
                             "Parallel execution produced a malformed result: "
                             f"{result!r}"
                         ),
+                        duration_seconds=_elapsed(tool_name),
                     ),
                 )
 
