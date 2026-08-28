@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.134.0] - 2026-08-28
+
+### Added
+
+- **tools**: add buf for Protocol Buffer linting and formatting (#1155) (8b30d03)
+
 ## [0.133.0] - 2026-08-27
 
 ### Added
