@@ -14,8 +14,6 @@ from lintro.config.config_loader import load_config
 from lintro.enums.action import Action
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.execution.tool_configuration import get_tools_to_run
-from lintro.watch.runner import WatchRunner
-from lintro.watch.watcher import watch_paths
 
 # Constants
 DEFAULT_PATHS: tuple[str, ...] = (".",)
@@ -102,6 +100,11 @@ def watch_command(
         click.UsageError: If validation leaves no enabled watch tools.
         click.exceptions.Exit: If the latest lint batch has a nonzero exit code.
     """
+    # Import watch runtime here so ``lintro check`` / report images can
+    # load the CLI without ``watchdog`` installed (fallback GHCR images).
+    from lintro.watch.runner import WatchRunner
+    from lintro.watch.watcher import watch_paths
+
     console = Console()
     try:
         config = load_config()

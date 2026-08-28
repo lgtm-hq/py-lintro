@@ -30,11 +30,11 @@ def test_no_fix_overrides_config_auto_fix() -> None:
             return_value=config,
         ),
         patch(
-            "lintro.cli_utils.commands.watch.watch_paths",
+            "lintro.watch.watcher.watch_paths",
             side_effect=_watch_paths,
         ) as watch_paths,
         patch(
-            "lintro.cli_utils.commands.watch.WatchRunner",
+            "lintro.watch.runner.WatchRunner",
         ) as runner_cls,
     ):
         runner_cls.return_value = MagicMock()
@@ -55,9 +55,9 @@ def test_include_venv_is_forwarded_to_watcher() -> None:
             "lintro.cli_utils.commands.watch.load_config",
             return_value=LintroConfig(),
         ),
-        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
+        patch("lintro.watch.watcher.watch_paths") as watch_paths,
         patch(
-            "lintro.cli_utils.commands.watch.WatchRunner",
+            "lintro.watch.runner.WatchRunner",
         ) as runner_cls,
     ):
         runner_cls.return_value = MagicMock()
@@ -90,8 +90,8 @@ def test_config_values_apply_when_cli_flags_are_omitted() -> None:
             "lintro.cli_utils.commands.watch.load_config",
             return_value=config,
         ),
-        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
-        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+        patch("lintro.watch.watcher.watch_paths") as watch_paths,
+        patch("lintro.watch.runner.WatchRunner") as runner_cls,
     ):
         runner_cls.return_value = MagicMock()
         runner_cls.return_value.last_exit_code = 0
@@ -114,8 +114,8 @@ def test_tools_all_uses_smart_selection() -> None:
             "lintro.cli_utils.commands.watch.load_config",
             return_value=LintroConfig(),
         ),
-        patch("lintro.cli_utils.commands.watch.watch_paths"),
-        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+        patch("lintro.watch.watcher.watch_paths"),
+        patch("lintro.watch.runner.WatchRunner") as runner_cls,
     ):
         runner_cls.return_value = MagicMock()
         runner_cls.return_value.last_exit_code = 0
@@ -133,8 +133,8 @@ def test_config_tools_all_uses_smart_selection() -> None:
             "lintro.cli_utils.commands.watch.load_config",
             return_value=config,
         ),
-        patch("lintro.cli_utils.commands.watch.watch_paths"),
-        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+        patch("lintro.watch.watcher.watch_paths"),
+        patch("lintro.watch.runner.WatchRunner") as runner_cls,
     ):
         runner_cls.return_value.last_exit_code = 0
         result = CliRunner().invoke(cli, ["watch", "."])
@@ -154,7 +154,7 @@ def test_watch_help_describes_config_fallbacks() -> None:
 
 def test_unknown_cli_tool_fails_before_watcher_starts() -> None:
     """An unknown ``--tools`` name should fail with the standard suggestion."""
-    with patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths:
+    with patch("lintro.watch.watcher.watch_paths") as watch_paths:
         result = CliRunner().invoke(cli, ["watch", "--tools", "ruft", "."])
 
     assert_that(result.exit_code).is_not_equal_to(0)
@@ -218,8 +218,8 @@ def test_malformed_watch_config_is_a_clean_click_error() -> None:
 def test_default_path_is_current_directory() -> None:
     """Omitting PATHS should watch the current directory."""
     with (
-        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
-        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+        patch("lintro.watch.watcher.watch_paths") as watch_paths,
+        patch("lintro.watch.runner.WatchRunner") as runner_cls,
     ):
         runner_cls.return_value.last_exit_code = 0
         result = CliRunner().invoke(cli, ["watch"])
@@ -235,7 +235,7 @@ def test_empty_validated_tool_selection_is_usage_error() -> None:
             "lintro.cli_utils.commands.watch.get_tools_to_run",
             return_value=ToolsToRunResult(),
         ),
-        patch("lintro.cli_utils.commands.watch.watch_paths") as watch_paths,
+        patch("lintro.watch.watcher.watch_paths") as watch_paths,
     ):
         result = CliRunner().invoke(cli, ["watch", "--tools", "ruff", "."])
 
@@ -247,7 +247,7 @@ def test_empty_validated_tool_selection_is_usage_error() -> None:
 def test_watcher_os_error_is_clean_click_error() -> None:
     """Observer startup failures should produce a concise nonzero exit."""
     with patch(
-        "lintro.cli_utils.commands.watch.watch_paths",
+        "lintro.watch.watcher.watch_paths",
         side_effect=OSError("permission denied"),
     ):
         result = CliRunner().invoke(cli, ["watch", "."])
@@ -260,10 +260,86 @@ def test_watcher_os_error_is_clean_click_error() -> None:
 def test_last_batch_exit_code_is_process_exit_code() -> None:
     """Clean Ctrl-C shutdown should return the latest lint result."""
     with (
-        patch("lintro.cli_utils.commands.watch.watch_paths"),
-        patch("lintro.cli_utils.commands.watch.WatchRunner") as runner_cls,
+        patch("lintro.watch.watcher.watch_paths"),
+        patch("lintro.watch.runner.WatchRunner") as runner_cls,
     ):
         runner_cls.return_value.last_exit_code = 1
         result = CliRunner().invoke(cli, ["watch", "."])
 
     assert_that(result.exit_code).is_equal_to(1)
+
+
+def test_importing_cli_does_not_load_watchdog() -> None:
+    """Importing the CLI must not import watchdog.
+
+    Scheduled report jobs mount current source into a fallback GHCR image
+    that may predate the watchdog dependency. ``lintro check`` has to start
+    in that environment.
+    """
+    import importlib
+    import sys
+
+    watchdog_names = [
+        name
+        for name in sys.modules
+        if name == "watchdog" or name.startswith("watchdog.")
+    ]
+    for name in watchdog_names:
+        del sys.modules[name]
+
+    cli_mod = importlib.reload(sys.modules["lintro.cli"])
+    command_mod = importlib.reload(sys.modules["lintro.cli_utils.commands.watch"])
+
+    leftover = [
+        name
+        for name in sys.modules
+        if name == "watchdog" or name.startswith("watchdog.")
+    ]
+    assert_that(leftover).is_empty()
+    assert_that(cli_mod.watch_command.name).is_equal_to("watch")
+    assert_that(command_mod.watch_command.name).is_equal_to("watch")
+
+
+def test_importing_cli_survives_missing_watchdog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI import must succeed when watchdog is not installed."""
+    import builtins
+    import importlib
+    import sys
+
+    real_import = builtins.__import__
+
+    def _blocked_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        if name == "watchdog" or name.startswith("watchdog."):
+            raise ModuleNotFoundError("No module named 'watchdog'")
+        return real_import(
+            name,
+            globals,
+            locals,
+            fromlist,
+            level,
+        )
+
+    monkeypatch.setattr(builtins, "__import__", _blocked_import)
+    for name in list(sys.modules):
+        if name == "watchdog" or name.startswith("watchdog."):
+            del sys.modules[name]
+    for name in (
+        "lintro.cli",
+        "lintro.cli_utils.commands.watch",
+        "lintro.watch.watcher",
+    ):
+        sys.modules.pop(name, None)
+
+    cli_mod = importlib.import_module("lintro.cli")
+    result = CliRunner().invoke(cli_mod.cli, ["check", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("Usage:")
