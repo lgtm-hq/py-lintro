@@ -33,7 +33,10 @@ class RequirementsParser:
                 an included file is missing. The check fails closed rather
                 than silently dropping the line.
         """
-        return self._parse_path(path, seen=set())
+        try:
+            return self._parse_path(path, seen=set())
+        except ValueError:
+            raise
 
     def _parse_path(self, path: Path, seen: set[Path]) -> list[Dependency]:
         """Parse one requirements file, following ``-r`` includes.
