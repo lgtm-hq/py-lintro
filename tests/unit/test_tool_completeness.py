@@ -377,14 +377,14 @@ def test_registry_is_populated() -> None:
 # ── Per-tool completeness assertions ────────────────────────────────────────
 @pytest.mark.parametrize("tool", TOOL_NAMES)
 def test_manifest_entry_exists(tool: str) -> None:
-    """Every non-exempt tool has a ``manifest.json`` entry.
+    """Every non-exempt tool has a ``manifest.src.json`` entry.
 
     Args:
         tool: Registry tool name (parametrized).
     """
     _skip_if_exempt(tool, MANIFEST_EXEMPT)
     assert_that(_MANIFEST_TOOLS).described_as(
-        f"{tool}: missing manifest.json entry",
+        f"{tool}: missing manifest.src.json entry",
     ).contains_key(_canonical(tool))
 
 
@@ -417,7 +417,7 @@ def test_manifest_tags_match_tool_type(tool: str) -> None:
     _skip_if_exempt(tool, TAGS_EXEMPT)
     canonical = _canonical(tool)
     assert_that(_MANIFEST_TOOLS).described_as(
-        f"{tool}: missing manifest.json entry",
+        f"{tool}: missing manifest.src.json entry",
     ).contains_key(canonical)
     entry = _MANIFEST_TOOLS[canonical]
     raw_tags = entry.get("tags", [])
