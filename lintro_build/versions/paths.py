@@ -17,7 +17,10 @@ class GeneratorPaths:
         tool_versions_path: Binary tool pins at ``lintro/_tool_versions.py``.
         package_json_path: npm pins at ``package.json``.
         pyproject_path: pypi pins at ``pyproject.toml``.
-        manifest_path: Manifest at ``lintro/tools/manifest.json``.
+        manifest_src_path: Hand-authored manifest source at
+            ``lintro/tools/manifest.src.json`` (no tool version keys).
+        manifest_path: Rendered manifest output at
+            ``lintro/tools/manifest.json``.
         generated_path: Output module at ``lintro/_generated_versions.py``.
     """
 
@@ -26,6 +29,7 @@ class GeneratorPaths:
     tool_versions_path: Path
     package_json_path: Path
     pyproject_path: Path
+    manifest_src_path: Path
     manifest_path: Path
     generated_path: Path
 
@@ -45,6 +49,7 @@ class GeneratorPaths:
             tool_versions_path=repo_root / "lintro" / "_tool_versions.py",
             package_json_path=repo_root / "package.json",
             pyproject_path=repo_root / "pyproject.toml",
+            manifest_src_path=repo_root / "lintro" / "tools" / "manifest.src.json",
             manifest_path=repo_root / "lintro" / "tools" / "manifest.json",
             generated_path=repo_root / "lintro" / "_generated_versions.py",
         )

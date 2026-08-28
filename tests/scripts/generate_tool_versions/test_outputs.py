@@ -28,65 +28,102 @@ def test_render_generated_module_is_sorted(gen: ModuleType) -> None:
     )
 
 
-def test_render_manifest_preserves_inline_arrays(gen: ModuleType) -> None:
-    """Manifest update edits only ``version`` strings, not formatting.
+_SRC_MANIFEST = (
+    "{\n"
+    '  "language_map": ["python", "js", "ts"],\n'
+    '  "tools": [\n'
+    "    {\n"
+    '      "name": "oxfmt",\n'
+    '      "install": {"type": "npm", "package": "oxfmt"}\n'
+    "    },\n"
+    "    {\n"
+    '      "name": "pytest",\n'
+    '      "description": "test runner",\n'
+    '      "install": {"type": "pip", "package": "pytest"}\n'
+    "    }\n"
+    "  ]\n"
+    "}\n"
+)
+
+
+def test_render_manifest_inserts_versions_byte_stable(gen: ModuleType) -> None:
+    """Versions are inserted after each name; every other byte is preserved.
 
     Args:
         gen: Imported generator module.
     """
-    inline = (
+    new_text = gen.render_manifest(
+        src_text=_SRC_MANIFEST,
+        target_versions={"oxfmt": "0.43.0", "pytest": "9.0.3"},
+    )
+
+    assert_that(new_text).is_equal_to(
         "{\n"
         '  "language_map": ["python", "js", "ts"],\n'
         '  "tools": [\n'
         "    {\n"
         '      "name": "oxfmt",\n'
-        '      "version": "0.0.0",\n'
+        '      "version": "0.43.0",\n'
         '      "install": {"type": "npm", "package": "oxfmt"}\n'
         "    },\n"
         "    {\n"
         '      "name": "pytest",\n'
-        '      "version": "0.0.0",\n'
+        '      "version": "9.0.3",\n'
+        '      "description": "test runner",\n'
         '      "install": {"type": "pip", "package": "pytest"}\n'
         "    }\n"
         "  ]\n"
-        "}\n"
-    )
-    new_text = gen.render_manifest(
-        current_text=inline,
-        target_versions={"oxfmt": "0.43.0", "pytest": "9.0.3"},
+        "}\n",
     )
 
-    assert_that(new_text).contains('"language_map": ["python", "js", "ts"]')
-    assert_that(new_text).contains('"version": "0.43.0"')
-    assert_that(new_text).contains('"version": "9.0.3"')
 
-
-def test_render_manifest_allows_intervening_fields(gen: ModuleType) -> None:
-    """Manifest update tolerates metadata between name and version.
+def test_render_manifest_skips_untargeted_tools(gen: ModuleType) -> None:
+    """A src tool with no resolved version gets no version key.
 
     Args:
         gen: Imported generator module.
     """
-    manifest = (
-        "{\n"
-        '  "tools": [\n'
-        "    {\n"
-        '      "name": "oxfmt",\n'
-        '      "description": "formatter",\n'
-        '      "version": "0.0.0",\n'
-        '      "install": {"type": "npm", "package": "oxfmt"}\n'
-        "    }\n"
-        "  ]\n"
-        "}\n"
-    )
-
     new_text = gen.render_manifest(
-        current_text=manifest,
+        src_text=_SRC_MANIFEST,
         target_versions={"oxfmt": "0.43.0"},
     )
 
-    assert_that(new_text).contains('"description": "formatter"')
     assert_that(new_text).contains('"version": "0.43.0"')
+    assert_that(new_text.count('"version"')).is_equal_to(1)
+
+
+def test_render_manifest_preserves_crlf_terminators(gen: ModuleType) -> None:
+    """CRLF source text round-trips with CRLF on the inserted line.
+
+    Args:
+        gen: Imported generator module.
+    """
+    src = _SRC_MANIFEST.replace("\n", "\r\n")
+
+    new_text = gen.render_manifest(
+        src_text=src,
+        target_versions={"oxfmt": "0.43.0"},
+    )
+
+    assert_that(new_text).contains('"version": "0.43.0",\r\n')
+    assert_that("\n" in new_text.replace("\r\n", "")).is_false()
+
+
+def test_render_manifest_rejects_version_in_src(gen: ModuleType) -> None:
+    """A tool ``version`` key in the source is a split-brain error.
+
+    Args:
+        gen: Imported generator module.
+    """
+    src = (
+        "{\n"
+        '  "tools": [\n'
+        '    {"name": "oxfmt", "version": "0.0.0"}\n'
+        "  ]\n"
+        "}\n"
+    )
+    with pytest.raises(gen.GenerationError, match="oxfmt"):
+        gen.render_manifest(src_text=src, target_versions={})
 
 
 def test_render_manifest_missing_entry_raises(gen: ModuleType) -> None:
@@ -97,7 +134,7 @@ def test_render_manifest_missing_entry_raises(gen: ModuleType) -> None:
     """
     with pytest.raises(gen.GenerationError, match="oxlint"):
         gen.render_manifest(
-            current_text='{"tools": []}\n',
+            src_text='{"tools": []}\n',
             target_versions={"oxlint": "1.0.0"},
         )
 

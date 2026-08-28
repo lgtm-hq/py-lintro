@@ -82,18 +82,16 @@ dependencies = ["pytest>=9.0.3"]
 """,
     )
 
-    (tmp_path / "lintro" / "tools" / "manifest.json").write_text(
+    (tmp_path / "lintro" / "tools" / "manifest.src.json").write_text(
         json.dumps(
             {
                 "tools": [
                     {
                         "name": "oxfmt",
-                        "version": "0.0.0",
                         "install": {"type": "npm", "package": "oxfmt"},
                     },
                     {
                         "name": "pytest",
-                        "version": "0.0.0",
                         "install": {"type": "pip", "package": "pytest"},
                     },
                 ],

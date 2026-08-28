@@ -183,7 +183,9 @@ Choose the path that matches the tool's distribution mechanism.
    ```
 
 2. **`lintro/tools/manifest.json`** — add a tool entry (version must match
-   `_tool_versions.py`):
+   `_tool_versions.py`). Since #2178, hand-authored entries live in
+   `lintro/tools/manifest.src.json` (without a `version` key — the generator renders
+   `manifest.json` from it):
 
    ```json
    {

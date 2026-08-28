@@ -106,47 +106,82 @@ def build_target_versions(
     return targets
 
 
-def render_manifest(current_text: str, target_versions: dict[str, str]) -> str:
-    """Apply targeted ``version`` updates to ``manifest.json`` text.
+def render_manifest(src_text: str, target_versions: dict[str, str]) -> str:
+    """Render ``manifest.json`` text from ``manifest.src.json`` text.
 
-    Edits only the ``"version": "..."`` field in each target tool object after
-    that tool's ``"name"`` field. All other bytes of the file (whitespace,
-    key order, inline-array formatting) are preserved — round-tripping
-    through ``json.dumps`` would reflow inline arrays into a noisy diff.
+    Inserts a ``"version": "..."`` field for each target tool immediately
+    after that tool's ``"name"`` field, matching the name line's indentation.
+    All other bytes of the source (whitespace, key order, inline-array
+    formatting) are preserved — round-tripping through ``json.dumps`` would
+    reflow inline arrays into a noisy diff.
 
     Args:
-        current_text: Current manifest.json contents.
+        src_text: Hand-authored manifest.src.json contents (no tool
+            ``version`` keys).
         target_versions: Mapping of manifest entry name -> desired version.
 
     Returns:
-        New manifest.json text.
+        Rendered manifest.json text.
 
     Raises:
-        GenerationError: If the manifest is malformed, a target name has no
-            following ``version`` field, or appears more than once.
+        GenerationError: If the source is malformed, contains a tool-level
+            ``version`` key (split-brain guard), or a target name matches
+            zero or multiple ``name`` fields.
     """
     try:
-        json.loads(current_text)
+        src_data = json.loads(src_text)
     except json.JSONDecodeError as exc:
-        raise GenerationError(f"manifest.json is not valid JSON: {exc}") from exc
+        raise GenerationError(f"manifest.src.json is not valid JSON: {exc}") from exc
 
-    text = current_text
+    versioned = [
+        entry.get("name", "<unnamed>")
+        for entry in src_data.get("tools", [])
+        if isinstance(entry, dict) and "version" in entry
+    ]
+    if versioned:
+        raise GenerationError(
+            f"manifest.src.json must not contain tool 'version' keys; the "
+            f"generator owns them. Remove the version from: {versioned}.",
+        )
+
+    text = src_text
     for name, version in target_versions.items():
         pattern = re.compile(
-            rf'("name":\s*"{re.escape(name)}".*?"version":\s*")[^"]+(")',
-            re.DOTALL,
+            rf'^(?P<indent>[ \t]*)"name": "{re.escape(name)}",(?P<nl>\r?\n)',
+            re.MULTILINE,
         )
-        text, count = pattern.subn(rf"\g<1>{version}\g<2>", text)
+
+        def _insert(match: re.Match[str], version: str = version) -> str:
+            """Append a version line after the matched name line.
+
+            A callable replacement keeps the version string literal —
+            ``re.subn`` would otherwise interpret backslashes or group
+            references inside it. The matched line terminator is reused so
+            CRLF working trees (e.g. Windows checkouts under text=auto)
+            round-trip unchanged.
+
+            Args:
+                match: The matched ``"name": "..."`` line.
+                version: Resolved version for this tool.
+
+            Returns:
+                The matched text followed by the new version line.
+            """
+            indent = match.group("indent")
+            newline = match.group("nl")
+            return f'{match.group(0)}{indent}"version": "{version}",{newline}'
+
+        text, count = pattern.subn(_insert, text)
         if count == 0:
             raise GenerationError(
-                f"manifest.json has no '{name}' entry with a following version "
-                f"field. Add the entry, or restore the conventional "
-                f"name-before-version key order.",
+                f"manifest.src.json has no '{name}' entry with a matching "
+                f"name field. Add the entry, or restore the conventional "
+                f'one-per-line ``"name": "..."`` formatting.',
             )
         if count > 1:
             raise GenerationError(
-                f"manifest.json has multiple '{name}' entries; this should be "
-                f"impossible. Inspect the file.",
+                f"manifest.src.json has multiple '{name}' entries; this "
+                f"should be impossible. Inspect the file.",
             )
 
     return text

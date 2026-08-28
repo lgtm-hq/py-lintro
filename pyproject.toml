@@ -234,6 +234,14 @@ lintro = ["tools/*.json"]
 "lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
+[tool.setuptools.exclude-package-data]
+# manifest.src.json is the hand-authored source the generator renders
+# manifest.json from (#2178); only the rendered manifest ships in the wheel.
+# This filters the ``tools/*.json`` package-data glob; MANIFEST.in carries a
+# matching ``exclude`` because setuptools does not apply this filter to
+# files pulled in via the sdist manifest (include-package-data path).
+lintro = ["tools/manifest.src.json"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"
