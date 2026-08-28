@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess runs a fixed interpreter probe; shell=False
 import sys
 from pathlib import Path
 from typing import Any
