@@ -482,6 +482,10 @@ export LINTRO_DOCKER=1
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 
+# Force-clear discovery/config caches on each invoke. Accepted truthy values
+# after trim + case-insensitive match: 1, true, yes, on.
+export LINTRO_NO_CACHE=1
+
 # AI config overlays (flag > env > .lintro-config.yaml > default). See
 # docs/ai-features.md "Invocation overrides".
 export LINTRO_AI_PROVIDER=cursor
@@ -499,13 +503,16 @@ export LINTRO_AI_MAX_COST_USD=uncapped # sentinel; a positive number is a USD ca
 | `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
 | `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
 | `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
-| `LINTRO_NO_CACHE`                | Force-clear discovery/config caches on each invoke           | -         |
+| `LINTRO_NO_CACHE`                | Force-clear caches each invoke (`1`/`true`/`yes`/`on`)       | -         |
 | `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
 | `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
 | `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |
 | `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)               | -         |
 | `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                | -         |
 | `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (USD cap or `uncapped`)           | -         |
+
+`LINTRO_NO_CACHE` is truthy after trim and case-insensitive match against `1`, `true`,
+`yes`, or `on`.
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
