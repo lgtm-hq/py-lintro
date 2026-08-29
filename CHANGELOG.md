@@ -11,13 +11,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **config**: add user-level global config with project-override precedence
-  (`LINTRO_GLOBAL_CONFIG`) (#1273)
-
 ### Changed
-
-- **cli**: clear discovery/config caches only when cwd, PATH, or Lintro config inputs
-  change; set `LINTRO_NO_CACHE=1` to force a clear (#1272)
 
 ### Deprecated
 
@@ -25,10 +19,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+### Security
+
+## [0.137.0] - 2026-08-29
+
+### Added
+
+- **config**: add user-level global config with project-override precedence (#1273)
+  (631a245)
+
+### Changed
+
+- **build**: generate version artifacts at package build time (#2197) (a3dfc0a)
+- **cli**: clear caches only on config change (#1272) (dcd2d03)
+- regenerate version artifacts explicitly in checkout-time consumers (#2195) (c6728df)
+- **cli**: clear discovery/config caches only when cwd, PATH, or Lintro config inputs
+  change; set `LINTRO_NO_CACHE=1` to force a clear (#1272)
+
+### Fixed
+
 - **cli**: invalidate in-process caches when PATH or a parent `.lintro-config.yaml` /
   `.lintro-ignore` changes (#1272)
-
-### Security
 
 ## [0.136.0] - 2026-08-28
 
