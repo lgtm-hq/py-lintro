@@ -13,9 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **tests**: align per-tool test layout with `tests/unit/tools/<tool>` convention
-  (#1277)
-
 ### Deprecated
 
 ### Removed
@@ -23,6 +20,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.137.1] - 2026-08-29
+
+### Changed
+
+- update contributor guidance for build-time artifact generation (#2199) (a7f80d9)
+- **tools**: align per-tool test layout with tests/unit/tools/<tool> convention (#1277)
+  (2cd448c)
+- **tests**: align per-tool test layout with `tests/unit/tools/<tool>` convention
+  (#1277)
+
+### Fixed
+
+- **ci**: regenerate builtin index before the universal-binary smoke test (#2203)
+  (11643c5)
 
 ## [0.137.0] - 2026-08-29
 
