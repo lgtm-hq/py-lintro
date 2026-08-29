@@ -13,6 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **tests**: align per-tool test layout with `tests/unit/tools/<tool>` convention
+  (#1277)
+
 ### Deprecated
 
 ### Removed
