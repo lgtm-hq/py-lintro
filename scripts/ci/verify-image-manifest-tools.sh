@@ -181,8 +181,7 @@ if "${docker_args[@]}"; then
 else
 	status=$?
 	if [[ -n "$ADDED_TOOLS" ]]; then
-		log_error "Newly-added tool(s) must be present in the app image: ${ADDED_TOOLS}"
-		log_error "Add them to the install-tools.sh --docker --tools bridge in the root Dockerfile (see the bridge comment block)."
+		log_error "If this failure is a missing newly-added tool (${ADDED_TOOLS}), add it to the install-tools.sh --docker --tools bridge in the root Dockerfile (see the bridge comment block)."
 	fi
 	exit "${status}"
 fi

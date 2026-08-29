@@ -163,11 +163,11 @@ def _version_changed_names(
     """Return sorted names whose version was bumped *upward* between manifests.
 
     Only tools present in *both* manifests are considered. Newly-added tools
-    are handled by ``--emit added`` / ``--allow-missing`` instead. Downgrades
-    and unparseable version changes are deliberately excluded so they fail
-    closed: ``--allow-version-lag`` is meant for upward bumps only, and a
-    downgrade leaves the pinned image *newer* than the manifest — a real drift
-    the gate must still hard-fail.
+    are handled by ``--emit added`` and verified in the app image (#2192).
+    Downgrades and unparseable version changes are deliberately excluded so
+    they fail closed: ``--allow-version-lag`` is meant for upward bumps only,
+    and a downgrade leaves the pinned image *newer* than the manifest — a
+    real drift the gate must still hard-fail.
 
     Args:
         old_versions: Name → version from the base-branch manifest.

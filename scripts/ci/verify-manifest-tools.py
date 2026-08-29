@@ -144,8 +144,8 @@ def _iter_tools(
 
 # Exit code returned by `_run` when the binary itself cannot be found on PATH
 # (FileNotFoundError). This is the ONLY failure mode tolerated for an
-# allow-missing tool: the tool the PR introduces is not yet baked into the
-# digest-pinned base image, so its binary is simply absent. Any other non-zero
+# explicit --allow-missing tool (install types the app image cannot carry).
+# Newly-added tools are verified, not tolerated (#2192). Any other non-zero
 # exit means the binary IS present but misbehaving, which stays a hard failure
 # even for an allow-missing tool.
 _MISSING_BINARY_EXIT = 127
@@ -259,10 +259,11 @@ def main() -> int:
         default=None,
         help=(
             "Tool name(s) whose missing binary downgrades to a warning instead "
-            "of failing. Repeatable and/or comma-separated. Intended for the "
-            "tool a PR introduces, which is not yet in the digest-pinned base "
-            "image. An allow-missing tool that IS present must still "
-            "version-match; every other tool keeps hard-fail behavior."
+            "of failing. Repeatable and/or comma-separated. Explicit allowlist "
+            "only — install types the app image cannot carry (#2192). Newly "
+            "added tools are verified, not listed here. An allow-missing tool "
+            "that IS present must still version-match; every other tool keeps "
+            "hard-fail behavior."
         ),
     )
     parser.add_argument(
@@ -331,17 +332,14 @@ def main() -> int:
                 continue
         if code != 0:
             cmd_str = " ".join(cmd)
-            # Tolerate ONLY a genuinely-absent binary (127) for a tool the PR
-            # introduces: the digest-pinned base image cannot yet contain it,
-            # so downgrade to a loud warning instead of a hard failure. The
-            # post-merge tools-image republish + digest bump restores full
-            # coverage. Any other exit code means the binary is present but
-            # broken, which stays a failure even for an allow-missing tool.
+            # Tolerate ONLY a genuinely-absent binary (127) for an explicit
+            # allow-missing name. Newly-added tools are not placed on this
+            # list (#2192). Any other exit code means the binary is present
+            # but broken, which stays a failure even for an allow-missing tool.
             if name in allow_missing and code == _MISSING_BINARY_EXIT:
                 warnings.append(
                     f"{name}: binary not found in image ({cmd_str}); tolerated "
-                    f"because this tool is newly added by the PR and is not yet "
-                    f"in the digest-pinned base image",
+                    f"because this tool is on the explicit allow-missing list",
                 )
                 continue
             diagnostic = output.strip()
@@ -387,7 +385,7 @@ def main() -> int:
         print("::warning::Tool verification tolerated digest-lag tool(s):")
         for item in warnings:
             print(f"::warning::{item}")
-        print("Tolerated tool(s) (newly added or version-bumped by this PR):")
+        print("Tolerated tool(s) (explicit allow-missing or version-lag):")
         for item in warnings:
             print(f"  - {item}")
 
