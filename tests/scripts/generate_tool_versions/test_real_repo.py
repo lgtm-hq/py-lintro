@@ -8,6 +8,7 @@ formatter-clean, instead of ``--check``-ing committed copies.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from pathlib import Path
@@ -25,12 +26,17 @@ def test_generator_runs_clean_against_real_repo_sources(
     Args:
         generated_version_artifacts: Session dir with the rendered outputs.
     """
-    assert_that(
-        (generated_version_artifacts / "_generated_versions.py").exists(),
-    ).is_true()
-    assert_that(
-        (generated_version_artifacts / "manifest.json").exists(),
-    ).is_true()
+    generated = (generated_version_artifacts / "_generated_versions.py").read_text()
+    assert_that(generated).contains("NPM_VERSIONS")
+    assert_that(generated).contains("PYPI_VERSIONS")
+
+    manifest = json.loads(
+        (generated_version_artifacts / "manifest.json").read_text(),
+    )
+    tools = {t["name"]: t for t in manifest["tools"]}
+    assert_that(len(tools)).is_greater_than(30)
+    for entry in tools.values():
+        assert_that(entry).described_as(entry["name"]).contains_key("version")
 
 
 def test_generator_cli_is_idempotent_in_working_tree() -> None:

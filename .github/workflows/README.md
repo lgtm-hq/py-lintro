@@ -15,7 +15,7 @@ comments so Renovate can track digest updates. Policy is enforced by
 
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
-- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+- **docker-ci.yml** — Multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral
   `ci-<run_id>` tags are retained for partial reruns (#1138) and reclaimed by the weekly
