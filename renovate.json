@@ -52,9 +52,7 @@
       "groupName": "rust toolchain",
       "groupSlug": "rust-toolchain",
       "description": "Single rust-family knob: rustc. rustfmt/clippy are bundled with the toolchain and have no independent managers (#2205)",
-      "matchPackageNames": [
-        "rust-lang/rust"
-      ]
+      "matchPackageNames": ["rust-lang/rust"]
     },
     {
       "groupName": "linting tools",
