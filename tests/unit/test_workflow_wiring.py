@@ -2209,6 +2209,21 @@ def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
     sparse = checkout["with"]["sparse-checkout"]
     assert_that(sparse).contains("scripts")
     assert_that(sparse).contains("lintro/plugins")
+    # #2202: the builtin index is generated, not committed (#2180), and this
+    # job never builds the package — the checkout must carry the generator's
+    # inputs and the generate step must run between checkout and smoke test.
+    assert_that(sparse).contains("lintro/tools/definitions")
+    assert_that(sparse).contains("lintro_build")
+    generate = by_name["Generate builtin tool index"]
+    assert_that(generate["run"]).is_equal_to(
+        "python3 scripts/ci/generate-builtin-tool-index.py",
+    )
+    assert_that(names.index("Checkout scripts")).is_less_than(
+        names.index("Generate builtin tool index"),
+    )
+    assert_that(names.index("Generate builtin tool index")).is_less_than(
+        names.index("Smoke-test tool registry"),
+    )
 
     assert_that(
         job["timeout-minutes"] - smoke["timeout-minutes"],
