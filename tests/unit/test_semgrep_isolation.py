@@ -14,8 +14,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REQUIREMENTS = _REPO_ROOT / "requirements-semgrep.txt"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _UV_LOCK = _REPO_ROOT / "uv.lock"
-_MANIFEST = _REPO_ROOT / "lintro" / "tools" / "manifest.json"
-_GENERATED = _REPO_ROOT / "lintro" / "_generated_versions.py"
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts" / "utils" / "install-semgrep.sh"
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
 _COMPILE_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "compile-semgrep-lock.sh"
@@ -63,13 +61,27 @@ def test_semgrep_in_pin_matches_compiled_lockfile() -> None:
     assert_that(_COMPILE_SCRIPT.stat().st_mode & 0o111).is_not_equal_to(0)
 
 
-def test_semgrep_requirements_pin_matches_manifest() -> None:
-    """The requirements pin and the tool manifest agree on semgrep's version."""
+def test_semgrep_requirements_pin_matches_manifest(
+    generated_version_artifacts: Path,
+) -> None:
+    """The requirements pin and the rendered artifacts agree on semgrep.
+
+    Cross-checks against freshly generated outputs (#2179) rather than the
+    checkout's committed copies, so the check keeps working once the
+    artifacts stop being committed.
+
+    Args:
+        generated_version_artifacts: Session dir with the rendered outputs.
+    """
     pin = _semgrep_pin()
-    manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (generated_version_artifacts / "manifest.json").read_text(encoding="utf-8"),
+    )
     entry = next(tool for tool in manifest["tools"] if tool["name"] == "semgrep")
     assert_that(entry["version"]).is_equal_to(pin)
-    generated = _GENERATED.read_text(encoding="utf-8")
+    generated = (generated_version_artifacts / "_generated_versions.py").read_text(
+        encoding="utf-8",
+    )
     assert_that(generated).contains(f'"semgrep": "{pin}"')
 
 

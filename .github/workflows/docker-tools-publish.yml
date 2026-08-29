@@ -25,11 +25,14 @@ name: Build - Lintro Tools Image
       - 'docker/tools.Dockerfile'
       - '.github/workflows/docker-tools-publish.yml'
       - 'lintro/_tool_versions.py'
-      - 'lintro/tools/manifest.json'
+      - 'lintro/tools/manifest.src.json'
+      - 'lintro/_tool_packages.py'
+      - 'lintro_build/**'
       - 'scripts/utils/install-tools.sh'
       - 'scripts/utils/install-semgrep.sh'
       - 'scripts/utils/utils.sh'
       - 'package.json'
+      - 'pyproject.toml'
       - 'requirements-semgrep.txt'
   pull_request:
     branches: [main]
@@ -38,11 +41,14 @@ name: Build - Lintro Tools Image
       - 'docker/tools.Dockerfile'
       - '.github/workflows/docker-tools-publish.yml'
       - 'lintro/_tool_versions.py'
-      - 'lintro/tools/manifest.json'
+      - 'lintro/tools/manifest.src.json'
+      - 'lintro/_tool_packages.py'
+      - 'lintro_build/**'
       - 'scripts/utils/install-tools.sh'
       - 'scripts/utils/install-semgrep.sh'
       - 'scripts/utils/utils.sh'
       - 'package.json'
+      - 'pyproject.toml'
       - 'requirements-semgrep.txt'
   schedule:
     # Weekly rebuild (Monday 03:17 UTC) for CVE freshness in tool binaries.

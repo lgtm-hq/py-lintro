@@ -5,9 +5,11 @@ set -euo pipefail
 
 # compute-new-manifest-tools.sh
 #
-# Print the comma-separated set of tool names a PR changes in
-# lintro/tools/manifest.json, computed as a git diff against the merge-base
-# with the PR base branch. The manifest-vs-image gate
+# Print the comma-separated set of tool names a PR changes in the manifest,
+# computed as a git diff against the merge-base with the PR base branch.
+# EMIT=added diffs the hand-authored lintro/tools/manifest.src.json (#2178);
+# EMIT=version-changed diffs the rendered lintro/tools/manifest.json, which
+# carries the version fields. The manifest-vs-image gate
 # (verify-image-manifest-tools.sh) feeds this to verify-manifest-tools.py:
 #
 #   EMIT=added (default) → --allow-missing: a newly-added tool's absent binary
@@ -44,8 +46,11 @@ the merge-base with the base branch. Fails closed (empty output) on any error.
 Environment:
   BASE_REF   Optional. PR base branch (github.base_ref), e.g. main. When unset
              or empty (main / nightly runs), the emitted set is empty.
-  MANIFEST   Optional. Manifest path relative to the repo root
-             (default: lintro/tools/manifest.json).
+  MANIFEST   Optional. Manifest path relative to the repo root. Defaults to
+             lintro/tools/manifest.src.json for EMIT=added (new-tool detection
+             needs only names, and the src file is the committed truth after
+             #2178) and lintro/tools/manifest.json for EMIT=version-changed
+             (version diffs need the rendered version fields).
   EMIT       Optional. ``added`` (default) or ``version-changed``. Selects
              which name set the Python helper prints.
 
@@ -63,8 +68,17 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 : "${BASE_REF:=}"
-: "${MANIFEST:=lintro/tools/manifest.json}"
 : "${EMIT:=added}"
+
+# EMIT=added diffs names only, so it reads the committed hand-authored
+# manifest.src.json (#2178) — which still exists at merge-bases after the
+# rendered manifest stops being committed. EMIT=version-changed diffs the
+# rendered version fields, which only manifest.json carries.
+default_manifest="lintro/tools/manifest.src.json"
+if [[ "$EMIT" == "version-changed" ]]; then
+	default_manifest="lintro/tools/manifest.json"
+fi
+: "${MANIFEST:=$default_manifest}"
 
 log_info() { echo "[INFO] $*" >&2; }
 log_warn() { echo "[WARN] $*" >&2; }
@@ -117,9 +131,17 @@ trap 'rm -f "$old_manifest"' EXIT
 # The manifest may not have existed at the merge-base (brand-new manifest); an
 # empty old blob makes compute-new-manifest-tools.py treat every current tool
 # as added, which is the correct fail-open-to-tolerance for that rare case.
+# Transition window (#2178): a merge-base predating the manifest split has no
+# manifest.src.json, so the added diff falls back to the rendered manifest
+# there — names are identical in both files.
 if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
-	log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
-	rm -f "$old_manifest"
+	if [[ "$EMIT" == "added" && "$MANIFEST" == "lintro/tools/manifest.src.json" ]] &&
+		git show "${merge_base}:lintro/tools/manifest.json" >"$old_manifest" 2>/dev/null; then
+		log_info "No ${MANIFEST} at merge-base ${merge_base}; using manifest.json (pre-split base)"
+	else
+		log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
+		rm -f "$old_manifest"
+	fi
 fi
 
 names=""

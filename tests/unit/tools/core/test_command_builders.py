@@ -594,7 +594,9 @@ def test_builder_package_names_match_the_manifest() -> None:
     from lintro.enums.tool_name import normalize_tool_name
 
     manifest = json.loads(
-        (Path(__file__).parents[4] / "lintro" / "tools" / "manifest.json").read_text(),
+        (
+            Path(__file__).parents[4] / "lintro" / "tools" / "manifest.src.json"
+        ).read_text(),
     )
     builder = NodeJSBuilder()
     for entry in manifest["tools"]:
