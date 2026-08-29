@@ -80,7 +80,7 @@ def _find_pyproject(start_path: Path | None = None) -> Path | None:
     key = start_path.resolve()
     if key in _pyproject_path_cache:
         return _pyproject_path_cache[key]
-    for parent in [start_path, *start_path.parents]:
+    for parent in [key, *key.parents]:
         candidate = parent / "pyproject.toml"
         if candidate.exists():
             _pyproject_path_cache[key] = candidate

@@ -13,11 +13,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **cli**: clear discovery/config caches only when cwd, PATH, or Lintro config inputs
+  change; set `LINTRO_NO_CACHE=1` to force a clear (#1272)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **cli**: invalidate in-process caches when PATH or a parent `.lintro-config.yaml` /
+  `.lintro-ignore` changes (#1272)
 
 ### Security
 
