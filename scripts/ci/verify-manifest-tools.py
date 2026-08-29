@@ -382,7 +382,7 @@ def main() -> int:
     if warnings:
         # GitHub Actions annotation (::warning::) plus a human-readable block so
         # the tolerated tool is prominent in both the checks UI and raw logs.
-        print("::warning::Tool verification tolerated digest-lag tool(s):")
+        print("::warning::Tool verification tolerated tool(s):")
         for item in warnings:
             print(f"::warning::{item}")
         print("Tolerated tool(s) (explicit allow-missing or version-lag):")
@@ -398,7 +398,7 @@ def main() -> int:
     tiers_str = ", ".join(tiers)
     summary = f"Verified {len(tools)} tool(s) against manifest tiers: {tiers_str}"
     if warnings:
-        summary = f"{summary} ({len(warnings)} digest-lag tool(s) tolerated)"
+        summary = f"{summary} ({len(warnings)} tolerated tool(s))"
     print(summary)
     return 0
 

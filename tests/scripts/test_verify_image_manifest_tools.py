@@ -346,6 +346,57 @@ def test_no_allow_missing_without_base_ref(
     assert_that(run_lines[0]).does_not_contain("--allow-missing")
 
 
+def test_base_ref_added_tool_is_not_allow_missing(
+    tmp_path: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """BASE_REF-derived added tools are verified, not passed as --allow-missing.
+
+    Regression for #2192: a two-commit repo that adds a tool name to
+    ``manifest.src.json`` must compute ADDED_TOOLS via the production
+    BASE_REF path and still omit ``--allow-missing`` from docker argv.
+    """
+    repo = tmp_path / "repo"
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True)
+    tools_dir.joinpath("manifest.src.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff"}]}\n',
+    )
+    tools_dir.joinpath("manifest.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff", "version": "0.1.0"}]}\n',
+    )
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "checkout", "-b", "feature")
+    tools_dir.joinpath("manifest.src.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff"}, {"name": "buf"}]}\n',
+    )
+    tools_dir.joinpath("manifest.json").write_text(
+        '{"version": 2, "tools": ['
+        '{"name": "ruff", "version": "0.1.0"}, '
+        '{"name": "buf", "version": "1.0.0"}]}\n',
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "add buf")
+
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        repo,
+        bin_dir,
+        args_log,
+        extra_env={"BASE_REF": "main"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).does_not_contain("--allow-missing")
+    assert_that(result.stdout).contains("Newly-added tool(s) verified")
+    assert_that(result.stdout).contains("buf")
+
+
 def test_explicit_allow_version_lag_passes_through(
     image_repo: Path,
     docker_stub: tuple[Path, Path],
