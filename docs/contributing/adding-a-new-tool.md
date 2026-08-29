@@ -227,12 +227,13 @@ Choose the path that matches the tool's distribution mechanism.
    "<npm-package>": "^x.y.z"
    ```
 
-4. **Run `just generate`** (see Step 9) to refresh the derived artifacts in your working
-   tree (they are gitignored — nothing to commit).
-
-5. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "npm"`
+4. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "npm"`
    and `install.package` set, and **no `version` key**; the generator injects the
    version from `package.json`.
+
+5. **Run `just generate`** (see Step 9) to refresh the derived artifacts in your working
+   tree (they are gitignored — nothing to commit). The generator errors when a seeded
+   package has no manifest entry, so the src entry must exist first.
 
 ### Path C — Bundled Python (e.g. ruff, bandit, yamllint)
 
@@ -268,11 +269,12 @@ Choose the path that matches the tool's distribution mechanism.
    `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.
 
-3. **Run `just generate`** (see Step 9).
-
-4. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
+3. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
    and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
    injects the version from `pyproject.toml`.
+
+4. **Run `just generate`** (see Step 9) — the generator errors when a seeded package has
+   no manifest entry, so the src entry must exist first.
 
 ---
 
