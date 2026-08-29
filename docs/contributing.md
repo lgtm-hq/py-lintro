@@ -185,10 +185,24 @@ consistent UX and maintainable implementation.
   For OS/arch tarballs, encapsulate download/extract in a helper.
 - Verify checksums when possible.
 
+### Generated artifacts
+
+Three files are derived and **not committed** (#2176), each from its own inputs:
+`lintro/_generated_versions.py` (from the per-install-type version sources),
+`lintro/tools/manifest.json` (rendered from `manifest.src.json` with resolved versions
+injected), and `lintro/plugins/_builtin_index.py` (from the tool definition modules
+under `lintro/tools/definitions/`). They are generated at package build time by the
+in-tree PEP 517 backend (`lintro_build/backend.py`), so every wheel, sdist, editable
+install, Docker image, and frozen binary carries current copies. `just setup` (via
+`uv pip install -e .`) generates them into your gitignored working tree; after editing a
+version source locally, run `just generate` to refresh them.
+
 ### Tool Version Sources (Including Companion Packages)
 
-- `lintro/tools/manifest.json` is the canonical source of external tool versions used by
-  Docker/CI. Add new tool binaries here.
+- `lintro/_tool_versions.py` (binary tools), `package.json` (npm tools), and
+  `pyproject.toml` (bundled Python tools) are the canonical version sources. New tool
+  binaries get a hand-authored entry in `lintro/tools/manifest.src.json` (no `version`
+  key); the generator renders `lintro/tools/manifest.json` from it at build time.
 - npm-managed tool versions come from `package.json` via `_NPM_PACKAGE_TO_TOOL` in
   `lintro/_tool_versions.py`.
 - If a tool requires companion npm packages (for example, a checker plugin that ships
