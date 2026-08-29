@@ -490,46 +490,38 @@ def test_renovate_regex_manager_current_value() -> None:
     assert_that(content).contains("currentValue")
 
 
-def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
-    """Renovate runs the generator after npm, pypi, and regex pin bumps."""
+def test_renovate_has_no_version_artifact_regen_wiring() -> None:
+    """Renovate never runs the version-artifact generator (#2180).
+
+    The derived artifacts are generated at package build time; a bump PR is
+    complete on its own. Only the semgrep lock recompilation remains as a
+    postUpgradeTask. Regression guard: the Mend-hosted app never executed
+    custom commands anyway, so any reintroduced regen wiring would be a
+    silent no-op that masks drift.
+    """
     config_path = Path("renovate.json")
-    config = json.loads(config_path.read_text())
-    regen_rules = [
+    content = config_path.read_text()
+    assert_that(content).does_not_contain("generate-tool-versions")
+    assert_that(content).does_not_contain("generate-builtin-tool-index")
+
+    config = json.loads(content)
+    assert_that(config.get("allowedCommands")).is_equal_to(
+        ["scripts/ci/compile-semgrep-lock.sh"],
+    )
+
+    task_rules = [
         rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule
     ]
-    assert_that(regen_rules).is_not_empty()
+    assert_that(task_rules).is_not_empty()
+    for rule in task_rules:
+        tasks = rule["postUpgradeTasks"]
+        assert_that(tasks.get("commands")).is_equal_to(
+            ["scripts/ci/compile-semgrep-lock.sh"],
+        )
+        assert_that(tasks.get("fileFilters")).is_equal_to(
+            ["requirements-semgrep.txt"],
+        )
 
-    managers: set[str] = set()
-    file_names: set[str] = set()
-    commands: set[str] = set()
-    for rule in regen_rules:
-        managers.update(rule.get("matchManagers", []))
-        file_names.update(rule.get("matchFileNames", []))
-        commands.update(rule["postUpgradeTasks"].get("commands", []))
-
-    assert_that(managers).contains(
-        "custom.regex",
-        "npm",
-        "pep621",
-        "pip_requirements",
-        "uv",
-    )
-    assert_that(file_names).contains(
-        "package.json",
-        "pyproject.toml",
-        "lintro/_tool_versions.py",
-        "requirements-semgrep.in",
-    )
-    file_filters: set[str] = set()
-    for rule in regen_rules:
-        file_filters.update(rule["postUpgradeTasks"].get("fileFilters", []))
-    assert_that(file_filters).contains("requirements-semgrep.txt")
-    assert_that(commands).contains("python3 scripts/ci/generate-tool-versions.py")
-    assert_that(commands).contains("scripts/ci/compile-semgrep-lock.sh")
-    assert_that(config.get("allowedCommands")).contains(
-        "python3 scripts/ci/generate-tool-versions.py",
-        "scripts/ci/compile-semgrep-lock.sh",
-    )
     disabled = [
         rule
         for rule in config.get("packageRules", [])

@@ -119,8 +119,6 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
   allow-list, not just the Python lock, or the pre-merge gate would be looser than the
   release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
   always reports and is safe to require
-- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
-  `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
   **test-built-package.yml**, **build-binary.yml**
 

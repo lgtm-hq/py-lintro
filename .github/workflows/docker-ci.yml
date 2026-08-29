@@ -5,7 +5,6 @@ name: CI - Docker
 
 # Docker build once → dogfooding quality (reusable-quality-lint + CI image) →
 # integration tests → security audit → publish (main).
-# manifest-sync runs in parallel (no Docker).
 #
 # Path filtering: 🐳 Build Docker Images, 🔐 Security Audit, and
 # 🧪 Docker Integration Tests are required checks (org ruleset
@@ -219,57 +218,6 @@ jobs:
           RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
         run: scripts/ci/resolve-pipeline-relevance.sh
 
-  manifest-sync:
-    name: 📋 Manifest Sync
-    needs: [changes]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    timeout-minutes: 5
-    # Not a required check: safe to skip the whole job on docs-only PRs.
-    # !cancelled() keeps it running (fail-open) if the changes job failed:
-    # the pipeline output is then empty, which is != 'false'.
-    if: >-
-      !cancelled() &&
-      needs.changes.outputs.pipeline != 'false' &&
-      (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.draft == false
-      )
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            astral.sh:443
-            releases.astral.sh:443
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Environment setup
-        uses: ./.github/actions/setup-env
-        with:
-          python-version: '3.14'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
-      - name: Verify generated tool versions
-        run: python3 scripts/ci/generate-tool-versions.py --check
-      # #2006: the index is what frozen binaries discover builtins from, so
-      # drift here ships a binary with an incomplete tool registry.
-      - name: Verify generated builtin tool index
-        run: python3 scripts/ci/generate-builtin-tool-index.py --check
-
   docker-build:
     name: 🐳 Build Docker Images
     # Required check (org ruleset checks-py-lintro): the job itself always
@@ -468,9 +416,8 @@ jobs:
         run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(Docker build)"
 
   dogfooding-lint:
-    needs: [changes, docker-build, manifest-sync]
-    # Run when docker-build succeeds even if manifest-sync was skipped (draft
-    # PRs). Skipped entirely on docs-only PRs (docker-build early-exits green
+    needs: [changes, docker-build]
+    # Skipped entirely on docs-only PRs (docker-build early-exits green
     # without pushing a CI image, so there is nothing to lint with).
     # lint-scope != 'changed' (#1361): PRs whose diff has no global lint
     # impact hand off to dogfooding-lint-changed below; merge_group, pushes,
@@ -482,11 +429,7 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.pipeline != 'false' &&
       needs.changes.outputs.lint-scope != 'changed' &&
-      needs.docker-build.result == 'success' &&
-      (
-        needs.manifest-sync.result == 'success' ||
-        needs.manifest-sync.result == 'skipped'
-      )
+      needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
     permissions:
@@ -519,17 +462,13 @@ jobs:
   # lintro-code-quality gate below mirrors whichever ran.
   dogfooding-lint-changed:
     name: 🛠️ Dogfooding Lint (Changed Files)
-    needs: [changes, docker-build, manifest-sync]
+    needs: [changes, docker-build]
     if: >-
       always() &&
       !cancelled() &&
       needs.changes.outputs.pipeline != 'false' &&
       needs.changes.outputs.lint-scope == 'changed' &&
-      needs.docker-build.result == 'success' &&
-      (
-        needs.manifest-sync.result == 'success' ||
-        needs.manifest-sync.result == 'skipped'
-      )
+      needs.docker-build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -735,16 +674,12 @@ jobs:
   # changed-files variant runs when dogfooding-lint is scope-skipped, so this
   # job keys off dogfooding-lint.result == 'failure' and stays skipped there.
   dogfooding_lint_retry:
-    needs: [docker-build, manifest-sync, dogfooding-lint]
+    needs: [docker-build, dogfooding-lint]
     if: >-
       always() &&
       !cancelled() &&
       needs.dogfooding-lint.result == 'failure' &&
-      needs.docker-build.result == 'success' &&
-      (
-        needs.manifest-sync.result == 'success' ||
-        needs.manifest-sync.result == 'skipped'
-      )
+      needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
     permissions:
@@ -777,7 +712,6 @@ jobs:
     needs:
       - changes
       - docker-build
-      - manifest-sync
       - dogfooding-lint
       - dogfooding-lint-changed
       - dogfooding_lint_retry
@@ -816,7 +750,6 @@ jobs:
         id: gate
         env:
           DOCKER_BUILD_RESULT: ${{ needs.docker-build.result }}
-          MANIFEST_SYNC_RESULT: ${{ needs.manifest-sync.result }}
           # Effective dogfooding result (#1361 scope + #1313 retry): docs-only
           # PRs report success without a lint run; lint-scope 'changed' selects
           # the changed-files job; anything else selects the full run. The

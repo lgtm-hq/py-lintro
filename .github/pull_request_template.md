@@ -76,8 +76,9 @@ See the full guide:
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, issue class, parser function
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` added
 - [ ] Version registered in correct source (`_tool_versions.py` / `_tool_packages.py` +
-      `package.json` / `pyproject.toml`) and `manifest.json` matches
-- [ ] `scripts/ci/generate-tool-versions.py --check` passes
+      `package.json` / `pyproject.toml`) and the tool entry added to `manifest.src.json`
+      (no `version` key — the generator renders it)
+- [ ] `just generate` runs cleanly (regenerates the derived artifacts)
 
 ### Dogfooding (required — gate [#1510](https://github.com/lgtm-hq/py-lintro/issues/1510))
 

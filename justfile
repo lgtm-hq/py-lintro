@@ -18,6 +18,11 @@ alias fmt := format
 default:
     @just --list
 
+# Regenerate the derived version artifacts from their sources (#2180)
+generate:
+    python3 scripts/ci/generate-tool-versions.py
+    python3 scripts/ci/generate-builtin-tool-index.py
+
 # Set up development environment with uv
 setup:
     @echo "Setting up development environment with uv..."

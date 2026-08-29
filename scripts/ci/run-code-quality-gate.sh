@@ -3,7 +3,7 @@
 # Evaluate docker-ci upstream jobs and assert the required code-quality gate.
 #
 # Required environment variables:
-#   DOCKER_BUILD_RESULT, MANIFEST_SYNC_RESULT, PRIMARY_LINT_RESULT
+#   DOCKER_BUILD_RESULT, PRIMARY_LINT_RESULT
 #
 # Optional environment variables:
 #   RETRY_LINT_RESULT
@@ -19,7 +19,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 Evaluate docker-ci upstream jobs and assert the required code-quality gate.
 
 Usage:
-  DOCKER_BUILD_RESULT=success MANIFEST_SYNC_RESULT=success \
+  DOCKER_BUILD_RESULT=success \
     PRIMARY_LINT_RESULT=success scripts/ci/run-code-quality-gate.sh
 
 Writes result, passed, status, exit-code, and infra-flake to GITHUB_OUTPUT
@@ -64,7 +64,6 @@ ASSERT_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/code-quality-gate-assert.XXXXXX")"
 trap 'rm -f "${EVALUATE_OUTPUT}" "${ASSERT_OUTPUT}"' EXIT
 
 : "${DOCKER_BUILD_RESULT:?}"
-: "${MANIFEST_SYNC_RESULT:?}"
 : "${PRIMARY_LINT_RESULT:?}"
 
 GITHUB_OUTPUT="${EVALUATE_OUTPUT}" bash "${SCRIPT_DIR}/evaluate-code-quality-gate.sh"
@@ -73,8 +72,8 @@ upstream_result="$(grep -E '^upstream-result=' "${EVALUATE_OUTPUT}" | tail -1 | 
 status_output="$(grep -E '^status-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 exit_code_output="$(grep -E '^exit-code-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 upstream_conclusion="$(grep -E '^upstream-conclusion=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
-# evaluate-code-quality-gate.sh also writes verdict-source (docker-build,
-# manifest-sync, or lint). Nothing consumes it yet: it exists so lint-only
+# evaluate-code-quality-gate.sh also writes verdict-source (docker-build
+# or lint). Nothing consumes it yet: it exists so lint-only
 # evidence can be scoped to a lint verdict once the authoritative run publishes
 # a structured report (#1653, lgtm-ci#746) — an upstream build failure also
 # surfaces as failed/1 here, so that scoping is mandatory before any such
