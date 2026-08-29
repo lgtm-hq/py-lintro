@@ -342,12 +342,16 @@ def _with_normalized_tool_keys(data: dict[str, Any]) -> dict[str, Any]:
         return data
     normalized = dict(data)
     if isinstance(tools, dict):
+        # Keep non-string keys intact so ``_parse_tools_config`` still
+        # fail-closes instead of silently stringifying YAML floats.
         normalized["tools"] = {
-            str(name).lower(): value for name, value in tools.items()
+            (name.lower() if isinstance(name, str) else name): value
+            for name, value in tools.items()
         }
     if isinstance(defaults, dict):
         normalized["defaults"] = {
-            str(name).lower(): value for name, value in defaults.items()
+            (name.lower() if isinstance(name, str) else name): value
+            for name, value in defaults.items()
         }
     return normalized
 
@@ -1326,8 +1330,10 @@ def load_config(
 
         # Deep-merge: global config is the base, project config overrides per key.
         data = _deep_merge(base=global_data, override=project_data)
-        global_tools = global_data.get("tools") or {}
-        project_tools = project_data.get("tools") or {}
+        # Do not coerce missing/null ``tools`` to ``{}`` — a YAML-null
+        # ``tools:`` must still fail closed in ``build_config_from_dict``.
+        global_tools = global_data.get("tools")
+        project_tools = project_data.get("tools")
         if isinstance(global_tools, dict) and isinstance(project_tools, dict):
             data["tools"] = _merge_tools_section(
                 global_tools=global_tools,
