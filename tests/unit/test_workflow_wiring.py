@@ -3247,3 +3247,35 @@ def test_docker_allowlist_file_keeps_the_baseline_and_signing_hosts() -> None:
         "token.actions.githubusercontent.com:443",
     ):
         assert_that(endpoints).contains(endpoint)
+
+
+_DOGFOOD_TOOL_OPTIONS_RE = re.compile(
+    r"pydoclint:timeout=\d+,[^\s]+osv_scanner:check_suppressions=[^\s,]+",
+)
+_EXPECTED_DOGFOOD_TOOL_OPTIONS = (
+    "pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,"
+    "mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,"
+    "osv_scanner:check_suppressions=false"
+)
+
+
+def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> None:
+    """Every dogfood options string must match and include ``gitleaks:timeout=120``.
+
+    ``dogfooding-lint`` (docker-ci) and ``dogfood-full`` (dogfood-nightly) share
+    one ``lintro-tool-options`` / ``TOOL_OPTIONS`` value. A drift lets one job
+    keep the 60s gitleaks default (#2206) while the others get the 120s floor.
+    """
+    texts = [
+        (_REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        for name in ("docker-ci.yml", "dogfood-nightly.yml")
+    ]
+    found = [
+        match.group(0)
+        for text in texts
+        for match in _DOGFOOD_TOOL_OPTIONS_RE.finditer(text)
+    ]
+
+    assert_that(found).is_length(6)
+    assert_that(set(found)).is_equal_to({_EXPECTED_DOGFOOD_TOOL_OPTIONS})
+    assert_that(_EXPECTED_DOGFOOD_TOOL_OPTIONS).contains("gitleaks:timeout=120")
