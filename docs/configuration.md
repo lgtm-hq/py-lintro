@@ -132,12 +132,11 @@ _mapping_ that never mentions `enabled` is only a partial statement, so a global
 Place a `~/.lintro-config.yaml` in your home directory to share settings across every
 project. It uses the exact same schema as a project `.lintro-config.yaml`, including
 `plugins:` and `licenses:`. Those sections are loaded from the resolved global file as
-the base tier and overlaid by a non-global project file; the home dotfile and the
-active global file are never treated as a project config, even when
-`LINTRO_GLOBAL_CONFIG=off`. Project config always wins on a per-key basis, so the
-global file is best for personal defaults (for example an `ai:` block, a preferred
-`enforce.line_length`, or a `plugins.trusted` allowlist) that individual projects can
-still override.
+the base tier and overlaid by a non-global project file; the home dotfile and the active
+global file are never treated as a project config, even when `LINTRO_GLOBAL_CONFIG=off`.
+Project config always wins on a per-key basis, so the global file is best for personal
+defaults (for example an `ai:` block, a preferred `enforce.line_length`, or a
+`plugins.trusted` allowlist) that individual projects can still override.
 
 **Resolution order** (first existing file wins):
 

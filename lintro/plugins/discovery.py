@@ -243,11 +243,9 @@ def _load_plugins_config() -> dict[str, Any]:
 
     Returns:
         The raw ``plugins`` mapping, or an empty dict when no config source is
-        present (or a present source has no ``plugins`` section).
-
-    Raises:
-        _PluginConfigError: When a config source exists but cannot be read or
-            parsed. Callers must fail closed and deny external plugins.
+        present (or a present source has no ``plugins`` section). Unreadable
+        config sources raise ``_PluginConfigError`` from helpers so callers
+        can fail closed and deny external plugins.
     """
     # Imported lazily to avoid pulling config parsing into module import.
     from lintro.config.config_loader import (
