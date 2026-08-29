@@ -495,17 +495,28 @@ jobs:
             uploads.github.com:443
 
       # Needed for scripts/build/create_universal.sh and the binary smoke
-      # test (scripts/ci/smoke-test-binary.py reads the generated builtin
-      # index under lintro/plugins). The codeload /
-      # objects.githubusercontent.com endpoints above are what actions/checkout
-      # fetches through, and match the other sparse-checkout jobs here.
+      # test. smoke-test-binary.py reads lintro/plugins/_builtin_index.py,
+      # which is no longer committed (#2180), so the checkout carries the
+      # builtin-index generator's inputs instead: lintro/tools/definitions
+      # (the modules it scans) and the lintro_build package (the
+      # implementation). The codeload / objects.githubusercontent.com
+      # endpoints above are what actions/checkout fetches through, and match
+      # the other sparse-checkout jobs here.
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             scripts
             lintro/plugins
+            lintro/tools/definitions
+            lintro_build
           persist-credentials: false
+
+      # #2202: regenerate the builtin index the smoke test reads; the file
+      # stopped being committed in #2180 and this job never builds the
+      # package, so nothing else generates it. Stdlib-only and offline.
+      - name: Generate builtin tool index
+        run: python3 scripts/ci/generate-builtin-tool-index.py
 
       - name: Download arm64 binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
