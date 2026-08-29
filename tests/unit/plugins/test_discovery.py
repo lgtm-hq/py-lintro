@@ -359,6 +359,46 @@ def test_malformed_pyproject_config_fails_closed(
     assert_that(ep.load.called).is_false()
 
 
+def test_discover_external_plugins_respects_global_config_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session discovery must not opt in via the real home ``plugins:`` section.
+
+    Uses the real ``_load_plugins_config`` path (not a stub) with
+    ``LINTRO_GLOBAL_CONFIG=off`` so a nested project cwd cannot inherit a home
+    ``plugins.trusted`` allowlist during :func:`discover_external_plugins`.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted:\n    - home-plugin\n",
+    )
+    project = home / "project"
+    project.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("LINTRO_GLOBAL_CONFIG", "off")
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+
+    mock_ep = MagicMock()
+    mock_ep.name = "home-plugin"
+
+    with patch(
+        "importlib.metadata.entry_points",
+        return_value=[mock_ep],
+    ) as mock_entry_points:
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    assert_that(mock_entry_points.called).is_false()
+    assert_that(mock_ep.load.called).is_false()
+
+
 # =============================================================================
 # Tests for discover_all_tools
 # =============================================================================

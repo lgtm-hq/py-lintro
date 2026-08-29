@@ -100,8 +100,38 @@ def _canonical_name(name: str) -> str:
     return name.strip().lower().replace("_", "-")
 
 
+def _load_named_yaml_section(
+    path: Path,
+    section_name: str,
+) -> dict[str, Any] | None:
+    """Load a named top-level mapping from a YAML config file.
+
+    Args:
+        path: YAML file to read.
+        section_name: Top-level key to return.
+
+    Returns:
+        dict[str, Any] | None: The named section, or None if PyYAML is
+            missing, the file has no mapping, or the key is absent.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return None
+
+    data = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(data, dict):
+        return None
+    section = data.get(section_name)
+    return section if isinstance(section, dict) else None
+
+
 def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
-    """Load the ``licenses`` section from a ``.lintro-config.yaml`` file.
+    """Load the ``licenses`` section from a project ``.lintro-config.yaml``.
+
+    The home dotfile and the active global file are never treated as a
+    project config; :func:`load_licenses_config` loads those as the base
+    tier separately.
 
     Args:
         start_dir: Directory to begin the upward search from.
@@ -109,18 +139,16 @@ def _load_yaml_section(start_dir: Path) -> dict[str, Any] | None:
     Returns:
         dict[str, Any] | None: The raw licenses section, or None if absent.
     """
-    try:
-        import yaml
-    except ImportError:
-        return None
-
     config_path = find_file_upward(start_dir.resolve(), _YAML_FILENAMES)
     if config_path is None:
         return None
 
-    data = yaml.safe_load(config_path.read_text()) or {}
-    section = data.get("licenses")
-    return section if isinstance(section, dict) else None
+    from lintro.config.config_loader import _exclude_global_file_when_tier_disabled
+
+    if _exclude_global_file_when_tier_disabled(candidate=config_path):
+        return None
+
+    return _load_named_yaml_section(path=config_path, section_name="licenses")
 
 
 def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
@@ -144,9 +172,12 @@ def _load_pyproject_section(start_dir: Path) -> dict[str, Any] | None:
 def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
     """Load the license policy configuration.
 
-    Resolution order (first hit wins): ``.lintro-config.yaml`` ``licenses:``
-    section, then ``[tool.lintro.licenses]`` in ``pyproject.toml``. Falls back
-    to permissive defaults when neither is present.
+    Resolution matches :func:`lintro.config.config_loader.load_config`: the
+    user-level global file is the base tier, then a non-global project
+    ``.lintro-config.yaml`` ``licenses:`` section overlays it. When no
+    project YAML exists, ``[tool.lintro.licenses]`` in ``pyproject.toml``
+    is the project overlay. Falls back to permissive defaults when neither
+    tier supplies a section.
 
     Args:
         start_dir: Directory to search from. Defaults to the current directory.
@@ -154,8 +185,24 @@ def load_licenses_config(start_dir: Path | None = None) -> LicensesConfig:
     Returns:
         LicensesConfig: The resolved configuration.
     """
+    from lintro.config.config_loader import (
+        _deep_merge,
+        _find_global_config_file,
+    )
+
     base = Path(start_dir) if start_dir else Path.cwd()
-    section = _load_yaml_section(base) or _load_pyproject_section(base)
-    if not section:
+    global_section: dict[str, Any] = {}
+    global_file = _find_global_config_file()
+    if global_file is not None:
+        loaded = _load_named_yaml_section(
+            path=global_file,
+            section_name="licenses",
+        )
+        if loaded is not None:
+            global_section = loaded
+
+    project_section = _load_yaml_section(base) or _load_pyproject_section(base) or {}
+    if not global_section and not project_section:
         return LicensesConfig()
-    return LicensesConfig.model_validate(section)
+    merged = _deep_merge(base=global_section, override=project_section)
+    return LicensesConfig.model_validate(merged)

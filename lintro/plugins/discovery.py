@@ -158,13 +158,37 @@ class _PluginConfigError(Exception):
     """
 
 
-def _load_plugins_config() -> dict[str, Any]:
-    """Load the ``plugins`` configuration section for external plugin trust.
+def _plugins_mapping_from_yaml(path: Path) -> dict[str, Any]:
+    """Read the ``plugins`` mapping from a YAML config file.
 
-    Reads the ``plugins`` mapping from ``.lintro-config.yaml`` if present,
-    otherwise falls back to ``[tool.lintro.plugins]`` in ``pyproject.toml``.
-    This is intentionally lightweight and independent of the full config
-    loader so plugin discovery never triggers heavier config parsing.
+    Args:
+        path: Config file to read.
+
+    Returns:
+        dict[str, Any]: The ``plugins`` mapping, or empty if the file has no
+            ``plugins`` section.
+
+    Raises:
+        _PluginConfigError: When the file cannot be read or parsed. Callers
+            must fail closed and deny external plugins.
+    """
+    # Imported lazily to avoid pulling config parsing into module import.
+    from lintro.config.config_loader import _load_yaml_file
+
+    try:
+        data = _load_yaml_file(path)
+    except Exception as e:  # noqa: BLE001 - any read/parse failure fails closed
+        raise _PluginConfigError(
+            f"Could not read plugins config {path}: {e}",
+        ) from e
+    if not isinstance(data, dict):
+        return {}
+    plugins = data.get("plugins")
+    return plugins if isinstance(plugins, dict) else {}
+
+
+def _plugins_mapping_from_pyproject() -> dict[str, Any]:
+    """Read ``[tool.lintro.plugins]`` from an upward-searched pyproject.toml.
 
     The pyproject fallback is read directly (rather than via the shared
     ``_load_pyproject_fallback``) so that a parse error surfaces here as a
@@ -173,31 +197,13 @@ def _load_plugins_config() -> dict[str, Any]:
     allowlist configured" and load every discovered plugin.
 
     Returns:
-        The raw ``plugins`` mapping, or an empty dict when no config source is
-        present (or a present source has no ``plugins`` section).
+        dict[str, Any]: The ``plugins`` mapping, or empty when no pyproject
+            file exists or it has no ``[tool.lintro.plugins]`` table.
 
     Raises:
-        _PluginConfigError: When a config source exists but cannot be read or
-            parsed. Callers must fail closed and deny external plugins.
+        _PluginConfigError: When a pyproject.toml exists but cannot be read
+            or parsed.
     """
-    # Imported lazily to avoid pulling config parsing into module import.
-    from lintro.config.config_loader import _find_config_file, _load_yaml_file
-
-    found_path = _find_config_file()
-    if found_path is not None:
-        try:
-            data = _load_yaml_file(found_path)
-        except Exception as e:  # noqa: BLE001 - any read/parse failure fails closed
-            raise _PluginConfigError(
-                f"Could not read plugins config {found_path}: {e}",
-            ) from e
-        if not isinstance(data, dict):
-            return {}
-        plugins = data.get("plugins")
-        return plugins if isinstance(plugins, dict) else {}
-
-    # pyproject.toml fallback: search upward and read directly so a TOML parse
-    # or read error fails closed instead of being swallowed into ``{}``.
     import tomllib
 
     current = Path.cwd().resolve()
@@ -223,6 +229,50 @@ def _load_plugins_config() -> dict[str, Any]:
         current = parent
 
     return {}
+
+
+def _load_plugins_config() -> dict[str, Any]:
+    """Load the ``plugins`` configuration section for external plugin trust.
+
+    Resolution matches :func:`lintro.config.config_loader.load_config`: the
+    user-level global file is the base tier, then a non-global project
+    ``.lintro-config.yaml`` overlays it. When no project YAML exists, an
+    upward-searched ``[tool.lintro.plugins]`` in ``pyproject.toml`` is the
+    project overlay. This stays independent of the full config loader so
+    plugin discovery never triggers heavier config parsing.
+
+    Returns:
+        The raw ``plugins`` mapping, or an empty dict when no config source is
+        present (or a present source has no ``plugins`` section). Unreadable
+        config sources raise ``_PluginConfigError`` from helpers so callers
+        can fail closed and deny external plugins.
+    """
+    # Imported lazily to avoid pulling config parsing into module import.
+    from lintro.config.config_loader import (
+        _deep_merge,
+        _exclude_global_file_when_tier_disabled,
+        _find_config_file,
+        _find_global_config_file,
+    )
+
+    plugins: dict[str, Any] = {}
+    global_file = _find_global_config_file()
+    if global_file is not None:
+        plugins = _plugins_mapping_from_yaml(path=global_file)
+
+    found_path = _find_config_file()
+    if found_path is not None and _exclude_global_file_when_tier_disabled(
+        candidate=found_path,
+    ):
+        found_path = None
+    if found_path is not None:
+        project_plugins = _plugins_mapping_from_yaml(path=found_path)
+        return _deep_merge(base=plugins, override=project_plugins)
+
+    pyproject_plugins = _plugins_mapping_from_pyproject()
+    if pyproject_plugins:
+        return _deep_merge(base=plugins, override=pyproject_plugins)
+    return plugins
 
 
 def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
@@ -265,6 +315,13 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
         return False, frozenset()
 
     if plugins_cfg:
+        enabled_flag = plugins_cfg.get("enabled")
+        if enabled_flag is False:
+            # Project ``plugins.enabled: false`` must disable external plugins
+            # even when the global tier supplies a ``trusted`` allowlist. Deep
+            # merge keeps inherited keys, but an explicit disable wins.
+            return False, None
+
         raw_trusted = plugins_cfg.get("trusted")
         if isinstance(raw_trusted, str):
             raw_trusted = [raw_trusted]
@@ -273,7 +330,6 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
             trusted = frozenset(str(name) for name in raw_trusted)
             config_enabled = True
 
-        enabled_flag = plugins_cfg.get("enabled")
         if isinstance(enabled_flag, bool):
             config_enabled = config_enabled or enabled_flag
 

@@ -104,6 +104,96 @@ For a tool like Prettier:
 
 This ensures consistent behavior while respecting tool-specific configurations.
 
+### Configuration Source Precedence
+
+Independently of the tier model above (which describes _how_ each section is applied),
+Lintro resolves _where_ config values come from in a fixed order. Later sources override
+earlier ones **key-by-key** via a deep merge, including nested `ai:` and `tools:`
+sections:
+
+1. **Built-in defaults** — the empty baseline configuration.
+2. **User-level global config** — `~/.lintro-config.yaml` (see below). Supplies base
+   values shared across all your projects.
+3. **Project config** — the first of: an upward-searched `.lintro-config.yaml` variant,
+   or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
+
+A value set in the global config survives only where the project config does not
+override that exact key path. An auto-discovered global file that is absent or empty is
+never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
+(see [below](#user-level-global-config)).
+
+In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
+about the tool, so a project scalar replaces the global mapping wholesale. A project
+_mapping_ that never mentions `enabled` is only a partial statement, so a global
+`ruff: false` still keeps the tool disabled while the project's other keys apply.
+
+### User-Level Global Config
+
+Place a `~/.lintro-config.yaml` in your home directory to share settings across every
+project. It uses the exact same schema as a project `.lintro-config.yaml`, including
+`plugins:` and `licenses:`. Those sections are loaded from the resolved global file as
+the base tier and overlaid by a non-global project file; the home dotfile and the active
+global file are never treated as a project config, even when `LINTRO_GLOBAL_CONFIG=off`.
+Project config always wins on a per-key basis, so the global file is best for personal
+defaults (for example an `ai:` block, a preferred `enforce.line_length`, or a
+`plugins.trusted` allowlist) that individual projects can still override.
+
+**Resolution order** (first existing file wins):
+
+1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `false`, `no`,
+   `none`, or empty) to disable the global tier entirely. Useful for CI and hermetic
+   test environments that must not inherit a developer's personal defaults. An explicit
+   path that does not exist is an error rather than a silent fallback, so a typo cannot
+   leave you running without the defaults you asked for; use `off` to opt out
+   deliberately.
+2. `~/.lintro-config.yaml` — the primary, authoritative location.
+3. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
+   defaults to `~/.config` when unset.
+
+The home-directory dotfile deliberately takes precedence over the XDG fallback when both
+exist, so `~/.lintro-config.yaml` is always authoritative.
+
+If your project lives inside your home directory, the upward search for a project
+`.lintro-config.yaml` can reach `~/.lintro-config.yaml` itself. That file is counted as
+the **global tier only** — never as both tiers — so it is reported once and its keys are
+still listed as global contributions rather than looking like a project override of
+itself. This holds even when the global tier is disabled: with
+`LINTRO_GLOBAL_CONFIG=off` the home dotfile is ignored outright rather than demoted to a
+project config, which is what makes the switch genuinely hermetic. The same switch
+applies to the plugin-trust and licenses loaders: they search upward on their own, so
+without it a cwd under `$HOME` would still pick up `plugins:` / `licenses:` from the
+home file.
+
+> [!IMPORTANT] **Upgrading with an existing `~/.lintro-config.yaml`.** Before user-level
+> global config existed, that file only took effect when the upward search happened to
+> reach it — that is, for projects under your home directory with no config of their
+> own. It is now a base layer for **every** project, so keys your project config omits
+> (an `ai:` block, `enforce.line_length`, tool enables) start applying where they
+> previously did not. If you were using it as a no-project-config fallback and want the
+> old behavior, move it into the projects that need it, or set
+> `LINTRO_GLOBAL_CONFIG=off`.
+
+A global file that only sets `ai:` or `enforce:` does not change which tools a default
+run selects — language scoping for an otherwise unconfigured project still applies. A
+global `tools:` section or `execution.enabled_tools` is a deliberate tool selection, so
+it opts the run out of language scoping just as a project config does.
+
+Run `lintro config` to see a **Global Config** section reporting whether a global file
+was found, its resolved path, and which effective values it contributed (the keys your
+project config did not override). The same details appear under `global_config` in
+`lintro config --json`. Only keys that survive section parsing are listed there — an
+unrecognized key such as `output.typo`, or a section Lintro does not read from config at
+all, is never reported as a contribution it does not actually make.
+
+```yaml
+# ~/.lintro-config.yaml — applies to all your projects unless overridden
+enforce:
+  line_length: 100
+ai:
+  enabled: true
+  provider: anthropic
+```
+
 ## Lintro Configuration
 
 ### Configuration File: `.lintro-config.yaml`

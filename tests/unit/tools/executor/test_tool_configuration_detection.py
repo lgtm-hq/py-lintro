@@ -601,3 +601,103 @@ def test_recommended_allowlist_excludes_typos(
     assert_that(result.to_run).does_not_contain("typos")
     skipped_names = [item.name for item in result.skipped]
     assert_that(skipped_names).contains("typos")
+
+
+def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point ``Path.home`` at a temp dir and re-enable the global config tier.
+
+    Args:
+        tmp_path: Temporary directory to host the fake home.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        Path: The isolated fake home directory.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.delenv("LINTRO_GLOBAL_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+def test_non_selecting_global_config_keeps_detection_scoping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A global config without tool selection must not widen a default run.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project directory.
+    """
+    home = _isolate_home(tmp_path, monkeypatch)
+    (home / ".lintro-config.yaml").write_text(
+        "enforce:\n  line_length: 100\nai:\n  enabled: true\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_python_project(project)
+    monkeypatch.chdir(project)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_true()
+    assert_that(result.detected_languages).contains("python")
+    assert_that(result.to_run).does_not_contain("clippy", "svelte-check")
+
+
+def test_global_tools_section_opts_out_of_detection_scoping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A global ``tools:`` section is a deliberate selection and disables scoping.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project directory.
+    """
+    home = _isolate_home(tmp_path, monkeypatch)
+    (home / ".lintro-config.yaml").write_text(
+        "tools:\n  ruff:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_python_project(project)
+    monkeypatch.chdir(project)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_false()
+
+
+def test_global_enabled_tools_opts_out_of_detection_scoping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A global ``execution.enabled_tools`` list disables language scoping.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary project directory.
+    """
+    home = _isolate_home(tmp_path, monkeypatch)
+    (home / ".lintro-config.yaml").write_text(
+        "execution:\n  enabled_tools:\n    - ruff\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_python_project(project)
+    monkeypatch.chdir(project)
+    clear_config_cache()
+
+    result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.scoped_by_detection).is_false()
+    assert_that(result.to_run).contains("ruff")
+    assert_that(result.to_run).does_not_contain("commitlint")
