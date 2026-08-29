@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.2] - 2026-08-29
+
+### Fixed
+
+- **ci**: bump pinned py-lintro image to 0.137.0 for build-time artifact self-heal
+  (#2208) (224eee5)
+
 ## [0.137.1] - 2026-08-29
 
 ### Changed
