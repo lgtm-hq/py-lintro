@@ -26,8 +26,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Changed
 
 - update contributor guidance for build-time artifact generation (#2199) (a7f80d9)
-- **tools**: align per-tool test layout with tests/unit/tools/<tool> convention (#1277)
-  (2cd448c)
+- **tools**: align per-tool test layout with `tests/unit/tools/<tool>` convention
+  (#1277) (2cd448c)
 - **tests**: align per-tool test layout with `tests/unit/tools/<tool>` convention
   (#1277)
 
