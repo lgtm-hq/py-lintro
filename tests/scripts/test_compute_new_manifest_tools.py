@@ -2,7 +2,7 @@
 
 Covers the pure JSON name-diff helper (``compute-new-manifest-tools.py``) and
 the git-resolution shell wrapper (``compute-new-manifest-tools.sh``), which
-feeds the ``--allow-missing`` allowlist to the manifest-vs-image gate. The
+feeds the newly-added tool set to the manifest-vs-image gate. The
 wrapper is exercised against a real temporary git repository so the merge-base
 and fail-closed paths are covered end to end.
 """
