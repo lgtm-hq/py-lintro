@@ -72,7 +72,8 @@ older Python versions.
 
 Bundled Python tools are available via the `lintro[full]` extra (or Homebrew
 `lintro-full`). The default `pip install lintro` installs the CLI only. Tool versions
-are centrally managed in `manifest.json` and `pyproject.toml`:
+are centrally managed in `pyproject.toml` and the version sources the build-time
+generator reads (#2176):
 
 **Bundled Python Tools:**
 

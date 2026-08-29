@@ -89,9 +89,9 @@ result = tool.fix(["path/to/go/module"], {})
 
 ## Configuration Strategy
 
-- Minimum/recommended version tracked in `lintro/_tool_versions.py` and
-  `lintro/tools/manifest.json` (kept in sync by the manifest generator; bumped by
-  Renovate via `golangci/golangci-lint` GitHub releases)
+- Minimum/recommended version tracked in `lintro/_tool_versions.py` (rendered into the
+  generated `lintro/tools/manifest.json` at build time; bumped by Renovate via
+  `golangci/golangci-lint` GitHub releases)
 - Uses the system `golangci-lint`; install via `brew install golangci-lint` or the
   official installer at <https://golangci-lint.run/welcome/install/>
 - Native configs: `.golangci.yml`, `.golangci.yaml`, `.golangci.toml`, `.golangci.json`

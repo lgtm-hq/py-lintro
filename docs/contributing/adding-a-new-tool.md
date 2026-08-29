@@ -182,15 +182,13 @@ Choose the path that matches the tool's distribution mechanism.
    }
    ```
 
-2. **`lintro/tools/manifest.json`** — add a tool entry (version must match
-   `_tool_versions.py`). Since #2178, hand-authored entries live in
-   `lintro/tools/manifest.src.json` (without a `version` key — the generator renders
-   `manifest.json` from it):
+2. **`lintro/tools/manifest.src.json`** — add the hand-authored tool entry with **no
+   `version` key**; the generator renders `lintro/tools/manifest.json` from it with the
+   version injected from `_tool_versions.py`:
 
    ```json
    {
      "name": "<tool>",
-     "version": "x.y.z",
      "install": { "type": "binary" },
      "tier": "tools",
      "category": "external",
@@ -200,10 +198,9 @@ Choose the path that matches the tool's distribution mechanism.
    }
    ```
 
-3. **`renovate.json`** — add **two** custom manager entries (one for
-   `_tool_versions.py`, one for `manifest.json`), copying the pattern from an existing
-   binary tool. Both entries must reference the same upstream package on the same
-   datasource so Renovate keeps them in sync.
+3. **`renovate.json`** — add a custom manager entry for the pin in `_tool_versions.py`,
+   copying the pattern from an existing binary tool. The rendered manifest follows via
+   the generator at build time — no second manager is needed.
 
 4. **`scripts/utils/install-tools.sh`** — four sync points (see Step 8).
 
@@ -230,11 +227,12 @@ Choose the path that matches the tool's distribution mechanism.
    "<npm-package>": "^x.y.z"
    ```
 
-4. **Run the generator** (see Step 9) to regenerate `lintro/_generated_versions.py` and
-   sync version fields in `manifest.json`.
+4. **Run `just generate`** (see Step 9) to refresh the derived artifacts in your working
+   tree (they are gitignored — nothing to commit).
 
-5. **`lintro/tools/manifest.json`** — the generator writes the `version` field; verify
-   the entry has the correct `install.type = "npm"` and `install.package`.
+5. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "npm"`
+   and `install.package` set, and **no `version` key**; the generator injects the
+   version from `package.json`.
 
 ### Path C — Bundled Python (e.g. ruff, bandit, yamllint)
 
@@ -267,13 +265,14 @@ Choose the path that matches the tool's distribution mechanism.
    ```
 
    Keep the package listed in `REQUIREMENTS_PYPI_SOURCES` in
-   `scripts/ci/generate-tool-versions.py` so the generator still reads the pin from
+   `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.
 
-3. **Run the generator** (see Step 9).
+3. **Run `just generate`** (see Step 9).
 
-4. **`lintro/tools/manifest.json`** — verify the generated entry has
-   `install.type = "pip"` and `install.package = "<pypi-package>"`.
+4. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
+   and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
+   injects the version from `pyproject.toml`.
 
 ---
 
@@ -332,36 +331,28 @@ Four places require editing (keep alphabetical order throughout):
 
 ---
 
-## Step 9 — Run the version generator
+## Step 9 — Regenerate the derived artifacts
 
-After any version-related edits, run:
+After any version-related or definition edits, refresh your working tree:
 
 ```bash
-python3 scripts/ci/generate-tool-versions.py
+just generate
 ```
 
-This regenerates `lintro/_generated_versions.py` and syncs version fields in
-`lintro/tools/manifest.json`. Verify the output is consistent and commit it alongside
-the other changes.
+This regenerates `lintro/_generated_versions.py`, renders `lintro/tools/manifest.json`
+from `manifest.src.json`, and rewrites `lintro/plugins/_builtin_index.py` so the new
+definition module is discoverable from frozen (Nuitka onefile) binaries. **All three
+outputs are gitignored** — they are generated at package build time (#2176), so there is
+nothing to commit and no drift gate to satisfy. Editable installs regenerate them
+automatically on `uv pip install -e .` / `just setup`; after editing a version source
+locally, run `just generate` to keep your working tree current.
 
-To check without writing (useful before pushing):
+To check your tree is in sync without writing:
 
 ```bash
 python3 scripts/ci/generate-tool-versions.py --check
+python3 scripts/ci/generate-builtin-tool-index.py --check
 ```
-
-CI fails the PR if `_generated_versions.py` or `manifest.json` are out of sync.
-
-Also regenerate the builtin tool index so the new definition module is discoverable from
-frozen (Nuitka onefile) binaries, which cannot glob the `lintro/tools/definitions/`
-source directory:
-
-```bash
-python3 scripts/ci/generate-builtin-tool-index.py
-```
-
-This rewrites `lintro/plugins/_builtin_index.py`. CI fails the PR when it is out of sync
-(`--check`).
 
 ---
 
@@ -568,7 +559,8 @@ Implementation checklist:
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
 - [ ] Version registration (Path A / B / C, see Step 4)
-- [ ] `lintro/tools/manifest.json` — tool entry with correct version and install type
+- [ ] `lintro/tools/manifest.src.json` — tool entry with install type and **no version
+      key**
 - [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN` (if
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
@@ -578,10 +570,8 @@ Implementation checklist:
       block, tools_to_verify)
 - [ ] `docker/tools.Dockerfile` — verify step
 - [ ] `Dockerfile` — root block and non-root block (for npm/bun tools)
-- [ ] `renovate.json` — custom managers for `_tool_versions.py` and `manifest.json`
-      (binary tools only)
-- [ ] `scripts/ci/generate-tool-versions.py --check` passes
-- [ ] `scripts/ci/generate-builtin-tool-index.py --check` passes
+- [ ] `renovate.json` — custom manager for `_tool_versions.py` (binary tools only)
+- [ ] `just generate` runs cleanly (derived artifacts are gitignored, not committed)
 - [ ] Unit tests (parser + plugin) added
 - [ ] Integration tests added (with `skipif` guard)
 - [ ] Test samples added (`violations.<ext>` and `clean.<ext>`)
