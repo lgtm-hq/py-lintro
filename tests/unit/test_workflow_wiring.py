@@ -2758,6 +2758,52 @@ def _renovate_pinned_image_manager() -> dict[str, Any]:
     return cast(dict[str, Any], covering[0])
 
 
+_BUNDLED_RUST_COMPONENT_PACKAGES = (
+    "rust-lang/rust-clippy",
+    "rust-lang/rustfmt",
+)
+
+
+def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
+    """rustfmt/clippy pins are toolchain readouts, not Renovate knobs (#2205).
+
+    Independent managers open unmergeable PRs (#1605) because those tags are
+    source milestones, not installable artifacts. rustc remains the single
+    rust-family manager; component records bump in the same toolchain PR.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    for package in _BUNDLED_RUST_COMPONENT_PACKAGES:
+        assert_that(tracked).does_not_contain(package)
+
+    rustc = [
+        manager
+        for manager in managers
+        if manager.get("packageNameTemplate") == "rust-lang/rust"
+    ]
+    assert_that(rustc).is_length(1)
+    assert_that(rustc[0]["description"]).contains("#2205")
+
+    grouped_clippy = [
+        rule
+        for rule in config.get("packageRules") or []
+        if "rust-lang/rust-clippy" in (rule.get("matchPackageNames") or [])
+    ]
+    assert_that(grouped_clippy).is_empty()
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("bump only alongside rustc (#2205)")
+
+
 # Every workflow file carrying a pinned release reference, and how many sites
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one

@@ -51,10 +51,9 @@
     {
       "groupName": "rust toolchain",
       "groupSlug": "rust-toolchain",
-      "description": "Group rustc and clippy because clippy versions match Rust release versions",
+      "description": "Single rust-family knob: rustc. rustfmt/clippy are bundled with the toolchain and have no independent managers (#2205)",
       "matchPackageNames": [
-        "rust-lang/rust",
-        "rust-lang/rust-clippy"
+        "rust-lang/rust"
       ]
     },
     {
@@ -479,7 +478,7 @@
       "packageNameTemplate": "typos-cli"
     },
     {
-      "description": "Update rustc in _tool_versions.py (manifest follows via generator)",
+      "description": "Update rustc in _tool_versions.py (manifest follows via generator). rustfmt/clippy pins are bundled with this toolchain — bump those records in the same PR; they have no independent managers (#2205)",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -490,32 +489,6 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rust",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
-    },
-    {
-      "description": "Update clippy in _tool_versions.py (manifest follows via generator)",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rust-clippy",
-      "extractVersionTemplate": "^rust-(?<version>.*)$"
-    },
-    {
-      "description": "Update rustfmt in _tool_versions.py (manifest follows via generator)",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rustfmt",
-      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",
