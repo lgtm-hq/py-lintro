@@ -94,6 +94,9 @@ def resolve_version(
 ) -> str:
     """Resolve the release version from argv, ``NEXT_VERSION``, or pyproject.
 
+    ``validate_version`` and ``_read_pyproject_version`` raise
+    ``ValueError`` / ``RuntimeError`` for invalid or unreadable versions.
+
     Args:
         argv: Command-line arguments excluding the program name.
         env: Environment mapping; defaults to ``os.environ``.
@@ -101,10 +104,6 @@ def resolve_version(
 
     Returns:
         str: Semver without a leading ``v``.
-
-    Raises:
-        RuntimeError: If no version can be parsed from ``pyproject.toml``.
-        ValueError: If the resolved version is not semver-like.
     """
     if argv:
         return validate_version(argv[0])
