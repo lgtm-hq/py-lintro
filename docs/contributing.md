@@ -187,13 +187,15 @@ consistent UX and maintainable implementation.
 
 ### Generated artifacts
 
-Three files are derived from the version sources and are **not committed** (#2176):
-`lintro/_generated_versions.py`, `lintro/tools/manifest.json` (rendered from
-`manifest.src.json`), and `lintro/plugins/_builtin_index.py`. They are generated at
-package build time by the in-tree PEP 517 backend (`lintro_build/backend.py`), so every
-wheel, sdist, editable install, Docker image, and frozen binary carries current copies.
-`just setup` (via `uv pip install -e .`) generates them into your gitignored working
-tree; after editing a version source locally, run `just generate` to refresh them.
+Three files are derived and **not committed** (#2176), each from its own inputs:
+`lintro/_generated_versions.py` (from the per-install-type version sources),
+`lintro/tools/manifest.json` (rendered from `manifest.src.json` with resolved versions
+injected), and `lintro/plugins/_builtin_index.py` (from the tool definition modules
+under `lintro/tools/definitions/`). They are generated at package build time by the
+in-tree PEP 517 backend (`lintro_build/backend.py`), so every wheel, sdist, editable
+install, Docker image, and frozen binary carries current copies. `just setup` (via
+`uv pip install -e .`) generates them into your gitignored working tree; after editing a
+version source locally, run `just generate` to refresh them.
 
 ### Tool Version Sources (Including Companion Packages)
 
