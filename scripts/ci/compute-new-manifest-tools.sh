@@ -134,10 +134,35 @@ trap 'rm -f "$old_manifest"' EXIT
 # Transition window (#2178): a merge-base predating the manifest split has no
 # manifest.src.json, so the added diff falls back to the rendered manifest
 # there — names are identical in both files.
+# Render the rendered manifest for a historic commit from that commit's own
+# committed sources and generator (#2180: manifest.json is no longer
+# committed, so version-changed diffs cannot ``git show`` it at the base).
+# Prints the rendered manifest to the given output path; non-zero on any
+# trouble (caller falls back).
+render_manifest_at_ref() {
+	local ref="$1"
+	local out_path="$2"
+	local worktree
+	worktree="$(mktemp -d)"
+	# Expand worktree now, not at EXIT time.
+	# shellcheck disable=SC2064
+	trap "rm -rf '$worktree'; rm -f '$old_manifest'" EXIT
+	git archive "$ref" \
+		lintro lintro_build scripts/ci \
+		package.json pyproject.toml requirements-semgrep.txt \
+		2>/dev/null | tar -x -C "$worktree" || return 1
+	python3 "${worktree}/scripts/ci/generate-tool-versions.py" >/dev/null 2>&1 ||
+		return 1
+	cp "${worktree}/lintro/tools/manifest.json" "$out_path"
+}
+
 if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
 	if [[ "$EMIT" == "added" && "$MANIFEST" == "lintro/tools/manifest.src.json" ]] &&
 		git show "${merge_base}:lintro/tools/manifest.json" >"$old_manifest" 2>/dev/null; then
 		log_info "No ${MANIFEST} at merge-base ${merge_base}; using manifest.json (pre-split base)"
+	elif [[ "$EMIT" == "version-changed" && "$MANIFEST" == "lintro/tools/manifest.json" ]] &&
+		render_manifest_at_ref "$merge_base" "$old_manifest"; then
+		log_info "Rendered merge-base manifest from ${merge_base} sources"
 	else
 		log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
 		rm -f "$old_manifest"

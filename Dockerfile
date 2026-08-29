@@ -153,8 +153,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=tools /usr/local/bin/uv /usr/local/bin/uv
 
-COPY pyproject.toml uv.lock /app/
+COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
+# The in-tree PEP 517 backend and its generator inputs (#2180): uv sync
+# builds lintro from /app, which regenerates the derived version artifacts.
+COPY lintro_build/ /app/lintro_build/
+COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 
 RUN uv sync --no-dev --no-progress && (uv cache clean || true)
 

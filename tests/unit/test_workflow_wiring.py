@@ -368,8 +368,8 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
         )
 
 
-def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
-    """Dogfooding lint depends on manifest-sync and allows draft-PR skips."""
+def test_docker_ci_dogfooding_lint_waits_on_docker_build() -> None:
+    """Dogfooding lint depends on the docker build (#2180: no manifest-sync)."""
     docker_ci = _load_workflow(name="docker-ci.yml")
     lint_job = docker_ci["jobs"]["dogfooding-lint"]
     comment_job = docker_ci["jobs"]["dogfooding-pr-comment"]
@@ -377,13 +377,12 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     lint_condition = lint_job["if"]
     comment_condition = comment_job["if"]
 
-    assert_that(lint_needs).contains("changes", "docker-build", "manifest-sync")
+    assert_that(lint_needs).contains("changes", "docker-build")
+    assert_that(lint_needs).does_not_contain("manifest-sync")
     assert_that(lint_condition).contains("always()")
     assert_that(lint_condition).contains("!cancelled()")
     assert_that(lint_condition).contains("needs.changes.outputs.pipeline != 'false'")
     assert_that(lint_condition).contains("needs.docker-build.result == 'success'")
-    assert_that(lint_condition).contains("manifest-sync.result == 'skipped'")
-    assert_that(lint_condition).contains("manifest-sync.result == 'success'")
     assert_that(comment_condition).contains("always()")
     assert_that(comment_condition).contains("!cancelled()")
     assert_that(comment_condition).contains(
@@ -408,26 +407,23 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
         "pipeline",
         "lint_scope",
         "docker_build",
-        "manifest_sync",
         "cancelled",
         "expected",
     ),
     [
-        ("true", "full", "success", "success", False, True),
-        ("true", "full", "success", "skipped", False, True),
-        ("true", "full", "success", "failure", False, False),
-        ("true", "full", "failure", "success", False, False),
-        ("true", "full", "success", "success", True, False),
+        ("true", "full", "success", False, True),
+        ("true", "full", "failure", False, False),
+        ("true", "full", "success", True, False),
         # Changed-files PR (#1361): the full-repo lint hands off to
         # dogfooding-lint-changed.
-        ("true", "changed", "success", "success", False, False),
-        # Docs-only PR: docker-build early-exits green and manifest-sync is
-        # path-skipped; dogfooding-lint must not run (no CI image pushed).
-        ("false", "changed", "success", "skipped", False, False),
+        ("true", "changed", "success", False, False),
+        # Docs-only PR: docker-build early-exits green; dogfooding-lint must
+        # not run (no CI image pushed).
+        ("false", "changed", "success", False, False),
         # Broken changes job fails open: pipeline and lint-scope outputs are
         # empty (not 'false'/'changed'), the full build ran, so the full
         # lint runs too.
-        ("", "", "success", "success", False, True),
+        ("", "", "success", False, True),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
@@ -435,11 +431,10 @@ def test_docker_ci_lint_condition_semantics(
     pipeline: str,
     lint_scope: str,
     docker_build: str,
-    manifest_sync: str,
     cancelled: bool,
     expected: bool,
 ) -> None:
-    """Lint job ``if:`` runs only when docker-build succeeds and manifest-sync is ok."""
+    """Lint job ``if:`` runs only when docker-build succeeds."""
     docker_ci = _load_workflow(name="docker-ci.yml")
     lint_condition = docker_ci["jobs"]["dogfooding-lint"]["if"]
 
@@ -447,10 +442,7 @@ def test_docker_ci_lint_condition_semantics(
         _evaluate_github_if(
             lint_condition,
             cancelled=cancelled,
-            results={
-                "docker-build": docker_build,
-                "manifest-sync": manifest_sync,
-            },
+            results={"docker-build": docker_build},
             outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
@@ -461,25 +453,22 @@ def test_docker_ci_lint_condition_semantics(
         "pipeline",
         "lint_scope",
         "docker_build",
-        "manifest_sync",
         "cancelled",
         "expected",
     ),
     [
         # Changed-scope PR with a green build runs the changed-files lint.
-        ("true", "changed", "success", "success", False, True),
-        ("true", "changed", "success", "skipped", False, True),
-        ("true", "changed", "success", "failure", False, False),
-        ("true", "changed", "failure", "success", False, False),
-        ("true", "changed", "success", "success", True, False),
+        ("true", "changed", "success", False, True),
+        ("true", "changed", "failure", False, False),
+        ("true", "changed", "success", True, False),
         # Full-scope runs (global-impact PRs, merge_group, pushes) belong to
         # dogfooding-lint, not this job.
-        ("true", "full", "success", "success", False, False),
+        ("true", "full", "success", False, False),
         # Docs-only PR: nothing was built, nothing to lint.
-        ("false", "changed", "success", "skipped", False, False),
+        ("false", "changed", "success", False, False),
         # Broken changes job fails open to the FULL lint job: empty
         # lint-scope is != 'changed', so this job stays skipped.
-        ("", "", "success", "success", False, False),
+        ("", "", "success", False, False),
     ],
 )
 def test_docker_ci_lint_changed_condition_semantics(
@@ -487,7 +476,6 @@ def test_docker_ci_lint_changed_condition_semantics(
     pipeline: str,
     lint_scope: str,
     docker_build: str,
-    manifest_sync: str,
     cancelled: bool,
     expected: bool,
 ) -> None:
@@ -499,10 +487,7 @@ def test_docker_ci_lint_changed_condition_semantics(
         _evaluate_github_if(
             lint_condition,
             cancelled=cancelled,
-            results={
-                "docker-build": docker_build,
-                "manifest-sync": manifest_sync,
-            },
+            results={"docker-build": docker_build},
             outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
@@ -695,7 +680,6 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     assert_that(gate_job["needs"]).contains(
         "changes",
         "docker-build",
-        "manifest-sync",
         "dogfooding-lint",
         "dogfooding-lint-changed",
         "dogfooding_lint_retry",
@@ -768,7 +752,6 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
 
     assert_that(retry_job["needs"]).contains(
         "docker-build",
-        "manifest-sync",
         "dogfooding-lint",
     )
     assert_that(retry_condition).contains("needs.dogfooding-lint.result == 'failure'")

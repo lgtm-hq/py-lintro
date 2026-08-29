@@ -4,7 +4,6 @@
     "local>lgtm-hq/.github:renovate-config"
   ],
   "allowedCommands": [
-    "python3 scripts/ci/generate-tool-versions.py",
     "scripts/ci/compile-semgrep-lock.sh"
   ],
   "packageRules": [
@@ -121,7 +120,7 @@
       "automerge": false
     },
     {
-      "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
+      "description": "Agent CLIs release close to daily; batch them into one weekly PR \u2014 the hybrid capability guard (#1612) tolerates the lag",
       "groupName": "ai agent CLIs",
       "groupSlug": "ai-agent-clis",
       "matchFileNames": [
@@ -136,39 +135,6 @@
       "automerge": false
     },
     {
-      "description": "Regenerate version artifacts when tool version sources change",
-      "matchManagers": [
-        "custom.regex",
-        "npm",
-        "pep621",
-        "pip_requirements",
-        "uv"
-      ],
-      "matchFileNames": [
-        "Dockerfile",
-        "docker/tools.Dockerfile",
-        "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json",
-        "package.json",
-        "pyproject.toml"
-      ],
-      "postUpgradeTasks": {
-        "commands": [
-          "python3 scripts/ci/generate-tool-versions.py"
-        ],
-        "fileFilters": [
-          "lintro/_tool_versions.py",
-          "lintro/_generated_versions.py",
-          "lintro/tools/manifest.json",
-          "package.json",
-          "pyproject.toml",
-          "Dockerfile",
-          "docker/tools.Dockerfile"
-        ],
-        "executionMode": "branch"
-      }
-    },
-    {
       "description": "Recompile the isolated semgrep lockfile after its .in pin changes",
       "matchManagers": ["pip_requirements"],
       "matchFileNames": [
@@ -176,13 +142,10 @@
       ],
       "postUpgradeTasks": {
         "commands": [
-          "scripts/ci/compile-semgrep-lock.sh",
-          "python3 scripts/ci/generate-tool-versions.py"
+          "scripts/ci/compile-semgrep-lock.sh"
         ],
         "fileFilters": [
-          "requirements-semgrep.txt",
-          "lintro/_generated_versions.py",
-          "lintro/tools/manifest.json"
+          "requirements-semgrep.txt"
         ],
         "executionMode": "branch"
       }

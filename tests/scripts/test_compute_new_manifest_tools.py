@@ -12,7 +12,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess  # nosec B404 - drives the scripts under test with shell=False
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -306,6 +308,105 @@ def test_sh_pre_split_merge_base_falls_back_to_manifest_json(
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout.strip()).is_equal_to("terraform")
     assert_that(result.stderr).contains("pre-split base")
+
+
+def _init_generator_repo(tmp_path: Path) -> Path:
+    """Create a repo carrying the real generator machinery and fake sources.
+
+    Mirrors the post-flip layout (#2180): manifest.src.json and the version
+    sources are committed, the rendered manifest.json is not.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        Path: The repository root, checked out on a feature branch.
+    """
+    repo = tmp_path / "repo"
+    (repo / "scripts" / "ci").mkdir(parents=True)
+    shutil.copytree(_REPO_ROOT / "lintro_build", repo / "lintro_build")
+    shutil.copy(
+        _REPO_ROOT / "scripts" / "ci" / "generate-tool-versions.py",
+        repo / "scripts" / "ci" / "generate-tool-versions.py",
+    )
+    (repo / "lintro" / "tools").mkdir(parents=True)
+    (repo / "lintro" / "_tool_packages.py").write_text(
+        "from lintro.enums.tool_name import ToolName\n"
+        "NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {}\n"
+        "PYPI_PACKAGE_OWNERS: dict[str, ToolName | None] = {}\n",
+    )
+    (repo / "lintro" / "_tool_versions.py").write_text(
+        "from lintro.enums.tool_name import ToolName\n"
+        "TOOL_VERSIONS: dict = {\n"
+        '    ToolName.HADOLINT: "2.14.0",\n'
+        "}\n",
+    )
+    (repo / "package.json").write_text(json.dumps({"devDependencies": {}}))
+    (repo / "pyproject.toml").write_text('[project]\nname = "fake"\n')
+    (repo / "requirements-semgrep.txt").write_text("")
+    (repo / "lintro" / "tools" / "manifest.src.json").write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {"name": "hadolint", "install": {"type": "binary"}},
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "post-flip base (no rendered manifest)")
+    _git(repo, "checkout", "-b", "feature")
+    return repo
+
+
+def test_sh_version_changed_renders_merge_base_from_sources(
+    tmp_path: Path,
+) -> None:
+    """Post-flip version bumps still resolve version-changed tolerance.
+
+    With the rendered manifest no longer committed (#2180), the old side of
+    the version diff is rendered from the merge-base's own committed sources
+    and generator; a bumped pin must surface in the version-changed set.
+    """
+    repo = _init_generator_repo(tmp_path)
+
+    tool_versions = repo / "lintro" / "_tool_versions.py"
+    tool_versions.write_text(
+        tool_versions.read_text().replace('"2.14.0"', '"2.15.0"'),
+    )
+    _git(repo, "commit", "-am", "bump hadolint")
+    # The working tree's rendered manifest exists (CI regenerates before the
+    # gate runs); the merge-base's does not.
+    result = subprocess.run(  # nosec B603 - fixed argv against a repo-owned script; shell=False
+        [sys.executable, str(repo / "scripts" / "ci" / "generate-tool-versions.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=repo,
+    )
+    assert_that(result.returncode).described_as(
+        result.stdout + result.stderr,
+    ).is_equal_to(0)
+
+    run = subprocess.run(  # nosec B603 - fixed argv against a real binary; shell=False
+        [str(_SH_SCRIPT)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=repo,
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),  # nosec B108 - test fallback
+            "BASE_REF": "main",
+            "EMIT": "version-changed",
+        },
+    )
+    assert_that(run.returncode).is_equal_to(0)
+    assert_that(run.stdout.strip()).is_equal_to("hadolint")
+    assert_that(run.stderr).contains("Rendered merge-base manifest")
 
 
 def test_sh_unresolvable_base_fails_closed(tmp_path: Path) -> None:

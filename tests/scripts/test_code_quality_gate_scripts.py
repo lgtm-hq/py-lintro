@@ -252,7 +252,6 @@ def test_evaluate_code_quality_gate_prefers_retry_success() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "success",
                 "PRIMARY_LINT_STATUS": "",
@@ -284,7 +283,6 @@ def test_evaluate_code_quality_gate_rejects_newline_in_lint_status(
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": f"boom{injection}status-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -312,7 +310,6 @@ def test_run_code_quality_gate_fails_closed_on_injected_lint_status() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "boom\nstatus-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -335,7 +332,6 @@ def test_evaluate_gate_keeps_primary_failure_when_retry_is_killed() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -365,7 +361,6 @@ def test_run_gate_stays_red_when_retry_killed_after_primary_lint_failure() -> No
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -393,7 +388,6 @@ def test_run_gate_recovers_when_retry_passes_after_primary_flake() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -422,7 +416,6 @@ def test_evaluate_code_quality_gate_propagates_docker_build_failure() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "failure",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "skipped",
             },
         )
@@ -446,7 +439,6 @@ def test_run_code_quality_gate_fails_on_docker_build_failure() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "failure",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "skipped",
             },
         )
@@ -469,7 +461,6 @@ def test_run_code_quality_gate_passes_after_runner_shutdown() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -505,7 +496,6 @@ def test_run_code_quality_gate_absorbs_post_lint_failure_after_passed_lint() -> 
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "passed",
                 "PRIMARY_LINT_EXIT_CODE": "0",
@@ -531,7 +521,6 @@ def test_run_code_quality_gate_fails_when_lint_never_reported() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -559,7 +548,6 @@ def test_run_code_quality_gate_marks_clean_pass_as_non_flake() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "success",
                 "PRIMARY_LINT_STATUS": "passed",
                 "PRIMARY_LINT_EXIT_CODE": "0",
@@ -584,7 +572,6 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -652,18 +639,15 @@ def test_gate_scripts_carry_no_timeout_flake_plumbing() -> None:
 
 
 @pytest.mark.parametrize(
-    ("docker_build", "manifest_sync", "expected_source"),
+    ("docker_build", "expected_source"),
     [
-        ("failure", "success", "docker-build"),
-        ("success", "failure", "manifest-sync"),
-        ("success", "success", "lint"),
-        ("success", "skipped", "lint"),
+        ("failure", "docker-build"),
+        ("success", "lint"),
     ],
 )
 def test_evaluate_code_quality_gate_reports_verdict_source(
     *,
     docker_build: str,
-    manifest_sync: str,
     expected_source: str,
 ) -> None:
     """The evaluator names the job its verdict came from (#1653)."""
@@ -676,7 +660,6 @@ def test_evaluate_code_quality_gate_reports_verdict_source(
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": docker_build,
-                "MANIFEST_SYNC_RESULT": manifest_sync,
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",

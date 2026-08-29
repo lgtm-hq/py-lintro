@@ -15,7 +15,7 @@ comments so Renovate can track digest updates. Policy is enforced by
 
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
-- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+- **docker-ci.yml** — Multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral
   `ci-<run_id>` tags are retained for partial reruns (#1138) and reclaimed by the weekly
@@ -119,8 +119,6 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
   allow-list, not just the Python lock, or the pre-merge gate would be looser than the
   release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
   always reports and is safe to require
-- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
-  `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
   **test-built-package.yml**, **build-binary.yml**
 

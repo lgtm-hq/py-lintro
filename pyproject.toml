@@ -1,6 +1,10 @@
 [build-system]
 requires = ["setuptools==84.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
+# In-tree PEP 517 shim: generates the derived version artifacts before
+# delegating to setuptools.build_meta (#2180). lintro_build never ships
+# in the wheel; the sdist carries it via MANIFEST.in.
+build-backend = "lintro_build.backend"
+backend-path = ["."]
 
 [project]
 name = "lintro"

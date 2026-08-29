@@ -353,3 +353,8 @@ benchmarks/fixtures/**/.ruff_cache/
 .secrets
 __pycache__/
 *.pyc
+
+# Derived version artifacts, generated at build time (#2180)
+lintro/_generated_versions.py
+lintro/tools/manifest.json
+lintro/plugins/_builtin_index.py
