@@ -34,7 +34,7 @@ system install gives you the full tool set.
    ```yaml
    repos:
      - repo: https://github.com/lgtm-hq/py-lintro
-       rev: v0.123.3 # pin to a released tag (auto-updated on release)
+       rev: v0.137.0 # pin to a released tag (auto-updated on release)
        hooks:
          - id: lintro-check
    ```
@@ -67,7 +67,7 @@ mixed set of staged files is fine.
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.123.3
+    rev: v0.137.0
     hooks:
       - id: lintro-check
 ```
@@ -80,7 +80,7 @@ run as failed so you can review and re-stage the result:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.123.3
+    rev: v0.137.0
     hooks:
       - id: lintro-format
       - id: lintro-check
@@ -93,7 +93,7 @@ Use pre-commit's standard `files`/`exclude`/`types` overrides to narrow a hook:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.123.3
+    rev: v0.137.0
     hooks:
       - id: lintro-check
         files: ^src/
@@ -108,7 +108,7 @@ dedicated mirror repository
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/lintro-pre-commit
-    rev: v0.69.0 # matches the pinned lintro version
+    rev: v0.137.0 # matches the pinned lintro version
     hooks:
       - id: lintro-check
       # - id: lintro-format  # opt in for auto-formatting
@@ -136,7 +136,7 @@ you specifically need to run against unreleased py-lintro code at a given `rev`:
 ```yaml
 repos:
   - repo: https://github.com/lgtm-hq/py-lintro
-    rev: v0.123.3
+    rev: v0.137.0
     hooks:
       - id: lintro-check-python
 ```
