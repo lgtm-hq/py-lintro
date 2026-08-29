@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.3] - 2026-08-29
+
+### Fixed
+
+- **ci**: give gitleaks an explicit timeout in dogfooding lint jobs (#2211) (d229a18)
+
 ## [0.137.2] - 2026-08-29
 
 ### Fixed
