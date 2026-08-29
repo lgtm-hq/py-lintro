@@ -11,6 +11,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **config**: add user-level global config with project-override precedence
+  (`LINTRO_GLOBAL_CONFIG`) (#1273)
+
 ### Changed
 
 - **cli**: clear discovery/config caches only when cwd, PATH, or Lintro config inputs
