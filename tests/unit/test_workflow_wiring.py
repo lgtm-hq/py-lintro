@@ -1290,7 +1290,7 @@ def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
     ).described_as(
         "golangci-lint manager does not target lintro/_tool_versions.py",
     ).is_true()
-    matches = []
+    matches: list[re.Match[str]] = []
     for match_string in manager["matchStrings"]:
         pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
         matches.extend(re.finditer(pattern, version_text))
