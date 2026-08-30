@@ -2819,12 +2819,15 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
     assert_that(rustc).is_length(1)
     assert_that(rustc[0]["description"]).contains("#2205")
 
-    grouped_clippy = [
-        rule
-        for rule in config.get("packageRules") or []
-        if "rust-lang/rust-clippy" in (rule.get("matchPackageNames") or [])
+    grouped_components = [
+        package
+        for package in _BUNDLED_RUST_COMPONENT_PACKAGES
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
     ]
-    assert_that(grouped_clippy).is_empty()
+    assert_that(grouped_components).is_empty()
 
     versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
         encoding="utf-8",
