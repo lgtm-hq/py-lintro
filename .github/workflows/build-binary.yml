@@ -34,7 +34,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.12.5'
+  UV_VERSION: '0.12.7'
 
 jobs:
   get-release-info:
@@ -137,7 +137,7 @@ jobs:
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
         # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/lintro.1
@@ -304,7 +304,7 @@ jobs:
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/nuitka/lintro-macos-${{ matrix.arch }}
@@ -462,7 +462,7 @@ jobs:
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
         # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/nuitka/lintro-linux-${{ matrix.arch }}
@@ -557,7 +557,7 @@ jobs:
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: binaries/lintro-macos-universal

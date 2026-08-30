@@ -267,7 +267,7 @@ def test_explicit_allow_missing_passes_through(
     image_repo: Path,
     docker_stub: tuple[Path, Path],
 ) -> None:
-    """An explicit ALLOW_MISSING flows through as --allow-missing (#1565)."""
+    """An explicit ALLOW_MISSING allowlist still flows through as --allow-missing."""
     bin_dir, args_log = docker_stub
     result = _run_script(
         image_repo,
@@ -283,6 +283,54 @@ def test_explicit_allow_missing_passes_through(
     assert_that(run_lines[0]).contains("--allow-missing terraform")
 
 
+def test_added_tool_present_is_fully_verified(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """A newly-added tool that is in the image passes without --allow-missing (#2192)."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        image_repo,
+        bin_dir,
+        args_log,
+        extra_env={"ADDED_TOOLS": "buf"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).does_not_contain("--allow-missing")
+    assert_that(result.stdout).contains("Newly-added tool(s) verified")
+    assert_that(result.stdout).contains("buf")
+
+
+def test_added_tool_missing_fails_with_bridge_hint(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """A newly-added tool missing from the image fails and names the Dockerfile bridge (#2192)."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        image_repo,
+        bin_dir,
+        args_log,
+        extra_env={
+            "ADDED_TOOLS": "buf",
+            "DOCKER_RUN_EXIT_CODE": "1",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).does_not_contain("--allow-missing")
+    assert_that(result.stderr).contains("install-tools.sh --docker --tools")
+    assert_that(result.stderr).contains("buf")
+    assert_that(result.stderr).contains("Dockerfile")
+
+
 def test_no_allow_missing_without_base_ref(
     image_repo: Path,
     docker_stub: tuple[Path, Path],
@@ -296,6 +344,57 @@ def test_no_allow_missing_without_base_ref(
     ]
     assert_that(run_lines).is_length(1)
     assert_that(run_lines[0]).does_not_contain("--allow-missing")
+
+
+def test_base_ref_added_tool_is_not_allow_missing(
+    tmp_path: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """BASE_REF-derived added tools are verified, not passed as --allow-missing.
+
+    Regression for #2192: a two-commit repo that adds a tool name to
+    ``manifest.src.json`` must compute ADDED_TOOLS via the production
+    BASE_REF path and still omit ``--allow-missing`` from docker argv.
+    """
+    repo = tmp_path / "repo"
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True)
+    tools_dir.joinpath("manifest.src.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff"}]}\n',
+    )
+    tools_dir.joinpath("manifest.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff", "version": "0.1.0"}]}\n',
+    )
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "checkout", "-b", "feature")
+    tools_dir.joinpath("manifest.src.json").write_text(
+        '{"version": 2, "tools": [{"name": "ruff"}, {"name": "buf"}]}\n',
+    )
+    tools_dir.joinpath("manifest.json").write_text(
+        '{"version": 2, "tools": ['
+        '{"name": "ruff", "version": "0.1.0"}, '
+        '{"name": "buf", "version": "1.0.0"}]}\n',
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "add buf")
+
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        repo,
+        bin_dir,
+        args_log,
+        extra_env={"BASE_REF": "main"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).does_not_contain("--allow-missing")
+    assert_that(result.stdout).contains("Newly-added tool(s) verified")
+    assert_that(result.stdout).contains("buf")
 
 
 def test_explicit_allow_version_lag_passes_through(

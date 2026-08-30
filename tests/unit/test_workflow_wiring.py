@@ -1259,6 +1259,34 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
             ).is_not_none()
 
 
+def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
+    """golangci-lint pin bumps must not automerge independently of the tools digest.
+
+    The regex manager writes only ``ToolName.GOLANGCI_LINT`` in
+    ``_tool_versions.py``. The app image copies binaries from the
+    digest-pinned ``lintro-tools`` image, so a versions-only merge fails
+    Docker verify (#2139, #2220). Automerge stays off so the pin and the
+    matching digest can land together.
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    managers = [
+        manager
+        for manager in config["customManagers"]
+        if manager.get("packageNameTemplate") == "golangci/golangci-lint"
+    ]
+    assert_that(managers).is_not_empty()
+
+    rules = [
+        rule
+        for rule in config.get("packageRules", [])
+        if "golangci/golangci-lint" in (rule.get("matchPackageNames") or [])
+        and rule.get("automerge") is False
+    ]
+    assert_that(rules).described_as(
+        "no packageRule disables automerge for golangci/golangci-lint",
+    ).is_not_empty()
+
+
 def test_build_binary_retries_setup_uv_on_failure() -> None:
     """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
     workflow = _load_workflow(name="build-binary.yml")
@@ -3325,3 +3353,31 @@ def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> Non
     assert_that(found).is_length(6)
     assert_that(set(found)).is_equal_to({_EXPECTED_DOGFOOD_TOOL_OPTIONS})
     assert_that(_EXPECTED_DOGFOOD_TOOL_OPTIONS).contains("gitleaks:timeout=120")
+
+
+def test_tools_publish_no_cache_covers_schedule_and_force_publish() -> None:
+    """Weekly and force-publish rebuilds must bypass the registry cache.
+
+    A cache hit on ``force_publish`` republishes stale tool binaries even
+    after installer pin fixes (#2220, #2221). Keep the expression folded
+    so yamllint ``line-length`` (88) stays green in dogfood.
+    """
+    path = _REPO_ROOT / ".github" / "workflows" / "docker-tools-publish.yml"
+    workflow = _load_workflow(name="docker-tools-publish.yml")
+    no_cache = _normalize_github_expr(
+        str(workflow["jobs"]["tools-image"]["with"]["no-cache"]),
+    )
+
+    assert_that(no_cache).contains("github.event_name == 'schedule'")
+    assert_that(no_cache).contains(
+        "github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true'",
+    )
+
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if "no-cache" not in line and "force_publish" not in line:
+            continue
+        assert_that(len(line)).described_as(
+            f"{path.name}:{lineno} exceeds yamllint line-length 88",
+        ).is_less_than_or_equal_to(88)

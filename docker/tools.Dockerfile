@@ -20,10 +20,10 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS tools
+FROM python:3.14-slim@sha256:cae66f2ef0ec51a9891263eeee7f987dacf0a9879e8aa9353d5606e0530619a5 AS tools
 
-ARG BUN_VERSION=1.3.14
-ARG UV_VERSION=0.12.5
+ARG BUN_VERSION=1.4.0
+ARG UV_VERSION=0.12.7
 ARG GO_VERSION=1.27.0
 
 LABEL maintainer="lgtm-hq"
@@ -134,18 +134,17 @@ RUN groupadd -r tools && \
 # Keep rustup's bundled HTML doc trees (rust-docs component) out of the
 # image: generated Rust API docs have no runtime use here, they add tens of
 # thousands of small files per toolchain, and Trivy's secret scanner walked
-# them until it hit its timeout (#1703). Install the stable toolchain with
-# --profile minimal (no rust-docs download; clippy/rustfmt added explicitly)
-# and rm any remaining share/doc trees — e.g. from the pinned toolchain
-# install-tools.sh installs with the default profile — in the same layer so
-# they never reach the committed image.
+# them until it hit its timeout (#1703). install-tools.sh installs the
+# rustc pin with --profile minimal (no rust-docs; clippy/rustfmt added
+# explicitly). Do not rustup-default "stable" afterwards — that floats
+# rustc to whatever stable is today and fails verify-manifest on main
+# (#2139, #2220). Strip any leftover share/doc trees in the same layer
+# so they never reach the committed image.
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
     --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
     /app/scripts/utils/install-tools.sh --docker && \
-    rustup toolchain install stable --profile minimal --component clippy,rustfmt && \
-    rustup default stable && \
     rm -rf /opt/rustup/toolchains/*/share/doc
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
