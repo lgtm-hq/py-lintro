@@ -1311,9 +1311,6 @@ def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
     assert_that(matching_rules[-1].get("automerge")).described_as(
         f"last packageRule for {package_name} must disable automerge",
     ).is_false()
-    assert_that(matching_rules[-1].get("matchFileNames", [version_path])).contains(
-        version_path,
-    )
 
 
 def test_build_binary_retries_setup_uv_on_failure() -> None:

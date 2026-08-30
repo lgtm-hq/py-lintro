@@ -130,3 +130,44 @@ install_python_package ruff 0.15.9
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout.strip()).is_equal_to("0.15.9")
     assert_that(result.stderr).is_empty()
+
+
+def test_docker_uv_install_uses_pip_without_tool_bin_dir(tmp_path: Path) -> None:
+    """A Docker install must use uv pip without local uv tool configuration.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    function = _shell_function(
+        _INSTALL_TOOLS.read_text(encoding="utf-8"),
+        "install_python_package",
+    )
+    probe = f"""
+set -euo pipefail
+BIN_DIR="$TEST_BIN_DIR"
+INSTALL_MODE=--docker
+TOOL_FILTER=""
+should_install() {{ return 0; }}
+log_verbose() {{ :; }}
+uv() {{
+    test "${{UV_TOOL_BIN_DIR+x}}" != x
+    test "$#" -eq 3
+    test "$1 $2" = "pip install"
+    test "$3" = "ruff==0.15.9"
+}}
+{function}
+install_python_package ruff 0.15.9
+"""
+    env = os.environ.copy()
+    env["TEST_BIN_DIR"] = str(tmp_path / "bin")
+    result = subprocess.run(  # nosec B603 - fixed bash with controlled test data
+        ["/bin/bash", "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).is_empty()
+    assert_that(result.stderr).is_empty()

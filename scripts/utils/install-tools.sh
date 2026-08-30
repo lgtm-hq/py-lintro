@@ -323,7 +323,7 @@ detect_platform() {
 	echo "${os}-${arch}"
 }
 
-# Function to install Python package with fallbacks (uv pip preferred)
+# Install a Python package with fallbacks (local uv tool; Docker uv pip)
 install_python_package() {
 	local package="$1"
 	local version="${2:-}"
