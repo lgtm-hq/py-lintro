@@ -32,7 +32,9 @@ Adding a new tool:
     - npm or pypi: add a ToolName, edit ``lintro/_tool_packages.py``, pin in
       package.json or pyproject.toml, run the generator.
     - Other (binary/cargo/rustup): add to ``TOOL_VERSIONS`` below and add a
-      Renovate ``customManager`` entry.
+      Renovate ``customManager`` entry. rustfmt and clippy are the exception:
+      they are bundled with ``ToolName.RUSTC`` and have no independent
+      managers — bump their records only alongside rustc (#2205).
 
 For shell scripts:
     python3 -c "from lintro._tool_versions import get_tool_version; \\
@@ -58,13 +60,16 @@ _logger = logging.getLogger(__name__)
 _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 
 # Non-npm/non-pypi external tools — updated by Renovate via custom regex
-# managers. Tools managed via npm or pypi live in ``_tool_packages.py``
-# (seeds) and ``_generated_versions.py`` (versions).
+# managers, except rustfmt/clippy which record what the rustc toolchain
+# ships (bump only alongside ToolName.RUSTC; see #2205). Tools managed via
+# npm or pypi live in ``_tool_packages.py`` (seeds) and
+# ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
     ToolName.BUF: "1.71.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
+    # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.97.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
@@ -72,6 +77,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUSTC: "1.97.1",
+    # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.1",

@@ -16,6 +16,9 @@ import yaml
 from assertpy import assert_that
 from pathspec import GitIgnoreSpec
 
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
     _REPO_ROOT / "scripts" / "ci" / "testing" / "lintro-report-generate.sh"
@@ -2784,6 +2787,65 @@ def _renovate_pinned_image_manager() -> dict[str, Any]:
     ]
     assert_that(covering).is_length(1)
     return cast(dict[str, Any], covering[0])
+
+
+_BUNDLED_RUST_COMPONENT_PACKAGES = (
+    "rust-lang/rust-clippy",
+    "rust-lang/rustfmt",
+)
+
+
+def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
+    """rustfmt/clippy pins are toolchain readouts, not Renovate knobs (#2205).
+
+    Independent managers open unmergeable PRs (#1605) because those tags are
+    source milestones, not installable artifacts. rustc remains the single
+    rust-family manager; component records bump in the same toolchain PR.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    for package in _BUNDLED_RUST_COMPONENT_PACKAGES:
+        assert_that(tracked).does_not_contain(package)
+
+    rustc = [
+        manager
+        for manager in managers
+        if manager.get("packageNameTemplate") == "rust-lang/rust"
+    ]
+    assert_that(rustc).is_length(1)
+    assert_that(rustc[0]["description"]).contains("#2205")
+
+    grouped_components = [
+        package
+        for package in _BUNDLED_RUST_COMPONENT_PACKAGES
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
+    ]
+    assert_that(grouped_components).is_empty()
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CLIPPY")
+    assert_that(match_strings).does_not_contain("ToolName.RUSTFMT")
+
+    assert_that(TOOL_VERSIONS[ToolName.CLIPPY]).is_equal_to(
+        TOOL_VERSIONS[ToolName.RUSTC],
+    )
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("bump only alongside rustc (#2205)")
 
 
 # Every workflow file carrying a pinned release reference, and how many sites

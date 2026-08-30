@@ -1011,8 +1011,9 @@ main() {
 
 		if [ -z "${RUST_TOOLCHAIN_VERSION:-}" ]; then
 			# Clippy versions match Rust release versions (clippy 1.94.0 = Rust 1.94.0).
-			# Use the highest version among rustc and clippy so that Renovate PRs
-			# that bump clippy independently install the correct toolchain.
+			# rustfmt/clippy pins bump only alongside rustc (#2205). Take
+			# max(rustc, clippy) so a drifted pair still installs a toolchain
+			# that can provide both components.
 			local _rustc_ver _clippy_ver
 			_rustc_ver=$(get_tool_version "rustc" 2>/dev/null || echo "")
 			_clippy_ver=$(get_tool_version "clippy" 2>/dev/null || echo "")
