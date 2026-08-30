@@ -3307,3 +3307,31 @@ def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> Non
     assert_that(found).is_length(6)
     assert_that(set(found)).is_equal_to({_EXPECTED_DOGFOOD_TOOL_OPTIONS})
     assert_that(_EXPECTED_DOGFOOD_TOOL_OPTIONS).contains("gitleaks:timeout=120")
+
+
+def test_tools_publish_no_cache_covers_schedule_and_force_publish() -> None:
+    """Weekly and force-publish rebuilds must bypass the registry cache.
+
+    A cache hit on ``force_publish`` republishes stale tool binaries even
+    after installer pin fixes (#2220, #2221). Keep the expression folded
+    so yamllint ``line-length`` (88) stays green in dogfood.
+    """
+    path = _REPO_ROOT / ".github" / "workflows" / "docker-tools-publish.yml"
+    workflow = _load_workflow(name="docker-tools-publish.yml")
+    no_cache = _normalize_github_expr(
+        str(workflow["jobs"]["tools-image"]["with"]["no-cache"]),
+    )
+
+    assert_that(no_cache).contains("github.event_name == 'schedule'")
+    assert_that(no_cache).contains(
+        "github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true'",
+    )
+
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if "no-cache" not in line and "force_publish" not in line:
+            continue
+        assert_that(len(line)).described_as(
+            f"{path.name}:{lineno} exceeds yamllint line-length 88",
+        ).is_less_than_or_equal_to(88)
