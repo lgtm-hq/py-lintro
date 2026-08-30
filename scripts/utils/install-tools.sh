@@ -338,16 +338,19 @@ install_python_package() {
 		full_package="$package==$version"
 	fi
 
-	# Prefer uv pip when available
+	# Prefer uv pip when available. Do not use `uv run` to locate the
+	# binary: `uv run` syncs this repo's pyproject.toml ranges
+	# (ruff>=0.15.9 → latest) and would copy the floated pin into
+	# BIN_DIR (#2220).
 	if command -v uv &>/dev/null; then
 		if uv pip install "$full_package"; then
-			# Copy the executable to target directory if it exists in uv environment
-			local uv_path
-			uv_path=$(uv run which "$package" 2>/dev/null || echo "")
-			if [ -n "$uv_path" ] && [ -f "$uv_path" ]; then
-				cp "$uv_path" "$BIN_DIR/$package"
+			local installed_path
+			installed_path=$(command -v "$package" 2>/dev/null || true)
+			if [ -n "$installed_path" ] && [ -f "$installed_path" ] &&
+				[ "$installed_path" != "$BIN_DIR/$package" ]; then
+				cp "$installed_path" "$BIN_DIR/$package"
 				chmod +x "$BIN_DIR/$package"
-				echo -e "${YELLOW}Copied $package from uv environment to $BIN_DIR${NC}"
+				echo -e "${YELLOW}Copied $package to $BIN_DIR${NC}"
 			fi
 			return 0
 		fi
@@ -1058,7 +1061,8 @@ main() {
 		if ! command -v rustup &>/dev/null; then
 			echo -e "${YELLOW}Installing rustup...${NC}"
 			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-				--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component "$component"
+				--default-toolchain "$RUST_TOOLCHAIN_VERSION" \
+				--profile minimal --component "$component"
 			# Source cargo environment (respect CARGO_HOME if set)
 			cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
 			if [ -f "$cargo_env" ]; then
@@ -1072,7 +1076,7 @@ main() {
 				rustup update stable
 				rustup component add "$component"
 			else
-				rustup toolchain install "$RUST_TOOLCHAIN_VERSION"
+				rustup toolchain install "$RUST_TOOLCHAIN_VERSION" --profile minimal
 				rustup default "$RUST_TOOLCHAIN_VERSION"
 				rustup component add "$component" --toolchain "$RUST_TOOLCHAIN_VERSION"
 			fi
