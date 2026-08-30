@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.5] - 2026-08-30
+
+### Changed
+
+- **deps**: update dependency fast-uri to 4.1.3 (patch) (#2225) (5509a6f)
+- **deps**: update dependency devalue to 5.9.1 (patch) (#2224) (2daa9c5)
+- **deps**: update dependency astral-sh/uv to 0.12.7 (patch) (#2223) (2076b04)
+- **deps**: update softprops/action-gh-release digest to efb3536 (#2222) (be7109b)
+- **deps**: update python:3.14-slim docker digest to cae66f2 (#2219) (2fdb0f9)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to d9605c7
+  (#2140) (4fbb1a3)
+- restore golangci-lint 2.13.0 pin until tools image ships 2.13.2 (#2218) (fc6187b)
+- **deps**: update dependency golangci/golangci-lint to 2.13.2 (patch) (#2139) (b4ee88b)
+
+### Fixed
+
+- **deps**: apply golangci-lint 2.13.2 with matching tools digest (#2221) (128fdc5)
+
 ## [0.137.4] - 2026-08-30
 
 ### Fixed
