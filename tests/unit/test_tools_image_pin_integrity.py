@@ -8,6 +8,8 @@ after a versions-only merge (#2139, #2220).
 
 from __future__ import annotations
 
+import os
+import subprocess  # nosec B404 - fixed bash probe exercises repository script
 from pathlib import Path
 
 from assertpy import assert_that
@@ -33,6 +35,13 @@ def _executable_lines(text: str) -> str:
     )
 
 
+def _shell_function(text: str, name: str) -> str:
+    """Extract one top-level shell function for an isolated behavior test."""
+    start = text.index(f"{name}() {{")
+    end = text.index("\n}\n", start) + 3
+    return text[start:end]
+
+
 def test_tools_dockerfile_does_not_default_rustup_to_stable() -> None:
     """``rustup default stable`` overwrites the rustc pin with today's stable.
 
@@ -53,7 +62,7 @@ def test_install_tools_uses_minimal_profile_for_pinned_rustc() -> None:
     paper over that by installing ``stable`` with ``--profile minimal``
     and making it the default — which floated rustc.
     """
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _executable_lines(_INSTALL_TOOLS.read_text(encoding="utf-8"))
 
     assert_that(text).contains("--profile minimal --component")
     assert_that(text).contains(
@@ -61,15 +70,63 @@ def test_install_tools_uses_minimal_profile_for_pinned_rustc() -> None:
     )
 
 
-def test_install_python_package_does_not_use_uv_run_which() -> None:
-    """``uv run which`` syncs pyproject.toml ranges and floats the pin.
+def test_install_python_package_uses_uv_tool_for_local_shims() -> None:
+    """Local uv installs write the pinned executable directly into ``BIN_DIR``.
 
-    ``uv pip install ruff==0.15.9`` is exact, but ``uv run which ruff``
-    from the repo root resolves ``ruff>=0.15.9`` to latest and copies
-    that binary into ``BIN_DIR``.
+    Looking up the executable with ``command -v`` after installation can return
+    a stale ``BIN_DIR`` entry because that directory is first on ``PATH``.
     """
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _executable_lines(_INSTALL_TOOLS.read_text(encoding="utf-8"))
 
     assert_that(text).does_not_contain("uv run which")
+    assert_that(text).does_not_contain('command -v "$package"')
     assert_that(text).contains('full_package="$package==$version"')
-    assert_that(text).contains('installed_path=$(command -v "$package"')
+    assert_that(text).contains('UV_TOOL_BIN_DIR="$BIN_DIR" uv tool install --force')
+
+
+def test_local_uv_install_replaces_stale_bin_dir_executable(tmp_path: Path) -> None:
+    """A successful local uv install must replace an existing stale shim.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stale = bin_dir / "ruff"
+    stale.write_text("#!/bin/sh\necho stale\n", encoding="utf-8")
+    stale.chmod(0o755)
+
+    function = _shell_function(
+        _INSTALL_TOOLS.read_text(encoding="utf-8"),
+        "install_python_package",
+    )
+    probe = f"""
+set -euo pipefail
+BIN_DIR="$TEST_BIN_DIR"
+INSTALL_MODE=local
+TOOL_FILTER=""
+should_install() {{ return 0; }}
+log_verbose() {{ :; }}
+uv() {{
+    test "$1 $2 $3" = "tool install --force"
+    test "$4" = "ruff==0.15.9"
+    printf '#!/bin/sh\\necho 0.15.9\\n' >"$UV_TOOL_BIN_DIR/ruff"
+    chmod +x "$UV_TOOL_BIN_DIR/ruff"
+}}
+{function}
+install_python_package ruff 0.15.9
+"$BIN_DIR/ruff"
+"""
+    env = os.environ.copy()
+    env["TEST_BIN_DIR"] = str(bin_dir)
+    result = subprocess.run(  # nosec B603 - fixed bash with controlled test data
+        ["/bin/bash", "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("0.15.9")
+    assert_that(result.stderr).is_empty()

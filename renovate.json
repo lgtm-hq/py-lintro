@@ -111,7 +111,7 @@
       "automerge": false
     },
     {
-      "description": "Binary pins in _tool_versions.py install only when the tools image rebuilds; do not automerge versions-only (#2220)",
+      "description": "golangci-lint installs only when the tools image rebuilds; do not automerge its versions-only pin (#2220)",
       "matchPackageNames": [
         "golangci/golangci-lint"
       ],

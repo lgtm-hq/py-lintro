@@ -16,6 +16,9 @@ import yaml
 from assertpy import assert_that
 from pathspec import GitIgnoreSpec
 
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
     _REPO_ROOT / "scripts" / "ci" / "testing" / "lintro-report-generate.sh"
@@ -1269,22 +1272,48 @@ def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
     matching digest can land together.
     """
     config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    version_path = "lintro/_tool_versions.py"
+    version_text = (_REPO_ROOT / version_path).read_text(encoding="utf-8")
     managers = [
         manager
         for manager in config["customManagers"]
         if manager.get("packageNameTemplate") == "golangci/golangci-lint"
     ]
-    assert_that(managers).is_not_empty()
+    assert_that(managers).is_length(1)
+    manager = managers[0]
 
-    rules = [
+    assert_that(
+        any(
+            re.search(pattern.strip("/"), version_path)
+            for pattern in manager["managerFilePatterns"]
+        ),
+    ).described_as(
+        "golangci-lint manager does not target lintro/_tool_versions.py",
+    ).is_true()
+    matches = []
+    for match_string in manager["matchStrings"]:
+        pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+        matches.extend(re.finditer(pattern, version_text))
+    assert_that(matches).is_length(1)
+    assert_that(matches[0].group("currentValue")).is_equal_to(
+        TOOL_VERSIONS[ToolName.GOLANGCI_LINT],
+    )
+
+    package_name = manager["packageNameTemplate"]
+    matching_rules = [
         rule
         for rule in config.get("packageRules", [])
-        if "golangci/golangci-lint" in (rule.get("matchPackageNames") or [])
-        and rule.get("automerge") is False
+        if package_name in (rule.get("matchPackageNames") or [])
     ]
-    assert_that(rules).described_as(
-        "no packageRule disables automerge for golangci/golangci-lint",
+    assert_that(matching_rules).described_as(
+        f"no packageRule applies to {package_name}",
     ).is_not_empty()
+    assert_that(matching_rules[-1].get("automerge")).described_as(
+        f"last packageRule for {package_name} must disable automerge",
+    ).is_false()
+    assert_that(matching_rules[-1].get("matchFileNames", [version_path])).contains(
+        version_path,
+    )
 
 
 def test_build_binary_retries_setup_uv_on_failure() -> None:
@@ -3326,6 +3355,34 @@ def test_tools_publish_no_cache_covers_schedule_and_force_publish() -> None:
     assert_that(no_cache).contains(
         "github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true'",
     )
+
+    expression = no_cache.removeprefix("${{").removesuffix("}}").strip()
+    cases = (
+        ("schedule", "false", True),
+        ("workflow_dispatch", "true", True),
+        ("workflow_dispatch", "false", False),
+        ("pull_request", "true", False),
+    )
+    for event_name, force_publish, expected in cases:
+        reduced = (
+            expression.replace(
+                "github.event_name == 'schedule'",
+                repr(event_name == "schedule"),
+            )
+            .replace(
+                "github.event_name == 'workflow_dispatch'",
+                repr(event_name == "workflow_dispatch"),
+            )
+            .replace(
+                "inputs.force_publish == 'true'",
+                repr(force_publish == "true"),
+            )
+            .replace("&&", " and ")
+            .replace("||", " or ")
+        )
+        assert_that(_eval_restricted_bool_expr(reduced)).described_as(
+            f"no-cache for event={event_name}, force_publish={force_publish}",
+        ).is_equal_to(expected)
 
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if line.lstrip().startswith("#"):

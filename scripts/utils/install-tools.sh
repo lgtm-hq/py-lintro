@@ -338,20 +338,16 @@ install_python_package() {
 		full_package="$package==$version"
 	fi
 
-	# Prefer uv pip when available. Do not use `uv run` to locate the
-	# binary: `uv run` syncs this repo's pyproject.toml ranges
-	# (ruff>=0.15.9 → latest) and would copy the floated pin into
-	# BIN_DIR (#2220).
+	# Prefer uv when available. Local installs use isolated uv tool environments
+	# and write their shims directly to BIN_DIR. This prevents a stale BIN_DIR
+	# executable (which is first on PATH) from masking the freshly installed pin.
+	# Docker uses uv pip with UV_SYSTEM_PYTHON=1, which writes into BIN_DIR.
 	if command -v uv &>/dev/null; then
-		if uv pip install "$full_package"; then
-			local installed_path
-			installed_path=$(command -v "$package" 2>/dev/null || true)
-			if [ -n "$installed_path" ] && [ -f "$installed_path" ] &&
-				[ "$installed_path" != "$BIN_DIR/$package" ]; then
-				cp "$installed_path" "$BIN_DIR/$package"
-				chmod +x "$BIN_DIR/$package"
-				echo -e "${YELLOW}Copied $package to $BIN_DIR${NC}"
+		if [ "$INSTALL_MODE" != "--docker" ] && [ "$INSTALL_MODE" != "docker" ]; then
+			if UV_TOOL_BIN_DIR="$BIN_DIR" uv tool install --force "$full_package"; then
+				return 0
 			fi
+		elif uv pip install "$full_package"; then
 			return 0
 		fi
 	fi

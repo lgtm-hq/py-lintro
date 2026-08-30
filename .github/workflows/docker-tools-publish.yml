@@ -97,8 +97,8 @@ jobs:
       smoke-test: bun --version
       validate-on-pr: true
       cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
-      # Scheduled rebuilds must not reuse cached layers, otherwise the
-      # weekly CVE-freshness rebuild is a no-op cache hit.
+      # Scheduled and forced rebuilds must not reuse cached layers, otherwise
+      # CVE-freshness and explicit pin rebuilds can be no-op cache hits.
       no-cache: >-
         ${{ github.event_name == 'schedule'
         || (github.event_name == 'workflow_dispatch'
