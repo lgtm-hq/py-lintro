@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0721f2395eddd2ef7b3c9c41fd2be982f2f7db0a0d6dd2de8e2bb7520d9ce824 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:8f42e713be3bbafe5e6b8e3362433c126ab55c6dd4ad7625fed7880e07a5fbd7 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
