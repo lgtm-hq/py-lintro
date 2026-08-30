@@ -354,8 +354,22 @@ install_python_package() {
 
 	# Fallback to pip
 	if command -v pip &>/dev/null; then
-		if pip install "$full_package"; then
-			return 0
+		local install_prefix
+		local target_path="$BIN_DIR/$package"
+		install_prefix=$(dirname "$BIN_DIR")
+
+		# pip can report "already satisfied" while leaving an older executable
+		# first on PATH. Install into BIN_DIR's owning prefix and remove the old
+		# entry first, so success means pip created the executable we verify.
+		if ! rm -f -- "$target_path"; then
+			return 1
+		fi
+		if pip install --ignore-installed --prefix "$install_prefix" "$full_package"; then
+			if [ -x "$target_path" ]; then
+				return 0
+			fi
+			echo -e "${RED}✗ pip installed $full_package but did not create $target_path${NC}" >&2
+			return 1
 		fi
 	fi
 

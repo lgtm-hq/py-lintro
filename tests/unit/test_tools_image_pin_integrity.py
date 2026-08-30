@@ -82,6 +82,9 @@ def test_install_python_package_uses_uv_tool_for_local_shims() -> None:
     assert_that(text).does_not_contain('command -v "$package"')
     assert_that(text).contains('full_package="$package==$version"')
     assert_that(text).contains('UV_TOOL_BIN_DIR="$BIN_DIR" uv tool install --force')
+    assert_that(text).contains(
+        'pip install --ignore-installed --prefix "$install_prefix"',
+    )
 
 
 def test_local_uv_install_replaces_stale_bin_dir_executable(tmp_path: Path) -> None:
@@ -171,3 +174,65 @@ install_python_package ruff 0.15.9
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).is_empty()
     assert_that(result.stderr).is_empty()
+
+
+def test_pip_fallback_fails_closed_if_executable_stays_stale(
+    tmp_path: Path,
+) -> None:
+    """A zero-exit pip fallback must not accept the stale ``BIN_DIR`` entry.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    bin_dir = tmp_path / "prefix" / "bin"
+    bin_dir.mkdir(parents=True)
+    stale = bin_dir / "ruff"
+    stale.write_text("#!/bin/sh\necho stale\n", encoding="utf-8")
+    stale.chmod(0o755)
+
+    function = _shell_function(
+        _INSTALL_TOOLS.read_text(encoding="utf-8"),
+        "install_python_package",
+    )
+    probe = f"""
+set -euo pipefail
+BIN_DIR="$TEST_BIN_DIR"
+INSTALL_MODE=local
+TOOL_FILTER=""
+RED=""
+NC=""
+should_install() {{ return 0; }}
+log_verbose() {{ :; }}
+uv() {{ return 1; }}
+pip() {{
+    test "$#" -eq 5
+    test "$1 $2 $3" = "install --ignore-installed --prefix"
+    test "$4" = "$TEST_PREFIX"
+    test "$5" = "ruff==0.15.9"
+    test ! -e "$BIN_DIR/ruff"
+    return 0
+}}
+brew() {{ return 98; }}
+{function}
+if install_python_package ruff 0.15.9; then
+    "$BIN_DIR/ruff"
+    exit 99
+fi
+test ! -e "$BIN_DIR/ruff"
+"""
+    env = os.environ.copy()
+    env["TEST_BIN_DIR"] = str(bin_dir)
+    env["TEST_PREFIX"] = str(bin_dir.parent)
+    result = subprocess.run(  # nosec B603 - fixed bash with controlled test data
+        ["/bin/bash", "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).is_empty()
+    assert_that(result.stderr).contains(
+        f"pip installed ruff==0.15.9 but did not create {stale}",
+    )
