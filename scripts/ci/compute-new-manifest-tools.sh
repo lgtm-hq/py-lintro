@@ -10,10 +10,12 @@ set -euo pipefail
 # EMIT=added diffs the hand-authored lintro/tools/manifest.src.json (#2178);
 # EMIT=version-changed diffs the rendered lintro/tools/manifest.json, which
 # carries the version fields. The manifest-vs-image gate
-# (verify-image-manifest-tools.sh) feeds this to verify-manifest-tools.py:
+# (verify-image-manifest-tools.sh) consumes this as:
 #
-#   EMIT=added (default) → --allow-missing: a newly-added tool's absent binary
-#     in the digest-pinned base image downgrades to a warning (#1565).
+#   EMIT=added (default) → the newly-added tool set (#2192). Those names are
+#     verified in the app image like every other tool (the PR Dockerfile
+#     bridge must install them if the pinned digest lacks them). An empty
+#     set means full enforcement, never a skip.
 #   EMIT=version-changed → --allow-version-lag: a baked tool whose manifest
 #     version the PR bumps may still be older in the digest-pinned base image;
 #     a version mismatch (image older than manifest) downgrades to a warning
