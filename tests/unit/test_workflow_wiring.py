@@ -16,6 +16,9 @@ import yaml
 from assertpy import assert_that
 from pathspec import GitIgnoreSpec
 
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
     _REPO_ROOT / "scripts" / "ci" / "testing" / "lintro-report-generate.sh"
@@ -2828,6 +2831,16 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
         )
     ]
     assert_that(grouped_components).is_empty()
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CLIPPY")
+    assert_that(match_strings).does_not_contain("ToolName.RUSTFMT")
+
+    assert_that(TOOL_VERSIONS[ToolName.CLIPPY]).is_equal_to(
+        TOOL_VERSIONS[ToolName.RUSTC],
+    )
 
     versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
         encoding="utf-8",
