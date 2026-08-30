@@ -111,6 +111,13 @@
       "automerge": false
     },
     {
+      "description": "Binary pins in _tool_versions.py install only when the tools image rebuilds; do not automerge versions-only (#2220)",
+      "matchPackageNames": [
+        "golangci/golangci-lint"
+      ],
+      "automerge": false
+    },
+    {
       "description": "lintro-ai-tools base image digest pin (FROM in the Dockerfile 'aitools' stage); full CI validates the bump",
       "matchDatasources": ["docker"],
       "matchPackageNames": [
@@ -326,7 +333,7 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
-      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "description": "Update golangci-lint in _tool_versions.py. Must land with a lintro-tools digest built at that pin (#2220); versions-only breaks Docker verify.",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"

@@ -1259,6 +1259,34 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
             ).is_not_none()
 
 
+def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
+    """golangci-lint pin bumps must not automerge independently of the tools digest.
+
+    The regex manager writes only ``ToolName.GOLANGCI_LINT`` in
+    ``_tool_versions.py``. The app image copies binaries from the
+    digest-pinned ``lintro-tools`` image, so a versions-only merge fails
+    Docker verify (#2139, #2220). Automerge stays off so the pin and the
+    matching digest can land together.
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    managers = [
+        manager
+        for manager in config["customManagers"]
+        if manager.get("packageNameTemplate") == "golangci/golangci-lint"
+    ]
+    assert_that(managers).is_not_empty()
+
+    rules = [
+        rule
+        for rule in config.get("packageRules", [])
+        if "golangci/golangci-lint" in (rule.get("matchPackageNames") or [])
+        and rule.get("automerge") is False
+    ]
+    assert_that(rules).described_as(
+        "no packageRule disables automerge for golangci/golangci-lint",
+    ).is_not_empty()
+
+
 def test_build_binary_retries_setup_uv_on_failure() -> None:
     """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
     workflow = _load_workflow(name="build-binary.yml")
