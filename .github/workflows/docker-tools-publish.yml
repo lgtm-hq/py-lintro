@@ -99,7 +99,7 @@ jobs:
       cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
       # Scheduled rebuilds must not reuse cached layers, otherwise the
       # weekly CVE-freshness rebuild is a no-op cache hit.
-      no-cache: ${{ github.event_name == 'schedule' }}
+      no-cache: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true') }}
       provenance: true
       sbom: true
       cosign-sign: true
