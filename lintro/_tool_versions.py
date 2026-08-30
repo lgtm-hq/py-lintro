@@ -78,7 +78,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUSTC: "1.98.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.RUSTFMT: "1.9.0",
+    ToolName.RUSTFMT: "1.98.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
