@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.4] - 2026-08-30
+
+### Fixed
+
+- **ci**: enforce app-image bridge coverage for newly-added binary tools (#2209)
+  (793b04a)
+
 ## [0.137.3] - 2026-08-29
 
 ### Fixed
