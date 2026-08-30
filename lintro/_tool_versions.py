@@ -70,7 +70,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.CLIPPY: "1.97.1",
+    ToolName.CLIPPY: "1.98.0",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
     ToolName.GOLANGCI_LINT: "2.13.2",
