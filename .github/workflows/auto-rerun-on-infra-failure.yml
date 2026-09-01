@@ -6,8 +6,8 @@ name: Auto Rerun on Infra Failure
 # When a listed workflow fails and its failed-job logs match a known
 # GitHub-side outage signature ("Failed to resolve action download info",
 # runner shutdown signals, harden-runner allowed-domain resolution errors),
-# re-run only the failed jobs — once (run-attempt guard upstream). This repo
-# saw a ghcr.io login timeout (run 29325278849) and a runner shutdown during
+# re-run only the failed jobs — up to three times (run-attempt guard upstream).
+# This repo saw a ghcr.io login timeout (run 29325278849) and a runner shutdown during
 # #1370's CI, both manually rerun. Tag publishes also flake on setup-uv
 # manifest timeouts and runner loss (#1487). See #1374 and Rustume's
 # equivalent (#474).
@@ -19,7 +19,7 @@ name: Auto Rerun on Infra Failure
 # tag name (e.g. v0.88.1), so branches: [main] would miss them, and
 # workflow_run has no separate tags: filter. Dropping it also makes PR-branch
 # runs of the watched CI workflows eligible, which is intended: the reusable
-# workflow only reruns on a matched infra signature and only once per attempt.
+# workflow only reruns on a matched infra signature and up to three times per run.
 # Fork abuse is blocked by the same-repo guard on the job below
 # (head_repository.full_name), which is now the only such guard.
 #
@@ -88,6 +88,7 @@ jobs:
       # as the strings the reusable workflow inputs expect.
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
+      max-reruns: '3'
       egress-policy: block
       egress-preset: github-minimal
       # Extra transient-infra signatures, appended to lgtm-ci's built-in
