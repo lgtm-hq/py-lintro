@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read # sparse checkout of the audit script
+      actions: read # inspect production runs and nested npm jobs
     timeout-minutes: 10
     steps:
       - name: Harden Runner

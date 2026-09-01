@@ -3378,7 +3378,7 @@ def test_version_skew_audit_invokes_the_checked_in_script() -> None:
     # Alarm, not gate: the audit must not be wired into any release job's
     # ``needs:`` chain, and must not carry write permissions.
     assert_that(workflow["jobs"]["audit"]["permissions"]).is_equal_to(
-        {"contents": "read"},
+        {"contents": "read", "actions": "read"},
     )
 
 
