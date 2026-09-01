@@ -147,6 +147,7 @@ declare -a docker_args=(
 	--entrypoint python3
 	-e SEMGREP_SEND_METRICS=off
 	-e SEMGREP_ENABLE_VERSION_CHECK=0
+	-e "LINTRO_IMAGE_REF=${IMAGE}"
 	-v "${repo_root}:/repo:ro"
 	-w /repo
 	"$IMAGE"

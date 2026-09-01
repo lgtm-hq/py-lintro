@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Promote - Lintro Tools Candidate
+
+# A merged Renovate PR already built and validated its tools image. Retag that
+# exact candidate digest as :latest after the merge; do not rebuild from the
+# squash commit. The candidate resolver selects by merged PR number because the
+# digest commit changes the PR head SHA before GitHub creates the merge commit.
+# Non-Renovate main updates use the canonical build fallback below; a Renovate
+# merge with a missing candidate fails closed instead of rebuilding.
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'docker/ai-tools.Dockerfile'
+      - 'docker/tools.Dockerfile'
+      - '.github/workflows/docker-tools-publish.yml'
+      - 'lintro/_tool_versions.py'
+      - 'lintro/tools/manifest.src.json'
+      - 'lintro/_tool_packages.py'
+      - 'lintro_build/**'
+      - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/install-semgrep.sh'
+      - 'scripts/utils/utils.sh'
+      - 'package.json'
+      - 'pyproject.toml'
+      - 'requirements-semgrep.txt'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docker-tools-promote-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Classify main tools image update
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 10
+    outputs:
+      action: ${{ steps.candidate.outputs.action }}
+      candidate-tag: ${{ steps.candidate.outputs.candidate-tag }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Resolve candidate from merged PR
+        id: candidate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/promote-tools-candidate.py
+  promote:
+    name: Promote candidate digest
+    needs: resolve
+    if: needs.resolve.outputs.action == 'promote'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Log in to GHCR
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote candidate by digest
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/lintro-tools
+          CI_TAG: ${{ needs.resolve.outputs.candidate-tag }}
+          TAGS: ghcr.io/lgtm-hq/lintro-tools:latest
+        run: scripts/ci/promote-ci-docker-images.sh
+
+  publish-fallback:
+    name: Build canonical tools image for ordinary main update
+    needs: resolve
+    if: needs.resolve.outputs.action == 'publish'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: docker/tools.Dockerfile
+      image-name: lgtm-hq/lintro-tools
+      tags: latest
+      push: true
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: bun --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
+      provenance: true
+      sbom: true
+      cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
+      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      egress-policy: block
+      egress-preset: docker
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        dl.google.com:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
+        get.trivy.dev:443
+        mirror.gcr.io:443
+
+  skip-consumer-digest:
+    name: Skip consumer-only digest update
+    needs: resolve
+    if: needs.resolve.outputs.action == 'skip'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: echo 'Consumer-only Renovate digest update needs no tools image build.'

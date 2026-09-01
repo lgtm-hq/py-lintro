@@ -92,6 +92,67 @@ def test_non_clippy_versions_require_exact_match() -> None:
     assert_that(versions_match("ruff", "1.97.1", "1.97.0")).is_false()
 
 
+def test_version_mismatch_names_the_lagging_image_and_digest_bump(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A main failure points directly at the missing candidate digest pin."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="99.0.0",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 1.2.3", False),
+    )
+    monkeypatch.setenv(
+        "LINTRO_IMAGE_REF",
+        "ghcr.io/lgtm-hq/py-lintro:ci-123@sha256:" + "a" * 64,
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("digest-bump required")
+    assert_that(output).contains("git")
+    assert_that(output).contains("99.0.0")
+    assert_that(output).contains("ci-123@sha256:")
+
+
+def test_version_mismatch_names_manifest_bump_for_newer_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A newer image directs maintainers to bump the manifest."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="1.0.0",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 2.0.0", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("manifest bump required")
+    assert_that(output).contains("newer than the manifest")
+    assert_that(output).does_not_contain("digest-bump required")
+
+
 def test_parse_allow_missing_splits_and_dedupes() -> None:
     """--allow-missing values are comma-split, trimmed, and de-duplicated."""
     module = _load_verify_manifest_tools_module()

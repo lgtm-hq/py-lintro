@@ -9,7 +9,7 @@ name: Build - Lintro Tools Image
 # from then on (see renovate.json and issue #1360).
 #
 # Triggers:
-#   - push (main) / pull_request touching the tools Dockerfile, the pinned
+#   - pull_request touching the tools Dockerfile, the pinned
 #     tool versions, or the installer script. PR runs validate only (no push).
 #     Not a required check, so on.<event>.paths filtering is safe here (see
 #     docker-ci.yml header for the required-check deadlock caveat).
@@ -19,21 +19,6 @@ name: Build - Lintro Tools Image
 #     from a branch (e.g. seeding the first image before the FROM flip).
 
 'on':
-  push:
-    branches: [main]
-    paths:
-      - 'docker/tools.Dockerfile'
-      - '.github/workflows/docker-tools-publish.yml'
-      - 'lintro/_tool_versions.py'
-      - 'lintro/tools/manifest.src.json'
-      - 'lintro/_tool_packages.py'
-      - 'lintro_build/**'
-      - 'scripts/utils/install-tools.sh'
-      - 'scripts/utils/install-semgrep.sh'
-      - 'scripts/utils/utils.sh'
-      - 'package.json'
-      - 'pyproject.toml'
-      - 'requirements-semgrep.txt'
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -86,10 +71,9 @@ jobs:
       # Dockerfile).
       tags: latest
       push: >-
-        ${{ github.event_name != 'pull_request'
-        && (github.ref == 'refs/heads/main'
+        ${{ github.event_name == 'schedule'
         || (github.event_name == 'workflow_dispatch'
-        && inputs.force_publish == 'true')) }}
+        && inputs.force_publish == 'true') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       # Build-time RUN steps already verify every bundled tool; the smoke
