@@ -1414,6 +1414,14 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     )
 
 
+def test_auto_rerun_allows_three_reruns() -> None:
+    """Persistent runner-loss failures may receive up to three reruns (#2237)."""
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    rerun_inputs = workflow["jobs"]["rerun"]["with"]
+
+    assert_that(rerun_inputs["max-reruns"]).is_equal_to("3")
+
+
 _DELIBERATELY_UNWATCHED = frozenset(
     {
         # Mutate repository state (tags, release PRs) rather than reporting on
