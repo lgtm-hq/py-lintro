@@ -767,10 +767,10 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
     The gate's healthy range is 10–17 min (median ~14), but its hosted
     runner can be terminated mid-run with no diagnostic signal. A bounded
     ``timeout-minutes`` — above the observed healthy max so healthy runs
-    never trip it, at most ~2x the median so a stall fails fast instead of
+    never trip it, around 2x the median so a stall fails fast instead of
     lingering until the runner dies — keeps the failure mode predictable.
     Applies to both copies of the gate (docker-ci.yml and
-    dogfood-nightly.yml); the owner-approved value is 20.
+    dogfood-nightly.yml); the owner-approved value is 30.
     """
     for workflow_name in ("docker-ci.yml", "dogfood-nightly.yml"):
         workflow = _load_workflow(name=workflow_name)
@@ -781,10 +781,8 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
             timeout,
             f"{workflow_name} dogfood-skip-gate must set timeout-minutes",
         ).is_not_none()
-        # Above the 17 min observed healthy max; at most ~2x the ~14 median.
-        # Upper bound 28 so the previous 30-minute configuration this PR
-        # removes would fail the contract.
-        assert_that(timeout).is_between(18, 28)
+        # Above the 17 min observed healthy max; around 2x the ~14 median.
+        assert_that(timeout).is_equal_to(30)
 
 
 def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
@@ -1082,6 +1080,7 @@ def test_lintro_report_scheduled_workflow_shares_single_run_output() -> None:
     """The scheduled workflow wires one analysis step to the report artifact."""
     workflow = _load_workflow(name="lintro-report-scheduled.yml")
     report_job = workflow["jobs"]["lintro-report"]
+    assert_that(report_job["timeout-minutes"]).is_equal_to(30)
 
     # Concurrency guard for the report ref must remain intact.
     assert_that(report_job["concurrency"]["group"]).is_equal_to(

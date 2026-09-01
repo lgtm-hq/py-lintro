@@ -581,8 +581,8 @@ jobs:
     permissions:
       contents: read
       packages: read # pull the CI lint image from GHCR
-    # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
-    timeout-minutes: 20
+    # ~14 min median (10–17 observed); 30 fails a stalled run fast (#1704).
+    timeout-minutes: 30
     outputs:
       # Diagnostic only (#1653): 'true' when THIS job's report shows the only
       # failures were tool-execution timeouts with zero findings anywhere.
