@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.6] - 2026-09-01
+
+### Changed
+
+- **deps**: update dependency rust-lang/rust to 1.98.0 (minor) (#2137) (d131ed9)
+- **deps**: update test-tools to 4.1.11 (patch) (#2231) (350bf72)
+- **renovate**: couple rustfmt and clippy pins to the rustc toolchain (#2213) (56c7267)
+- **deps**: update dependency svelte to 5.56.10 (patch) (#2230) (41dcdda)
+- **deps**: update dependency oven-sh/bun to 1.4.0 (minor) (#2136) (052bba1)
+- **deps**: update dependency sharp to 0.35.4 (patch) (#2227) (62c1002)
+
+### Fixed
+
+- **deps**: pin Rust 1.98 tools image digest (#2235) (0d7443b)
+
 ## [0.137.5] - 2026-08-30
 
 ### Changed
