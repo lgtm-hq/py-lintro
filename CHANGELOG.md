@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.137.7] - 2026-09-02
+
+### Changed
+
+- **ci**: raise auto-rerun max-reruns for runner-loss failures (#2249) (04a63ca)
+
+### Fixed
+
+- **ci**: raise full-repo lint job timeout budgets before duration creep crosses 20
+  minutes (#2250) (03c275d)
+
 ## [0.137.6] - 2026-09-01
 
 ### Changed
