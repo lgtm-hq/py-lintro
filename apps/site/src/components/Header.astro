@@ -5,57 +5,131 @@ import SearchDropdown from './SearchDropdown.astro';
 import NavDropdown from './NavDropdown.astro';
 import { getCollection } from 'astro:content';
 import { buildMainNav } from '../data/docs-nav';
-import { external } from '../data/site-links';
+import { docs, docHref, external } from '../data/site-links';
 
 const base = import.meta.env.BASE_URL;
 const docsCollection = await getCollection('docs', ({ data }) => !data.draft);
 const nav = buildMainNav(base, docsCollection);
+const installHref = docHref(base, docs.gettingStarted);
 ---
 
 <header class="site-header" data-pagefind-ignore>
   <div class="header-inner">
-    <a href={base} class="logo-link">
-      <BrandLogo class="logo-text" />
+    <a href={base} class="logo-link" aria-label="Lintro home">
+      <BrandLogo />
     </a>
 
     <nav class="header-nav" aria-label="Main">
-      {nav.map((item) => (
-        <NavDropdown label={item.label} href={item.href} groups={item.groups} />
-      ))}
+      {
+        nav.map((item) =>
+          item.groups.length > 0 ? (
+            <NavDropdown label={item.label} href={item.href} groups={item.groups} />
+          ) : (
+            <a href={item.href} class="nav-link">
+              {item.label}
+            </a>
+          )
+        )
+      }
+      <a
+        href={external.github.href}
+        class="nav-link"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        GitHub
+      </a>
     </nav>
 
     <div class="header-controls">
       <SearchDropdown />
       <ThemeDropdown />
-      <a
-        href={external.github.href}
-        class="github-link"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="GitHub"
+      <a href={installHref} class="btn btn-primary btn-sm header-install">Install</a>
+      <button
+        type="button"
+        class="nav-toggle"
+        id="nav-toggle"
+        aria-label="Open navigation"
+        aria-expanded="false"
+        aria-controls="mobile-nav"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      </a>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      </button>
     </div>
   </div>
+
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Main (mobile)" hidden>
+    {
+      nav.map((item) => (
+        <div class="mobile-nav-section">
+          <a href={item.href} class="mobile-nav-link">
+            {item.label}
+          </a>
+          {item.groups.map((group) => (
+            <div class="mobile-nav-group">
+              <p class="mobile-nav-group-label">{group.label}</p>
+              {group.items.map((entry) => (
+                <a href={entry.href} class="mobile-nav-item">
+                  {entry.label}
+                </a>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))
+    }
+    <div class="mobile-nav-section">
+      <a href={external.github.href} class="mobile-nav-link" target="_blank" rel="noopener noreferrer">
+        GitHub
+      </a>
+      <a href={installHref} class="btn btn-primary">Install</a>
+    </div>
+  </nav>
 </header>
+
+<script>
+  function initMobileNav(): void {
+    const toggle = document.getElementById('nav-toggle');
+    const panel = document.getElementById('mobile-nav');
+    if (!toggle || !panel || toggle.dataset.bound === 'true') return;
+    toggle.dataset.bound = 'true';
+
+    const setOpen = (open: boolean): void => {
+      panel.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+    };
+
+    toggle.addEventListener('click', () => setOpen(panel.hidden === true));
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !panel.hidden) {
+        setOpen(false);
+        toggle.focus();
+      }
+    });
+  }
+
+  initMobileNav();
+  document.addEventListener('astro:page-load', initMobileNav);
+</script>
 
 <style>
   .site-header {
     position: sticky;
     top: 0;
     z-index: 100;
-    height: var(--header-height);
-    border-bottom: 1px solid color-mix(in srgb, var(--site-accent, var(--lintro-accent)) 20%, var(--turbo-border-default));
-    background: color-mix(in srgb, var(--turbo-bg-base) 92%, transparent);
+    border-bottom: 1px solid var(--wb-hair);
+    background: color-mix(in srgb, var(--wb-ground) 88%, transparent);
     backdrop-filter: blur(10px);
   }
 
   .header-inner {
     max-width: var(--max-width);
     margin: 0 auto;
-    padding: 0 1.5rem;
-    height: 100%;
+    padding: 0 24px;
+    height: var(--header-height);
     display: flex;
     align-items: center;
     gap: 1.5rem;
@@ -64,18 +138,12 @@ const nav = buildMainNav(base, docsCollection);
   .logo-link {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    color: var(--site-accent, var(--lintro-accent));
     text-decoration: none;
     flex-shrink: 0;
-    font-weight: 600;
   }
-  .logo-link:hover { text-decoration: none; color: var(--site-accent, var(--lintro-accent)); }
 
-  .logo-text {
-    font-family: var(--font-mono);
-    font-size: 0.95rem;
-    font-weight: 600;
+  .logo-link:hover {
+    text-decoration: none;
   }
 
   .header-nav {
@@ -86,37 +154,102 @@ const nav = buildMainNav(base, docsCollection);
   }
 
   .header-nav :global(.nav-link) {
-    padding: 0.4rem 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.7rem;
     border-radius: var(--radius);
-    font-size: 0.85rem;
-    color: var(--turbo-body-secondary, var(--turbo-text-secondary));
+    font-size: 0.925rem;
+    font-weight: 500;
+    color: var(--wb-muted);
     text-decoration: none;
-    text-transform: lowercase;
-    transition: color var(--transition-fast), background var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .header-nav :global(.nav-link:hover),
   .header-nav :global(.nav-dropdown.is-open .nav-link) {
-    background: var(--turbo-dropdown-item-hover, var(--turbo-bg-overlay));
-    color: var(--site-accent-light, var(--lintro-accent-light));
+    background: var(--wb-surface-2);
+    color: var(--wb-ink);
     text-decoration: none;
   }
 
   .header-controls {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.6rem;
   }
 
-  .github-link {
-    display: flex;
-    padding: 0.4rem;
-    color: var(--turbo-text-muted, var(--turbo-text-secondary));
-    border-radius: var(--radius);
+  .nav-toggle {
+    display: none;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--radius-md);
+    background: var(--wb-surface);
+    color: var(--wb-ink);
   }
-  .github-link:hover { color: var(--site-accent); background: var(--turbo-bg-overlay); }
 
-  @media (max-width: 768px) {
-    .header-nav { display: none; }
+  .mobile-nav {
+    display: grid;
+    gap: 1.25rem;
+    padding: 1rem 24px 1.5rem;
+    border-top: 1px solid var(--wb-hair);
+    background: var(--wb-surface);
+    max-height: calc(100dvh - var(--header-height));
+    overflow-y: auto;
+  }
+
+  .mobile-nav[hidden] {
+    display: none;
+  }
+
+  .mobile-nav-section {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .mobile-nav-link {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--wb-navy);
+    text-decoration: none;
+  }
+
+  .mobile-nav-group {
+    display: grid;
+    gap: 0.2rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--wb-hair);
+  }
+
+  .mobile-nav-group-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wb-muted);
+    margin: 0.35rem 0 0.1rem;
+  }
+
+  .mobile-nav-item {
+    color: var(--wb-ink);
+    font-size: 0.925rem;
+    text-decoration: none;
+    padding: 0.2rem 0;
+  }
+
+  @media (max-width: 900px) {
+    .header-nav,
+    .header-install {
+      display: none;
+    }
+
+    .nav-toggle {
+      display: inline-flex;
+    }
   }
 </style>

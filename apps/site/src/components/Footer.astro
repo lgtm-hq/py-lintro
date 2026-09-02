@@ -1,72 +1,199 @@
 ---
 import BrandLogo from './BrandLogo.astro';
-import { docs, external } from '../data/site-links';
+import { docs, docHref, external } from '../data/site-links';
 
 const base = import.meta.env.BASE_URL;
 const year = new Date().getFullYear();
+
+const columns = [
+  {
+    title: 'Docs',
+    links: [
+      { label: 'Getting started', href: docHref(base, docs.gettingStarted) },
+      { label: 'Configuration', href: docHref(base, docs.configuration) },
+      { label: 'AI features', href: docHref(base, docs.aiFeatures) },
+      { label: 'Tool catalog', href: docHref(base, docs.toolsIndex) },
+      { label: 'All documentation', href: docHref(base, docs.hub) },
+    ],
+  },
+  {
+    title: 'Install',
+    links: [
+      { label: 'PyPI', href: external.pypi.href, external: true },
+      { label: 'npm', href: external.npm.href, external: true },
+      { label: 'Docker image', href: external.docker.href, external: true },
+      { label: 'Homebrew tap', href: 'https://github.com/lgtm-hq/homebrew-tap', external: true },
+    ],
+  },
+  {
+    title: 'Project',
+    links: [
+      { label: 'GitHub', href: external.github.href, external: true },
+      { label: 'Issues', href: `${external.github.href}/issues`, external: true },
+      { label: 'Releases', href: `${external.github.href}/releases`, external: true },
+      { label: 'Coverage report', href: docHref(base, docs.coverage) },
+      { label: 'Security', href: docHref(base, docs.security) },
+    ],
+  },
+];
+
+const trust = [
+  { label: 'OpenSSF Scorecard', href: 'https://scorecard.dev/viewer/?uri=github.com/lgtm-hq/py-lintro' },
+  { label: 'OpenSSF Best Practices', href: 'https://www.bestpractices.dev/projects/11142' },
+  { label: 'CodeQL', href: `${external.github.href}/actions/workflows/codeql.yml` },
+  { label: 'CycloneDX SBOM', href: `${external.github.href}/actions/workflows/sbom-on-main.yml` },
+  { label: 'Codecov', href: external.codecov.href },
+];
 ---
 
 <footer class="site-footer" data-pagefind-ignore>
   <div class="footer-inner">
     <div class="footer-grid">
-      <div>
-        <BrandLogo class="footer-brand" as="strong" />
-        <p class="footer-tagline">// unified lint · format · test</p>
+      <div class="footer-brand">
+        <BrandLogo as="strong" />
+        <p class="footer-tagline">
+          One CLI for every linter, formatter, type checker and security scanner in your stack.
+        </p>
+        <ul class="footer-trust" aria-label="Trust and supply-chain signals">
+          {
+            trust.map((item) => (
+              <li>
+                <a href={item.href} target="_blank" rel="noopener noreferrer">
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
       </div>
-      <div class="footer-col">
-        <h4>// docs</h4>
-        <a href={`${base}${docs.gettingStarted}`}>getting-started</a>
-        <a href={`${base}${docs.configuration}`}>configuration</a>
-        <a href={`${base}${docs.toolsIndex}`}>tools</a>
-        <a href={`${base}${docs.coverage}`}>coverage</a>
-      </div>
-      <div class="footer-col">
-        <h4>// links</h4>
-        <a href={external.github.href} target="_blank" rel="noopener noreferrer">github</a>
-        <a href={`${external.github.href}/issues`} target="_blank" rel="noopener noreferrer">issues</a>
-        <a href={`${external.pypi.href}`} target="_blank" rel="noopener noreferrer">pypi</a>
-      </div>
+      {
+        columns.map((column) => (
+          <div class="footer-col">
+            <h4>{column.title}</h4>
+            {column.links.map((link) => (
+              <a
+                href={link.href}
+                target={link.external ? '_blank' : undefined}
+                rel={link.external ? 'noopener noreferrer' : undefined}
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+        ))
+      }
     </div>
-    <p class="footer-bottom">MIT © {year} lintro</p>
+    <p class="footer-bottom">
+      <span>MIT License © {year} lgtm-hq</span>
+      <span>Lintro lints, formats and reviews its own repository on every pull request.</span>
+    </p>
   </div>
 </footer>
 
 <style>
   .site-footer {
-    border-top: 1px solid color-mix(in srgb, var(--site-accent, var(--lintro-accent)) 15%, var(--turbo-border-default));
-    background: color-mix(in srgb, var(--turbo-bg-surface) 90%, var(--site-accent, var(--lintro-accent)) 10%);
-    padding: 3rem 0 1.5rem;
-    margin-top: 4rem;
+    border-top: 1px solid var(--wb-hair);
+    background: var(--wb-surface);
+    padding: 48px 0 32px;
+    margin-top: 72px;
+    color: var(--wb-muted);
+    font-size: 0.875rem;
   }
-  .footer-inner { max-width: var(--max-width); margin: 0 auto; padding: 0 1.5rem; }
-  .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2rem; }
+
+  .footer-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 2fr repeat(3, 1fr);
+    gap: 2rem;
+  }
+
   .footer-brand {
-    font-size: 0.95rem;
+    display: grid;
+    gap: 0.75rem;
+    align-content: start;
   }
-  .footer-tagline { color: var(--turbo-text-muted, var(--turbo-text-secondary)); margin-top: 0.5rem; font-size: 0.8rem; }
-  .footer-col { display: flex; flex-direction: column; gap: 0.4rem; }
+
+  .footer-tagline {
+    max-width: 34ch;
+    line-height: 1.5;
+  }
+
+  .footer-trust {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 0.25rem;
+  }
+
+  .footer-trust a {
+    display: inline-block;
+    padding: 2px 9px;
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    color: var(--wb-muted);
+    text-decoration: none;
+  }
+
+  .footer-trust a:hover {
+    border-color: var(--wb-accent);
+    color: var(--wb-ink);
+  }
+
+  .footer-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
   .footer-col h4 {
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    text-transform: lowercase;
-    letter-spacing: 0.06em;
-    color: #4a6a4a;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wb-muted);
     margin-bottom: 0.25rem;
   }
+
   .footer-col a {
-    color: var(--turbo-text-muted, var(--turbo-text-secondary));
-    font-size: 0.8rem;
+    color: var(--wb-ink);
     text-decoration: none;
-    text-transform: lowercase;
   }
-  .footer-col a:hover { color: var(--site-accent, var(--lintro-accent)); }
+
+  .footer-col a:hover {
+    text-decoration: underline;
+  }
+
   .footer-bottom {
-    margin-top: 2rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--turbo-border-default);
-    font-size: 0.75rem;
-    color: #4a6a4a;
-    text-transform: lowercase;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 1.5rem;
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--wb-hair);
+    font-size: 0.8rem;
   }
-  @media (max-width: 768px) { .footer-grid { grid-template-columns: 1fr; } }
+
+  @media (max-width: 900px) {
+    .footer-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .footer-brand {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .footer-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
