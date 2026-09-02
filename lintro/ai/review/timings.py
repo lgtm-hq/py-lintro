@@ -36,9 +36,10 @@ __all__ = [
 class ReviewPhase(StrEnum):
     """Stable phase identifiers recorded during a review run.
 
-    ``validation`` covers the post-merge work that decides what survives:
-    context-finding rejection, coverage and resume bookkeeping, and flag
-    reconciliation, through to the assembled result.
+    ``validation`` is the post-merge tail: provider session teardown and
+    progress callbacks, then the work that decides what survives
+    (context-finding rejection, coverage and resume bookkeeping, flag
+    reconciliation), through to the assembled result.
 
     ``provider`` is an envelope: it spans the whole chunk fan-out, including
     the per-chunk ``generated_questions`` (depth >= 2) and ``adversarial``

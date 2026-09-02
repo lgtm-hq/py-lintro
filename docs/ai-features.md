@@ -403,8 +403,10 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
-- `validation` is the post-merge pass that decides what survives: context-finding
-  rejection, coverage and resume bookkeeping, and flag reconciliation.
+- `validation` is the post-merge tail of the run: provider session teardown and progress
+  callbacks, then the pass that decides what survives (context-finding rejection,
+  coverage and resume bookkeeping, flag reconciliation). A slow session close therefore
+  shows up here rather than only in the total.
 - `metadata.duration_seconds` now equals `total_seconds`: it includes the caller's
   context collection and the validation pass, where it previously started just before
   the provider calls. Consumers comparing durations across versions should expect the

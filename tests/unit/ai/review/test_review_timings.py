@@ -146,6 +146,7 @@ def _run(
     call_delay: float = 0.0,
     stop_on_first_call: bool = False,
     stop_during_first_call: bool = False,
+    max_cost_usd: float | None = None,
 ) -> ReviewResult:
     """Run a review with the provider call stubbed out.
 
@@ -160,12 +161,23 @@ def _run(
             cost-cap stop so the remaining queued chunks are cancelled.
         stop_during_first_call: When True, the injected SIGTERM stop event
             is set while the first provider call is sleeping.
+        max_cost_usd: Optional spend cap; the orchestrator serializes chunk
+            calls whenever one is set.
 
     Returns:
         The completed review result.
     """
     provider = _provider()
     stop = asyncio.Event()
+    ai_config = AIConfig(
+        enabled=True,
+        transport=AITransport.API,
+        max_cost_usd=max_cost_usd,
+    )
+    if max_parallel_calls is not None:
+        ai_config = ai_config.model_copy(
+            update={"max_parallel_calls": max_parallel_calls},
+        )
 
     async def _call(*, provider: MagicMock, **kwargs: Any) -> AIResponse:
         """Return the canned response after an optional delay.
@@ -200,15 +212,7 @@ def _run(
         return run_review(
             _context(tmp_path=tmp_path, count=chunk_count),
             provider=provider,
-            ai_config=(
-                AIConfig(enabled=True, transport=AITransport.API)
-                if max_parallel_calls is None
-                else AIConfig(
-                    enabled=True,
-                    transport=AITransport.API,
-                    max_parallel_calls=max_parallel_calls,
-                )
-            ),
+            ai_config=ai_config,
             depth=depth,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -635,6 +639,51 @@ def test_depth_two_adds_a_distinct_generated_questions_span(tmp_path: Path) -> N
     assert_that(deep_spans).contains_key("generated_questions", "provider")
     # One occurrence per chunk, folded into a single span.
     assert_that(deep_spans["generated_questions"].occurrences).is_equal_to(2)
+
+
+def test_generated_questions_span_is_a_strict_part_of_provider(
+    tmp_path: Path,
+) -> None:
+    """The question span covers one call, the provider envelope covers both.
+
+    With a single chunk at depth 2 the provider envelope spans the question
+    call and the main review call back to back, so the nested span must be
+    at least one stubbed call long and strictly shorter than the envelope.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    result = _run(tmp_path=tmp_path, chunk_count=1, depth=2, call_delay=0.02)
+
+    timings = _timings_of(result=result)
+    questions = timings.phase_seconds(name="generated_questions")
+    provider = timings.phase_seconds(name="provider")
+    assert_that(questions).is_greater_than_or_equal_to(0.02)
+    assert_that(provider).is_greater_than_or_equal_to(0.04)
+    assert_that(questions).is_less_than(provider)
+
+
+def test_cost_cap_serializes_chunks_and_reports_it(tmp_path: Path) -> None:
+    """A spend cap forces one slot even when the config allows more.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    result = _run(
+        tmp_path=tmp_path,
+        chunk_count=3,
+        call_delay=0.02,
+        max_cost_usd=100.0,
+    )
+
+    timings = _timings_of(result=result)
+    assert_that(AIConfig(enabled=True).max_parallel_calls).is_greater_than(1)
+    assert_that(timings.max_parallel).is_equal_to(1)
+    # With one slot, the fan-out is serialized: at least one chunk waited a
+    # full call behind another.
+    assert_that(
+        max(chunk.queued_seconds for chunk in timings.chunks),
+    ).is_greater_than_or_equal_to(0.02)
 
 
 def test_depth_three_adds_a_distinct_adversarial_span(tmp_path: Path) -> None:
