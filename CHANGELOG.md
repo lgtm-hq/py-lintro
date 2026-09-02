@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.139.0] - 2026-09-02
+
+### Added
+
+- **ai**: add per-phase timing instrumentation to lintro review (#2255) (58488b5)
+
 ## [0.138.1] - 2026-09-02
 
 ### Fixed
