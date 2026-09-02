@@ -19,6 +19,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **docs**: sync pre-commit `rev:` pins and close other audit-drift gaps (#1329)
+
 ### Security
 
 ## [0.137.6] - 2026-09-01

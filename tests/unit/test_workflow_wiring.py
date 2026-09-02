@@ -234,16 +234,21 @@ def test_release_workflows_use_paired_egress_presets() -> None:
 
 
 def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
-    """Version-PR workflow finalizes CHANGELOG and SECURITY.md via a repo script."""
+    """Version-PR workflow finalizes CHANGELOG, SECURITY.md, and release docs."""
     version_pr = _load_workflow(name="release-version-pr.yml")
 
     script = version_pr["jobs"]["version-pr"]["with"]["version-update-script"]
     assert_that(script).is_equal_to("scripts/ci/finalize-version-pr.py")
     assert_that((_REPO_ROOT / script).is_file()).is_true()
-    # The finalizer orchestrates the changelog and security-table scripts.
+    finalizer = (_REPO_ROOT / script).read_text(encoding="utf-8")
+    assert_that(finalizer).contains('release_docs = _load("sync_release_docs"')
+    assert_that(finalizer).contains("release_docs.main([])")
     assert_that((_REPO_ROOT / "scripts/ci/format-changelog.py").is_file()).is_true()
     assert_that(
         (_REPO_ROOT / "scripts/ci/update-security-support.py").is_file(),
+    ).is_true()
+    assert_that(
+        (_REPO_ROOT / "scripts/ci/sync-release-docs.py").is_file(),
     ).is_true()
 
 
@@ -1580,8 +1585,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                     continue
                 if with_block.get("ref") != canonical:
                     offenders.append(
-                        f"{path.name}:{job_id}: checkout ref "
-                        f"{with_block.get('ref')!r}",
+                        f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
 
     assert_that(offenders).is_empty()
