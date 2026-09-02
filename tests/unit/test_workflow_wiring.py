@@ -761,6 +761,42 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
+    """Full-repo skip checks wait for retry and consume its final report."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+
+    assert_that(gate["needs"]).contains(
+        "changes",
+        "docker-build",
+        "dogfooding-lint",
+        "dogfooding-lint-changed",
+        "dogfooding_lint_retry",
+    )
+
+    download = next(
+        step
+        for step in gate["steps"]
+        if step.get("name") == "Download authoritative lint JSON report"
+    )
+    assert_that(download["if"]).contains(
+        "needs.changes.outputs.lint-scope != 'changed'",
+    )
+    assert_that(download["uses"]).contains(
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    )
+    assert_that(download["with"]).is_equal_to(
+        {"name": "linting-json-report", "path": ".lintro/artifacts/json"},
+    )
+
+    check = next(step for step in gate["steps"] if step.get("id") == "skips")
+    report_expr = _normalize_github_expr(check["env"]["REPORT_JSON"])
+    assert_that(report_expr).contains(
+        "needs.changes.outputs.lint-scope != 'changed'",
+    )
+    assert_that(report_expr).contains(".lintro/artifacts/json/results.json")
+
+
 def test_dogfood_skip_gate_has_bounded_timeout() -> None:
     """The no-silent-skip gate must fail predictably on a stall (#1704).
 
