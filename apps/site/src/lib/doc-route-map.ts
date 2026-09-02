@@ -7,7 +7,7 @@ import { sourceToDoc } from '../generated/docs-route-map';
  * Docs markdown is written against the repo-root docs/ tree, but the migration
  * (scripts/ci/site/migrate-docs-content.py) renames and re-categorizes files
  * (e.g. architecture/ARCHITECTURE.md → architecture/architecture,
- * configuration.md → usage/configuration). This module resolves the authored
+ * configuration.md → guides/configuration). This module resolves the authored
  * `.md` hrefs to final `/docs/<id>/` routes using the generated source→doc map.
  */
 
@@ -23,7 +23,8 @@ export function sourceForDocId(
   map: Record<string, string> = sourceToDoc
 ): string | undefined {
   const docToSource = map === sourceToDoc ? defaultDocToSource : invertMap(map);
-  return docToSource[docId];
+  // Astro flattens `<dir>/index` ids to `<dir>`; accept either spelling.
+  return docToSource[docId] ?? docToSource[`${docId}/index`];
 }
 
 /**
@@ -31,7 +32,7 @@ export function sourceForDocId(
  *
  * Handles `.md` file links and directory links (`tool-analysis/`), which by
  * markdown convention target that directory's README. Returns a base-relative
- * route like `docs/usage/configuration/#hash`, or null when the href is
+ * route like `docs/guides/configuration/#hash`, or null when the href is
  * external, not a docs link, or does not point at a migrated doc (callers
  * should drop such links rather than emit them).
  */
@@ -50,7 +51,7 @@ export function routeForDocHref(
   const hash = hashIndex === -1 ? '' : trimmed.slice(hashIndex);
 
   const isMarkdownLink = /\.md$/i.test(pathPart);
-  const isDirectoryLink = pathPart.endsWith('/');
+  const isDirectoryLink = pathPart.endsWith('/') || pathPart === '.' || pathPart === '..';
   if (!isMarkdownLink && !isDirectoryLink) {
     return null;
   }
@@ -66,11 +67,12 @@ export function routeForDocHref(
     const dir = source.includes('/') ? source.slice(0, source.lastIndexOf('/')) : '';
     sourceRel = normalizeDocPath(dir ? `${dir}/${pathPart}` : pathPart);
   }
-  if (!sourceRel) {
+  if (!sourceRel && isMarkdownLink) {
     return null;
   }
 
-  const docId = map[isMarkdownLink ? sourceRel : `${sourceRel}/README.md`];
+  const readme = sourceRel ? `${sourceRel}/README.md` : 'README.md';
+  const docId = map[isMarkdownLink ? sourceRel : readme];
   if (!docId) {
     return null;
   }

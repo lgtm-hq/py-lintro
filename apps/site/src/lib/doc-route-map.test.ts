@@ -31,6 +31,13 @@ describe('routeForDocHref', () => {
     );
   });
 
+  it('resolves a bare directory link to the docs root README', () => {
+    expect(routeForDocHref('./', 'usage/docker', fixtureMap)).toBe('docs/getting-started/hub/');
+    expect(routeForDocHref('../', 'architecture/overview', fixtureMap)).toBe(
+      'docs/getting-started/hub/'
+    );
+  });
+
   it('resolves parent-relative links from nested sources', () => {
     expect(routeForDocHref('../configuration.md', 'architecture/overview', fixtureMap)).toBe(
       'docs/usage/configuration/'
@@ -78,17 +85,46 @@ describe('routeForDocHref', () => {
   });
 
   it('resolves real cross-links against the generated map', () => {
-    expect(routeForDocHref('./ARCHITECTURE.md', 'architecture/overview', sourceToDoc)).toBe(
-      'docs/architecture/architecture/'
+    expect(routeForDocHref('./ARCHITECTURE.md', 'project', sourceToDoc)).toBe(
+      'docs/project/architecture/'
     );
-    expect(routeForDocHref('../contributing.md', 'architecture/roadmap', sourceToDoc)).toBe(
-      'docs/contributing/contributing/'
+    expect(routeForDocHref('../contributing.md', 'project/roadmap', sourceToDoc)).toBe(
+      'docs/contribute/'
     );
     expect(routeForDocHref('./yamllint-analysis.md', 'tools/index', sourceToDoc)).toBe(
       'docs/tools/yamllint/'
     );
-    expect(routeForDocHref('architecture/VISION.md', 'getting-started/hub', sourceToDoc)).toBe(
-      'docs/architecture/vision/'
+    expect(routeForDocHref('architecture/VISION.md', 'start/overview', sourceToDoc)).toBe(
+      'docs/project/vision/'
     );
+    expect(routeForDocHref('mcp.md', 'start/overview', sourceToDoc)).toBe('docs/ai/mcp/');
+    expect(routeForDocHref('adr/', 'start/overview', sourceToDoc)).toBe('docs/project/adr/');
+    expect(
+      routeForDocHref('./0001-native-parser-per-tool.md', 'project/adr/index', sourceToDoc)
+    ).toBe('docs/project/adr/0001-native-parser-per-tool/');
+  });
+});
+
+describe('generated route map coverage', () => {
+  it('publishes every markdown file under docs/ except the ADR template', async () => {
+    const { readdirSync } = await import('node:fs');
+    const { join, relative, sep } = await import('node:path');
+    const docsRoot = join(import.meta.dirname, '..', '..', '..', '..', 'docs');
+
+    function walk(dir: string): string[] {
+      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          return walk(full);
+        }
+        return entry.name.endsWith('.md') ? [relative(docsRoot, full).split(sep).join('/')] : [];
+      });
+    }
+
+    const sources = walk(docsRoot).filter((path) => path !== 'adr/template.md');
+    expect(sources.length).toBeGreaterThan(60);
+    for (const source of sources) {
+      expect(sourceToDoc[source], `${source} is not published`).toBeDefined();
+    }
   });
 });

@@ -1,59 +1,82 @@
-import { SECTION_OVERVIEW_ID, type DocCategory } from './docs-nav';
+import { type DocCategory, isSectionOverview } from './docs-nav';
 
+/** Sidebar group order inside each section. */
 export const SECTION_GROUP_ORDER: Partial<Record<DocCategory, readonly string[]>> = {
-  'getting-started': ['start'],
-  usage: ['setup', 'ci', 'extend'],
-  tools: ['python', 'js-ts', 'rust', 'go', 'frameworks', 'config', 'ci-ops', 'security'],
-  architecture: ['design'],
-  security: ['policy'],
-  contributing: ['standards', 'meta'],
+  start: ['start', 'evaluate'],
+  guides: ['setup', 'ci', 'distribute', 'debug'],
+  ai: ['features', 'review', 'agents', 'internals'],
+  tools: ['python', 'js-ts', 'rust', 'go', 'frameworks', 'docs', 'config', 'ci-ops', 'security'],
+  contribute: ['develop', 'standards', 'practices'],
+  project: ['architecture', 'decisions', 'design', 'security'],
 };
 
 export const SECTION_GROUP_LABELS: Partial<Record<DocCategory, Record<string, string>>> = {
-  'getting-started': { start: 'start here' },
-  usage: {
-    setup: 'setup',
-    ci: 'ci',
-    extend: 'debug',
+  start: { start: 'Start here', evaluate: 'Evaluate' },
+  guides: {
+    setup: 'Setup',
+    ci: 'Run in CI',
+    distribute: 'Distribute',
+    debug: 'Debug',
+  },
+  ai: {
+    features: 'Features',
+    review: 'Code review',
+    agents: 'Agents',
+    internals: 'Internals',
   },
   tools: {
-    python: 'python',
-    'js-ts': 'js / ts',
-    rust: 'rust',
-    go: 'go',
-    frameworks: 'frameworks',
-    config: 'config',
-    'ci-ops': 'ci & ops',
-    security: 'security',
+    python: 'Python',
+    'js-ts': 'JavaScript & CSS',
+    rust: 'Rust',
+    go: 'Go',
+    frameworks: 'Frameworks',
+    docs: 'Docs & prose',
+    config: 'Config & schemas',
+    'ci-ops': 'CI & containers',
+    security: 'Security',
   },
-  architecture: { design: 'design' },
-  security: { policy: 'policy' },
-  contributing: {
-    standards: 'standards',
-    meta: 'practices',
+  contribute: {
+    develop: 'Develop',
+    standards: 'Standards',
+    practices: 'Practices',
+  },
+  project: {
+    architecture: 'Architecture',
+    decisions: 'Decision records',
+    design: 'Design notes',
+    security: 'Security',
   },
 };
 
 /** Fallback nav groups by doc id when frontmatter omits navGroup. */
 export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
-  'getting-started/getting-started': 'start',
-  'usage/configuration': 'setup',
-  'usage/docker': 'setup',
-  'usage/github-integration': 'ci',
-  'usage/ai-features': 'extend',
-  'usage/ai-review-transports': 'extend',
-  'usage/troubleshooting': 'extend',
-  'usage/debugging': 'extend',
-  'usage/plugins': 'extend',
+  'start/getting-started': 'start',
+  'start/comparison': 'evaluate',
+  'guides/configuration': 'setup',
+  'guides/watch-mode': 'setup',
+  'guides/docker': 'setup',
+  'guides/pre-commit': 'ci',
+  'guides/github-integration': 'ci',
+  'guides/npm-distribution': 'distribute',
+  'guides/library-api': 'distribute',
+  'guides/troubleshooting': 'debug',
+  'guides/debugging': 'debug',
+  'ai/ai-features': 'features',
+  'ai/review-transports': 'review',
+  'ai/review-report': 'review',
+  'ai/mcp': 'agents',
+  'ai/review-execution': 'internals',
   'tools/ruff': 'python',
   'tools/black': 'python',
   'tools/mypy': 'python',
   'tools/bandit': 'python',
   'tools/pydoclint': 'python',
   'tools/pytest': 'python',
+  'tools/idiom-review': 'python',
   'tools/prettier': 'js-ts',
   'tools/tsc': 'js-ts',
   'tools/oxc': 'js-ts',
+  'tools/stylelint': 'js-ts',
   'tools/clippy': 'rust',
   'tools/cargo-deny': 'rust',
   'tools/golangci-lint': 'go',
@@ -61,25 +84,33 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/svelte-check': 'frameworks',
   'tools/vue-tsc': 'frameworks',
   'tools/html-validate': 'frameworks',
+  'tools/markdownlint': 'docs',
+  'tools/vale': 'docs',
+  'tools/typos': 'docs',
   'tools/yamllint': 'config',
-  'tools/markdownlint': 'config',
   'tools/buf': 'config',
-  'tools/typos': 'config',
   'tools/spectral': 'config',
+  'tools/dotenv-linter': 'config',
   'tools/actionlint': 'ci-ops',
   'tools/hadolint': 'ci-ops',
-  'tools/idiom-review': 'python',
+  'tools/commitlint': 'ci-ops',
   'tools/osv-scanner': 'security',
   'tools/pip-audit': 'security',
   'tools/trufflehog': 'security',
-  'architecture/architecture': 'design',
-  'architecture/vision': 'design',
-  'architecture/roadmap': 'design',
-  'security/requirements': 'policy',
-  'security/assurance': 'policy',
-  'contributing/style-guide': 'standards',
-  'contributing/shell-script-style-guide': 'standards',
-  'contributing/lintro-self-use': 'meta',
+  'contribute/adding-a-new-tool': 'develop',
+  'contribute/testing': 'develop',
+  'contribute/plugins': 'develop',
+  'contribute/style-guide': 'standards',
+  'contribute/shell-script-style-guide': 'standards',
+  'contribute/self-use': 'practices',
+  'project/architecture': 'architecture',
+  'project/vision': 'architecture',
+  'project/roadmap': 'architecture',
+  'project/adr': 'decisions',
+  'project/design': 'design',
+  'project/security': 'security',
+  'project/security/assurance': 'security',
+  'project/security/requirements': 'security',
 };
 
 export interface SidebarNavDoc {
@@ -92,10 +123,10 @@ export interface SidebarNavDoc {
   };
 }
 
-export interface SidebarNavGroup {
+export interface SidebarNavGroup<T extends SidebarNavDoc = SidebarNavDoc> {
   key: string;
   label: string;
-  docs: SidebarNavDoc[];
+  docs: T[];
 }
 
 export function sidebarLabel(doc: SidebarNavDoc): string {
@@ -106,23 +137,24 @@ export function resolveNavGroup(doc: SidebarNavDoc): string | undefined {
   if (doc.data.navGroup) {
     return doc.data.navGroup;
   }
-  return NAV_GROUP_BY_ID[doc.id];
+  if (NAV_GROUP_BY_ID[doc.id]) {
+    return NAV_GROUP_BY_ID[doc.id];
+  }
+  // Nested ids (project/adr/0001-…) inherit their parent directory's group.
+  const parent = doc.id.includes('/') ? doc.id.slice(0, doc.id.lastIndexOf('/')) : undefined;
+  return parent ? NAV_GROUP_BY_ID[parent] : undefined;
 }
 
-export function sectionOverviewId(category: DocCategory): string {
-  return SECTION_OVERVIEW_ID[category];
-}
-
-export function groupSectionDocs(
+/** Group a section's pages for the sidebar, excluding the section landing page. */
+export function groupSectionDocs<T extends SidebarNavDoc>(
   category: DocCategory,
-  docs: SidebarNavDoc[]
-): { groups: SidebarNavGroup[] } {
-  const overviewId = SECTION_OVERVIEW_ID[category];
+  docs: T[]
+): { groups: SidebarNavGroup<T>[] } {
   const groupOrder = SECTION_GROUP_ORDER[category] ?? [];
   const groupLabels = SECTION_GROUP_LABELS[category] ?? {};
 
-  const pages = docs.filter((d) => d.id !== overviewId);
-  const byGroup = new Map<string, SidebarNavDoc[]>();
+  const pages = docs.filter((d) => !isSectionOverview(d.id, category));
+  const byGroup = new Map<string, T[]>();
 
   for (const doc of pages) {
     const group = resolveNavGroup(doc) ?? 'other';
@@ -139,11 +171,41 @@ export function groupSectionDocs(
         ]
       : [...byGroup.keys()].sort();
 
-  const groups: SidebarNavGroup[] = orderedKeys.map((key) => ({
+  const groups: SidebarNavGroup<T>[] = orderedKeys.map((key) => ({
     key,
     label: groupLabels[key] ?? key,
     docs: (byGroup.get(key) ?? []).sort((a, b) => a.data.order - b.data.order),
   }));
 
   return { groups };
+}
+
+/** Reading order for a section: landing page first, then groups in sidebar order. */
+export function flattenSectionDocs<T extends SidebarNavDoc>(category: DocCategory, docs: T[]): T[] {
+  const overview = docs.find((d) => isSectionOverview(d.id, category));
+  const { groups } = groupSectionDocs(category, docs);
+  const ordered = groups.flatMap((group) => group.docs);
+  return overview ? [overview, ...ordered] : ordered;
+}
+
+export interface PrevNext<T extends SidebarNavDoc> {
+  prev?: T;
+  next?: T;
+}
+
+/** Previous and next pages for `currentId` within a section's reading order. */
+export function prevNextDocs<T extends SidebarNavDoc>(
+  category: DocCategory,
+  docs: T[],
+  currentId: string
+): PrevNext<T> {
+  const ordered = flattenSectionDocs(category, docs);
+  const index = ordered.findIndex((d) => d.id === currentId);
+  if (index === -1) {
+    return {};
+  }
+  return {
+    prev: index > 0 ? ordered[index - 1] : undefined,
+    next: index < ordered.length - 1 ? ordered[index + 1] : undefined,
+  };
 }
