@@ -46,6 +46,12 @@ name: CI - Docker
 # it, plus merge_group and main pushes, keep the full-repo run
 # (dogfooding-lint). A nightly full-repo backstop lives in
 # dogfood-nightly.yml.
+#
+# Concurrency (#2241): main pushes use GitHub's multi-pending queue so a
+# later merge cannot displace a run that is waiting for this slow pipeline.
+# Other refs retain the default single-pending queue and cancel the in-progress
+# superseded run. The queue expression uses GitHub's documented `single` value;
+# `latest` is not a valid queue value.
 
 'on':
   push:
@@ -61,6 +67,7 @@ permissions: {}
 
 concurrency:
   group: docker-ci-${{ github.ref }}
+  queue: ${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -239,7 +246,7 @@ jobs:
         shell: bash
     concurrency:
       group: docker-build-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     outputs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
     steps:

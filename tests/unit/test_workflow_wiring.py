@@ -2342,6 +2342,30 @@ _REF_KEYED_PUSH_GROUP_EXEMPTIONS: dict[str, str] = {
 }
 
 
+def test_docker_ci_queues_main_without_changing_pr_supersession() -> None:
+    """Docker CI must retain main runs while PR pushes supersede stale work."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    workflow_concurrency = docker_ci["concurrency"]
+    assert_that(workflow_concurrency["group"]).is_equal_to(
+        "docker-ci-${{ github.ref }}",
+    )
+    assert_that(_normalize_github_expr(workflow_concurrency["queue"])).is_equal_to(
+        "${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}",
+    )
+    expected_cancel = "${{ github.ref != 'refs/heads/main' }}"
+    assert_that(
+        _normalize_github_expr(workflow_concurrency["cancel-in-progress"]),
+    ).is_equal_to(expected_cancel)
+
+    docker_build_concurrency = docker_ci["jobs"]["docker-build"]["concurrency"]
+    assert_that(docker_build_concurrency["group"]).is_equal_to(
+        "docker-build-${{ github.ref }}",
+    )
+    assert_that(
+        _normalize_github_expr(docker_build_concurrency["cancel-in-progress"]),
+    ).is_equal_to(expected_cancel)
+
+
 def _render_concurrency_group(
     group: str,
     *,
