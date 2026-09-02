@@ -126,7 +126,7 @@ class ReviewMetadata:
     )
 
     @property
-    def coverage_complete(self) -> bool:
+    def findings_coverage_complete(self) -> bool:
         """Return whether the run asked the model for an unlimited finding set.
 
         Returns:

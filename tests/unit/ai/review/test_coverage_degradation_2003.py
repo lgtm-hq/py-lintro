@@ -158,7 +158,7 @@ def test_uncapped_run_reports_complete_coverage(
     metadata = sample_review_result.metadata
 
     assert_that(metadata.coverage_degradations).is_empty()
-    assert_that(metadata.coverage_complete).is_true()
+    assert_that(metadata.findings_coverage_complete).is_true()
     assert_that(metadata.findings_cap_applied).is_none()
     assert_that(metadata.output_exhaustion_retried).is_false()
 
@@ -179,7 +179,7 @@ def test_findings_cap_is_recorded_without_flipping_partial(
         degradations=(_CAP,),
     )
 
-    assert_that(result.metadata.coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_false()
     assert_that(result.metadata.findings_cap_applied).is_equal_to(12)
     assert_that(result.metadata.output_exhaustion_retried).is_false()
     assert_that(result.metadata.partial).is_false()
@@ -294,6 +294,10 @@ def test_review_body_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
+    # The run-history recap carries the marker too, so a capped round stays
+    # visible after later rounds push it out of the current-round sections.
+    assert_that(clean).does_not_contain("⚠️ coverage limited")
+    assert_that(capped).contains("⚠️ coverage limited")
 
 
 def test_sticky_carries_the_warning_only_when_capped(
@@ -314,6 +318,10 @@ def test_sticky_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
+    # The run-history recap carries the marker too, so a capped round stays
+    # visible after later rounds push it out of the current-round sections.
+    assert_that(clean).does_not_contain("⚠️ coverage limited")
+    assert_that(capped).contains("⚠️ coverage limited")
 
 
 def test_uncapped_run_renders_identically_on_every_surface(
@@ -371,7 +379,7 @@ def test_json_payload_exposes_the_coverage_fields(
 
     payload = review_result_to_dict(result=result)
 
-    assert_that(payload["coverage_complete"]).is_false()
+    assert_that(payload["findings_coverage_complete"]).is_false()
     assert_that(payload["findings_cap_applied"]).is_equal_to(6)
     assert_that(payload["output_exhaustion_retried"]).is_true()
     assert_that(payload["coverage_degradations"]).is_equal_to(
@@ -404,7 +412,7 @@ def test_json_payload_marks_an_uncapped_run_complete(
     """
     payload = review_result_to_dict(result=sample_review_result)
 
-    assert_that(payload["coverage_complete"]).is_true()
+    assert_that(payload["findings_coverage_complete"]).is_true()
     assert_that(payload["coverage_degradations"]).is_empty()
     assert_that(payload["findings_cap_applied"]).is_none()
     assert_that(payload["output_exhaustion_retried"]).is_false()
@@ -425,7 +433,7 @@ def test_mcp_run_block_exposes_the_coverage_fields(
 
     run = _run_metadata(metadata=result.metadata)
 
-    assert_that(run["coverage_complete"]).is_false()
+    assert_that(run["findings_coverage_complete"]).is_false()
     assert_that(run["findings_cap_applied"]).is_equal_to(12)
     assert_that(run["output_exhaustion_retried"]).is_false()
     assert_that(run["coverage_degradations"]).is_length(1)
@@ -653,7 +661,7 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
             classifications=[],
         )
 
-    assert_that(result.metadata.coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_false()
     assert_that(result.metadata.findings_cap_applied).is_equal_to(
         CLI_MAX_FINDINGS_PER_CALL,
     )

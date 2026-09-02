@@ -76,7 +76,7 @@ _MCP_RUN_METADATA_KEYS: frozenset[str] = frozenset(
         "stopped_reason",
         # #2003: the "reviewed, but not at full depth" axis, reported next to
         # the "stopped early" one so a capped run is never read as complete.
-        "coverage_complete",
+        "findings_coverage_complete",
         "coverage_degradations",
         "findings_cap_applied",
         "output_exhaustion_retried",

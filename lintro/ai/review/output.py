@@ -28,7 +28,7 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     phase spans plus per-chunk queued/in-flight detail. It is ``None`` when
     the result predates timing instrumentation.
 
-    The top-level ``coverage_complete`` / ``coverage_degradations`` /
+    The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
     ``findings_cap_applied`` / ``output_exhaustion_retried`` keys report
     whether a CLI findings cap or an output-exhaustion retry may have
     suppressed findings (#2003). They are always present, so a classifier can
@@ -79,7 +79,7 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         # #2003: a capped or retried run is never presented as a complete one.
         # ``partial`` stays the "chunks went unreviewed" axis; these keys are
         # the sibling "reviewed, but not at full depth" axis.
-        "coverage_complete": result.metadata.coverage_complete,
+        "findings_coverage_complete": result.metadata.findings_coverage_complete,
         "coverage_degradations": degradations,
         "findings_cap_applied": result.metadata.findings_cap_applied,
         "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
