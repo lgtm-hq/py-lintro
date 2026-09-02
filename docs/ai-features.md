@@ -414,8 +414,8 @@ Reading the block:
 - Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
   semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
   capped by the effective concurrency ceiling, not by provider latency. That ceiling is
-  `ai.max_parallel_calls`, or 1 when a cost cap serializes chunk calls (#2154); it is
-  reported as `max_parallel` so the lever an operator can turn is never guessed at.
+  `min(chunk count, ai.max_parallel_calls)`, or 1 when a cost cap serializes chunk calls
+  (#2154); it is reported as `max_parallel`.
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
