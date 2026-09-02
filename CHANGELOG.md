@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.138.0] - 2026-09-02
+
+### Added
+
+- **ai**: validate suggested patches against head file contents before posting (#2256)
+  (3a2d447)
+
 ## [0.137.7] - 2026-09-02
 
 ### Changed
