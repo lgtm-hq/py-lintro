@@ -1811,12 +1811,15 @@ def _round_expander(
     )
     fixed = 0 if run.resolved is None else run.resolved
     prefix = "~" if run.estimated else ""
+    # A capped round stays marked in history (#2003) so a later reader can
+    # tell a genuinely clean round from one that reported fewer findings.
+    limited = " · ⚠️ coverage limited" if run.coverage_limited else ""
     summary = (
         f"<b>Round {run.round}</b>{sha_bit} · "
         f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} · "
         f"{fixed} fixed, {open_after} left open · "
         f"{_fmt_cost(run.cost, estimated=run.estimated)} · "
-        f"{run.duration:.0f}s"
+        f"{run.duration:.0f}s{limited}"
     )
     narrative = _DETAILS_TAG_RE.sub(
         r"&lt;\1\2",
@@ -1946,7 +1949,6 @@ def _history_mini_summary(*, run: RunRecord) -> str:
         f"**Round {run.round}**{where} · "
         f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()}"
         + (" · ⚠️ partial" if run.partial else "")
-        + (" · ⚠️ coverage limited" if run.coverage_limited else "")
     )
     # Table-safe *and* collapsible-safe: the recap sits inside the history
     # <details>, so a model-written closing tag would end it early.

@@ -294,10 +294,6 @@ def test_review_body_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
-    # The run-history recap carries the marker too, so a capped round stays
-    # visible after later rounds push it out of the current-round sections.
-    assert_that(clean).does_not_contain("⚠️ coverage limited")
-    assert_that(capped).contains("⚠️ coverage limited")
 
 
 def test_sticky_carries_the_warning_only_when_capped(
@@ -318,10 +314,6 @@ def test_sticky_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
-    # The run-history recap carries the marker too, so a capped round stays
-    # visible after later rounds push it out of the current-round sections.
-    assert_that(clean).does_not_contain("⚠️ coverage limited")
-    assert_that(capped).contains("⚠️ coverage limited")
 
 
 def test_uncapped_run_renders_identically_on_every_surface(
@@ -767,3 +759,41 @@ def test_run_record_partial_uses_strict_bool_parsing() -> None:
 
     assert_that(RunRecord.from_dict({**base, "partial": "false"}).partial).is_false()
     assert_that(RunRecord.from_dict({**base, "partial": True}).partial).is_true()
+
+
+def test_sticky_history_marks_a_prior_capped_round(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The run-history recap keeps a capped round visible in later rounds.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    from lintro.ai.review.github_sticky import build_sticky_bodies
+    from lintro.ai.review.models.run_record import RunRecord
+
+    limited = RunRecord(round=1, sha="abc1234", coverage_limited=True).to_dict()
+    unlimited = RunRecord(round=1, sha="abc1234").to_dict()
+
+    # The primary sticky archives run history into its companion body, so the
+    # marker is asserted across both bodies the public builder returns.
+    with_marker = "\n".join(
+        body or ""
+        for body in build_sticky_bodies(
+            result=sample_review_result,
+            prior_runs=[limited],
+            transport="cli",
+        )
+    )
+    without_marker = "\n".join(
+        body or ""
+        for body in build_sticky_bodies(
+            result=sample_review_result,
+            prior_runs=[unlimited],
+            transport="cli",
+        )
+    )
+
+    assert_that(with_marker).contains("Run-by-run history")
+    assert_that(with_marker).contains("⚠️ coverage limited")
+    assert_that(without_marker).does_not_contain("⚠️ coverage limited")
