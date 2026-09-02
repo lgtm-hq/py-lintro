@@ -29,7 +29,7 @@ const tabs = [
 
   <div class="bench-panel" role="tabpanel" id="bp-check" aria-labelledby="bt-check">
     <div class="bench-cmd">
-      <pre id="check-cmd"><span class="prompt">$</span> lintro check <span class="flag">--output-format grid</span></pre>
+      <pre tabindex="0" id="check-cmd"><span class="prompt">$</span> lintro check <span class="flag">--output-format grid</span></pre>
       <p class="note">
         <b>Pick files, watch only the relevant tools run.</b> Lintro maps each tool to its own file
         patterns, reads your existing <code>.prettierrc</code> and <code>pyproject.toml</code>, and
@@ -72,7 +72,7 @@ const tabs = [
 
   <div class="bench-panel" role="tabpanel" id="bp-format" aria-labelledby="bt-format" hidden>
     <div class="bench-cmd">
-      <pre><span class="prompt">$</span> lintro format <span class="flag">--diff</span></pre>
+      <pre tabindex="0"><span class="prompt">$</span> lintro format <span class="flag">--diff</span></pre>
       <p class="note">
         <b>Fix what the formatters can fix.</b> Fifteen of the forty tools write changes. Chain
         commands with a comma: <code>lintro fmt . , chk .</code>
@@ -83,7 +83,7 @@ const tabs = [
         <dt>ai.lint: true</dt><dd>AI suggests fixes for what remains, then summarizes</dd>
       </dl>
     </div>
-    <div class="bench-out"><pre><span class="dim">Formatting 6 changed files vs origin/HEAD</span>
+    <div class="bench-out"><pre tabindex="0"><span class="dim">Formatting 6 changed files vs origin/HEAD</span>
 
 ruff       <span class="ok">✓ fixed 2</span>   (0.66s)
 black      <span class="ok">✓ fixed 1</span>   (0.31s)
@@ -99,7 +99,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
 
   <div class="bench-panel" role="tabpanel" id="bp-watch" aria-labelledby="bt-watch" hidden>
     <div class="bench-cmd">
-      <pre><span class="prompt">$</span> lintro watch src/</pre>
+      <pre tabindex="0"><span class="prompt">$</span> lintro watch src/</pre>
       <p class="note">
         <b>Instant feedback while you edit.</b> Only the tools that match the changed file run. A
         300 ms debounce folds a burst of saves into one run.
@@ -121,7 +121,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
       </div>
     </div>
     <div class="bench-out">
-      <div class="watch-log" id="watch-log"><span class="dim">Watching for changes in src/...</span>
+      <div class="watch-log" id="watch-log" tabindex="0"><span class="dim">Watching for changes in src/...</span>
 <span class="dim">Press Ctrl+C to stop</span>
 
 <span class="entry"><span class="key">[12:34:56]</span> foo.py modified
@@ -135,7 +135,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
 
   <div class="bench-panel" role="tabpanel" id="bp-review" aria-labelledby="bt-review" hidden>
     <div class="bench-cmd">
-      <pre id="review-cmd"><span class="prompt">$</span> lintro review <span class="flag">--pr 214 --depth 2 --strictness balanced --post</span></pre>
+      <pre tabindex="0" id="review-cmd"><span class="prompt">$</span> lintro review <span class="flag">--pr 214 --depth 2 --strictness balanced --post</span></pre>
       <p class="note">
         <b>AI reviews the diff, not the repo.</b> Findings get P1/P2/P3 severity. The verdict is
         computed from severities in code, never asked of the model. <code>--post</code> writes a
@@ -164,7 +164,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
       </dl>
       <p class="note small">Example figures. Findings and cost vary with the diff and the model.</p>
     </div>
-    <div class="bench-out"><pre id="review-out"><span class="dim">Reviewing PR #214 · 7 files · depth 2 · balanced</span>
+    <div class="bench-out"><pre tabindex="0" id="review-out"><span class="dim">Reviewing PR #214 · 7 files · depth 2 · balanced</span>
 <span class="dim">Coverage: 5/7 files carried from round 1 · 2 new · 4 provider calls</span>
 
 <span class="er">P1</span> src/api/client.py:88  mutable default argument shared
@@ -182,7 +182,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
 
   <div class="bench-panel" role="tabpanel" id="bp-mcp" aria-labelledby="bt-mcp" hidden>
     <div class="bench-cmd">
-      <pre><span class="prompt">$</span> lintro mcp <span class="flag">--workspace .</span></pre>
+      <pre tabindex="0"><span class="prompt">$</span> lintro mcp <span class="flag">--workspace .</span></pre>
       <p class="note">
         <b>Give your coding agent the same tools.</b> Seven MCP tools over stdio, returning
         structured findings from the same serializer that feeds JSON and SARIF.
@@ -193,7 +193,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
         <dt>lintro_review</dt><dd>AI review with budget metadata</dd>
       </dl>
     </div>
-    <div class="bench-out"><pre><span class="dim">// lintro_check → response</span>
+    <div class="bench-out"><pre tabindex="0"><span class="dim">// lintro_check → response</span>
 &#123;
   <span class="key">"findings"</span>: [&#123;
     <span class="key">"tool"</span>: <span class="hi">"ruff"</span>, <span class="key">"file"</span>: <span class="hi">"src/utils/paths.py"</span>,
@@ -398,7 +398,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
     color: #ff7b7b;
   }
   .bench-out :global(.dim) {
-    color: #6c7a93;
+    color: #7f8da6;
   }
   .bench-out :global(.hi) {
     color: #ffd46a;
@@ -514,7 +514,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
     margin-top: 12px;
     font-family: var(--wb-font-mono);
     font-size: 0.82rem;
-    color: #6c7a93;
+    color: #7f8da6;
   }
 
   .debounce {
@@ -524,7 +524,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
     min-height: 20px;
     font-family: var(--wb-font-mono);
     font-size: 0.78rem;
-    color: #6c7a93;
+    color: var(--wb-chrome-muted);
   }
 
   .debounce .bar {
@@ -554,7 +554,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
     color: #cfd8e6;
   }
 
-  .watch-log :global(.entry) {
+  .watch-log :global(.entry.is-new) {
     animation: bench-slidein 0.25s ease-out;
   }
 
@@ -581,7 +581,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .watch-log :global(.entry),
+    .watch-log :global(.entry.is-new),
     .run-lines :global(.bar i),
     .debounce .bar i {
       animation: none;
@@ -850,7 +850,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
           if (r[4]) body += `  ${last ? '  ' : '│ '} ${esc(r[4])}\n`;
         });
         const entry = document.createElement('span');
-        entry.className = 'entry';
+        entry.className = 'entry is-new';
         entry.innerHTML = body;
         log.appendChild(entry);
         log.scrollTop = log.scrollHeight;

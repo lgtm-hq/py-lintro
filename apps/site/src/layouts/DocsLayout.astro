@@ -31,7 +31,7 @@ const onOverview = isSectionOverview(slug, category);
     <DocsSectionTabs currentCategory={category} />
     <div class="docs-layout">
       <DocsSidebar currentSlug={slug} currentCategory={category} />
-      <main class="docs-main">
+      <div class="docs-main">
         <article class="docs-content" data-pagefind-body>
           <DocsBreadcrumbs category={category} slug={slug} title={title} />
           <header class="docs-header">
@@ -44,7 +44,7 @@ const onOverview = isSectionOverview(slug, category);
         </article>
         <DocsResources resources={resources ?? []} />
         <DocsPrevNext category={category} slug={slug} />
-      </main>
+      </div>
       <DocsOnThisPage enabled={toc} />
     </div>
   </div>

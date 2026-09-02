@@ -44,6 +44,9 @@
   --wb-pass-soft: #dff3e9;
   --wb-warn-soft: #fbebc7;
   --wb-fail-soft: #fbe1e1;
+  --wb-pass-text: #1f6b48;
+  --wb-warn-text: #7a5200;
+  --wb-fail-text: #a32d2d;
   --wb-shadow: 0 1px 2px rgba(16, 24, 39, 0.06), 0 8px 24px rgba(16, 24, 39, 0.06);
 
   --turbo-bg-base: var(--wb-ground);
@@ -75,7 +78,7 @@
   --turbo-code-block-bg: var(--wb-terminal);
   --turbo-syntax-fg: #cfd8e6;
   --turbo-syntax-bg: var(--wb-terminal);
-  --turbo-syntax-comment: #6c7a93;
+  --turbo-syntax-comment: #7f8da6;
   --turbo-syntax-keyword: #8fd3f4;
   --turbo-syntax-string: #ffd46a;
   --turbo-syntax-number: #5fd39a;
@@ -144,6 +147,9 @@
   --wb-pass-soft: #163325;
   --wb-warn-soft: #3a2c0e;
   --wb-fail-soft: #3d1a1a;
+  --wb-pass-text: #5fd39a;
+  --wb-warn-text: #f0b74a;
+  --wb-fail-text: #ff8a8a;
   --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 
   --turbo-bg-base: var(--wb-ground);
@@ -175,7 +181,7 @@
   --turbo-code-block-bg: var(--wb-terminal);
   --turbo-syntax-fg: #cfd8e6;
   --turbo-syntax-bg: var(--wb-terminal);
-  --turbo-syntax-comment: #6c7a93;
+  --turbo-syntax-comment: #7f8da6;
   --turbo-syntax-keyword: #8fd3f4;
   --turbo-syntax-string: #ffd46a;
   --turbo-syntax-number: #5fd39a;
@@ -243,6 +249,9 @@
   --wb-pass-soft: color-mix(in srgb, var(--turbo-state-success) 18%, var(--turbo-bg-surface));
   --wb-warn-soft: color-mix(in srgb, var(--turbo-state-warning) 18%, var(--turbo-bg-surface));
   --wb-fail-soft: color-mix(in srgb, var(--turbo-state-danger) 18%, var(--turbo-bg-surface));
+  --wb-pass-text: color-mix(in srgb, var(--turbo-state-success) 80%, var(--turbo-text-primary));
+  --wb-warn-text: color-mix(in srgb, var(--turbo-state-warning) 80%, var(--turbo-text-primary));
+  --wb-fail-text: color-mix(in srgb, var(--turbo-state-danger) 80%, var(--turbo-text-primary));
   --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 

@@ -94,7 +94,7 @@ const rows: { capability: string; cells: Cell[] }[] = [
   </p>
 </header>
 
-<div class="scroll-x">
+<div class="scroll-x" tabindex="0">
   <table class="cmp">
     <thead>
       <tr><th>Capability</th><th>Lintro</th><th>trunk</th><th>MegaLinter</th><th>pre-commit</th><th>qlty</th></tr>
@@ -168,11 +168,11 @@ const rows: { capability: string; cells: Cell[] }[] = [
   }
 
   td.yes {
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
 
   td.part {
-    color: var(--wb-warn);
+    color: var(--wb-warn-text);
   }
 
   td.no {

@@ -64,7 +64,7 @@ const tabs = [
     </div>
     <div class="term">
       <div class="cap">lintro check · ai.lint enabled</div>
-      <pre>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      <pre tabindex="0">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <span class="hi">AI SUMMARY — actionable insights</span>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Code quality is generally good but 12 type annotation
@@ -112,7 +112,7 @@ const tabs = [
     </div>
     <div class="term">
       <div class="cap">lintro check --fix</div>
-      <pre><span class="dim">Group 1 of 3</span> · <span class="ok">safe-style</span> · 1 file · <span class="add">+0</span> <span class="del">−1</span> · 1 hunk
+      <pre tabindex="0"><span class="dim">Group 1 of 3</span> · <span class="ok">safe-style</span> · 1 file · <span class="add">+0</span> <span class="del">−1</span> · 1 hunk
 <span class="dim">Checkpoint: refs/lintro/checkpoints/7f3a2c</span>
 
 <span class="dim">--- a/src/utils/paths.py</span>
@@ -238,7 +238,7 @@ const tabs = [
     </div>
     <div class="codebox">
       <div class="cap">.lintro/review-agents/no-raw-sql.md</div>
-      <pre><code>---
+      <pre tabindex="0"><code>---
 name: no-raw-sql
 description: SQL must go through the repository layer
 include:
@@ -283,7 +283,7 @@ be used instead.</code></pre>
     <div class="stack">
       <div class="codebox">
         <div class="cap">.lintro-config.yaml</div>
-        <pre><code>tools:
+        <pre tabindex="0"><code>tools:
   idiom-review:
     options:
       enabled: true        # opt-in gate (default: false)
@@ -293,7 +293,7 @@ be used instead.</code></pre>
       </div>
       <div class="term">
         <div class="cap">ad hoc from the CLI</div>
-        <pre><span class="hi">$</span> lintro review --advisory-only \
+        <pre tabindex="0"><span class="hi">$</span> lintro review --advisory-only \
     --tool-options idiom-review:enabled=true
 
 <span class="key">idiom-review</span> · per-file · 25 files · 3 findings
@@ -442,7 +442,7 @@ be used instead.</code></pre>
     color: #ff7b7b;
   }
   .term .dim {
-    color: #6c7a93;
+    color: #7f8da6;
   }
   .term .hi {
     color: #ffd46a;
@@ -457,7 +457,7 @@ be used instead.</code></pre>
     font-size: 0.75rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #6c7a93;
+    color: #7f8da6;
   }
 
   .codebox {
@@ -469,12 +469,22 @@ be used instead.</code></pre>
 
   .codebox pre {
     margin: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--wb-ink);
     overflow-x: auto;
     font-family: var(--wb-font-mono);
     font-size: 0.82rem;
     line-height: 1.55;
     white-space: pre;
     color: var(--wb-ink);
+  }
+
+  .codebox pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
   }
 
   .codebox .cap {
@@ -526,12 +536,12 @@ be used instead.</code></pre>
 
   .risk.safe {
     background: var(--wb-pass-soft);
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
 
   .risk.beh {
     background: var(--wb-warn-soft);
-    color: var(--wb-warn);
+    color: var(--wb-warn-text);
   }
 
   .stepper-title {
@@ -610,11 +620,11 @@ be used instead.</code></pre>
 
   .sev.p1 {
     background: var(--wb-fail-soft);
-    color: var(--wb-fail);
+    color: var(--wb-fail-text);
   }
   .sev.p2 {
     background: var(--wb-warn-soft);
-    color: var(--wb-warn);
+    color: var(--wb-warn-text);
   }
   .sev.p3 {
     background: var(--wb-accent-soft);
@@ -666,7 +676,7 @@ be used instead.</code></pre>
   }
 
   .comment.resolved {
-    opacity: 0.75;
+    border-style: dashed;
   }
 
   .banner {
@@ -679,15 +689,15 @@ be used instead.</code></pre>
 
   .banner.ok {
     background: var(--wb-pass-soft);
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
   .banner.reg {
     background: var(--wb-fail-soft);
-    color: var(--wb-fail);
+    color: var(--wb-fail-text);
   }
   .banner.part {
     background: var(--wb-warn-soft);
-    color: var(--wb-warn);
+    color: var(--wb-warn-text);
   }
 
   .cards {

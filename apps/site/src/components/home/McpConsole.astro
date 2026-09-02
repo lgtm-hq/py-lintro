@@ -79,7 +79,7 @@ const clientConfig = JSON.stringify(
 </header>
 
 <div class="split" id="mcp-console" data-version={LINTRO_VERSION}>
-  <div class="scroll-x">
+  <div class="scroll-x" tabindex="0">
     <table>
       <thead><tr><th>Tool</th><th>Annotations</th><th>Returns</th></tr></thead>
       <tbody>
@@ -125,12 +125,12 @@ const clientConfig = JSON.stringify(
       </div>
       <div class="term">
         <div class="cap" id="mcp-cap">response · {MCP_DEFAULT_TOOL}</div>
-        <pre id="mcp-out" set:html={initialResponse} />
+        <pre tabindex="0" id="mcp-out" set:html={initialResponse} />
       </div>
     </div>
     <div class="codebox">
       <div class="cap">Generic MCP client config</div>
-      <pre><code>{clientConfig}</code></pre>
+      <pre tabindex="0"><code>{clientConfig}</code></pre>
     </div>
     <p class="muted small">
       Findings come from the same serializer that feeds JSON and SARIF, so an agent, a CI upload and
@@ -219,13 +219,13 @@ const clientConfig = JSON.stringify(
   .ann.ro {
     border-color: transparent;
     background: var(--wb-pass-soft);
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
 
   .ann.dz {
     border-color: transparent;
     background: var(--wb-fail-soft);
-    color: var(--wb-fail);
+    color: var(--wb-fail-text);
   }
 
   .console {
@@ -263,7 +263,7 @@ const clientConfig = JSON.stringify(
   }
 
   .status :global(.ok) {
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
 
   .term {
@@ -303,7 +303,7 @@ const clientConfig = JSON.stringify(
     font-size: 0.75rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #6c7a93;
+    color: #7f8da6;
   }
 
   .codebox {
@@ -314,6 +314,8 @@ const clientConfig = JSON.stringify(
   }
 
   .codebox pre {
+    background: transparent;
+    color: var(--wb-ink);
     margin: 0;
     overflow-x: auto;
     font-family: var(--wb-font-mono);
@@ -321,6 +323,13 @@ const clientConfig = JSON.stringify(
     line-height: 1.55;
     white-space: pre;
     color: var(--wb-ink);
+  }
+
+  .codebox pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
   }
 
   .codebox .cap {

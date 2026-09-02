@@ -59,7 +59,7 @@ const base = import.meta.env.BASE_URL;
         <a href={docHref(base, docs.plugins)}>Plugin guide</a>.
       </p>
     </div>
-    <pre><code>[project.entry-points."lintro.tools"]
+    <pre tabindex="0"><code>[project.entry-points."lintro.tools"]
 my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
   </div>
 </div>
@@ -189,7 +189,7 @@ my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--wb-pass);
+    color: var(--wb-pass-text);
   }
 
   .plugin-note {
@@ -208,8 +208,18 @@ my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
     font-size: 0.9rem;
   }
 
+  .plugin-note pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
+  }
+
   .plugin-note pre {
     margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--wb-radius-sm);
+    background: var(--wb-surface-2);
     overflow-x: auto;
     font-family: var(--wb-font-mono);
     font-size: 0.85rem;
