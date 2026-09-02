@@ -8,6 +8,10 @@ from typing import Any
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.patch_validation import (
+    count_dropped_suggestions,
+    drop_reason_counts,
+)
 
 __all__ = [
     "render_review_json",
@@ -44,6 +48,13 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         ],
         "checklist": [asdict(answer) for answer in result.checklist],
         "findings": [asdict(finding) for finding in result.findings],
+        # #2101: dropped suggestions are never silent. Each finding carries its
+        # own ``suggestion_dropped`` tag; these keys give consumers the run
+        # total without re-deriving it from the finding list.
+        "suggestions_dropped": count_dropped_suggestions(findings=result.findings),
+        "suggestions_dropped_by_reason": drop_reason_counts(
+            findings=result.findings,
+        ),
     }
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()

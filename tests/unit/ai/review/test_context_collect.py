@@ -880,15 +880,46 @@ def test_collect_pr_context_fetches_workflow_via_gh_when_git_show_raises(
 
 
 @patch("lintro.ai.review.context.collection._run_git")
-def test_read_workflow_post_image_preserves_empty_file(
+def test_read_file_at_head_worktree_refuses_paths_outside_the_repo(
+    mock_run_git: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """A WORKTREE read is confined to the repository root (#2101).
+
+    Args:
+        mock_run_git: Patched git runner reporting the repository root.
+        tmp_path: Temporary directory holding the fake repo and an outsider.
+    """
+    from lintro.ai.review.context.collection import read_file_at_head
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "inside.txt").write_text("inside\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    mock_run_git.return_value = _completed(stdout=f"{repo_root}\n")
+
+    assert_that(
+        read_file_at_head(path="inside.txt", head_ref="WORKTREE"),
+    ).is_equal_to("inside\n")
+    assert_that(
+        read_file_at_head(path="../outside.txt", head_ref="WORKTREE"),
+    ).is_none()
+    assert_that(
+        read_file_at_head(path=str(outside), head_ref="WORKTREE"),
+    ).is_none()
+
+
+@patch("lintro.ai.review.context.collection._run_git")
+def test_read_file_at_head_preserves_empty_file(
     mock_run_git: MagicMock,
 ) -> None:
     """An emptied workflow at head is preserved as empty, not treated as missing."""
-    from lintro.ai.review.context.collection import _read_workflow_post_image
+    from lintro.ai.review.context.collection import read_file_at_head
 
     mock_run_git.return_value = _completed(stdout="")
 
-    content = _read_workflow_post_image(
+    content = read_file_at_head(
         path=".github/workflows/ci.yml",
         head_ref="deadbeef",
     )
@@ -898,17 +929,17 @@ def test_read_workflow_post_image_preserves_empty_file(
 
 @patch("lintro.ai.review.context.collection._run_gh")
 @patch("lintro.ai.review.context.collection._run_git")
-def test_read_workflow_post_image_preserves_empty_file_via_gh(
+def test_read_file_at_head_preserves_empty_file_via_gh(
     mock_run_git: MagicMock,
     mock_run_gh: MagicMock,
 ) -> None:
     """Gh raw-content fallback preserves an emptied workflow file at head."""
-    from lintro.ai.review.context.collection import _read_workflow_post_image
+    from lintro.ai.review.context.collection import read_file_at_head
 
     mock_run_git.return_value = _completed(returncode=1, stdout="", stderr="bad object")
     mock_run_gh.return_value = _completed(stdout="")
 
-    content = _read_workflow_post_image(
+    content = read_file_at_head(
         path=".github/workflows/ci.yml",
         head_ref="deadbeef",
         repo="lgtm-hq/py-lintro",

@@ -312,6 +312,26 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Suggested-patch validation
+
+A GitHub `suggestion` block is a one-click commit, so every one is checked against the
+real file at HEAD before any surface renders it — the terminal panels, the JSON payload,
+and `--post` alike. The file is read at the head revision (locally, or through `gh` in
+`--pr` mode); the PR tree is never checked out or executed.
+
+- **Exact match** — the suggestion is posted as-is.
+- **Drifted but unique** — the change's `before` block occurs exactly once elsewhere in
+  the file, so the hunk and the comment anchor are re-anchored to it.
+- **Anything else** — the one-click patch is withheld. The finding keeps its prose and
+  its described `fix`, and is tagged with why: `stale_anchor` (the block is not there),
+  `ambiguous_anchor` (it is there more than once), or `file_missing` (the file is
+  unreadable at HEAD).
+
+Drops are never silent. Terminal output marks each affected finding and prints a run
+total, `--output json` carries `suggestions_dropped` plus a
+`suggestions_dropped_by_reason` tally alongside a per-finding `suggestion_dropped` tag,
+and the sticky comment states the count and reasons.
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked

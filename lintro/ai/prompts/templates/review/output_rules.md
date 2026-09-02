@@ -58,4 +58,11 @@
   written out verbatim — a described fix is better than a wrong one-click commit. Keep
   `replacement` to at most 4,000 characters and the range to at most 200 lines; anything
   larger is dropped and rendered as a described fix anyway.
+- Also set `suggested_change.before` to the **verbatim current text** of exactly those
+  lines, copied from the file rather than retyped. It is checked against the file at
+  HEAD before anything is posted: an exact match commits the suggestion, a unique match
+  elsewhere re-anchors it, and anything else drops the one-click fix and keeps only your
+  described `fix`. Omitting `before` means only the line range's existence can be
+  verified, so a misnumbered hunk survives; include it whenever you include
+  `suggested_change`.
 {findings_cap_rule}

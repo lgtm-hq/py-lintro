@@ -41,7 +41,8 @@
       "suggested_code": "Exact replacement for the flagged line(s) when a mechanical fix applies (one-click GitHub suggestion); else empty string",
       "suggested_change": {
         "lines": [123, 124],
-        "replacement": "Full replacement text for exactly those lines; omit the whole object when the fix is not a clean hunk"
+        "replacement": "Full replacement text for exactly those lines; omit the whole object when the fix is not a clean hunk",
+        "before": "Verbatim current text of exactly those lines, copied from the file; checked against HEAD before the suggestion is posted"
       },
       "evidence_style": "diff_local|cross_file|speculative",
       "occurrences": [{ "file": "path/to/file", "line": 123 }],
