@@ -1,0 +1,186 @@
+---
+import { TOOL_COUNT } from '../../data/tools-catalog';
+import { docHref, docs } from '../../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+
+type Cell = { text: string; tone?: 'yes' | 'part' | 'no' };
+
+const rows: { capability: string; cells: Cell[] }[] = [
+  {
+    capability: 'Unified output (JSON / SARIF)',
+    cells: [
+      { text: 'Yes, 8 formats', tone: 'yes' },
+      { text: 'Yes', tone: 'yes' },
+      { text: 'Yes', tone: 'yes' },
+      { text: 'No, raw hook output', tone: 'no' },
+      { text: 'Partial', tone: 'part' },
+    ],
+  },
+  {
+    capability: 'Local CLI = CI parity',
+    cells: [
+      { text: 'Yes', tone: 'yes' },
+      { text: 'Yes', tone: 'yes' },
+      { text: 'CI-first, Docker locally', tone: 'part' },
+      { text: 'Yes', tone: 'yes' },
+      { text: 'Yes', tone: 'yes' },
+    ],
+  },
+  {
+    capability: 'Fix + check verbs',
+    cells: [
+      { text: 'fmt / chk', tone: 'yes' },
+      { text: 'fmt / check', tone: 'yes' },
+      { text: 'APPLY_FIXES', tone: 'yes' },
+      { text: 'Depends on hook', tone: 'part' },
+      { text: 'fmt / check', tone: 'yes' },
+    ],
+  },
+  {
+    capability: 'AI diff review, bring your own key',
+    cells: [
+      { text: 'Yes, posts to PRs', tone: 'yes' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+    ],
+  },
+  {
+    capability: 'MCP server for agents',
+    cells: [
+      { text: 'Yes, 7 tools', tone: 'yes' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+      { text: '—', tone: 'no' },
+    ],
+  },
+  {
+    capability: 'Hold-the-line baseline',
+    cells: [
+      { text: 'Roadmap (#438)', tone: 'part' },
+      { text: 'Yes', tone: 'yes' },
+      { text: 'Changed-files only', tone: 'part' },
+      { text: 'No', tone: 'no' },
+      { text: 'Partial', tone: 'part' },
+    ],
+  },
+  {
+    capability: 'Tool catalog',
+    cells: [{ text: String(TOOL_COUNT) }, { text: '100+' }, { text: '100+' }, { text: 'Any hook repo' }, { text: '70+' }],
+  },
+  {
+    capability: 'License',
+    cells: [
+      { text: 'MIT', tone: 'yes' },
+      { text: 'Proprietary, paid tiers', tone: 'no' },
+      { text: 'AGPL-3.0', tone: 'yes' },
+      { text: 'MIT', tone: 'yes' },
+      { text: 'Fair Source, paid Cloud', tone: 'part' },
+    ],
+  },
+];
+---
+
+<header class="section-header">
+  <span class="eyebrow">Where it sits</span>
+  <h2>Honest comparison</h2>
+  <p class="lede">
+    Lintro is a free, local-first unifier with a BYO-key reviewer. Other tools win on catalog size
+    or metrics. Pick on the merits. The
+    <a href={docHref(base, docs.comparison)}>full comparison</a> cites its sources.
+  </p>
+</header>
+
+<div class="scroll-x">
+  <table class="cmp">
+    <thead>
+      <tr><th>Capability</th><th>Lintro</th><th>trunk</th><th>MegaLinter</th><th>pre-commit</th><th>qlty</th></tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((r) => (
+          <tr>
+            <td>{r.capability}</td>
+            {r.cells.map((cell) => (
+              <td class={cell.tone}>{cell.text}</td>
+            ))}
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+</div>
+<p class="muted note">
+  Competitor claims reflect public docs as of July 2026 and drift. Confirm against each project
+  before deciding.
+</p>
+
+<style>
+  .section-header {
+    display: grid;
+    gap: 10px;
+    max-width: 70ch;
+    margin-bottom: 36px;
+  }
+
+  .section-header a {
+    color: var(--turbo-link-default, var(--wb-ink));
+  }
+
+  table {
+    width: 100%;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--wb-hair);
+    border-collapse: collapse;
+    border-radius: var(--wb-radius);
+    background: var(--wb-surface);
+    font-size: 0.9rem;
+  }
+
+  th,
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--wb-hair);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    background: var(--wb-surface-2);
+    font-family: var(--wb-font-display);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wb-muted);
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  td:first-child {
+    font-weight: 500;
+  }
+
+  td.yes {
+    color: var(--wb-pass);
+  }
+
+  td.part {
+    color: var(--wb-warn);
+  }
+
+  td.no {
+    color: var(--wb-muted);
+  }
+
+  .note {
+    margin-top: 12px;
+    font-size: 0.85rem;
+  }
+</style>

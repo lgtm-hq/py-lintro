@@ -1,0 +1,763 @@
+---
+import { docHref, docs } from '../../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+
+const tabs = [
+  { key: 'summary', label: 'Summary' },
+  { key: 'fixes', label: 'Fixes' },
+  { key: 'review', label: 'Review' },
+  { key: 'agents', label: 'Agents' },
+  { key: 'finders', label: 'Finders' },
+  { key: 'safety', label: 'Safety' },
+] as const;
+---
+
+<header class="section-header">
+  <span class="eyebrow">AI, bring your own key</span>
+  <h2>Off by default. Deterministic where it counts. Reviewed like a colleague, gated like a linter.</h2>
+  <p class="lede">
+    Anthropic, OpenAI or Cursor. Metered API or your own agent CLI on a subscription. Every AI
+    feature is a separate toggle, and none of them can move your <code>--fail-under</code> gate.
+    Full details in the <a href={docHref(base, docs.aiFeatures)}>AI features guide</a> and the
+    <a href={docHref(base, docs.aiReviewTransports)}>transports reference</a>.
+  </p>
+</header>
+
+<div class="ai" id="ai-features">
+  <div class="ai-tabs" role="tablist" aria-label="AI features">
+    {
+      tabs.map((t, i) => (
+        <button
+          type="button"
+          class="ai-tab"
+          role="tab"
+          id={`at-${t.key}`}
+          aria-controls={`ap-${t.key}`}
+          aria-selected={i === 0 ? 'true' : 'false'}
+          tabindex={i === 0 ? 0 : -1}
+        >
+          {t.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="ai-panel" role="tabpanel" id="ap-summary" aria-labelledby="at-summary">
+    <div class="ai-text">
+      <h3>One API call per check run</h3>
+      <p>
+        With <code>ai.lint: true</code>, every <code>lintro check</code> ends with a summary that
+        reads the whole findings list and answers the question a linter cannot: what is actually
+        going on here?
+      </p>
+      <ul>
+        <li><b>Overview</b> of the state of the codebase in two sentences.</li>
+        <li><b>Key patterns</b>, systemic issues rather than line-by-line repeats.</li>
+        <li><b>Priority actions</b> ordered by how many findings each one clears.</li>
+        <li><b>Estimated effort</b> in minutes of focused work.</li>
+      </ul>
+      <p class="muted">
+        Exactly one provider call regardless of how many issues were found. Token usage and cost
+        are printed when <code>show_cost_estimate</code> is on.
+      </p>
+    </div>
+    <div class="term">
+      <div class="cap">lintro check · ai.lint enabled</div>
+      <pre>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<span class="hi">AI SUMMARY — actionable insights</span>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Code quality is generally good but 12 type annotation
+  issues in src/utils/ suggest a systematic gap in
+  utility functions.
+
+  <span class="key">Key Patterns:</span>
+  • Missing type annotations in 8 utility functions in src/utils/
+  • Unused imports in 4 test files (likely copy-paste artifacts)
+
+  <span class="key">Priority Actions:</span>
+  1. Add return type annotations to src/utils/ (resolves 8 issues)
+  2. Remove unused imports in test files (resolves 4 issues)
+
+  <span class="dim">Estimated effort: 20-30 minutes of focused cleanup</span></pre>
+    </div>
+  </div>
+
+  <div class="ai-panel" role="tabpanel" id="ap-fixes" aria-labelledby="at-fixes" hidden>
+    <div class="ai-text">
+      <h3>Diffs you approve one group at a time</h3>
+      <p>
+        <code>lintro check --fix</code> asks the model for unified diffs for each group of related
+        findings and walks you through them. <code>lintro format</code> does the same for whatever
+        the formatters could not fix.
+      </p>
+      <ul>
+        <li>
+          <b>Risk label</b> on every group: <span class="risk safe">safe-style</span> or
+          <span class="risk beh">behavioral-risk</span>. The model self-classifies; anything unknown
+          defaults to behavioral-risk. Enter accepts a safe-style group.
+        </li>
+        <li><b>Patch stats</b>: files touched, +/− lines, hunk count, before you decide.</li>
+        <li><b>Post-fix summary</b> of what changed and what remains.</li>
+      </ul>
+      <h4>Git checkpoints, not stashes</h4>
+      <p class="muted">
+        Before a batch touches files, Lintro snapshots them to
+        <code>refs/lintro/checkpoints/&lt;run-id&gt;</code> using git plumbing on a temporary
+        index. Your index, stash and HEAD are untouched. Rollback restores only the targeted files,
+        atomically, preserving mode. Rejecting a group restores from the checkpoint tree, so it
+        never discards a group you already accepted. The last 10 checkpoints are kept; outside a
+        git work tree it falls back to file snapshots under <code>.lintro-cache/ai</code>.
+      </p>
+    </div>
+    <div class="term">
+      <div class="cap">lintro check --fix</div>
+      <pre><span class="dim">Group 1 of 3</span> · <span class="ok">safe-style</span> · 1 file · <span class="add">+0</span> <span class="del">−1</span> · 1 hunk
+<span class="dim">Checkpoint: refs/lintro/checkpoints/7f3a2c</span>
+
+<span class="dim">--- a/src/utils/paths.py</span>
+<span class="dim">+++ b/src/utils/paths.py</span>
+<span class="key">@@ -10,4 +10,3 @@</span>
+ import sys
+<span class="del">-import os</span>
+ from pathlib import Path
+
+[<span class="hi">y</span>]accept group / [<span class="hi">a</span>]accept group + remaining / [<span class="hi">r</span>]eject
+[<span class="hi">d</span>]iffs / [<span class="hi">s</span>]kip / [<span class="hi">v</span>]alidate-after-group / [<span class="hi">q</span>]uit  <span class="dim">› y</span>
+
+<span class="ok">✓ applied</span> · ruff re-run: 0 issues in src/utils/paths.py
+
+<span class="dim">Group 2 of 3</span> · <span class="wr">behavioral-risk</span> · 1 file · <span class="add">+3</span> <span class="del">−1</span> · 1 hunk
+<span class="dim">--- a/src/api/client.py</span>
+<span class="dim">+++ b/src/api/client.py</span>
+<span class="key">@@ -88,1 +88,3 @@</span>
+<span class="del">-def fetch(url, headers={}):</span>
+<span class="add">+def fetch(url, headers=None):</span>
+<span class="add">+    if headers is None:</span>
+<span class="add">+        headers = {}</span></pre>
+    </div>
+  </div>
+
+  <div class="ai-panel wide" role="tabpanel" id="ap-review" aria-labelledby="at-review" hidden>
+    <div class="split">
+      <div class="stack">
+        <div class="ai-text">
+          <h3>Diff-based review that lives in the PR</h3>
+          <p>
+            <code>lintro review</code> reads a diff from <code>--base main</code>,
+            <code>--uncommitted</code> or <code>--pr 214</code>, runs it through a checklist
+            corpus, and returns findings with a severity and the rubric boundary each one used.
+          </p>
+        </div>
+        <dl class="kv">
+          <dt>--depth 1 · 2 · 3</dt><dd>Checklist only · plus generated questions · plus an adversarial pass</dd>
+          <dt>--strictness</dt><dd><b>focused</b> merge blockers · <b>balanced</b> default · <b>thorough</b> hunts doc and migration nits too</dd>
+          <dt>--semantic-chunks</dt><dd>One provider call per semantic chunk of the diff</dd>
+          <dt>--with-lint</dt><dd>Include deterministic linter results in the review context</dd>
+          <dt>--post</dt><dd>Write a sticky summary that updates in place, plus one inline comment per finding</dd>
+          <dt>--transport api | cli</dt><dd>Metered SDK with an enforced <code>max_cost_usd</code>, or a local agent CLI on your subscription</dd>
+          <dt>--full</dt><dd>Discard carried coverage and review everything again</dd>
+        </dl>
+        <div>
+          <h4 class="stepper-title">Verdict is derived in code, never asked of the model</h4>
+          <div class="stepper">
+            <div class="step blocked"><span class="v">Blocked</span><span class="w">Any open <span class="sev p1">P1</span></span><span class="x">exit 1</span></div>
+            <div class="step changes"><span class="v">Changes requested</span><span class="w">Open <span class="sev p2">P2</span>, no P1</span><span class="x">exit 0</span></div>
+            <div class="step nits"><span class="v">Nits only</span><span class="w">Only <span class="sev p3">P3</span> open</span><span class="x">exit 0</span></div>
+            <div class="step ready"><span class="v">Ready</span><span class="w">No open findings, every eligible file covered at HEAD</span><span class="x">exit 0</span></div>
+            <div class="step incomplete"><span class="v">Incomplete</span><span class="w">Coverage at HEAD below 100%. The findings label is withheld so a partial round can never look clean. Exit 2 is different: it means no review was produced at all.</span><span class="x">exit 0 · exit 1 with an open P1</span></div>
+          </div>
+        </div>
+        <div class="ai-text">
+          <h4>Resume for free</h4>
+          <p class="muted">
+            Coverage is keyed by path and normalized patch hash, stored in CI artifacts or
+            <code>.lintro-cache/ai/review-state/</code>. Re-reviewing an already-covered HEAD makes
+            zero provider calls. A content-identical rebase keeps its coverage.
+          </p>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="thread" aria-label="Example PR thread after two review rounds">
+          <div class="comment">
+            <div class="head"><b>lintro review</b> · sticky summary · round 2 · <span class="example">example</span></div>
+            <div class="body">
+              <div><b>Changes requested</b> · 1 open P2 · 1 addressed · 1 regressed</div>
+              <div class="muted">Coverage 7/7 at HEAD · cost $0.14 · ~$0.31 across rounds</div>
+            </div>
+          </div>
+          <div class="comment resolved">
+            <div class="head"><span class="sev p1">P1</span> <b>src/api/client.py:88</b> · resolved</div>
+            <div class="body">
+              <span class="banner ok">✔ Addressed in 9c1e4f2 · round 2</span>
+              <div class="muted">Mutable default argument shared across calls. Copy-paste agent prompt retitled (historical).</div>
+            </div>
+          </div>
+          <div class="comment">
+            <div class="head"><span class="sev p2">P2</span> <b>src/db/orders.py:41</b> · source: no-raw-sql</div>
+            <div class="body">
+              <span class="banner part">✔ 14/20 addressed in 9c1e4f2 · round 2</span>
+              <div class="muted">Raw <code>cursor.execute</code> outside the repository layer. Thread stays open until the whole pattern is gone.</div>
+            </div>
+          </div>
+          <div class="comment">
+            <div class="head"><span class="sev p3">P3</span> <b>docs/usage.md:12</b> · new thread</div>
+            <div class="body">
+              <span class="banner reg">regression · first raised round 1, fixed round 1</span>
+              <div class="muted">Stale flag name. The original thread is stamped ↩ Regressed and never reopened.</div>
+            </div>
+          </div>
+        </div>
+        <p class="muted small">
+          Thread auto-resolution follows <code>review.auto_resolve</code> (default true). The
+          banner is always written. Lintro reviews its own pull requests this way on every eligible
+          PR.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="ai-panel" role="tabpanel" id="ap-agents" aria-labelledby="at-agents" hidden>
+    <div class="ai-text">
+      <h3>House rules as markdown</h3>
+      <p>
+        The built-in checklist covers the general case. Your rules are prose. Put each one in
+        <code>.lintro/review-agents/*.md</code>: front matter carries the scope and policy, the
+        body carries the instruction.
+      </p>
+      <ul>
+        <li><b>Runs only when it matches.</b> An agent whose <code>include</code> globs match no changed file is skipped and costs nothing.</li>
+        <li><b>Findings carry the agent's name</b> as <code>source</code>, and its declared severity. A <code>severity: high</code> agent produces P1 findings that fail the gate.</li>
+        <li><b>One provider call per scoped agent</b>, counted against <code>ai.max_cost_usd</code> like any checklist chunk.</li>
+        <li><b>Invalid front matter</b> is reported with the offending field and skipped. The rest of the review still runs.</li>
+      </ul>
+      <dl class="kv">
+        <dt>review.custom_agents</dt><dd><b>true</b> run with the checklist · <b>false</b> skip discovery · <b>only</b> run agents instead of the checklist</dd>
+        <dt>lintro review --list-agents</dt><dd>Show what would run without spending anything</dd>
+      </dl>
+    </div>
+    <div class="codebox">
+      <div class="cap">.lintro/review-agents/no-raw-sql.md</div>
+      <pre><code>---
+name: no-raw-sql
+description: SQL must go through the repository layer
+include:
+  - 'src/**/*.py'
+exclude:
+  - 'src/repositories/**'
+severity: high
+strictness: focused
+model: default
+enabled: true
+---
+Review the changed code for raw SQL strings executed
+outside the repository layer. Flag any direct
+cursor.execute / connection.execute call with a string
+literal, and point at the repository method that should
+be used instead.</code></pre>
+    </div>
+  </div>
+
+  <div class="ai-panel" role="tabpanel" id="ap-finders" aria-labelledby="at-finders" hidden>
+    <div class="ai-text">
+      <h3>Finding what pattern matchers cannot</h3>
+      <p>
+        Summaries and fixes explain or repair what a linter found. An advisory finder uses the
+        model to <em>find</em> issues that syntax matching structurally cannot.
+        <code>idiom-review</code> is the first.
+      </p>
+      <ul>
+        <li><b>per-file mode</b> flags idiomatic misses: correct but verbose code, like a manual <code>found = False</code> loop that should be <code>any(...)</code>.</li>
+        <li><b>duplication mode</b> flags the same utility logic reimplemented across files, invisible to any per-file tool, with a suggested extraction point.</li>
+        <li><b>Cached by content hash</b> under <code>.lintro-cache/idiom</code>, so unchanged files cost nothing on the next run.</li>
+        <li><b>Degrades gracefully</b> to a skipped result when no provider is available.</li>
+      </ul>
+      <h4>Why it runs under review, not check</h4>
+      <p class="muted">
+        Every tool declares an execution class. <code>chk</code> runs only deterministic tools, so
+        two identical runs always agree and <code>--fail-under</code> moves on regressions, never
+        on model mood. Advisory findings exit 0 unless you pass <code>--fail-on-findings</code>,
+        and never touch the health score.
+      </p>
+    </div>
+    <div class="stack">
+      <div class="codebox">
+        <div class="cap">.lintro-config.yaml</div>
+        <pre><code>tools:
+  idiom-review:
+    options:
+      enabled: true        # opt-in gate (default: false)
+      mode: per-file       # per-file | duplication | both
+      min_confidence: medium
+      max_files: 25        # cost bound per run</code></pre>
+      </div>
+      <div class="term">
+        <div class="cap">ad hoc from the CLI</div>
+        <pre><span class="hi">$</span> lintro review --advisory-only \
+    --tool-options idiom-review:enabled=true
+
+<span class="key">idiom-review</span> · per-file · 25 files · 3 findings
+  src/utils/scan.py:31   <span class="wr">medium</span>  manual flag loop → any(...)
+  src/utils/scan.py:58   <span class="wr">medium</span>  index loop → enumerate
+  src/cli/args.py:104    <span class="ok">high</span>    dict.get chain → dict.setdefault
+<span class="dim">advisory · exit 0 · not counted in health score</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="ai-panel wide" role="tabpanel" id="ap-safety" aria-labelledby="at-safety" hidden>
+    <div class="cards">
+      <div class="card">
+        <h3>Prompts are redacted</h3>
+        <p>Every prompt is scrubbed for secrets before it leaves the machine. Redaction is mandatory on every provider call, on both transports.</p>
+      </div>
+      <div class="card">
+        <h3>Agent bodies are untrusted</h3>
+        <p>A custom review agent never becomes the system prompt. Its body is sanitized and embedded in the user prompt inside a per-call boundary marker with instructions that nothing inside can change the model's role or output contract.</p>
+      </div>
+      <div class="card">
+        <h3>Trusted install in CI</h3>
+        <p>Lintro's own review workflow installs lintro from the PR's base ref, never the PR head. The PR diff is fetched through the GitHub API and reviewed as data, so a PR cannot substitute its own code to reach the credential.</p>
+      </div>
+      <div class="card">
+        <h3>Cost has a ceiling</h3>
+        <p>On the api transport <code>ai.max_cost_usd</code> is enforced. On the cli transport it is advisory, and figures marked <code>~</code> are estimates, not a bill. <code>0</code> is rejected as ambiguous; say <code>uncapped</code> if you mean it.</p>
+      </div>
+      <div class="card">
+        <h3>Two toggles, both off</h3>
+        <p><code>ai.enabled</code> is the master switch. <code>ai.lint</code> and <code>ai.review</code> are AND-ed with it, so you can run PR review without adding a summary to every local check.</p>
+      </div>
+      <div class="card">
+        <h3>Dogfooded on every PR</h3>
+        <p>Every eligible pull request to Lintro is reviewed by <code>lintro review --pr &lt;n&gt; --depth 1 --output json</code> before a human reads it.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .section-header {
+    display: grid;
+    gap: 10px;
+    max-width: 70ch;
+    margin-bottom: 36px;
+  }
+
+  .section-header a {
+    color: var(--turbo-link-default, var(--wb-ink));
+  }
+
+  .ai-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--wb-hair);
+  }
+
+  .ai-tab {
+    margin-bottom: -1px;
+    padding: 10px 14px 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    font-family: var(--wb-font-display);
+    font-size: 0.925rem;
+    font-weight: 500;
+    color: var(--wb-muted);
+    white-space: nowrap;
+  }
+
+  .ai-tab[aria-selected='true'] {
+    color: var(--wb-navy);
+    border-bottom-color: var(--wb-accent);
+  }
+
+  .ai-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+
+  .ai-panel.wide {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-panel[hidden] {
+    display: none;
+  }
+
+  .ai-text {
+    display: grid;
+    gap: 14px;
+    max-width: 60ch;
+  }
+
+  .ai-text ul {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .ai-text li {
+    color: var(--wb-ink);
+  }
+
+  .ai-text li b {
+    font-weight: 600;
+  }
+
+  .small {
+    font-size: 0.85rem;
+  }
+
+  .term {
+    padding: 18px 20px;
+    background: var(--wb-terminal);
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: var(--wb-radius);
+    color: #cfd8e6;
+  }
+
+  .term pre {
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.8rem;
+    line-height: 1.55;
+    white-space: pre;
+  }
+
+  .term .ok,
+  .term .add {
+    color: #5fd39a;
+  }
+  .term .wr {
+    color: #f2b84b;
+  }
+  .term .er,
+  .term .del {
+    color: #ff7b7b;
+  }
+  .term .dim {
+    color: #6c7a93;
+  }
+  .term .hi {
+    color: #ffd46a;
+  }
+  .term .key {
+    color: #8fd3f4;
+  }
+
+  .term .cap {
+    margin-bottom: 10px;
+    font-family: var(--wb-font-body);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6c7a93;
+  }
+
+  .codebox {
+    padding: 16px 18px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .codebox pre {
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    white-space: pre;
+    color: var(--wb-ink);
+  }
+
+  .codebox .cap {
+    margin-bottom: 8px;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wb-muted);
+  }
+
+  .stack {
+    display: grid;
+    gap: 16px;
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 16px;
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  .kv dt {
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    color: var(--wb-ink);
+  }
+
+  .kv dd {
+    margin: 0;
+    color: var(--wb-muted);
+  }
+
+  .risk {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.72rem;
+  }
+
+  .risk.safe {
+    background: var(--wb-pass-soft);
+    color: var(--wb-pass);
+  }
+
+  .risk.beh {
+    background: var(--wb-warn-soft);
+    color: var(--wb-warn);
+  }
+
+  .stepper-title {
+    margin-bottom: 10px;
+  }
+
+  .stepper {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .step {
+    position: relative;
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: 8px;
+  }
+
+  .step .v {
+    font-family: var(--wb-font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .step .w {
+    font-size: 0.8rem;
+    color: var(--wb-muted);
+  }
+
+  .step .x {
+    font-family: var(--wb-font-mono);
+    font-size: 0.72rem;
+    color: var(--wb-muted);
+  }
+
+  .step::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    border-radius: 8px 0 0 8px;
+  }
+
+  .step.blocked::before {
+    background: var(--wb-fail);
+  }
+  .step.changes::before {
+    background: var(--wb-warn);
+  }
+  .step.nits::before {
+    background: var(--wb-accent);
+  }
+  .step.ready::before {
+    background: var(--wb-pass);
+  }
+  .step.incomplete {
+    grid-column: 1 / -1;
+    border-style: dashed;
+  }
+  .step.incomplete::before {
+    background: var(--wb-muted);
+  }
+
+  .sev {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+
+  .sev.p1 {
+    background: var(--wb-fail-soft);
+    color: var(--wb-fail);
+  }
+  .sev.p2 {
+    background: var(--wb-warn-soft);
+    color: var(--wb-warn);
+  }
+  .sev.p3 {
+    background: var(--wb-accent-soft);
+    color: var(--wb-ink);
+  }
+
+  .thread {
+    display: grid;
+    gap: 10px;
+  }
+
+  .comment {
+    overflow: hidden;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+
+  .comment .head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--wb-surface-2);
+    border-bottom: 1px solid var(--wb-hair);
+    color: var(--wb-muted);
+  }
+
+  .comment .head b {
+    font-weight: 600;
+    color: var(--wb-ink);
+  }
+
+  .comment .example {
+    margin-left: auto;
+    padding: 1px 6px;
+    border: 1px solid var(--wb-hair);
+    border-radius: 4px;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .comment .body {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .comment.resolved {
+    opacity: 0.75;
+  }
+
+  .banner {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.75rem;
+  }
+
+  .banner.ok {
+    background: var(--wb-pass-soft);
+    color: var(--wb-pass);
+  }
+  .banner.reg {
+    background: var(--wb-fail-soft);
+    color: var(--wb-fail);
+  }
+  .banner.part {
+    background: var(--wb-warn-soft);
+    color: var(--wb-warn);
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 18px 20px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .card h3 {
+    font-size: 1rem;
+  }
+
+  .card p {
+    font-size: 0.9rem;
+    color: var(--wb-muted);
+  }
+
+  @media (max-width: 860px) {
+    .ai-panel,
+    .split {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .stepper {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+</style>
+
+<script>
+  function initAiTabs(): void {
+    const root = document.getElementById('ai-features');
+    if (!root || root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.ai-tab'));
+    const select = (tab: HTMLButtonElement): void => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(t.getAttribute('aria-controls') ?? '');
+        if (panel) panel.hidden = !on;
+      }
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (e) => {
+        const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!delta) return;
+        const next = tabs[(i + delta + tabs.length) % tabs.length];
+        if (!next) return;
+        e.preventDefault();
+        select(next);
+        next.focus();
+      });
+    });
+  }
+
+  initAiTabs();
+  document.addEventListener('astro:page-load', initAiTabs);
+</script>

@@ -1,54 +1,92 @@
 ---
+import { TOOL_COUNT } from '../data/tools-catalog';
 import BaseLayout from '../layouts/BaseLayout.astro';
-import HomeFeatureCards from '../components/HomeFeatureCards.astro';
-import DocLink from '../components/DocLink.astro';
-import { docs, docHref, external } from '../data/site-links';
-
-const base = import.meta.env.BASE_URL;
+import Hero from '../components/home/Hero.astro';
+import Workbench from '../components/home/Workbench.astro';
+import InstallPicker from '../components/home/InstallPicker.astro';
+import HealthScore from '../components/home/HealthScore.astro';
+import ToolCatalog from '../components/home/ToolCatalog.astro';
+import AiFeatures from '../components/home/AiFeatures.astro';
+import ConfigBuilder from '../components/home/ConfigBuilder.astro';
+import McpConsole from '../components/home/McpConsole.astro';
+import WatchAndCi from '../components/home/WatchAndCi.astro';
+import Comparison from '../components/home/Comparison.astro';
 ---
 
-<BaseLayout title="Lintro" description="Unified linting, formatting, and testing for modern projects.">
-  <div class="container">
-    <section class="term-hero">
-      <p class="term-prompt">
-        <span class="user">dev@repo</span>:<span class="path">~/project</span>$ lintro --help
-      </p>
-      <h1>ONE CLI.<br />MANY TOOLS.<br />ZERO CEREMONY.</h1>
-      <p class="term-lead">
-        Unified linting, formatting, and testing. Native configs. Grid output. No migration
-        theatre.
-      </p>
-      <div class="term-actions">
-        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">$ lintro check .</a>
-        <a href={docHref(base, docs.hub)} class="btn btn-secondary">man lintro</a>
-      </div>
-      <pre class="term-output" aria-hidden="true"><code>✓ ruff      0 issues
-✓ prettier  0 issues
-✓ yamllint  0 issues
-────────────────────
-PASS  3 tools  0 issues</code></pre>
-    </section>
+<BaseLayout
+  title="Lintro"
+  description={`One CLI that runs ${TOOL_COUNT} linters, formatters, type checkers and security scanners behind a single command, normalizes their output, and adds optional bring-your-own-key AI code review.`}
+>
+  <section class="home-hero" id="workbench-section">
+    <div class="container">
+      <Hero />
+      <Workbench />
+      <InstallPicker />
+    </div>
+  </section>
 
-    <HomeFeatureCards />
+  <section class="home-block">
+    <div class="container">
+      <HealthScore />
+    </div>
+  </section>
 
-    <section class="term-cta">
-      <h2>// ready?</h2>
-      <p>
-        Install from PyPI, run <code>lintro check</code>, and explore the{' '}
-        <DocLink href={docs.hub}>documentation hub</DocLink> for configuration and CI setup.
-      </p>
-      <div class="term-actions">
-        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">read the docs</a>
-        <a href={docHref(base, docs.coverage)} class="btn btn-secondary">view coverage</a>
-        <a
-          href={external.github.href}
-          class="btn btn-secondary"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          github
-        </a>
-      </div>
-    </section>
-  </div>
+  <section class="home-block" id="tools">
+    <div class="container">
+      <ToolCatalog />
+    </div>
+  </section>
+
+  <section class="home-block" id="ai">
+    <div class="container">
+      <AiFeatures />
+    </div>
+  </section>
+
+  <section class="home-block" id="config">
+    <div class="container">
+      <ConfigBuilder />
+    </div>
+  </section>
+
+  <section class="home-block" id="mcp">
+    <div class="container">
+      <McpConsole />
+    </div>
+  </section>
+
+  <section class="home-block" id="ci">
+    <div class="container">
+      <WatchAndCi />
+    </div>
+  </section>
+
+  <section class="home-block" id="compare">
+    <div class="container">
+      <Comparison />
+    </div>
+  </section>
 </BaseLayout>
+
+<style>
+  .home-hero {
+    padding: 64px 0 48px;
+    scroll-margin-top: var(--header-height);
+  }
+
+  .home-block {
+    padding: 72px 0;
+    border-top: 1px solid var(--wb-hair);
+    scroll-margin-top: var(--header-height);
+  }
+
+  @media (max-width: 700px) {
+    .home-hero {
+      padding: 40px 0 32px;
+    }
+
+    .home-block {
+      padding: 48px 0;
+    }
+  }
+</style>

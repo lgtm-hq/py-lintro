@@ -1,0 +1,415 @@
+---
+import { docHref, docs } from '../../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+
+const categories = [
+  { value: 'python', label: 'Python', checked: true },
+  { value: 'js', label: 'JS / TS', checked: true },
+  { value: 'shell', label: 'Shell', checked: false },
+  { value: 'rust', label: 'Rust', checked: false },
+  { value: 'go', label: 'Go', checked: false },
+  { value: 'config', label: 'YAML / TOML / .env', checked: true },
+  { value: 'docs', label: 'Markdown / prose', checked: false },
+  { value: 'security', label: 'Secrets / SAST', checked: true },
+  { value: 'infra', label: 'Docker / Actions / SQL', checked: false },
+];
+---
+
+<header class="section-header">
+  <span class="eyebrow">Config builder</span>
+  <h2>Write your first <code>.lintro-config.yaml</code> here.</h2>
+  <p class="lede">
+    Or run <code>lintro init</code> and let it write one for you. Native tool configs keep working
+    either way. Every key is documented in the
+    <a href={docHref(base, docs.configuration)}>configuration guide</a>.
+  </p>
+</header>
+
+<div class="builder" id="config-builder">
+  <form class="form" id="cfg-form" aria-label="Configuration options">
+    <div class="two">
+      <div class="field">
+        <label for="cfg-provider">Provider</label>
+        <select id="cfg-provider">
+          <option value="anthropic" selected>anthropic</option>
+          <option value="openai">openai</option>
+          <option value="cursor">cursor</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="cfg-transport">Transport</label>
+        <select id="cfg-transport">
+          <option value="api" selected>api (SDK, metered)</option>
+          <option value="cli">cli (local agent binary)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">AI features</span>
+      <div class="row">
+        <label><input type="checkbox" id="cfg-ai-enabled" /> Enable AI (off by default)</label>
+        <label><input type="checkbox" id="cfg-ai-lint" checked /> Summaries on check and format</label>
+        <label><input type="checkbox" id="cfg-ai-review" checked /> Diff review</label>
+      </div>
+    </div>
+    <div class="two">
+      <div class="field">
+        <label for="cfg-cost">Max cost per run (USD)</label>
+        <input type="number" id="cfg-cost" min="0.05" step="0.05" value="2.00" />
+      </div>
+      <div class="field">
+        <label for="cfg-line">Enforced line length</label>
+        <input type="number" id="cfg-line" min="60" max="200" step="1" value="88" />
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Review</span>
+      <div class="two">
+        <select id="cfg-depth" aria-label="Review depth">
+          <option value="1" selected>depth 1 · checklist</option>
+          <option value="2">depth 2 · + generated questions</option>
+          <option value="3">depth 3 · + adversarial</option>
+        </select>
+        <select id="cfg-strict" aria-label="Review strictness">
+          <option value="focused">focused</option>
+          <option value="balanced" selected>balanced</option>
+          <option value="thorough">thorough</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <span class="lbl">Tool categories to enable</span>
+      <div class="row" id="cfg-cats">
+        {
+          categories.map((c) => (
+            <label>
+              <input type="checkbox" value={c.value} checked={c.checked} /> {c.label}
+            </label>
+          ))
+        }
+      </div>
+    </div>
+  </form>
+  <div class="yaml">
+    <div class="head">
+      <span>.lintro-config.yaml</span>
+      <button type="button" id="yaml-copy">Copy YAML</button>
+    </div>
+    <pre id="yaml-out"><span class="line c"># .lintro-config.yaml · generated on this page</span>
+<span class="line"><span class="k">enforce</span>:</span>
+<span class="line">  <span class="k">line_length</span>: <span class="n">88</span></span>
+<span class="line"> </span>
+<span class="line"><span class="k">tools</span>:</span>
+<span class="line">  <span class="k">ruff</span>:</span>
+<span class="line">    <span class="k">enabled</span>: <span class="n">true</span></span>
+<span class="line">  <span class="c"># … one entry per tool in the picked categories</span></span>
+<span class="line"> </span>
+<span class="line"><span class="k">ai</span>:</span>
+<span class="line">  <span class="k">enabled</span>: <span class="n">true</span></span>
+<span class="line">  <span class="k">lint</span>: <span class="n">true</span>       <span class="c"># AI summaries on chk / fmt</span></span>
+<span class="line">  <span class="k">review</span>: <span class="n">true</span>     <span class="c"># lintro review</span></span>
+<span class="line">  <span class="k">provider</span>: <span class="s">anthropic</span></span>
+<span class="line">  <span class="k">transport</span>: <span class="s">api</span></span>
+<span class="line">  <span class="k">max_cost_usd</span>: <span class="n">2.00</span>   <span class="c"># enforced on the api transport</span></span>
+<span class="line"> </span>
+<span class="line"><span class="k">review</span>:</span>
+<span class="line">  <span class="k">depth</span>: <span class="n">1</span></span>
+<span class="line">  <span class="k">strictness</span>: <span class="s">balanced</span></span>
+<span class="line">  <span class="k">custom_agents</span>: <span class="n">true</span>    <span class="c"># .lintro/review-agents/*.md</span></span>
+<span class="line">  <span class="k">auto_resolve</span>: <span class="n">true</span></span></pre>
+  </div>
+</div>
+
+<style>
+  .section-header {
+    display: grid;
+    gap: 10px;
+    max-width: 70ch;
+    margin-bottom: 36px;
+  }
+
+  .section-header a {
+    color: var(--turbo-link-default, var(--wb-ink));
+  }
+
+  .builder {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .form {
+    display: grid;
+    gap: 18px;
+    padding: 22px 24px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .field {
+    display: grid;
+    gap: 6px;
+  }
+
+  .field > label,
+  .field > .lbl {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--wb-muted);
+  }
+
+  .field select,
+  .field input[type='number'] {
+    padding: 8px 10px;
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius-sm);
+    background: var(--wb-surface-2);
+    font: inherit;
+    color: var(--wb-ink);
+  }
+
+  .field .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .field .row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.925rem;
+  }
+
+  .field input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--wb-accent);
+  }
+
+  .two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .yaml {
+    overflow: hidden;
+    background: var(--wb-chrome);
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: var(--wb-radius);
+    color: var(--wb-chrome-ink);
+  }
+
+  .yaml .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--wb-chrome-hair);
+    font-family: var(--wb-font-mono);
+    font-size: 0.8rem;
+    color: var(--wb-chrome-muted);
+  }
+
+  .yaml .head button {
+    padding: 4px 10px;
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: var(--wb-radius-sm);
+    background: transparent;
+    font-size: 0.8rem;
+    color: var(--wb-chrome-ink);
+  }
+
+  .yaml .head button:hover {
+    border-color: var(--wb-accent);
+  }
+
+  .yaml pre {
+    margin: 0;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    white-space: pre;
+  }
+
+  .yaml :global(.k) {
+    color: #8fd3f4;
+  }
+  .yaml :global(.s) {
+    color: #ffd46a;
+  }
+  .yaml :global(.c) {
+    color: #6c7a93;
+  }
+  .yaml :global(.n) {
+    color: #5fd39a;
+  }
+
+  .yaml :global(.line) {
+    display: block;
+    transition: background 0.6s ease;
+  }
+
+  .yaml :global(.line.flash) {
+    background: rgba(233, 162, 27, 0.28);
+    transition: none;
+  }
+
+  @media (max-width: 860px) {
+    .builder {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .yaml :global(.line) {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  import { escapeHtml as esc } from '../../data/home-content';
+
+  const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const CATS: Record<string, string[]> = {
+    python: ['ruff', 'black', 'mypy', 'bandit', 'pydoclint', 'pip-audit'],
+    js: ['oxlint', 'oxfmt', 'prettier', 'tsc', 'stylelint'],
+    shell: ['shellcheck', 'shfmt'],
+    rust: ['clippy', 'rustfmt', 'cargo-audit', 'cargo-deny'],
+    go: ['golangci-lint'],
+    config: ['yamllint', 'taplo', 'dotenv-linter'],
+    docs: ['markdownlint-cli2', 'vale', 'typos'],
+    security: ['gitleaks', 'trufflehog', 'semgrep', 'osv-scanner'],
+    infra: ['hadolint', 'actionlint', 'sqlfluff'],
+  };
+
+  const k = (s: string): string => `<span class="k">${esc(s)}</span>`;
+  const v = (s: string): string => `<span class="s">${esc(s)}</span>`;
+  const n = (s: string | number | boolean): string => `<span class="n">${esc(String(s))}</span>`;
+  const c = (s: string): string => `<span class="c"># ${esc(s)}</span>`;
+
+  function initConfigBuilder(): void {
+    const root = document.getElementById('config-builder');
+    const form = document.getElementById('cfg-form') as HTMLFormElement | null;
+    const out = document.getElementById('yaml-out');
+    const copy = document.getElementById('yaml-copy') as HTMLButtonElement | null;
+    if (!root || !form || !out || !copy || root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const field = <T extends HTMLElement>(id: string): T | null =>
+      document.getElementById(id) as T | null;
+
+    let prev: string[] | null = null;
+    let plain = '';
+
+    const build = (): void => {
+      const html: string[] = [];
+      const raw: string[] = [];
+      const L = (h: string, r: string): void => {
+        html.push(h);
+        raw.push(r);
+      };
+
+      const enabled = field<HTMLInputElement>('cfg-ai-enabled')?.checked ?? false;
+      const lint = field<HTMLInputElement>('cfg-ai-lint')?.checked ?? false;
+      const review = field<HTMLInputElement>('cfg-ai-review')?.checked ?? false;
+      const provider = field<HTMLSelectElement>('cfg-provider')?.value ?? 'anthropic';
+      let transport = field<HTMLSelectElement>('cfg-transport')?.value ?? 'api';
+      if (provider === 'cursor') transport = 'cli';
+      let cost = Number.parseFloat(field<HTMLInputElement>('cfg-cost')?.value ?? '2');
+      if (!(cost > 0)) cost = 2;
+      const costText = cost.toFixed(2);
+      let line = Number.parseInt(field<HTMLInputElement>('cfg-line')?.value ?? '88', 10);
+      if (!(line > 0)) line = 88;
+      const depth = field<HTMLSelectElement>('cfg-depth')?.value ?? '1';
+      const strict = field<HTMLSelectElement>('cfg-strict')?.value ?? 'balanced';
+
+      L(c('.lintro-config.yaml · generated on this page'), '# .lintro-config.yaml · generated on this page');
+      L(`${k('enforce')}:`, 'enforce:');
+      L(`  ${k('line_length')}: ${n(line)}`, `  line_length: ${line}`);
+      L('', '');
+      L(`${k('tools')}:`, 'tools:');
+      let any = false;
+      const cats = field<HTMLElement>('cfg-cats');
+      for (const cb of cats?.querySelectorAll<HTMLInputElement>('input:checked') ?? []) {
+        for (const t of CATS[cb.value] ?? []) {
+          any = true;
+          L(`  ${k(t)}:`, `  ${t}:`);
+          L(`    ${k('enabled')}: ${n('true')}`, '    enabled: true');
+        }
+      }
+      if (!any) L(`  ${c('pick a category to enable tools')}`, '  # pick a category to enable tools');
+      L('', '');
+      L(`${k('ai')}:`, 'ai:');
+      L(`  ${k('enabled')}: ${n(enabled)}`, `  enabled: ${enabled}`);
+      L(`  ${k('lint')}: ${n(lint)}       ${c('AI summaries on chk / fmt')}`, `  lint: ${lint}       # AI summaries on chk / fmt`);
+      L(`  ${k('review')}: ${n(review)}     ${c('lintro review')}`, `  review: ${review}     # lintro review`);
+      L(`  ${k('provider')}: ${v(provider)}`, `  provider: ${provider}`);
+      const cursorNote = provider === 'cursor' ? '   # cursor requires cli' : '';
+      L(
+        `  ${k('transport')}: ${v(transport)}${provider === 'cursor' ? `   ${c('cursor requires cli')}` : ''}`,
+        `  transport: ${transport}${cursorNote}`
+      );
+      const capNote = transport === 'api' ? 'enforced on the api transport' : 'advisory on the cli transport';
+      L(`  ${k('max_cost_usd')}: ${n(costText)}   ${c(capNote)}`, `  max_cost_usd: ${costText}   # ${capNote}`);
+      if (review) {
+        L('', '');
+        L(`${k('review')}:`, 'review:');
+        L(`  ${k('depth')}: ${n(depth)}`, `  depth: ${depth}`);
+        L(`  ${k('strictness')}: ${v(strict)}`, `  strictness: ${strict}`);
+        L(`  ${k('custom_agents')}: ${n('true')}    ${c('.lintro/review-agents/*.md')}`, '  custom_agents: true    # .lintro/review-agents/*.md');
+        L(`  ${k('auto_resolve')}: ${n('true')}`, '  auto_resolve: true');
+      }
+
+      const before = prev;
+      out.innerHTML = html
+        .map((h, i) => {
+          const changed = before !== null && raw[i] !== before[i];
+          return `<span class="line${changed && !REDUCE ? ' flash' : ''}">${h || ' '}</span>`;
+        })
+        .join('');
+      if (before !== null && !REDUCE) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            for (const el of out.querySelectorAll('.line.flash')) el.classList.remove('flash');
+          });
+        });
+      }
+      prev = raw.slice();
+      plain = raw.join('\n');
+    };
+
+    form.addEventListener('input', build);
+    form.addEventListener('change', build);
+    form.addEventListener('submit', (e) => e.preventDefault());
+    copy.addEventListener('click', () => {
+      const done = (): void => {
+        copy.textContent = 'Copied';
+        setTimeout(() => {
+          copy.textContent = 'Copy YAML';
+        }, 1400);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(plain).then(done, () => {
+          copy.textContent = 'Copy failed';
+        });
+      } else {
+        copy.textContent = 'Select and copy';
+      }
+    });
+    build();
+  }
+
+  initConfigBuilder();
+  document.addEventListener('astro:page-load', initConfigBuilder);
+</script>

@@ -1,0 +1,144 @@
+---
+import { docHref, docs } from '../../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<header class="section-header">
+  <span class="eyebrow">Everywhere you run it</span>
+  <h2>Same command on your laptop, in a hook, in a container, in CI.</h2>
+</header>
+
+<div class="cards">
+  <div class="card">
+    <h3>Watch mode</h3>
+    <p>
+      Only the tools matching the changed file run, derived from each tool's own file patterns.
+      <a href={docHref(base, docs.watchMode)}>Watch mode guide</a>.
+    </p>
+    <dl class="map">
+      <dt>*.py</dt><dd>ruff · mypy · bandit · black</dd>
+      <dt>*.ts</dt><dd>oxlint · tsc</dd>
+      <dt>*.rs</dt><dd>clippy · rustfmt</dd>
+      <dt>*.yaml</dt><dd>yamllint · prettier</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h3>Output formats</h3>
+    <p>One flag, eight renderers, one findings model.</p>
+    <div class="fmt-list">
+      <code>grid</code><code>plain</code><code>json</code><code>sarif</code><code>github</code><code>markdown</code><code>html</code><code>csv</code>
+    </div>
+  </div>
+  <div class="card">
+    <h3>GitHub Actions</h3>
+    <ul>
+      <li>PR comment with results</li>
+      <li><code>github</code> format for inline annotations</li>
+      <li>SARIF upload to code scanning</li>
+      <li><code>--diff</code> for PR-scoped runs</li>
+      <li>AI review workflow with trusted install</li>
+    </ul>
+    <a href={docHref(base, docs.githubIntegration)}>GitHub integration guide</a>
+  </div>
+  <div class="card">
+    <h3>pre-commit</h3>
+    <p>
+      Run Lintro as a hook and keep one unified output instead of each hook's raw text.
+      <a href={docHref(base, docs.preCommit)}>Hook setup</a>.
+    </p>
+  </div>
+  <div class="card">
+    <h3>Docker</h3>
+    <ul>
+      <li><code>ghcr.io/lgtm-hq/py-lintro</code> with every tool installed</li>
+      <li><code>ghcr.io/lgtm-hq/py-lintro-base</code> CLI only</li>
+    </ul>
+    <a href={docHref(base, docs.docker)}>Docker guide</a>
+  </div>
+  <div class="card">
+    <h3>No Python at all</h3>
+    <p>
+      <code>bun add -g @lgtm-hq/lintro</code> installs a self-contained native binary for
+      darwin-arm64, darwin-x64, linux-arm64 or linux-x64. Homebrew via <code>lgtm-hq/tap</code>.
+    </p>
+  </div>
+</div>
+
+<style>
+  .section-header {
+    display: grid;
+    gap: 10px;
+    max-width: 70ch;
+    margin-bottom: 36px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    padding: 18px 20px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .card h3 {
+    font-size: 1rem;
+  }
+
+  .card p {
+    font-size: 0.9rem;
+    color: var(--wb-muted);
+  }
+
+  .card ul {
+    display: grid;
+    gap: 3px;
+    margin: 0;
+    padding-left: 16px;
+    font-size: 0.875rem;
+    color: var(--wb-muted);
+  }
+
+  .card a {
+    font-size: 0.875rem;
+    color: var(--turbo-link-default, var(--wb-ink));
+  }
+
+  .fmt-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .fmt-list code {
+    font-size: 0.8rem;
+  }
+
+  .map {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 14px;
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .map dt {
+    font-family: var(--wb-font-mono);
+    color: var(--wb-ink);
+  }
+
+  .map dd {
+    margin: 0;
+    font-family: var(--wb-font-mono);
+    font-size: 0.8rem;
+    color: var(--wb-muted);
+  }
+</style>
