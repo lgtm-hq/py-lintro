@@ -459,8 +459,11 @@ def test_parallel_chunks_report_queued_and_in_flight(tmp_path: Path) -> None:
     for chunk in timings.chunks:
         assert_that(chunk.in_flight_seconds).is_greater_than_or_equal_to(0.02)
         assert_that(chunk.failed).is_false()
-    # Serialized behind one slot, every chunk after the first waits.
-    assert_that(timings.chunks[0].queued_seconds).is_less_than(0.02)
+    # Serialized behind one slot, every chunk after the first waits; the
+    # leader is admitted before it could have spent a full call in flight.
+    assert_that(timings.chunks[0].queued_seconds).is_less_than(
+        timings.chunks[0].in_flight_seconds,
+    )
     assert_that(
         [chunk.queued_seconds for chunk in timings.chunks[1:]],
     ).is_not_empty()
@@ -484,9 +487,10 @@ def test_unqueued_chunks_report_no_semaphore_wait(tmp_path: Path) -> None:
 
     timings = _timings_of(result=result)
     assert_that(timings.max_parallel).is_equal_to(3)
-    assert_that(
-        max(chunk.queued_seconds for chunk in timings.chunks),
-    ).is_less_than(0.02)
+    # With a slot per chunk, no chunk waits anywhere near as long as it spent
+    # in flight. A relative bound does not depend on scheduler latency.
+    for chunk in timings.chunks:
+        assert_that(chunk.queued_seconds).is_less_than(chunk.in_flight_seconds)
 
 
 def test_single_chunk_run_records_one_chunk_without_queue(tmp_path: Path) -> None:
