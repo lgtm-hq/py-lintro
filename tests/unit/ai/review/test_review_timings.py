@@ -825,6 +825,51 @@ def test_run_mechanics_footer_omits_timings_when_uninstrumented() -> None:
     assert_that(format_run_mechanics(metadata=metadata)).does_not_contain("Timings")
 
 
+def _uninstrumented_result() -> ReviewResult:
+    """Build a result whose metadata predates timing instrumentation.
+
+    Returns:
+        A minimal result with ``metadata.timings`` left at ``None``.
+    """
+    return ReviewResult(
+        metadata=ReviewMetadata(
+            model="gpt-4o",
+            provider="openai",
+            context_window=128_000,
+            depth=1,
+            chunks_total=1,
+            chunks_current=1,
+            files_reviewed=1,
+            files_total=1,
+            checklist_items=0,
+        ),
+        summary="Nothing to report.",
+        findings=(),
+    )
+
+
+def test_json_payload_carries_null_timings_when_uninstrumented() -> None:
+    """Legacy results serialize ``timings`` as ``null``, never omit the key."""
+    payload = review_result_to_dict(result=_uninstrumented_result())
+
+    assert_that(payload).contains_key("timings")
+    assert_that(payload["timings"]).is_none()
+    assert_that(payload["metadata"]).does_not_contain_key("timings")
+
+
+def test_terminal_output_omits_summary_when_uninstrumented() -> None:
+    """Legacy results render no timing line in the terminal."""
+    from rich.console import Console
+
+    from lintro.ai.review.display import render_review_terminal
+
+    console = Console(record=True, width=200, no_color=True)
+
+    render_review_terminal(result=_uninstrumented_result(), console=console)
+
+    assert_that(console.export_text()).does_not_contain("total ")
+
+
 def test_terminal_output_prints_the_timing_summary(tmp_path: Path) -> None:
     """The terminal renderer prints the one-line timing summary.
 
