@@ -471,11 +471,11 @@ def test_parallel_chunks_report_queued_and_in_flight(tmp_path: Path) -> None:
     for chunk in timings.chunks:
         assert_that(chunk.in_flight_seconds).is_greater_than_or_equal_to(0.02)
         assert_that(chunk.failed).is_false()
-    # Serialized behind one slot, every chunk after the first waits; the
-    # leader is admitted before it could have spent a full call in flight.
-    assert_that(timings.chunks[0].queued_seconds).is_less_than(
-        timings.chunks[0].in_flight_seconds,
-    )
+    # Serialized behind one slot, every chunk after the leader waits; the
+    # leader (whichever index was admitted first) is admitted before it could
+    # have spent a full call in flight.
+    leader = min(timings.chunks, key=lambda chunk: chunk.queued_seconds)
+    assert_that(leader.queued_seconds).is_less_than(leader.in_flight_seconds)
     assert_that(
         [chunk.queued_seconds for chunk in timings.chunks[1:]],
     ).is_not_empty()
@@ -707,6 +707,43 @@ def test_run_mechanics_footer_carries_the_timing_summary(tmp_path: Path) -> None
 
     expected = format_timing_summary(timings=_timings_of(result=result))
     assert_that(mechanics).contains(f"**Timings:** {expected}")
+
+
+def test_review_body_run_stats_carry_the_timing_summary(tmp_path: Path) -> None:
+    """The posted success comment's run-stats block shows the summary.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    from lintro.ai.review.github_review_body import _run_stats_section
+
+    result = _run(tmp_path=tmp_path, chunk_count=1)
+
+    section = _run_stats_section(
+        result=result,
+        transport="api",
+        auth_mode="",
+        config_source="",
+    )
+
+    expected = format_timing_summary(timings=_timings_of(result=result))
+    assert_that(section).contains(f"<sub>Timings: {expected}</sub>")
+
+
+def test_sticky_this_run_carries_the_timing_summary(tmp_path: Path) -> None:
+    """The sticky comment's This-run section shows the summary.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    from lintro.ai.review.github_sticky import _this_run_section
+
+    result = _run(tmp_path=tmp_path, chunk_count=1)
+
+    section = _this_run_section(result=result, transport="api", auth_mode="")
+
+    expected = format_timing_summary(timings=_timings_of(result=result))
+    assert_that(section).contains(f"<sub>Timings: {expected}</sub>")
 
 
 def test_run_mechanics_footer_omits_timings_when_uninstrumented() -> None:

@@ -73,6 +73,7 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_timings_note,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -1651,6 +1652,11 @@ def _this_run_section(
                 f"| {metadata.files_reviewed} "
                 f"| {metadata.checklist_items} "
                 f"| {metadata.duration_seconds:.0f}s |"
+            ),
+            *(
+                ["", timings_note]
+                if (timings_note := format_timings_note(metadata=metadata))
+                else []
             ),
         ],
     )

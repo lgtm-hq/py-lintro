@@ -358,8 +358,10 @@ duration so the dominant phase reads first:
 total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, validation 0.1s
 ```
 
-The same line is appended to the run-mechanics footer of the posted GitHub comment.
-`--output-format json` carries the full breakdown in a top-level `timings` block:
+The same line is posted to GitHub as a `Timings:` note under the review body's run-stats
+block and the sticky comment's `This run` table (and in the run-mechanics footer of
+error stickies). `--output-format json` carries the full breakdown in a top-level
+`timings` block:
 
 ```json
 {

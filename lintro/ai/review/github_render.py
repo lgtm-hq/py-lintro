@@ -24,6 +24,7 @@ from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
+    "format_timings_note",
     "format_badge_table",
     "format_badge_tables",
     "format_finding_comment",
@@ -170,6 +171,31 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
         ("tokens in", f"{tilde}{_fmt_int(prompt_tokens)}"),
         ("tokens out", f"{tilde}{_fmt_int(completion_tokens)}"),
     ]
+
+
+def format_timings_note(*, metadata: ReviewMetadata) -> str:
+    """Render the per-phase timing summary as a small note for posted comments.
+
+    Shared by every success surface that shows run mechanics (the review
+    body's run-stats block and the sticky's ``This run`` table) so the posted
+    comment carries the same one-line breakdown the terminal prints (#2148).
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A ``<sub>`` line with the summary, or an empty string when the run was
+        not instrumented.
+    """
+    if metadata.timings is None:
+        return ""
+    summary = sanitize_comment_text(
+        format_timing_summary(timings=metadata.timings),
+        # Trusted instrumentation text, not model prose: the cap only bounds a
+        # pathological run, it must not clip a normal one.
+        limit=1000,
+    )
+    return f"<sub>Timings: {summary}</sub>"
 
 
 def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
