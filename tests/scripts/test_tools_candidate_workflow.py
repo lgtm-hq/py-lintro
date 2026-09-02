@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess  # nosec B404 - fixed argv runs the repository script under test
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -98,6 +100,77 @@ def test_candidate_workflow_keeps_custom_tag_and_manifest_trigger(
     assert "candidate-tag" in candidate["with"]["tags"]
 
 
+def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
+    """Candidate writes stay limited to Renovate and the digest app token."""
+    workflow = _load_workflow("docker-tools-candidate.yml")
+    trigger = _trigger(workflow)
+    push = trigger["push"]
+    assert isinstance(push, dict)
+    assert_that(push["branches"]).is_equal_to(["renovate/**"])
+    assert_that(push["paths"]).contains("lintro/tools/manifest.src.json")
+
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    resolve = jobs["resolve-pr"]
+    candidate = jobs["candidate-build"]
+    digest = jobs["push-digest"]
+    assert isinstance(resolve, dict)
+    assert isinstance(candidate, dict)
+    assert isinstance(digest, dict)
+    assert_that(resolve["if"]).is_equal_to("github.actor == 'renovate[bot]'")
+    assert_that(candidate["if"]).is_equal_to("github.actor == 'renovate[bot]'")
+    assert_that(digest["needs"]).is_equal_to(["resolve-pr", "candidate-build"])
+    assert_that(digest["if"]).contains("github.actor == 'renovate[bot]'")
+    assert_that(digest["if"]).contains("needs.resolve-pr.result == 'success'")
+    assert_that(digest["if"]).contains("needs.candidate-build.result == 'success'")
+
+    checkouts = [
+        step
+        for job_name in ("resolve-pr", "push-digest")
+        for step in jobs[job_name]["steps"]
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert_that(checkouts).is_length(2)
+    for checkout in checkouts:
+        assert_that(checkout["with"]["persist-credentials"]).is_false()
+
+    steps = digest["steps"]
+    mint_index = next(
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, dict) and step.get("id") == "digest-app"
+    )
+    push_index = next(
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, dict) and step.get("name") == "Push digest commit"
+    )
+    mint = steps[mint_index]
+    push_step = steps[push_index]
+    assert_that(mint_index).is_equal_to(push_index - 1)
+    assert_that(mint["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
+    assert_that(mint["uses"]).is_equal_to(
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+    )
+    assert_that(mint["with"]).is_equal_to(
+        {
+            "app-id": "${{ secrets.DIGEST_APP_ID }}",
+            "private-key": "${{ secrets.DIGEST_APP_PRIVATE_KEY }}",
+            "permission-contents": "write",
+        },
+    )
+    assert_that(push_step["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
+    digest_token = "${{ steps.digest-app.outputs.token }}"  # nosec B105 - expression
+    assert_that(push_step["env"]).is_equal_to(
+        {
+            "DIGEST_TOKEN": digest_token,
+            "REPOSITORY": "${{ github.repository }}",
+            "BRANCH": "${{ github.ref_name }}",
+        },
+    )
+
+
 def test_resolve_pr_retries_until_renovate_creates_pr(
     *,
     resolver_module: ModuleType,
@@ -154,6 +227,28 @@ def test_candidate_cleanup_checks_out_repository_script() -> None:
     )
 
 
+def test_candidate_cleanup_runs_from_production_script_path() -> None:
+    """The committed production path runs without a package import failure."""
+    script = Path("scripts/ci/maintenance/sweep-tools-candidate-tags.py")
+    environment = os.environ.copy()
+    environment.pop("GH_TOKEN", None)
+    environment.pop("GITHUB_TOKEN", None)
+    environment.pop("PYTHONPATH", None)
+
+    result = subprocess.run(  # nosec B603 - fixed repository script path
+        [sys.executable, str(script)],
+        capture_output=True,
+        check=False,
+        cwd=_REPO_ROOT,
+        env=environment,
+        text=True,
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("GH_TOKEN is required")
+    assert_that(result.stderr).does_not_contain("ModuleNotFoundError")
+
+
 def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     """A Renovate merge promotes; ordinary main updates build canonically."""
     workflow = _load_workflow("docker-tools-promote.yml")
@@ -173,6 +268,16 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
     assert cleanup["concurrency"]["group"] == workflow["concurrency"]["group"]
+    publish = _load_workflow("docker-tools-publish.yml")
+    assert_that(publish["concurrency"]).is_equal_to(workflow["concurrency"])
+    promote_steps = [
+        step
+        for step in promote["steps"]
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("docker/setup-buildx-action@")
+    ]
+    assert_that(promote_steps).is_length(1)
+    assert_that(promote_steps[0]["with"]["driver"]).is_equal_to("docker")
     assert "docker/tools.Dockerfile" in _trigger(workflow)["push"]["paths"]
     assert (
         ".github/workflows/docker-tools-publish.yml"
@@ -384,6 +489,27 @@ def test_cleanup_refresh_skips_version_that_gained_persistent_tag(
     assert_that(
         cleanup_module._refresh_candidate(owner="lgtm-hq", candidate=candidate),
     ).is_none()
+
+
+def test_cleanup_reraises_unrelated_404_text(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only an HTTP 404 response is treated as a concurrent deletion."""
+
+    def raise_unrelated_error(*args: str) -> object:
+        """Raise an error whose digits must not be mistaken for HTTP status."""
+        raise RuntimeError("candidate 404 marker")
+
+    monkeypatch.setattr(
+        cleanup_module,
+        "_gh_json",
+        raise_unrelated_error,
+    )
+
+    with pytest.raises(RuntimeError, match="candidate 404 marker"):
+        cleanup_module._gh_json_allow_not_found("packages/version")
 
 
 def test_cleanup_main_skips_persistent_tag_added_before_delete(

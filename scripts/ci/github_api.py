@@ -20,7 +20,7 @@ def gh_json(*args: str) -> object:
     Returns:
         The decoded GitHub API response.
     """
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN", "")
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
     result = subprocess.run(  # nosec B603, B607 - fixed gh executable and flags
         ["gh", "api", *args],
         check=False,

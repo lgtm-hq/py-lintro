@@ -49,8 +49,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: docker-tools-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: lintro-tools-registry
+  cancel-in-progress: false
 
 jobs:
   tools-image:

@@ -10,11 +10,18 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 try:
     from github_api import gh_json as _gh_json
-except ModuleNotFoundError:
+except ModuleNotFoundError as exc:
+    if exc.name != "github_api":
+        raise
+    # Direct production invocations put this maintenance directory on
+    # sys.path, not the repository root. Add the root before importing the
+    # shared helper as a package (``python3 scripts/ci/...``).
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from scripts.ci.github_api import gh_json as _gh_json
 
 PACKAGE = "lintro-tools"
@@ -125,7 +132,7 @@ def _gh_json_allow_not_found(*args: str) -> tuple[bool, object]:
     try:
         return True, _gh_json(*args)
     except RuntimeError as exc:
-        if "404" in str(exc):
+        if re.search(r"\bHTTP\s+404\b", str(exc), flags=re.IGNORECASE):
             return False, None
         raise
 

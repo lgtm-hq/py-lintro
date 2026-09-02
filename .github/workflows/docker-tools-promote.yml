@@ -109,6 +109,8 @@ jobs:
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker
       - name: Log in to GHCR
         # yamllint disable-line rule:line-length
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
