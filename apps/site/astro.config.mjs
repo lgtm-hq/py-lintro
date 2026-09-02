@@ -1,12 +1,29 @@
 // @ts-check
+import { existsSync } from 'node:fs';
 import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import sitemap from '@astrojs/sitemap';
 import { rehypeSiteImages } from './src/lib/rehype-site-images.mjs';
 import { rehypeTableScroll } from './src/lib/rehype-table-scroll.mjs';
-import { rehypeDocLinks, rehypeUnwrapHeadingLinks } from './src/lib/rehype-doc-links.mjs';
 
 const base = process.env.ASTRO_BASE || '/';
+
+/*
+ * The doc-link rehype plugins resolve authored cross-links through
+ * src/generated/docs-route-map.ts, which scripts/ci/site/migrate-docs-content.py
+ * emits (chained into the dev/build/check/test scripts) and git ignores. A bare
+ * `astro check` — as run by lintro's astro-check tool in the lint container —
+ * has no generated map, and importing it there would fail before any checking
+ * starts. Register those plugins only when the map exists; the committed .d.ts
+ * shim keeps type-checking whole either way.
+ */
+const routeMapReady = existsSync(new URL('./src/generated/docs-route-map.ts', import.meta.url));
+const docLinkPlugins = routeMapReady
+  ? await import('./src/lib/rehype-doc-links.mjs').then((m) => [
+      m.rehypeUnwrapHeadingLinks,
+      [m.rehypeDocLinks, base],
+    ])
+  : [];
 /** `base` with a leading slash and no trailing slash, for building absolute site paths. */
 const basePath = `/${base.replace(/^\/+|\/+$/g, '')}`.replace(/^\/$/, '');
 
@@ -53,12 +70,7 @@ export default defineConfig({
   ),
   markdown: {
     processor: unified({
-      rehypePlugins: [
-        [rehypeSiteImages, base],
-        rehypeUnwrapHeadingLinks,
-        [rehypeDocLinks, base],
-        rehypeTableScroll,
-      ],
+      rehypePlugins: [[rehypeSiteImages, base], ...docLinkPlugins, rehypeTableScroll],
     }),
     shikiConfig: { theme: 'css-variables', wrap: true },
   },
