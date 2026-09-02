@@ -142,9 +142,10 @@ def _run(
     tmp_path: Path,
     chunk_count: int,
     depth: int = 1,
-    max_parallel_calls: int = 4,
+    max_parallel_calls: int | None = None,
     call_delay: float = 0.0,
     stop_on_first_call: bool = False,
+    stop_during_first_call: bool = False,
 ) -> ReviewResult:
     """Run a review with the provider call stubbed out.
 
@@ -152,15 +153,19 @@ def _run(
         tmp_path: Temporary repository root.
         chunk_count: Number of chunks to force.
         depth: Review depth.
-        max_parallel_calls: Concurrency ceiling for chunk calls.
+        max_parallel_calls: Concurrency ceiling for chunk calls; ``None``
+            keeps the production ``AIConfig`` default.
         call_delay: Seconds each stubbed provider call sleeps.
         stop_on_first_call: When True, the first provider call raises a
             cost-cap stop so the remaining queued chunks are cancelled.
+        stop_during_first_call: When True, the injected SIGTERM stop event
+            is set while the first provider call is sleeping.
 
     Returns:
         The completed review result.
     """
     provider = _provider()
+    stop = asyncio.Event()
 
     async def _call(*, provider: MagicMock, **kwargs: Any) -> AIResponse:
         """Return the canned response after an optional delay.
@@ -176,6 +181,8 @@ def _run(
             AICostBudgetExceededError: When ``stop_on_first_call`` is set.
         """
         del kwargs
+        if stop_during_first_call:
+            stop.set()
         if call_delay:
             await asyncio.sleep(call_delay)
         if stop_on_first_call:
@@ -193,16 +200,21 @@ def _run(
         return run_review(
             _context(tmp_path=tmp_path, count=chunk_count),
             provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=max_parallel_calls,
+            ai_config=(
+                AIConfig(enabled=True, transport=AITransport.API)
+                if max_parallel_calls is None
+                else AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=max_parallel_calls,
+                )
             ),
             depth=depth,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
             classifications=[],
             context_collection_seconds=0.5,
+            stop=stop,
         )
 
 
@@ -561,6 +573,47 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
         # reached it. Whether it was then cancelled while still queued or just
         # after admission depends on scheduling, so only the wait is bounded.
         assert_that(chunk.queued_seconds).is_greater_than_or_equal_to(0.01)
+
+
+def test_sigterm_during_single_chunk_records_the_chunk_as_failed(
+    tmp_path: Path,
+) -> None:
+    """A SIGTERM stop mid-call still records the lone chunk's span.
+
+    The single-chunk fast path has its own stop handling; the chunk must
+    surface as failed with zero queued time rather than vanish.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    result = _run(
+        tmp_path=tmp_path,
+        chunk_count=1,
+        call_delay=0.05,
+        stop_during_first_call=True,
+    )
+
+    timings = _timings_of(result=result)
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("SIGTERM")
+    assert_that(timings.chunks).is_length(1)
+    assert_that(timings.chunks[0].failed).is_true()
+    assert_that(timings.chunks[0].queued_seconds).is_equal_to(0.0)
+
+
+def test_resume_planning_has_its_own_span(tmp_path: Path) -> None:
+    """Resume classification is accounted for in a phase, not in the gap.
+
+    Args:
+        tmp_path: Temporary repository root.
+    """
+    result = _run(tmp_path=tmp_path, chunk_count=1)
+
+    names = [span.name for span in _timings_of(result=result).phases]
+    assert_that(names).contains("chunking", "resume_planning", "provider")
+    assert_that(names.index("resume_planning")).is_greater_than(
+        names.index("chunking"),
+    )
 
 
 def test_depth_two_adds_a_distinct_generated_questions_span(tmp_path: Path) -> None:

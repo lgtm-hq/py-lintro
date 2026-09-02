@@ -48,6 +48,7 @@ class ReviewPhase(StrEnum):
 
     CONTEXT_COLLECTION = "context_collection"
     CHUNKING = "chunking"
+    RESUME_PLANNING = "resume_planning"
     PROVIDER = "provider"
     GENERATED_QUESTIONS = "generated_questions"
     ADVERSARIAL = "adversarial"
@@ -60,6 +61,7 @@ class ReviewPhase(StrEnum):
 _SUMMARY_LABELS: dict[str, str] = {
     ReviewPhase.CONTEXT_COLLECTION: "context",
     ReviewPhase.PARSE_MERGE: "merge",
+    ReviewPhase.RESUME_PLANNING: "resume",
     ReviewPhase.GENERATED_QUESTIONS: "questions",
 }
 

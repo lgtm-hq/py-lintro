@@ -1133,17 +1133,21 @@ async def run_review_async(
             if run_builtin_checklist
             else []
         )
-    resume = plan_resume(
-        context=context,
-        prior=prior_state,
-        extra_skips=chunk_skips,
-        groups=tuple(tuple(chunk.files) for chunk in chunks),
-        force_full=force_full,
-    )
-    if resume.queue:
-        chunks = filter_chunks(chunks=chunks, queue=resume.queue)
-    elif run_builtin_checklist:
-        chunks = []
+    # Resume planning hashes every file patch and walks importers over the
+    # post-image set, so its cost scales with the diff; it gets its own span
+    # rather than hiding in the gap between the phase sum and the total.
+    with timings.phase(name=ReviewPhase.RESUME_PLANNING):
+        resume = plan_resume(
+            context=context,
+            prior=prior_state,
+            extra_skips=chunk_skips,
+            groups=tuple(tuple(chunk.files) for chunk in chunks),
+            force_full=force_full,
+        )
+        if resume.queue:
+            chunks = filter_chunks(chunks=chunks, queue=resume.queue)
+        elif run_builtin_checklist:
+            chunks = []
     agent_selection = select_custom_agents(
         agents=custom_agents,
         changed_paths=tuple(file.path for file in context.changed_files),

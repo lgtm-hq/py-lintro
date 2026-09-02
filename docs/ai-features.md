@@ -355,7 +355,7 @@ The terminal output carries a one-line summary under the header, ordered by desc
 duration so the dominant phase reads first:
 
 ```text
-total 4m52s — provider 4m10s (7 chunks, max parallel 5), context 22.0s, merge 8.0s
+total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, finalize 0.1s
 ```
 
 The same line is appended to the run-mechanics footer of the posted GitHub comment.
@@ -369,6 +369,7 @@ The same line is appended to the run-mechanics footer of the posted GitHub comme
     "phases": [
       { "name": "context_collection", "seconds": 22.0, "occurrences": 1 },
       { "name": "chunking", "seconds": 0.4, "occurrences": 1 },
+      { "name": "resume_planning", "seconds": 1.2, "occurrences": 1 },
       { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
       { "name": "provider", "seconds": 250.0, "occurrences": 1 },
       { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
