@@ -355,7 +355,7 @@ The terminal output carries a one-line summary under the header, ordered by desc
 duration so the dominant phase reads first:
 
 ```text
-total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, finalize 0.1s
+total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, validation 0.1s
 ```
 
 The same line is appended to the run-mechanics footer of the posted GitHub comment.
@@ -373,7 +373,7 @@ The same line is appended to the run-mechanics footer of the posted GitHub comme
       { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
       { "name": "provider", "seconds": 250.0, "occurrences": 1 },
       { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
-      { "name": "finalize", "seconds": 0.1, "occurrences": 1 }
+      { "name": "validation", "seconds": 0.1, "occurrences": 1 }
     ],
     "chunks": [
       {
@@ -401,10 +401,12 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `validation` is the post-merge pass that decides what survives: context-finding
+  rejection, coverage and resume bookkeeping, and flag reconciliation.
 - `metadata.duration_seconds` now equals `total_seconds`: it includes the caller's
-  context collection and the finalize step, where it previously started just before the
-  provider calls. Consumers comparing durations across versions should expect the larger
-  figure for the same provider work.
+  context collection and the validation pass, where it previously started just before
+  the provider calls. Consumers comparing durations across versions should expect the
+  larger figure for the same provider work.
 - Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
   semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
   capped by `ai.max_parallel_calls`, not by provider latency.

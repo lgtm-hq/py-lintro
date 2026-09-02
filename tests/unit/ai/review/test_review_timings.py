@@ -392,13 +392,13 @@ def test_format_timing_summary_drops_zero_length_phases() -> None:
     """Phases that took no measurable time are omitted from the summary."""
     recorder = ReviewTimingRecorder()
     recorder.add_phase(name=ReviewPhase.PROVIDER, seconds=4.0)
-    recorder.add_phase(name=ReviewPhase.FINALIZE, seconds=0.0)
+    recorder.add_phase(name=ReviewPhase.VALIDATION, seconds=0.0)
 
     summary = format_timing_summary(
         timings=recorder.build(total_seconds=4.0, max_parallel=1),
     )
 
-    assert_that(summary).does_not_contain("finalize")
+    assert_that(summary).does_not_contain("validation")
 
 
 # ---------------------------------------------------------------------------
@@ -424,12 +424,12 @@ def test_run_review_exposes_ordered_spans_in_json(tmp_path: Path) -> None:
         "chunking",
         "provider",
         "parse_merge",
-        "finalize",
+        "validation",
     )
     assert_that(names.index("context_collection")).is_less_than(names.index("chunking"))
     assert_that(names.index("chunking")).is_less_than(names.index("provider"))
     assert_that(names.index("provider")).is_less_than(names.index("parse_merge"))
-    assert_that(names.index("parse_merge")).is_less_than(names.index("finalize"))
+    assert_that(names.index("parse_merge")).is_less_than(names.index("validation"))
     assert_that(timings["total_seconds"]).is_greater_than_or_equal_to(0.0)
     assert_that(timings["chunks"]).is_length(2)
     assert_that(json.loads(json.dumps(payload))["timings"]).is_equal_to(timings)
@@ -705,8 +705,8 @@ def test_run_mechanics_footer_carries_the_timing_summary(tmp_path: Path) -> None
 
     mechanics = format_run_mechanics(metadata=result.metadata)
 
-    assert_that(mechanics).contains("**Timings:** total ")
-    assert_that(mechanics).contains("provider ")
+    expected = format_timing_summary(timings=_timings_of(result=result))
+    assert_that(mechanics).contains(f"**Timings:** {expected}")
 
 
 def test_run_mechanics_footer_omits_timings_when_uninstrumented() -> None:

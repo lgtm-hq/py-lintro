@@ -1362,7 +1362,7 @@ async def run_review_async(
             else:
                 tracker.on_abort()
 
-    finalize_started = time.monotonic()
+    validation_started = time.monotonic()
     # ``phase_timings`` stays the flat three-key mapping earlier consumers
     # (MCP run payloads, eval stamps) already read; ``timings`` carries the
     # ordered spans and the per-chunk detail.
@@ -1491,12 +1491,12 @@ async def run_review_async(
         for item in resume.classified
         if item.path in set(awaiting_paths) and item.flag_reason
     )
-    # The finalize span and the run total are closed here, after the coverage
-    # bookkeeping above, so the breakdown covers everything the caller waited
-    # for (#2148).
+    # The validation span (context-finding rejection, coverage and resume
+    # bookkeeping, flag reconciliation) and the run total are closed here so
+    # the breakdown covers everything the caller waited for (#2148).
     timings.add_phase(
-        name=ReviewPhase.FINALIZE,
-        seconds=time.monotonic() - finalize_started,
+        name=ReviewPhase.VALIDATION,
+        seconds=time.monotonic() - validation_started,
     )
     duration_seconds = time.monotonic() - started_at
     metadata = replace(

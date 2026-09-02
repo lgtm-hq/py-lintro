@@ -36,6 +36,10 @@ __all__ = [
 class ReviewPhase(StrEnum):
     """Stable phase identifiers recorded during a review run.
 
+    ``validation`` covers the post-merge work that decides what survives:
+    context-finding rejection, coverage and resume bookkeeping, and flag
+    reconciliation, through to the assembled result.
+
     ``provider`` is an envelope: it spans the whole chunk fan-out, including
     the per-chunk ``generated_questions`` (depth >= 2) and ``adversarial``
     (depth >= 3) spans recorded inside it. Phase sums therefore exceed the run
@@ -53,7 +57,7 @@ class ReviewPhase(StrEnum):
     GENERATED_QUESTIONS = "generated_questions"
     ADVERSARIAL = "adversarial"
     PARSE_MERGE = "parse_merge"
-    FINALIZE = "finalize"
+    VALIDATION = "validation"
 
 
 # Short labels for the one-line terminal/footer summary. Phases absent from
