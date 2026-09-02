@@ -59,7 +59,7 @@ Inside a Node project, `lintro install` adds npm-managed tools as **dev dependen
 using the manager your project already uses (`packageManager` field, then lockfile), not
 whichever manager happens to be on `PATH`. Use `--global` for a machine-wide install and
 `--node-package-manager` to force a specific manager — see
-[Node.js Package Manager Policy](configuration.md#node-package-manager-policy).
+[Node.js Package Manager Policy](configuration.md#nodejs-package-manager-policy).
 
 ## Requirements
 

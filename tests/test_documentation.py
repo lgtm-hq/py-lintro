@@ -141,9 +141,9 @@ def _slugify_heading(heading: str) -> str:
 def _heading_anchors(markdown: str) -> set[str]:
     """Collect the anchors a Markdown document exposes.
 
-    Supports both GitHub's implicit heading slugs and the explicit
-    ``{#custom-anchor}`` suffix used in the longer guides. Fenced code blocks
-    are skipped so that shell comments such as ``# install foo`` do not
+    Anchors are GitHub's implicit heading slugs; the ``{#custom-anchor}``
+    extension is not supported because GitHub renders it literally. Fenced
+    code blocks are skipped so that shell comments such as ``# install foo`` do not
     register as headings and silently validate a link that does not resolve.
 
     Repeated headings get the ``-1``, ``-2`` … suffixes ``github-slugger``
@@ -174,11 +174,6 @@ def _heading_anchors(markdown: str) -> set[str]:
         if match is None:
             continue
         heading = match.group(1).strip()
-        explicit = re.search(r"\{#([^}]+)\}\s*$", heading)
-        if explicit is not None:
-            anchors.add(explicit.group(1))
-            heading = heading[: explicit.start()].strip()
-
         slug = _slugify_heading(heading)
         occurrence = seen.get(slug, 0)
         seen[slug] = occurrence + 1
@@ -216,6 +211,14 @@ def test_heading_anchors_ignore_fenced_code_blocks() -> None:
 
     assert_that(anchors).contains("real", "second")
     assert_that(anchors).does_not_contain("npm-install--g-typescript")
+
+
+def test_heading_anchors_do_not_honor_custom_anchor_syntax() -> None:
+    """``{#custom}`` is Pandoc syntax; GitHub slugs the literal heading text."""
+    anchors = _heading_anchors("## Node.js Tool Resolution {#custom-id}\n")
+
+    assert_that(anchors).does_not_contain("custom-id")
+    assert_that(anchors).contains("nodejs-tool-resolution-custom-id")
 
 
 def test_heading_anchors_number_repeated_headings() -> None:
