@@ -413,7 +413,9 @@ Reading the block:
   larger figure for the same provider work.
 - Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
   semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
-  capped by `ai.max_parallel_calls`, not by provider latency.
+  capped by the effective concurrency ceiling, not by provider latency. That ceiling is
+  `ai.max_parallel_calls`, or 1 when a cost cap serializes chunk calls (#2154); it is
+  reported as `max_parallel` so the lever an operator can turn is never guessed at.
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
@@ -534,10 +536,10 @@ ai:
 
   # Spend ceiling per AI session, in USD; the run stops
   # scheduling new calls once spent+reserved reaches the cap. null disables
-  # it. A cost cap does NOT force serial execution — chunk reviews still
-  # fan out up to max_parallel_calls. Trade-off: calls already in flight
-  # when the ceiling is hit still finish, so the final total may overshoot
-  # by up to (max_parallel_calls − 1) in-flight calls' cost.
+  # it. A cost cap serializes chunk reviews (one provider call at a time,
+  # #2154) so the resume queue cannot invert; the call already in flight
+  # when the ceiling is hit still finishes, so the final total may
+  # overshoot by up to one call's cost.
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
@@ -922,11 +924,10 @@ developer's login.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing
-  note above). Setting a cap does **not** serialize provider calls: review chunks still
-  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
-  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
-  calls' cost. Review metadata records per-phase timings (`context_collection`,
-  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
+  note above). Setting a cap serializes chunk reviews to one provider call at a time
+  (#2154), so the session can overshoot by at most the call in flight when the ceiling
+  is hit. Review metadata records per-phase timings (see "Review phase timings" above)
+  so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.
