@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
 
 
@@ -60,7 +61,11 @@ class ReviewMetadata:
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
-            ``parse_merge``.
+            ``parse_merge``. Kept as a flat mapping for backward
+            compatibility; ``timings`` carries the full breakdown.
+        timings (ReviewTimings | None): Full per-phase timing breakdown
+            (ordered spans plus per-chunk queued/in-flight detail, #2148).
+            ``None`` on legacy records and merge-only placeholders.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -100,6 +105,7 @@ class ReviewMetadata:
     max_cost_usd: float | None = None
     max_cost_usd_source: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
+    timings: ReviewTimings | None = None
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

@@ -126,6 +126,7 @@ from lintro.ai.review.sensitivity import (
     format_strictness_prompt_section,
 )
 from lintro.ai.review.state_store import state_dir, write_state_part
+from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
@@ -455,6 +456,7 @@ async def _review_one_chunk_until_stop(
     next_generated_checklist_id: int,
     diff_budget: int,
     stop: asyncio.Event | None,
+    timings: ReviewTimingRecorder | None = None,
 ) -> _ChunkReviewPartial:
     """Review a single chunk, aborting persistably when *stop* is set.
 
@@ -476,6 +478,7 @@ async def _review_one_chunk_until_stop(
         next_generated_checklist_id: Next generated checklist id.
         diff_budget: Token budget for the diff.
         stop: Optional SIGTERM event.
+        timings: Optional recorder for per-phase timing spans (#2148).
 
     Returns:
         The completed chunk partial.
@@ -483,6 +486,9 @@ async def _review_one_chunk_until_stop(
     Raises:
         AIProviderError: When SIGTERM arrives before the chunk finishes.
     """
+    # A lone chunk never waits on the concurrency semaphore, so its queued
+    # time is zero by construction; only the in-flight span is measured.
+    started = time.monotonic()
     review_task = asyncio.ensure_future(
         _review_chunk_with_progress(
             chunk_index=0,
@@ -503,10 +509,34 @@ async def _review_one_chunk_until_stop(
             strictness_section=strictness_section,
             next_generated_checklist_id=next_generated_checklist_id,
             diff_budget=diff_budget,
+            timings=timings,
         ),
     )
+
+    def _record(*, failed: bool) -> None:
+        """Record the lone chunk's in-flight span.
+
+        Args:
+            failed: True when the chunk ended in an error or a stop.
+        """
+        if timings is None:
+            return
+        timings.add_chunk(
+            chunk_index=0,
+            files=len(chunk.files),
+            queued_seconds=0.0,
+            in_flight_seconds=time.monotonic() - started,
+            failed=failed,
+        )
+
     if stop is None:
-        return await review_task
+        unfinished = True
+        try:
+            single = await review_task
+            unfinished = False
+        finally:
+            _record(failed=unfinished)
+        return single
     stop_task = asyncio.ensure_future(stop.wait())
     try:
         done, _pending = await asyncio.wait(
@@ -518,6 +548,7 @@ async def _review_one_chunk_until_stop(
                 review_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await review_task
+                _record(failed=True)
                 raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
                     "SIGTERM",
                 )
@@ -525,11 +556,19 @@ async def _review_one_chunk_until_stop(
             # stop task won. Treat that failure as the persistable
             # SIGTERM timeout instead of aborting without coverage.
             if review_task.cancelled() or review_task.exception() is not None:
+                _record(failed=True)
                 raise AIProviderError(SIGTERM_TIMEOUT_MESSAGE) from TimeoutError(
                     "SIGTERM",
                 )
+            _record(failed=False)
             return review_task.result()
-        return await review_task
+        unfinished = True
+        try:
+            single = await review_task
+            unfinished = False
+        finally:
+            _record(failed=unfinished)
+        return single
     finally:
         if not stop_task.done():
             stop_task.cancel()
@@ -559,6 +598,7 @@ async def _review_all_chunks(
     completed_sink: list[_ChunkReviewPartial] | None = None,
     on_chunk_complete: Callable[[list[_ChunkReviewPartial]], None] | None = None,
     stop: asyncio.Event | None = None,
+    timings: ReviewTimingRecorder | None = None,
 ) -> list[_ChunkReviewPartial]:
     """Review all chunks with bounded concurrency.
 
@@ -576,7 +616,8 @@ async def _review_all_chunks(
     ``run_review_async``. Depth ≥ 2 assigns each chunk a disjoint
     generated-checklist id range so merge stays deterministic under fan-out.
     ``stop`` is set by a SIGTERM/SIGINT handler so an in-flight chunk can
-    be cancelled and completed siblings persisted (#2156).
+    be cancelled and completed siblings persisted (#2156). ``timings`` records
+    each chunk's semaphore-queued and in-flight split (#2148).
     """
     if len(chunks) <= 1:
         single = await _review_one_chunk_until_stop(
@@ -597,6 +638,7 @@ async def _review_all_chunks(
             next_generated_checklist_id=next_generated_checklist_id,
             diff_budget=diff_budget,
             stop=stop,
+            timings=timings,
         )
         if completed_sink is not None:
             completed_sink.append(single)
@@ -633,9 +675,16 @@ async def _review_all_chunks(
         chunk_checklist_id = (
             next_generated_checklist_id + chunk_index * _GENERATED_CHECKLIST_ID_STRIDE
         )
-        async with semaphore:
-            try:
-                return chunk_index, await _review_chunk_with_progress(
+        # Queued time is measured from task creation to semaphore admission,
+        # so a run bottlenecked by ``max_parallel_calls`` is distinguishable
+        # from one bottlenecked by provider latency (#2148).
+        queued_at = time.monotonic()
+        admitted_at: float | None = None
+        failed = True
+        try:
+            async with semaphore:
+                admitted_at = time.monotonic()
+                outcome = chunk_index, await _review_chunk_with_progress(
                     chunk_index=chunk_index,
                     chunk=chunk,
                     context=context,
@@ -654,9 +703,30 @@ async def _review_all_chunks(
                     strictness_section=strictness_section,
                     next_generated_checklist_id=chunk_checklist_id,
                     diff_budget=diff_budget,
+                    timings=timings,
                 )
-            except Exception as exc:
-                return chunk_index, exc
+        except Exception as exc:
+            return chunk_index, exc
+        else:
+            failed = False
+            return outcome
+        finally:
+            # Recorded outside the semaphore so a chunk cancelled while still
+            # queued (cost-cap stop, SIGTERM) reports its wait with no
+            # in-flight time rather than vanishing from the breakdown.
+            if timings is not None:
+                now = time.monotonic()
+                timings.add_chunk(
+                    chunk_index=chunk_index,
+                    files=len(chunk.files),
+                    queued_seconds=(
+                        (admitted_at if admitted_at is not None else now) - queued_at
+                    ),
+                    in_flight_seconds=(
+                        now - admitted_at if admitted_at is not None else 0.0
+                    ),
+                    failed=failed,
+                )
 
     review_tasks = [
         asyncio.ensure_future(_run_chunk(chunk_index, chunk))
@@ -779,11 +849,13 @@ async def _review_chunk_with_progress(
     strictness_section: str = "",
     next_generated_checklist_id: int = 1,
     diff_budget: int = 0,
+    timings: ReviewTimingRecorder | None = None,
 ) -> _ChunkReviewPartial:
     """Review one chunk with progress tracking and error wrapping.
 
     A cost-cap stop is re-raised raw; any other failure is wrapped as a
     ``ReviewExecutionError`` after the progress tracker is notified.
+    ``timings`` records the chunk's intra-chunk phase spans (#2148).
     """
     budget.check()
     progress.on_chunk_start(chunk_index=chunk_index, files=list(chunk.files))
@@ -806,6 +878,7 @@ async def _review_chunk_with_progress(
             use_one_shot=use_one_shot,
             strictness_section=strictness_section,
             diff_budget=diff_budget,
+            timings=timings,
         )
     except Exception as exc:
         # A cost-cap stop is an expected graceful halt, not a chunk failure:
@@ -1009,6 +1082,18 @@ async def run_review_async(
             context_collection_seconds=context_collection_seconds,
         )
 
+    # One monotonic clock for the whole run: the recorder is back-dated by the
+    # context-collection time already spent so ``total_seconds`` (and the
+    # reported duration) covers the whole wait, not just the phases after the
+    # early-return (#2148).
+    timings = ReviewTimingRecorder(
+        started_at=time.monotonic() - max(context_collection_seconds, 0.0),
+    )
+    timings.add_phase(
+        name=ReviewPhase.CONTEXT_COLLECTION,
+        seconds=context_collection_seconds,
+    )
+
     context_window = get_context_window(
         model=provider.model_name,
         override=context_window_override,
@@ -1036,17 +1121,18 @@ async def run_review_async(
             cli_max_diff_tokens=ai_config.cli_max_diff_tokens,
         )
     chunk_skips: list[SkippedFile] = []
-    chunks = (
-        resolve_review_chunks(
-            context=context,
-            diff_budget=diff_budget,
-            classifications=classifications,
-            force_semantic_chunking=force_semantic_chunking,
-            skipped_sink=chunk_skips,
+    with timings.phase(name=ReviewPhase.CHUNKING):
+        chunks = (
+            resolve_review_chunks(
+                context=context,
+                diff_budget=diff_budget,
+                classifications=classifications,
+                force_semantic_chunking=force_semantic_chunking,
+                skipped_sink=chunk_skips,
+            )
+            if run_builtin_checklist
+            else []
         )
-        if run_builtin_checklist
-        else []
-    )
     resume = plan_resume(
         context=context,
         prior=prior_state,
@@ -1078,6 +1164,15 @@ async def run_review_async(
     budget = CostBudget(
         max_cost_usd=ai_config.max_cost_usd if enforce_cost_cap else None,
     )
+    # A cost cap serializes chunk calls so the resume queue cannot invert
+    # (#2154); the effective ceiling is reported alongside the timings so a
+    # slow run's concurrency is never guessed at.
+    max_parallel_calls = (
+        1
+        if enforce_cost_cap and ai_config.max_cost_usd is not None
+        else ai_config.max_parallel_calls
+    )
+    effective_max_parallel = max(min(len(chunks), max_parallel_calls), 1)
     # Branch on the provider's declared capability, not its identity (#1241):
     # a durable session only helps when the transport can resume one.
     # begin/end_durable_session are concrete no-ops on BaseAIProvider, so no
@@ -1098,8 +1193,8 @@ async def run_review_async(
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
     custom_findings: tuple[ReviewFinding, ...] = ()
-    started_at = time.monotonic()
-    provider_started = started_at
+    started_at = timings.started_at
+    provider_started = time.monotonic()
     provider_seconds = 0.0
     parse_merge_seconds = 0.0
     interrupt = stop if stop is not None else asyncio.Event()
@@ -1151,11 +1246,7 @@ async def run_review_async(
                 progress=tracker,
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
-                max_parallel_calls=(
-                    1
-                    if enforce_cost_cap and ai_config.max_cost_usd is not None
-                    else ai_config.max_parallel_calls
-                ),
+                max_parallel_calls=max_parallel_calls,
                 strictness_section=strictness_section,
                 next_generated_checklist_id=(
                     _max_checklist_id(checklist_items=checklist_items) + 1
@@ -1164,6 +1255,7 @@ async def run_review_async(
                 completed_sink=collected,
                 on_chunk_complete=_checkpoint,
                 stop=interrupt,
+                timings=timings,
             )
         if resume.queue:
             await run_custom_agent_passes(
@@ -1182,6 +1274,7 @@ async def run_review_async(
                 on_agent_failed=custom_agents_failed.append,
             )
         provider_seconds = time.monotonic() - provider_started
+        timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)
         merge_started = time.monotonic()
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
@@ -1198,6 +1291,7 @@ async def run_review_async(
         filtered_findings = filtered_findings + custom_findings
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
+        timings.add_phase(name=ReviewPhase.PARSE_MERGE, seconds=parse_merge_seconds)
         completed = True
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: a cost cap or timeout stopped the run
@@ -1216,6 +1310,7 @@ async def run_review_async(
             raise
         if provider_seconds <= 0.0:
             provider_seconds = time.monotonic() - provider_started
+            timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)
         partials = list(collected)
         partial = True
         merge_started = time.monotonic()
@@ -1229,6 +1324,7 @@ async def run_review_async(
         filtered_findings = filtered_findings + custom_findings
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
+        timings.add_phase(name=ReviewPhase.PARSE_MERGE, seconds=parse_merge_seconds)
         completed = True
         if "SIGTERM" in stopped_reason:
             hint = (
@@ -1262,7 +1358,10 @@ async def run_review_async(
             else:
                 tracker.on_abort()
 
-    duration_seconds = time.monotonic() - started_at
+    finalize_started = time.monotonic()
+    # ``phase_timings`` stays the flat three-key mapping earlier consumers
+    # (MCP run payloads, eval stamps) already read; ``timings`` carries the
+    # ordered spans and the per-chunk detail.
     phase_timings = {
         "context_collection": max(context_collection_seconds, 0.0),
         "provider": max(provider_seconds, 0.0),
@@ -1329,7 +1428,6 @@ async def run_review_async(
         partial=partial,
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
-        duration_seconds=duration_seconds,
         phase_timings=phase_timings,
         custom_agents_run=len(custom_results),
         custom_agents_skipped=(
@@ -1389,10 +1487,23 @@ async def run_review_async(
         for item in resume.classified
         if item.path in set(awaiting_paths) and item.flag_reason
     )
+    # The finalize span and the run total are closed here, after the coverage
+    # bookkeeping above, so the breakdown covers everything the caller waited
+    # for (#2148).
+    timings.add_phase(
+        name=ReviewPhase.FINALIZE,
+        seconds=time.monotonic() - finalize_started,
+    )
+    duration_seconds = time.monotonic() - started_at
     metadata = replace(
         metadata,
         reviewed_paths=actually_reviewed,
         files_reviewed=len(actually_reviewed),
+        duration_seconds=duration_seconds,
+        timings=timings.build(
+            total_seconds=duration_seconds,
+            max_parallel=effective_max_parallel,
+        ),
     )
 
     return ReviewResult(
@@ -1865,6 +1976,7 @@ async def _review_chunk(
     use_one_shot: bool = False,
     strictness_section: str = "",
     diff_budget: int = 0,
+    timings: ReviewTimingRecorder | None = None,
 ) -> tuple[_ChunkReviewPartial, int]:
     """Run depth-controlled review for a single chunk.
 
@@ -1886,10 +1998,14 @@ async def _review_chunk(
         use_one_shot: When True, avoid durable provider sessions.
         strictness_section: Pre-formatted strictness prompt section.
         diff_budget: Token budget available for embedded diffs.
+        timings: Optional recorder for the depth >= 2 question-generation and
+            depth >= 3 adversarial spans (#2148). The main provider call is
+            timed per chunk by the caller's queued/in-flight split.
 
     Returns:
         The chunk partial and the next available generated checklist id.
     """
+    recorder = timings or ReviewTimingRecorder()
     tracker = progress or NullReviewProgress()
     interaction_paths = generate_interaction_paths(
         classifications=classifications,
@@ -1899,20 +2015,21 @@ async def _review_chunk(
     extra_checklist_usage: _ChunkReviewPartial | None = None
     if depth >= 2:
         tracker.on_step(chunk_index=chunk_index, step="generating questions")
-        (
-            extra_checklist,
-            next_generated_checklist_id,
-            extra_checklist_usage,
-        ) = await _generate_extra_checklist(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=ai_config,
-            budget=budget,
-            next_generated_checklist_id=next_generated_checklist_id,
-            repo_root=repo_root,
-            use_one_shot=use_one_shot,
-        )
+        with recorder.phase(name=ReviewPhase.GENERATED_QUESTIONS):
+            (
+                extra_checklist,
+                next_generated_checklist_id,
+                extra_checklist_usage,
+            ) = await _generate_extra_checklist(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                budget=budget,
+                next_generated_checklist_id=next_generated_checklist_id,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+            )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
     # Gate before the main provider call so intra-chunk (depth-2/3) work
@@ -1964,15 +2081,16 @@ async def _review_chunk(
 
     if depth >= 3:
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
-        adversarial = await _run_adversarial_pass(
-            chunk=chunk,
-            provider=provider,
-            ai_config=ai_config,
-            prior_findings=partial.findings,
-            budget=budget,
-            repo_root=repo_root,
-            use_one_shot=use_one_shot,
-        )
+        with recorder.phase(name=ReviewPhase.ADVERSARIAL):
+            adversarial = await _run_adversarial_pass(
+                chunk=chunk,
+                provider=provider,
+                ai_config=ai_config,
+                prior_findings=partial.findings,
+                budget=budget,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+            )
         partial = replace(
             partial,
             findings=merge_findings(
@@ -2637,6 +2755,11 @@ def _empty_review_result(
     context_collection_seconds: float = 0.0,
 ) -> ReviewResult:
     """Return an empty result when no changes are present."""
+    empty_timings = ReviewTimingRecorder()
+    empty_timings.add_phase(
+        name=ReviewPhase.CONTEXT_COLLECTION,
+        seconds=context_collection_seconds,
+    )
     context_window = get_context_window(
         model=provider.model_name,
         override=context_window_override,
@@ -2661,6 +2784,13 @@ def _empty_review_result(
             "provider": 0.0,
             "parse_merge": 0.0,
         },
+        # Nothing ran after context collection, so the run's duration and
+        # the timings total are the same figure (#2148).
+        duration_seconds=max(context_collection_seconds, 0.0),
+        timings=empty_timings.build(
+            total_seconds=max(context_collection_seconds, 0.0),
+            max_parallel=1,
+        ),
     )
     return ReviewResult(
         metadata=metadata,

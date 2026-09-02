@@ -344,6 +344,73 @@ A P2 "changes requested" review still exits 0. An open P1 fails the process (`ex
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
 
+### Review phase timings
+
+Every `lintro review` run is instrumented with per-phase wall-clock spans (monotonic
+clock, always on, no extra provider calls). They answer which phase dominates a slow
+review — provider latency, chunking, context collection, or parse/merge — so perf work
+is driven by measurement rather than guesswork.
+
+The terminal output carries a one-line summary under the header, ordered by descending
+duration so the dominant phase reads first:
+
+```text
+total 4m52s — provider 4m10s (7 chunks, max parallel 5), context 22.0s, merge 8.0s
+```
+
+The same line is appended to the run-mechanics footer of the posted GitHub comment.
+`--output-format json` carries the full breakdown in a top-level `timings` block:
+
+```json
+{
+  "timings": {
+    "total_seconds": 292.0,
+    "max_parallel": 5,
+    "phases": [
+      { "name": "context_collection", "seconds": 22.0, "occurrences": 1 },
+      { "name": "chunking", "seconds": 0.4, "occurrences": 1 },
+      { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
+      { "name": "provider", "seconds": 250.0, "occurrences": 1 },
+      { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
+      { "name": "finalize", "seconds": 0.1, "occurrences": 1 }
+    ],
+    "chunks": [
+      {
+        "chunk_index": 0,
+        "files": 3,
+        "queued_seconds": 0.0,
+        "in_flight_seconds": 61.2,
+        "total_seconds": 61.2,
+        "failed": false
+      }
+    ]
+  }
+}
+```
+
+Reading the block:
+
+- `phases` is in first-occurrence order, so it reads chronologically. `provider` is an
+  envelope covering the whole chunk fan-out plus any custom-agent passes, matching the
+  `phase_timings.provider` key; phases that run once per chunk inside it
+  (`generated_questions` at depth ≥ 2, `adversarial` at depth ≥ 3) fold every occurrence
+  into one span, and `occurrences` says how many. Those nested spans are already counted
+  inside `provider`, and chunks run concurrently, so phase sums can exceed
+  `total_seconds` — the sum answers "how much provider work happened", `total_seconds`
+  answers "how long did the user wait". The summary line lists nested phases inside the
+  provider parenthetical for the same reason, e.g.
+  `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `metadata.duration_seconds` now equals `total_seconds`: it includes the caller's
+  context collection and the finalize step, where it previously started just before the
+  provider calls. Consumers comparing durations across versions should expect the larger
+  figure for the same provider work.
+- Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
+  semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
+  capped by `ai.max_parallel_calls`, not by provider latency.
+- GitHub posting happens after the result is rendered, so it is outside the measured
+  window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
+  existing consumers.
+
 ## Configuration
 
 ### Basic Setup

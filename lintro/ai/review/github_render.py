@@ -20,6 +20,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
@@ -178,8 +179,9 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata.
 
     Returns:
-        Markdown describing model, provider, tokens, cost, depth, and duration.
-        Estimated token/cost figures are prefixed with ``~``.
+        Markdown describing model, provider, tokens, cost, depth, duration,
+        and (when instrumented) the per-phase timing breakdown. Estimated
+        token/cost figures are prefixed with ``~``.
     """
     estimated = metadata.token_usage_estimated
     total_tokens = int(metadata.token_usage.get("total", 0))
@@ -227,6 +229,18 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
             f"**Duration:** {metadata.duration_seconds:.1f}s",
         ],
     )
+    if metadata.timings is not None:
+        # Per-phase breakdown for the run (#2148): the footer is the only
+        # place a reader of the posted comment can see where the time went.
+        parts.append(
+            "**Timings:** "
+            + sanitize_comment_text(
+                format_timing_summary(timings=metadata.timings),
+                # Trusted instrumentation text, not model prose: the cap only
+                # bounds a pathological run, it must not clip a normal one.
+                limit=1000,
+            ),
+        )
     return " · ".join(parts)
 
 
