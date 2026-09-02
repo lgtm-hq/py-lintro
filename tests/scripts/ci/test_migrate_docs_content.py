@@ -146,6 +146,25 @@ def test_rewrite_root_readme_links_targets_github() -> None:
     assert_that(rewritten).does_not_contain("README.md")
 
 
+def test_rewrite_repo_file_links_target_github_blob_and_tree() -> None:
+    """Files and directories outside docs/ have no site page; link to GitHub."""
+    migrate = _load_migrate_module()
+    body = (
+        "See [ci](../.github/workflows/test-ci.yml) and "
+        "[samples](../test_samples/) and [nested](../../outside.md)."
+    )
+
+    rewritten = migrate.rewrite_root_readme_links(body, "")
+
+    assert_that(rewritten).contains(
+        "(https://github.com/lgtm-hq/py-lintro/blob/main/.github/workflows/test-ci.yml)",
+    )
+    assert_that(rewritten).contains(
+        "(https://github.com/lgtm-hq/py-lintro/tree/main/test_samples)",
+    )
+    assert_that(rewritten).contains("(../../outside.md)")
+
+
 def test_rewrite_root_readme_links_keeps_docs_internal_links() -> None:
     """A ../README.md link from a nested dir targets the docs hub, not GitHub."""
     migrate = _load_migrate_module()

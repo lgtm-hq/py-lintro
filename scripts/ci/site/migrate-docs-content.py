@@ -296,26 +296,28 @@ GENERATED_LANDINGS: dict[str, tuple[str, str]] = {
 
 
 ROOT_README_URL = "https://github.com/lgtm-hq/py-lintro"
-ROOT_README_LINK = re.compile(
-    r"\((?P<ups>(?:\.\./)+)README\.md(?P<hash>#[A-Za-z0-9._-]*)?\)",
+REPO_LINK = re.compile(
+    r"\((?P<ups>(?:\.\./)+)(?P<path>[^)#\s]*)(?P<hash>#[A-Za-z0-9._-]*)?\)",
 )
 
 
 def rewrite_root_readme_links(body: str, src_dir: str) -> str:
-    """Point links that resolve to the repo-root README at the GitHub repo.
+    """Point links that escape ``docs/`` at the file on GitHub.
 
-    The repo-root README has no equivalent page on the site; GitHub renders it
-    (with heading anchors) on the repository home page instead. Only links
-    whose ``../`` chain escapes ``docs/`` are rewritten — e.g. ``../README.md``
-    from ``docs/README.md`` targets the repo root, while the same link from
-    ``docs/architecture/`` targets the docs hub and is left alone.
+    Only links whose ``../`` chain leaves ``docs/`` are rewritten — e.g.
+    ``../README.md`` from ``docs/README.md`` targets the repo root, while the
+    same link from ``docs/architecture/`` targets the docs hub and is left
+    alone. The repo-root README maps to the repository home page (GitHub
+    renders it there, anchors included); any other file maps to its ``blob``
+    URL and a directory to its ``tree`` URL, since neither has a page on the
+    site.
 
     Args:
         body: Markdown source being migrated.
         src_dir: Source directory relative to ``docs/`` ("" for the root).
 
     Returns:
-        The body with repo-root README links rewritten.
+        The body with repo-relative links rewritten.
     """
     depth = len([part for part in src_dir.split("/") if part])
 
@@ -323,9 +325,14 @@ def rewrite_root_readme_links(body: str, src_dir: str) -> str:
         ups = match.group("ups").count("../")
         if ups != depth + 1:
             return match.group(0)
-        return f"({ROOT_README_URL}{match.group('hash') or ''})"
+        path = match.group("path")
+        hash_part = match.group("hash") or ""
+        if path in {"", "README.md"}:
+            return f"({ROOT_README_URL}{hash_part})"
+        kind = "tree" if path.endswith("/") else "blob"
+        return f"({ROOT_README_URL}/{kind}/main/{path.rstrip('/')}{hash_part})"
 
-    return ROOT_README_LINK.sub(_replace, body)
+    return REPO_LINK.sub(_replace, body)
 
 
 def title_from_markdown(text: str, fallback: str) -> str:
