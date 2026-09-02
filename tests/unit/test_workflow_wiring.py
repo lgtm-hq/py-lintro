@@ -2370,7 +2370,11 @@ def test_docker_ci_only_current_main_tip_updates_rolling_image_tags() -> None:
     """Stale queued runs keep immutable SHA tags but cannot move branch tags."""
     docker_ci = _load_workflow(name="docker-ci.yml")
     steps = docker_ci["jobs"]["publish"]["steps"]
-    rolling = next(step for step in steps if step.get("id") == "rolling-tags")
+    rolling_index, rolling = next(
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("id") == "rolling-tags"
+    )
     assert_that(rolling["run"]).is_equal_to(
         "scripts/ci/resolve-docker-rolling-tags.sh",
     )
@@ -2382,18 +2386,19 @@ def test_docker_ci_only_current_main_tip_updates_rolling_image_tags() -> None:
     )
 
     metadata_steps = [
-        step
-        for step in steps
+        (index, step)
+        for index, step in enumerate(steps)
         if step.get("uses", "").startswith("docker/metadata-action@")
     ]
     assert_that(metadata_steps).is_length(2)
-    for step in metadata_steps:
-        tags = step["with"]["tags"]
-        assert_that(tags).contains(
+    for metadata_index, step in metadata_steps:
+        assert_that(rolling_index).is_less_than(metadata_index)
+        tag_lines = {line.strip() for line in step["with"]["tags"].splitlines()}
+        assert_that(tag_lines).contains(
             "type=ref,event=branch,enable=${{ "
             "steps.rolling-tags.outputs.rolling-tags-enabled }}",
         )
-        assert_that(tags).contains("type=sha,prefix=sha-,format=long")
+        assert_that(tag_lines).contains("type=sha,prefix=sha-,format=long")
 
 
 def _render_concurrency_group(

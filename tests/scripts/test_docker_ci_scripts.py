@@ -146,14 +146,16 @@ def _run_with_stubs(
 
 
 @pytest.mark.parametrize(
-    ("remote_sha", "expected"),
+    ("default_branch", "remote_sha", "expected"),
     [
-        ("a" * 40, "rolling-tags-enabled=true"),
-        ("b" * 40, "rolling-tags-enabled=false"),
+        ("main", "a" * 40, "rolling-tags-enabled=true"),
+        ("main", "b" * 40, "rolling-tags-enabled=false"),
+        ("release/stable", "a" * 40, "rolling-tags-enabled=true"),
     ],
 )
 def test_resolve_docker_rolling_tags_compares_current_remote_tip(
     tmp_path: Path,
+    default_branch: str,
     remote_sha: str,
     expected: str,
 ) -> None:
@@ -167,8 +169,9 @@ def test_resolve_docker_rolling_tags_compares_current_remote_tip(
         "git",
         (
             'if [[ "$1" == "check-ref-format" ]]; then exit 0; fi\n'
-            'if [[ "$1" == "ls-remote" ]]; then\n'
-            f'  echo "{remote_sha}  refs/heads/main"\n'
+            'if [[ "$1" == "ls-remote" && "$2" == "--exit-code" '
+            f'&& "$3" == "origin" && "$4" == "refs/heads/{default_branch}" ]]; then\n'
+            f'  echo "{remote_sha}  refs/heads/{default_branch}"\n'
             "  exit 0\n"
             "fi\n"
             "exit 1"
@@ -179,7 +182,7 @@ def test_resolve_docker_rolling_tags_compares_current_remote_tip(
         "scripts/ci/resolve-docker-rolling-tags.sh",
         bin_dir,
         {
-            "DEFAULT_BRANCH": "main",
+            "DEFAULT_BRANCH": default_branch,
             "RUN_SHA": "a" * 40,
             "GITHUB_OUTPUT": str(github_output),
         },
@@ -209,6 +212,61 @@ def test_resolve_docker_rolling_tags_fails_closed_on_lookup_error(
         {
             "DEFAULT_BRANCH": "main",
             "RUN_SHA": "a" * 40,
+            "GITHUB_OUTPUT": str(github_output),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(github_output.read_text().strip()).is_equal_to(
+        "rolling-tags-enabled=false",
+    )
+
+
+@pytest.mark.parametrize(
+    ("default_branch", "run_sha", "git_stub"),
+    [
+        ("", "a" * 40, "exit 1"),
+        ("main", "", "exit 1"),
+        (
+            "main",
+            "not-a-sha",
+            'if [[ "$1" == "check-ref-format" ]]; then exit 0; fi\nexit 1',
+        ),
+        ("invalid branch", "a" * 40, "exit 1"),
+        (
+            "main",
+            "a" * 40,
+            (
+                'if [[ "$1" == "check-ref-format" ]]; then exit 0; fi\n'
+                'if [[ "$1" == "ls-remote" && "$2" == "--exit-code" '
+                '&& "$3" == "origin" && "$4" == "refs/heads/main" ]]; then\n'
+                '  echo "not-a-sha  refs/heads/main"\n'
+                "  exit 0\n"
+                "fi\n"
+                "exit 1\n"
+            ),
+        ),
+    ],
+)
+def test_resolve_docker_rolling_tags_fails_closed_on_invalid_inputs(
+    tmp_path: Path,
+    default_branch: str,
+    run_sha: str,
+    git_stub: str,
+) -> None:
+    """Missing or malformed inputs never enable a rolling image tag."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    github_output = tmp_path / "github_output"
+    github_output.touch()
+    _write_stub(bin_dir, "git", git_stub)
+
+    result = _run_with_stubs(
+        "scripts/ci/resolve-docker-rolling-tags.sh",
+        bin_dir,
+        {
+            "DEFAULT_BRANCH": default_branch,
+            "RUN_SHA": run_sha,
             "GITHUB_OUTPUT": str(github_output),
         },
     )
