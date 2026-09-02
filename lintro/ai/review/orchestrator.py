@@ -1353,6 +1353,9 @@ async def run_review_async(
             cause=str(exc),
         )
     finally:
+        # The validation span opens before cleanup so a slow durable-session
+        # close or progress callback lands in a phase, not only in the total.
+        validation_started = time.monotonic()
         uninstall_interrupt()
         if durable_session_started:
             provider.end_durable_session()
@@ -1362,7 +1365,6 @@ async def run_review_async(
             else:
                 tracker.on_abort()
 
-    validation_started = time.monotonic()
     # ``phase_timings`` stays the flat three-key mapping earlier consumers
     # (MCP run payloads, eval stamps) already read; ``timings`` carries the
     # ordered spans and the per-chunk detail.

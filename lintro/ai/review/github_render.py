@@ -25,6 +25,7 @@ from lintro.ai.review.timings import format_timing_summary
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
     "format_timings_note",
+    "sanitized_timing_summary",
     "format_badge_table",
     "format_badge_tables",
     "format_finding_comment",
@@ -173,6 +174,28 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
     ]
 
 
+def sanitized_timing_summary(*, metadata: ReviewMetadata) -> str:
+    """Return the per-phase timing summary, sanitized for a posted comment.
+
+    The single cap for every GitHub surface, so a later change cannot clip
+    one comment and not another. The text is trusted instrumentation, not
+    model prose: the cap only bounds a pathological run.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        The sanitized summary, or an empty string when the run was not
+        instrumented.
+    """
+    if metadata.timings is None:
+        return ""
+    return sanitize_comment_text(
+        format_timing_summary(timings=metadata.timings),
+        limit=1000,
+    )
+
+
 def format_timings_note(*, metadata: ReviewMetadata) -> str:
     """Render the per-phase timing summary as a small note for posted comments.
 
@@ -187,15 +210,8 @@ def format_timings_note(*, metadata: ReviewMetadata) -> str:
         A ``<sub>`` line with the summary, or an empty string when the run was
         not instrumented.
     """
-    if metadata.timings is None:
-        return ""
-    summary = sanitize_comment_text(
-        format_timing_summary(timings=metadata.timings),
-        # Trusted instrumentation text, not model prose: the cap only bounds a
-        # pathological run, it must not clip a normal one.
-        limit=1000,
-    )
-    return f"<sub>Timings: {summary}</sub>"
+    summary = sanitized_timing_summary(metadata=metadata)
+    return f"<sub>Timings: {summary}</sub>" if summary else ""
 
 
 def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
@@ -255,18 +271,10 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
             f"**Duration:** {metadata.duration_seconds:.1f}s",
         ],
     )
-    if metadata.timings is not None:
-        # Per-phase breakdown for the run (#2148): the footer is the only
-        # place a reader of the posted comment can see where the time went.
-        parts.append(
-            "**Timings:** "
-            + sanitize_comment_text(
-                format_timing_summary(timings=metadata.timings),
-                # Trusted instrumentation text, not model prose: the cap only
-                # bounds a pathological run, it must not clip a normal one.
-                limit=1000,
-            ),
-        )
+    timing_summary = sanitized_timing_summary(metadata=metadata)
+    if timing_summary:
+        # Per-phase breakdown for the run (#2148) on the error-sticky footer.
+        parts.append(f"**Timings:** {timing_summary}")
     return " · ".join(parts)
 
 

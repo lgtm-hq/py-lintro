@@ -565,10 +565,13 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
     assert_that([chunk.failed for chunk in timings.chunks]).is_equal_to(
         [True, True, True],
     )
-    assert_that(timings.chunks[0].in_flight_seconds).is_greater_than_or_equal_to(
-        0.01,
-    )
-    for chunk in timings.chunks[1:]:
+    # The leader is whichever chunk the semaphore admitted first, not
+    # necessarily index 0 once the breakdown is sorted by chunk index.
+    leader = max(timings.chunks, key=lambda chunk: chunk.in_flight_seconds)
+    assert_that(leader.in_flight_seconds).is_greater_than_or_equal_to(0.01)
+    for chunk in timings.chunks:
+        if chunk is leader:
+            continue
         # Every sibling waited behind the leader's full call before the stop
         # reached it. Whether it was then cancelled while still queued or just
         # after admission depends on scheduling, so only the wait is bounded.
@@ -709,41 +712,51 @@ def test_run_mechanics_footer_carries_the_timing_summary(tmp_path: Path) -> None
     assert_that(mechanics).contains(f"**Timings:** {expected}")
 
 
-def test_review_body_run_stats_carry_the_timing_summary(tmp_path: Path) -> None:
-    """The posted success comment's run-stats block shows the summary.
+def test_review_body_carries_the_timing_summary(tmp_path: Path) -> None:
+    """The posted review body shows the summary under its run stats.
 
     Args:
         tmp_path: Temporary repository root.
     """
-    from lintro.ai.review.github_review_body import _run_stats_section
+    from lintro.ai.review.finding_matcher import match_findings
+    from lintro.ai.review.github_review_body import build_review_body
+    from lintro.ai.review.models.review_state import ReviewState
 
     result = _run(tmp_path=tmp_path, chunk_count=1)
+    prior_state = ReviewState()
+    match = match_findings(
+        previous=prior_state,
+        findings=result.findings,
+        round_number=prior_state.next_round,
+        head_sha="fb740b2",
+    )
 
-    section = _run_stats_section(
+    body = build_review_body(
         result=result,
+        prior_state=prior_state,
+        match=match,
+        head_sha="fb740b2",
         transport="api",
-        auth_mode="",
-        config_source="",
     )
 
     expected = format_timing_summary(timings=_timings_of(result=result))
-    assert_that(section).contains(f"<sub>Timings: {expected}</sub>")
+    assert_that(body).contains(f"<sub>Timings: {expected}</sub>")
 
 
-def test_sticky_this_run_carries_the_timing_summary(tmp_path: Path) -> None:
-    """The sticky comment's This-run section shows the summary.
+def test_sticky_comment_carries_the_timing_summary(tmp_path: Path) -> None:
+    """The sticky comment shows the summary under its This-run table.
 
     Args:
         tmp_path: Temporary repository root.
     """
-    from lintro.ai.review.github_sticky import _this_run_section
+    from lintro.ai.review.github_sticky import build_sticky_comment
 
     result = _run(tmp_path=tmp_path, chunk_count=1)
 
-    section = _this_run_section(result=result, transport="api", auth_mode="")
+    sticky = build_sticky_comment(result=result, transport="api")
 
     expected = format_timing_summary(timings=_timings_of(result=result))
-    assert_that(section).contains(f"<sub>Timings: {expected}</sub>")
+    assert_that(sticky).contains(f"<sub>Timings: {expected}</sub>")
 
 
 def test_run_mechanics_footer_omits_timings_when_uninstrumented() -> None:
