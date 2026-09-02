@@ -20,9 +20,12 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
+    "format_timings_note",
+    "sanitized_timing_summary",
     "format_badge_table",
     "format_badge_tables",
     "format_finding_comment",
@@ -171,6 +174,46 @@ def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]
     ]
 
 
+def sanitized_timing_summary(*, metadata: ReviewMetadata) -> str:
+    """Return the per-phase timing summary, sanitized for a posted comment.
+
+    The single cap for every GitHub surface, so a later change cannot clip
+    one comment and not another. The text is trusted instrumentation, not
+    model prose: the cap only bounds a pathological run.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        The sanitized summary, or an empty string when the run was not
+        instrumented.
+    """
+    if metadata.timings is None:
+        return ""
+    return sanitize_comment_text(
+        format_timing_summary(timings=metadata.timings),
+        limit=1000,
+    )
+
+
+def format_timings_note(*, metadata: ReviewMetadata) -> str:
+    """Render the per-phase timing summary as a small note for posted comments.
+
+    Shared by every success surface that shows run mechanics (the review
+    body's run-stats block and the sticky's ``This run`` table) so the posted
+    comment carries the same one-line breakdown the terminal prints (#2148).
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A ``<sub>`` line with the summary, or an empty string when the run was
+        not instrumented.
+    """
+    summary = sanitized_timing_summary(metadata=metadata)
+    return f"<sub>Timings: {summary}</sub>" if summary else ""
+
+
 def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
     """Format the per-run mechanics footer for a single review run.
 
@@ -178,8 +221,9 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata.
 
     Returns:
-        Markdown describing model, provider, tokens, cost, depth, and duration.
-        Estimated token/cost figures are prefixed with ``~``.
+        Markdown describing model, provider, tokens, cost, depth, duration,
+        and (when instrumented) the per-phase timing breakdown. Estimated
+        token/cost figures are prefixed with ``~``.
     """
     estimated = metadata.token_usage_estimated
     total_tokens = int(metadata.token_usage.get("total", 0))
@@ -227,6 +271,10 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
             f"**Duration:** {metadata.duration_seconds:.1f}s",
         ],
     )
+    timing_summary = sanitized_timing_summary(metadata=metadata)
+    if timing_summary:
+        # Per-phase breakdown for the run (#2148) on the error-sticky footer.
+        parts.append(f"**Timings:** {timing_summary}")
     return " · ".join(parts)
 
 

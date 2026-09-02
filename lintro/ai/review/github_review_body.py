@@ -28,6 +28,7 @@ from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
     format_badge_tables,
+    format_timings_note,
     run_stats_primary_cells,
     sanitize_comment_text,
 )
@@ -285,6 +286,9 @@ def _run_stats_section(
 
     lines = ["**📊 Run stats**", ""]
     lines.extend(format_badge_tables(rows=[primary, secondary]))
+    timings_note = format_timings_note(metadata=metadata)
+    if timings_note:
+        lines.extend(["", timings_note])
     if config_source:
         source = sanitize_comment_text(config_source, limit=300)
         lines.extend(["", f"<sub>Config source: {source}</sub>"])

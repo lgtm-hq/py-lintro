@@ -344,6 +344,82 @@ A P2 "changes requested" review still exits 0. An open P1 fails the process (`ex
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
 
+### Review phase timings
+
+Every `lintro review` run is instrumented with per-phase wall-clock spans (monotonic
+clock, always on, no extra provider calls). They answer which phase dominates a slow
+review — provider latency, chunking, context collection, or parse/merge — so perf work
+is driven by measurement rather than guesswork.
+
+The terminal output carries a one-line summary under the header, ordered by descending
+duration so the dominant phase reads first:
+
+```text
+total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, validation 0.1s
+```
+
+The same line is posted to GitHub as a `Timings:` note under the review body's run-stats
+block and the sticky comment's `This run` table (and in the run-mechanics footer of
+error stickies). `--output-format json` carries the full breakdown in a top-level
+`timings` block:
+
+```json
+{
+  "timings": {
+    "total_seconds": 292.0,
+    "max_parallel": 5,
+    "phases": [
+      { "name": "context_collection", "seconds": 22.0, "occurrences": 1 },
+      { "name": "chunking", "seconds": 0.4, "occurrences": 1 },
+      { "name": "resume_planning", "seconds": 1.2, "occurrences": 1 },
+      { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
+      { "name": "provider", "seconds": 250.0, "occurrences": 1 },
+      { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
+      { "name": "validation", "seconds": 0.1, "occurrences": 1 }
+    ],
+    "chunks": [
+      {
+        "chunk_index": 0,
+        "files": 3,
+        "queued_seconds": 0.0,
+        "in_flight_seconds": 61.2,
+        "total_seconds": 61.2,
+        "failed": false
+      }
+    ]
+  }
+}
+```
+
+Reading the block:
+
+- `phases` is in first-occurrence order, so it reads chronologically. `provider` is an
+  envelope covering the whole chunk fan-out plus any custom-agent passes, matching the
+  `phase_timings.provider` key; phases that run once per chunk inside it
+  (`generated_questions` at depth ≥ 2, `adversarial` at depth ≥ 3) fold every occurrence
+  into one span, and `occurrences` says how many. Those nested spans are already counted
+  inside `provider`, and chunks run concurrently, so phase sums can exceed
+  `total_seconds` — the sum answers "how much provider work happened", `total_seconds`
+  answers "how long did the user wait". The summary line lists nested phases inside the
+  provider parenthetical for the same reason, e.g.
+  `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `validation` is the post-merge tail of the run: provider session teardown and progress
+  callbacks, then the pass that decides what survives (context-finding rejection,
+  coverage and resume bookkeeping, flag reconciliation). A slow session close therefore
+  shows up here rather than only in the total.
+- `metadata.duration_seconds` now equals `total_seconds`: it includes the caller's
+  context collection and the validation pass, where it previously started just before
+  the provider calls. Consumers comparing durations across versions should expect the
+  larger figure for the same provider work.
+- Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
+  semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
+  capped by the effective concurrency ceiling, not by provider latency. That ceiling is
+  `min(chunk count, ai.max_parallel_calls)`, or 1 when a cost cap serializes chunk calls
+  (#2154); it is reported as `max_parallel`.
+- GitHub posting happens after the result is rendered, so it is outside the measured
+  window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
+  existing consumers.
+
 ## Configuration
 
 ### Basic Setup
@@ -460,10 +536,10 @@ ai:
 
   # Spend ceiling per AI session, in USD; the run stops
   # scheduling new calls once spent+reserved reaches the cap. null disables
-  # it. A cost cap does NOT force serial execution — chunk reviews still
-  # fan out up to max_parallel_calls. Trade-off: calls already in flight
-  # when the ceiling is hit still finish, so the final total may overshoot
-  # by up to (max_parallel_calls − 1) in-flight calls' cost.
+  # it. A cost cap serializes chunk reviews (one provider call at a time,
+  # #2154) so the resume queue cannot invert; the call already in flight
+  # when the ceiling is hit still finishes, so the final total may
+  # overshoot by up to one call's cost.
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
@@ -848,11 +924,10 @@ developer's login.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing
-  note above). Setting a cap does **not** serialize provider calls: review chunks still
-  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
-  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
-  calls' cost. Review metadata records per-phase timings (`context_collection`,
-  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
+  note above). Setting a cap serializes chunk reviews to one provider call at a time
+  (#2154), so the session can overshoot by at most the call in flight when the ceiling
+  is hit. Review metadata records per-phase timings (see "Review phase timings" above)
+  so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.

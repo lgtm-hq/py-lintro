@@ -24,6 +24,10 @@ __all__ = [
 def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     """Convert a review result to a JSON-serializable dictionary.
 
+    The ``timings`` block carries the per-phase breakdown (#2148): ordered
+    phase spans plus per-chunk queued/in-flight detail. It is ``None`` when
+    the result predates timing instrumentation.
+
     Args:
         result: Review result to serialize.
 
@@ -31,8 +35,14 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         Dictionary representation suitable for JSON encoding.
     """
     metadata = asdict(result.metadata)
+    # Timings are hoisted out of ``metadata`` into a top-level ``timings``
+    # block (#2148): the breakdown is run instrumentation, not review
+    # content, and consumers should not have to dig for it.
+    metadata.pop("timings", None)
+    timings = result.metadata.timings
     payload: dict[str, Any] = {
         "metadata": metadata,
+        "timings": timings.to_dict() if timings is not None else None,
         "summary": result.summary,
         "readiness_verdict": result.readiness_verdict.value,
         "pr_summary": (

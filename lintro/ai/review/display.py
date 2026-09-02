@@ -18,6 +18,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
+from lintro.ai.review.timings import format_timing_summary
 
 __all__ = ["render_review_terminal"]
 
@@ -87,6 +88,12 @@ def render_review_terminal(
     if metadata.chunks_total > 1:
         output.print(
             f"[dim]Reviewed in {metadata.chunks_total} semantic chunks[/dim]",
+        )
+
+    if metadata.timings is not None:
+        # One line, always on: which phase dominated the wait (#2148).
+        output.print(
+            f"[dim]{format_timing_summary(timings=metadata.timings)}[/dim]",
         )
 
     output.print(
