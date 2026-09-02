@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.138.1] - 2026-09-02
+
+### Fixed
+
+- **ci**: stop displacement-cancelling queued main CI - Docker runs (#2254) (41870aa)
+
 ## [0.138.0] - 2026-09-02
 
 ### Added
