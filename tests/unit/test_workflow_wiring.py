@@ -795,6 +795,7 @@ def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> Non
         "needs.changes.outputs.lint-scope != 'changed'",
     )
     assert_that(report_expr).contains(".lintro/artifacts/json/results.json")
+    assert_that(report_expr).contains("|| ''")
 
 
 def test_dogfood_skip_gate_has_bounded_timeout() -> None:

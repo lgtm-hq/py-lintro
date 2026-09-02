@@ -169,13 +169,13 @@ report_in_container="/code/${REPORT_JSON}"
 if [[ "$REPORT_JSON" == /* ]]; then
 	workspace_dir="$(pwd -P)"
 	case "$REPORT_JSON" in
-		"${workspace_dir}"/*)
-			report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
-			;;
-		*)
-			log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
-			exit 2
-			;;
+	"${workspace_dir}"/*)
+		report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
+		;;
+	*)
+		log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
+		exit 2
+		;;
 	esac
 fi
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
