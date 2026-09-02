@@ -23,6 +23,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/is-infra-flake-failure.sh",
+        "scripts/ci/resolve-docker-rolling-tags.sh",
         "scripts/ci/promote-ci-docker-images.sh",
         "scripts/ci/cosign-sign-images.sh",
         "scripts/ci/testing/pull-ci-docker-images.sh",
@@ -141,6 +142,80 @@ def _run_with_stubs(
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             **env,
         },
+    )
+
+
+@pytest.mark.parametrize(
+    ("remote_sha", "expected"),
+    [
+        ("a" * 40, "rolling-tags-enabled=true"),
+        ("b" * 40, "rolling-tags-enabled=false"),
+    ],
+)
+def test_resolve_docker_rolling_tags_compares_current_remote_tip(
+    tmp_path: Path,
+    remote_sha: str,
+    expected: str,
+) -> None:
+    """Only the current default-branch run may update rolling image tags."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    github_output = tmp_path / "github_output"
+    github_output.touch()
+    _write_stub(
+        bin_dir,
+        "git",
+        (
+            'if [[ "$1" == "check-ref-format" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "ls-remote" ]]; then\n'
+            f'  echo "{remote_sha}  refs/heads/main"\n'
+            "  exit 0\n"
+            "fi\n"
+            "exit 1"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/resolve-docker-rolling-tags.sh",
+        bin_dir,
+        {
+            "DEFAULT_BRANCH": "main",
+            "RUN_SHA": "a" * 40,
+            "GITHUB_OUTPUT": str(github_output),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(github_output.read_text().strip()).is_equal_to(expected)
+
+
+def test_resolve_docker_rolling_tags_fails_closed_on_lookup_error(
+    tmp_path: Path,
+) -> None:
+    """A remote lookup failure skips rolling tags without blocking SHA tags."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    github_output = tmp_path / "github_output"
+    github_output.touch()
+    _write_stub(
+        bin_dir,
+        "git",
+        'if [[ "$1" == "check-ref-format" ]]; then exit 0; fi\nexit 1',
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/resolve-docker-rolling-tags.sh",
+        bin_dir,
+        {
+            "DEFAULT_BRANCH": "main",
+            "RUN_SHA": "a" * 40,
+            "GITHUB_OUTPUT": str(github_output),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(github_output.read_text().strip()).is_equal_to(
+        "rolling-tags-enabled=false",
     )
 
 

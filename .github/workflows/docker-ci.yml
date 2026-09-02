@@ -1180,28 +1180,41 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve rolling tag eligibility
+        # Queued main workflows are retained but do not have guaranteed
+        # dispatch order. A stale run may still publish its immutable sha- tag,
+        # but must not move :main backward over a newer validated image.
+        id: rolling-tags
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_SHA: ${{ github.sha }}
+        run: scripts/ci/resolve-docker-rolling-tags.sh
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro
+          # yamllint disable rule:line-length
           tags: |
-            type=ref,event=branch
+            type=ref,event=branch,enable=${{ steps.rolling-tags.outputs.rolling-tags-enabled }}
             type=sha,prefix=sha-,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+          # yamllint enable rule:line-length
       - name: Extract metadata (base)
         id: meta-base
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro-base
+          # yamllint disable rule:line-length
           tags: |
-            type=ref,event=branch
+            type=ref,event=branch,enable=${{ steps.rolling-tags.outputs.rolling-tags-enabled }}
             type=sha,prefix=sha-,format=long
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+          # yamllint enable rule:line-length
       - name: Promote CI image to release tags (digest retag)
         id: promote
         env:

@@ -2366,6 +2366,36 @@ def test_docker_ci_queues_main_without_changing_pr_supersession() -> None:
     ).is_equal_to(expected_cancel)
 
 
+def test_docker_ci_only_current_main_tip_updates_rolling_image_tags() -> None:
+    """Stale queued runs keep immutable SHA tags but cannot move branch tags."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["publish"]["steps"]
+    rolling = next(step for step in steps if step.get("id") == "rolling-tags")
+    assert_that(rolling["run"]).is_equal_to(
+        "scripts/ci/resolve-docker-rolling-tags.sh",
+    )
+    assert_that(rolling["env"]).is_equal_to(
+        {
+            "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
+            "RUN_SHA": "${{ github.sha }}",
+        },
+    )
+
+    metadata_steps = [
+        step
+        for step in steps
+        if step.get("uses", "").startswith("docker/metadata-action@")
+    ]
+    assert_that(metadata_steps).is_length(2)
+    for step in metadata_steps:
+        tags = step["with"]["tags"]
+        assert_that(tags).contains(
+            "type=ref,event=branch,enable=${{ "
+            "steps.rolling-tags.outputs.rolling-tags-enabled }}",
+        )
+        assert_that(tags).contains("type=sha,prefix=sha-,format=long")
+
+
 def _render_concurrency_group(
     group: str,
     *,
