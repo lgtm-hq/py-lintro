@@ -332,6 +332,39 @@ total, `--output json` carries `suggestions_dropped` plus a
 `suggestions_dropped_by_reason` tally alongside a per-finding `suggestion_dropped` tag,
 and the sticky comment states the count and reasons.
 
+### Review coverage completeness
+
+A capped CLI review is **not a guaranteed full finding set**. Under `--transport cli`,
+every chunk prompt carries the `ai.cli_max_findings_per_call` ceiling, and a chunk that
+still exhausts the provider's output-token cap is retried once at a tighter ceiling. In
+both cases every chunk is still reviewed — but the model was told to stop at N findings,
+so lower-severity issues beyond the cap may exist and go unreported.
+
+That is recorded and surfaced rather than left silent:
+
+- `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
+  event, each with a `reason` (`findings_cap_applied` or `output_exhaustion_retried`),
+  the `chunk_index`, and the `findings_cap` that was in force. A chunk that ran under
+  the cap and then retried after output exhaustion contributes two entries with the same
+  `chunk_index`. `coverage_complete` is the derived "nothing was capped" boolean.
+- The terminal prints a `⚠ Coverage limited` banner under the run header.
+- The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
+  same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
+- `--output json` and the MCP `lintro_review` payload expose `coverage_complete`,
+  `coverage_degradations`, `findings_cap_applied`, and `output_exhaustion_retried`.
+
+**Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
+mean the run _stopped early_ and some chunks were never reviewed (a cost cap, an
+interrupt). A findings-cap run reviewed every chunk, just not at full depth, so it is
+reported as its own signal with equal prominence instead of being folded into `partial`.
+A run can be both.
+
+An uncapped, complete run renders exactly as it always has — no banner, no warning row,
+`coverage_complete: true`.
+
+This is distinct from the hard `cli_max_diff_bytes` ceiling: a diff over that limit is
+refused outright with `DIFF_TOO_LARGE` and is a hard failure, not a degraded success.
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked

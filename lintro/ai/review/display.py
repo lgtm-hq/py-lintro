@@ -14,6 +14,10 @@ from lintro.ai.review.checklist_display import (
     orphan_concerns,
     questions_for_finding,
 )
+from lintro.ai.review.coverage_degradation import (
+    COVERAGE_LIMITED_HEADLINE,
+    describe_coverage_degradations,
+)
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
@@ -89,6 +93,14 @@ def render_review_terminal(
         output.print(
             f"[dim]Reviewed in {metadata.chunks_total} semantic chunks[/dim]",
         )
+
+    coverage_note = describe_coverage_degradations(metadata=metadata)
+    if coverage_note:
+        # No silent caps: a capped run must never look like a clean one.
+        output.print(
+            f"[bold yellow]⚠ {COVERAGE_LIMITED_HEADLINE}[/bold yellow]",
+        )
+        output.print(f"[yellow]{coverage_note}[/yellow]")
 
     if metadata.timings is not None:
         # One line, always on: which phase dominated the wait (#2148).

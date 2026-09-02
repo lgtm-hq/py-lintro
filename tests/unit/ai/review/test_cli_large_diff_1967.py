@@ -522,7 +522,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         "lintro.ai.review.orchestrator.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        response, _elapsed = await _invoke_chunk_review(
+        response, _elapsed, _degradations = await _invoke_chunk_review(
             chunk=chunk,
             context=context,
             provider=provider,
@@ -538,6 +538,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
             use_one_shot=True,
             diff_budget=10_000,
             max_findings=CLI_MAX_FINDINGS_PER_CALL,
+            chunk_index=0,
         )
 
     assert_that(calls).is_length(2)

@@ -15,6 +15,21 @@ from lintro.ai.transport import resolve_cost_basis
 __all__ = ["RunRecord"]
 
 
+def _strict_bool(value: object) -> bool:
+    """Return ``value`` only when it is a real boolean, else ``False``.
+
+    A legacy blob carrying ``"false"`` as a *string* must not truthy-coerce
+    into a positive flag.
+
+    Args:
+        value: Raw payload value.
+
+    Returns:
+        The boolean itself, or ``False`` for anything that is not a bool.
+    """
+    return value if isinstance(value, bool) else False
+
+
 @dataclass(frozen=True, slots=True)
 class RunRecord:
     """Statistics for one AI review round on a pull request.
@@ -58,6 +73,12 @@ class RunRecord:
             how much of it the gate absorbed, stays visible over time rather
             than being an invisible parse-time edit.
         partial: True when the review stopped before every chunk was reviewed.
+        coverage_limited: True when a CLI findings cap or an output-exhaustion
+            retry may have suppressed findings in this round (#2003). A
+            separate axis from ``partial``: every chunk was reviewed, but not
+            at full depth. Serialized only when True, so a record written
+            before the field existed round-trips byte-identically and keeps
+            rendering as an unlimited round.
         chunks_reviewed: Number of chunks actually reviewed.
         chunks_total: Total number of chunks in the diff.
         resolved: Number of findings this round resolved. ``None`` on a record
@@ -99,6 +120,7 @@ class RunRecord:
     questions: int = 0
     downgraded: int = 0
     partial: bool = False
+    coverage_limited: bool = False
     chunks_reviewed: int = 0
     chunks_total: int = 0
     resolved: int | None = None
@@ -144,6 +166,8 @@ class RunRecord:
             "chunks_reviewed": self.chunks_reviewed,
             "chunks_total": self.chunks_total,
         }
+        if self.coverage_limited:
+            payload["coverage_limited"] = True
         if self.cost_basis:
             payload["cost_basis"] = self.cost_basis
         if self.resolved is not None:
@@ -170,8 +194,7 @@ class RunRecord:
         auth_mode = str(payload.get("auth_mode", ""))
         # Strict bool only: a legacy blob carrying "false" as a *string* must
         # not truthy-coerce into an estimated cost basis.
-        raw_estimated = payload.get("estimated", False)
-        estimated = raw_estimated if isinstance(raw_estimated, bool) else False
+        estimated = _strict_bool(payload.get("estimated"))
         if "cost_basis" in payload:
             cost_basis = _parse_cost_basis(payload.get("cost_basis"))
         else:
@@ -206,7 +229,8 @@ class RunRecord:
             p3=coerce_int(payload.get("p3")),
             questions=coerce_int(payload.get("questions")),
             downgraded=coerce_int(payload.get("downgraded")),
-            partial=bool(payload.get("partial", False)),
+            partial=_strict_bool(payload.get("partial")),
+            coverage_limited=_strict_bool(payload.get("coverage_limited")),
             chunks_reviewed=coerce_int(payload.get("chunks_reviewed")),
             chunks_total=coerce_int(payload.get("chunks_total")),
             resolved=_optional_count(payload.get("resolved")),

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
 
@@ -74,6 +78,13 @@ class ReviewMetadata:
             actually looked at, in sorted order.
         skipped_files (tuple[SkippedFile, ...]): Changed files excluded from
             the review, each carrying the reason it was excluded (#1910).
+        coverage_degradations (tuple[CoverageDegradation, ...]): Chunk-level
+            limits that may have suppressed findings (#2003), one entry per
+            limit event — a CLI per-call findings cap, or an
+            output-exhaustion retry at a tighter cap — so one chunk can
+            contribute both. Every chunk was still reviewed, so this is a
+            *depth* limit and deliberately distinct from ``partial``, which
+            means chunks went unreviewed. Empty for a fully uncapped run.
     """
 
     model: str
@@ -110,3 +121,40 @@ class ReviewMetadata:
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
     skipped_files: tuple[SkippedFile, ...] = field(default_factory=tuple)
+    coverage_degradations: tuple[CoverageDegradation, ...] = field(
+        default_factory=tuple,
+    )
+
+    @property
+    def coverage_complete(self) -> bool:
+        """Return whether the run asked the model for an unlimited finding set.
+
+        Returns:
+            True when no chunk ran under a findings cap or a tightened
+            output-exhaustion retry. ``partial`` is a separate axis: a run can
+            be complete in coverage depth and still have stopped early.
+        """
+        return not self.coverage_degradations
+
+    @property
+    def findings_cap_applied(self) -> int | None:
+        """Return the tightest findings ceiling any chunk ran under.
+
+        Returns:
+            The smallest recorded cap, or ``None`` when no cap was applied.
+        """
+        caps = [item.findings_cap for item in self.coverage_degradations]
+        return min(caps) if caps else None
+
+    @property
+    def output_exhaustion_retried(self) -> bool:
+        """Return whether any chunk was retried after output exhaustion.
+
+        Returns:
+            True when at least one chunk hit the provider output-token
+            ceiling and was re-run under a tighter findings cap.
+        """
+        return any(
+            item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
+            for item in self.coverage_degradations
+        )

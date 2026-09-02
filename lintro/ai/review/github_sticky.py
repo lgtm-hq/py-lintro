@@ -73,6 +73,7 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_coverage_limited_warning,
     format_timings_note,
     sanitize_comment_text,
 )
@@ -923,6 +924,7 @@ def _assemble_body(
         _reasoning_section(result=result, verdict=verdict),
         _degraded_row(failure=inline_failure),
         _suggestion_drops_row(result=result),
+        _coverage_limited_row(result=result),
         _findings_round_section(
             match=match,
             result=result,
@@ -1384,6 +1386,23 @@ def _suggestion_drops_row(*, result: ReviewResult) -> str:
         f"> ✂️ **{sanitize_comment_text(notice, limit=300)}** — the described "
         "fix is kept on each finding; only the one-click commit is withheld."
     )
+
+
+def _coverage_limited_row(*, result: ReviewResult) -> str:
+    """Render the warning row shown when a findings cap limited this round.
+
+    Sits with the other no-silent-caps notices (``_degraded_row``,
+    ``_suggestion_drops_row``) and shares its text with the per-review body
+    through :func:`format_coverage_limited_warning`, so the sticky can never
+    present a capped round as an unmarked complete one (#2003).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote warning, or an empty string when coverage was complete.
+    """
+    return format_coverage_limited_warning(metadata=result.metadata)
 
 
 def _degraded_row(*, failure: InlinePostFailure | None) -> str:
@@ -1927,6 +1946,7 @@ def _history_mini_summary(*, run: RunRecord) -> str:
         f"**Round {run.round}**{where} · "
         f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()}"
         + (" · ⚠️ partial" if run.partial else "")
+        + (" · ⚠️ coverage limited" if run.coverage_limited else "")
     )
     # Table-safe *and* collapsible-safe: the recap sits inside the history
     # <details>, so a model-written closing tag would end it early.
@@ -2267,6 +2287,7 @@ def _run_record(
         questions=sum(1 for finding in result.findings if finding.is_question),
         downgraded=count_downgrades(findings=result.findings),
         partial=bool(metadata.partial),
+        coverage_limited=not metadata.coverage_complete,
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,
         resolved=resolved,

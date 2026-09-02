@@ -502,6 +502,15 @@ def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
         "timestamp": metadata.timestamp,
         "partial": metadata.partial,
         "stopped_reason": metadata.stopped_reason,
+        # #2003: "we capped the model at N" is reported separately from
+        # "chunks went unreviewed" (``partial``), so a classifier never reads
+        # a findings-capped round as a full one.
+        "coverage_complete": metadata.coverage_complete,
+        "coverage_degradations": [
+            item.to_dict() for item in metadata.coverage_degradations
+        ],
+        "findings_cap_applied": metadata.findings_cap_applied,
+        "output_exhaustion_retried": metadata.output_exhaustion_retried,
     }
 
 
@@ -558,6 +567,7 @@ def _review_payload(
         "budget": budget.to_dict(exceeded=exceeded),
         "readiness_verdict": result.readiness_verdict.value,
     }
+    payload["coverage_complete"] = result.metadata.coverage_complete
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()
         payload["partial"] = result.metadata.partial
@@ -619,6 +629,9 @@ def _no_changes_payload(
         "findings": [],
         "run": _run_metadata(metadata=result.metadata),
         "budget": budget.to_dict(exceeded=False),
+        # Same top-level key as a real review (#2003): an empty run is
+        # trivially complete, and consumers should not need a special case.
+        "coverage_complete": result.metadata.coverage_complete,
     }
 
 

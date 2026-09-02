@@ -13,6 +13,10 @@ from lintro.ai.review.checklist_display import (
     orphan_concerns,
     questions_for_finding,
 )
+from lintro.ai.review.coverage_degradation import (
+    COVERAGE_LIMITED_HEADLINE,
+    describe_coverage_degradations,
+)
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
@@ -24,6 +28,7 @@ from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
+    "format_coverage_limited_warning",
     "format_timings_note",
     "sanitized_timing_summary",
     "format_badge_table",
@@ -212,6 +217,29 @@ def format_timings_note(*, metadata: ReviewMetadata) -> str:
     """
     summary = sanitized_timing_summary(metadata=metadata)
     return f"<sub>Timings: {summary}</sub>" if summary else ""
+
+
+def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
+    """Render the shared coverage-limited warning for posted GitHub surfaces.
+
+    The review body and the sticky comment both call this, so the two can
+    never disagree about whether a run was capped (#2003). It is the sibling
+    of the cost-cap ``partial`` warning and carries equal prominence: a capped
+    run is *not* a guaranteed full finding set.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A blockquote warning, or an empty string when coverage was complete.
+    """
+    detail = describe_coverage_degradations(metadata=metadata)
+    if not detail:
+        return ""
+    return (
+        f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}** — "
+        f"{sanitize_comment_text(detail, limit=400)}"
+    )
 
 
 def format_run_mechanics(*, metadata: ReviewMetadata) -> str:

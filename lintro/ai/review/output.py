@@ -28,6 +28,12 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     phase spans plus per-chunk queued/in-flight detail. It is ``None`` when
     the result predates timing instrumentation.
 
+    The top-level ``coverage_complete`` / ``coverage_degradations`` /
+    ``findings_cap_applied`` / ``output_exhaustion_retried`` keys report
+    whether a CLI findings cap or an output-exhaustion retry may have
+    suppressed findings (#2003). They are always present, so a classifier can
+    tell "the model found N issues" from "we capped the model at N".
+
     Args:
         result: Review result to serialize.
 
@@ -39,6 +45,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     # block (#2148): the breakdown is run instrumentation, not review
     # content, and consumers should not have to dig for it.
     metadata.pop("timings", None)
+    # #2003: ``asdict`` renders the degradations as raw dataclass dicts with a
+    # StrEnum reason; normalize them through the model's own serializer so the
+    # reason is a plain string on every consumer.
+    degradations = [item.to_dict() for item in result.metadata.coverage_degradations]
+    metadata["coverage_degradations"] = degradations
     timings = result.metadata.timings
     payload: dict[str, Any] = {
         "metadata": metadata,
@@ -65,6 +76,13 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         "suggestions_dropped_by_reason": drop_reason_counts(
             findings=result.findings,
         ),
+        # #2003: a capped or retried run is never presented as a complete one.
+        # ``partial`` stays the "chunks went unreviewed" axis; these keys are
+        # the sibling "reviewed, but not at full depth" axis.
+        "coverage_complete": result.metadata.coverage_complete,
+        "coverage_degradations": degradations,
+        "findings_cap_applied": result.metadata.findings_cap_applied,
+        "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
     }
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()

@@ -845,4 +845,6 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
 
     assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
+    # #2003: an empty run is trivially complete and carries the same key.
+    assert_that(payload["coverage_complete"]).is_true()
     assert_that(calls).is_empty()

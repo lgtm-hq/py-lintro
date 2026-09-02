@@ -67,6 +67,9 @@ from lintro.ai.review.custom_agents import (
     CustomAgentSpec,
     select_custom_agents,
 )
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -91,6 +94,7 @@ from lintro.ai.review.interrupt import (
 )
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.coverage_counts import CoverageCounts
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -390,6 +394,9 @@ class _ChunkReviewPartial:
     file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
     files: tuple[str, ...] = field(default_factory=tuple)
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
+    coverage_degradations: tuple[CoverageDegradation, ...] = field(
+        default_factory=tuple,
+    )
 
 
 def resolve_review_chunks(
@@ -1439,6 +1446,11 @@ async def run_review_async(
         custom_agents_skipped=(
             len(agent_selection.skipped) + len(custom_agents_failed)
         ),
+        coverage_degradations=tuple(
+            degradation
+            for item in partials
+            for degradation in item.coverage_degradations
+        ),
     )
 
     completed_files = {path for partial in partials for path in partial.files}
@@ -2045,7 +2057,7 @@ async def _review_chunk(
         transport_is_cli=ai_config.transport == AITransport.CLI,
         cli_max_findings_per_call=ai_config.cli_max_findings_per_call,
     )
-    response, elapsed = await _invoke_chunk_review(
+    response, elapsed, chunk_degradations = await _invoke_chunk_review(
         chunk=chunk,
         context=context,
         provider=provider,
@@ -2061,6 +2073,7 @@ async def _review_chunk(
         use_one_shot=use_one_shot,
         diff_budget=diff_budget,
         max_findings=findings_cap,
+        chunk_index=chunk_index,
     )
     response, payload = await _parse_review_payload_with_recovery(
         response=response,
@@ -2075,6 +2088,7 @@ async def _review_chunk(
     partial = replace(
         _payload_to_partial(response=response, payload=payload),
         files=tuple(chunk.files),
+        coverage_degradations=chunk_degradations,
     )
 
     if extra_checklist_usage is not None:
@@ -2127,11 +2141,14 @@ async def _invoke_chunk_review(
     use_one_shot: bool,
     diff_budget: int,
     max_findings: int | None,
-) -> tuple[AIResponse, float]:
+    chunk_index: int,
+) -> tuple[AIResponse, float, tuple[CoverageDegradation, ...]]:
     """Build the chunk prompt, call the provider, and retry on output exhaustion.
 
     When CLI transport hits the ~32k output-token cap mid-JSON, retry once with
     a tighter findings ceiling so the call can finish a complete object (#1967).
+    Both the cap itself and the retry are recorded as coverage degradations so
+    a capped chunk can never present as an unlimited one (#2003).
 
     Args:
         chunk: The chunk under review.
@@ -2149,10 +2166,12 @@ async def _invoke_chunk_review(
         use_one_shot: When True, avoid durable provider sessions.
         diff_budget: Token budget available for embedded diffs.
         max_findings: Optional per-call findings ceiling.
+        chunk_index: Zero-based position of the chunk in the run, stamped on
+            any recorded coverage degradation.
 
     Returns:
-        The provider response and wall-clock seconds spent on the successful
-        (or final) call attempt.
+        The provider response, wall-clock seconds spent on the successful (or
+        final) call attempt, and the coverage degradations this chunk incurred.
 
     Raises:
         AICostBudgetExceededError: When the session cost ceiling is hit.
@@ -2162,6 +2181,15 @@ async def _invoke_chunk_review(
     use_git_native = ai_config.transport == AITransport.CLI
     findings_cap = max_findings
     allow_output_retry = findings_cap is not None and findings_cap > 1
+    degradations: list[CoverageDegradation] = []
+    if findings_cap is not None:
+        degradations.append(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+                chunk_index=chunk_index,
+                findings_cap=findings_cap,
+            ),
+        )
     started = time.monotonic()
     while True:
         if use_git_native:
@@ -2220,13 +2248,22 @@ async def _invoke_chunk_review(
                     )
                     findings_cap = next_cap
                     allow_output_retry = False
+                    degradations.append(
+                        CoverageDegradation(
+                            reason=(
+                                CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
+                            ),
+                            chunk_index=chunk_index,
+                            findings_cap=next_cap,
+                        ),
+                    )
                     # Each attempt gets its own schema-retry window: charging
                     # the retry with the first attempt's elapsed time starves
                     # the recovery the retry exists to provide.
                     started = time.monotonic()
                     continue
             raise
-        return response, time.monotonic() - started
+        return response, time.monotonic() - started, tuple(degradations)
 
 
 async def _parse_review_payload_with_recovery(
