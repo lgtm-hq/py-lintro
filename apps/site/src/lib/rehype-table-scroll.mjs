@@ -5,6 +5,8 @@ import { visit } from 'unist-util-visit';
  *
  * Wide tables then scroll horizontally inside `.table-scroll` while the table
  * itself keeps `display: table`, so assistive technology still sees a table.
+ * The wrapper is focusable and named as a group (not a landmark, since a page
+ * may hold many tables) so keyboard users can reach and scroll it.
  *
  * @returns {(tree: import('hast').Root) => void}
  */
@@ -18,7 +20,12 @@ export function rehypeTableScroll() {
       parent.children[index] = {
         type: 'element',
         tagName: 'div',
-        properties: { className: ['table-scroll'] },
+        properties: {
+          className: ['table-scroll'],
+          tabIndex: 0,
+          role: 'group',
+          ariaLabel: 'Scrollable table',
+        },
         children: [node],
       };
     });

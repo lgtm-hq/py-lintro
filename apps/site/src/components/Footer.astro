@@ -5,7 +5,18 @@ import { docs, docHref, external } from '../data/site-links';
 const base = import.meta.env.BASE_URL;
 const year = new Date().getFullYear();
 
-const columns = [
+interface FooterLink {
+  label: string;
+  href: string;
+  external?: boolean;
+}
+
+interface FooterColumn {
+  title: string;
+  links: FooterLink[];
+}
+
+const columns: FooterColumn[] = [
   {
     title: 'Docs',
     links: [
@@ -22,7 +33,7 @@ const columns = [
       { label: 'PyPI', href: external.pypi.href, external: true },
       { label: 'npm', href: external.npm.href, external: true },
       { label: 'Docker image', href: external.docker.href, external: true },
-      { label: 'Homebrew tap', href: 'https://github.com/lgtm-hq/homebrew-tap', external: true },
+      { label: external.homebrew.label, href: external.homebrew.href, external: true },
     ],
   },
   {
@@ -37,12 +48,12 @@ const columns = [
   },
 ];
 
-const trust = [
-  { label: 'OpenSSF Scorecard', href: 'https://scorecard.dev/viewer/?uri=github.com/lgtm-hq/py-lintro' },
-  { label: 'OpenSSF Best Practices', href: 'https://www.bestpractices.dev/projects/11142' },
-  { label: 'CodeQL', href: `${external.github.href}/actions/workflows/codeql.yml` },
-  { label: 'CycloneDX SBOM', href: `${external.github.href}/actions/workflows/sbom-on-main.yml` },
-  { label: 'Codecov', href: external.codecov.href },
+const trust: FooterLink[] = [
+  external.scorecard,
+  external.bestPractices,
+  external.codeql,
+  external.sbom,
+  external.codecov,
 ];
 ---
 

@@ -206,7 +206,7 @@ DOC_SPECS: tuple[DocSpec, ...] = (
         "adr/README.md",
         "project",
         "adr/index",
-        40,
+        100,
         "Decision records",
         "decisions",
     ),
@@ -214,7 +214,7 @@ DOC_SPECS: tuple[DocSpec, ...] = (
         "design/README.md",
         "project",
         "design/index",
-        60,
+        300,
         "Design notes",
         "design",
     ),
@@ -222,7 +222,7 @@ DOC_SPECS: tuple[DocSpec, ...] = (
         "security/README.md",
         "project",
         "security/index",
-        80,
+        500,
         "Security",
         "security",
     ),
@@ -230,7 +230,7 @@ DOC_SPECS: tuple[DocSpec, ...] = (
         "security/assurance.md",
         "project",
         "security/assurance",
-        81,
+        501,
         "Assurance",
         "security",
     ),
@@ -238,7 +238,7 @@ DOC_SPECS: tuple[DocSpec, ...] = (
         "security/requirements.md",
         "project",
         "security/requirements",
-        82,
+        502,
         "Requirements",
         "security",
     ),
@@ -451,7 +451,7 @@ def rule_specs(docs_src: Path) -> list[DocSpec]:
 
     adr_dir = docs_src / ADR_DIR
     if adr_dir.is_dir():
-        order = 41
+        order = 101
         for src in sorted(adr_dir.glob("*.md")):
             rel = f"{ADR_DIR}/{src.name}"
             if src.name == "README.md" or rel in SKIP_SOURCES:
@@ -472,7 +472,7 @@ def rule_specs(docs_src: Path) -> list[DocSpec]:
 
     design_dir = docs_src / DESIGN_DIR
     if design_dir.is_dir():
-        order = 61
+        order = 301
         for src in sorted(design_dir.glob("*.md")):
             rel = f"{DESIGN_DIR}/{src.name}"
             if src.name == "README.md" or rel in SKIP_SOURCES:

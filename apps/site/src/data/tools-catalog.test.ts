@@ -15,6 +15,7 @@ describe('tools catalog', () => {
   });
 
   it('marks exactly 15 tools as able to write fixes', () => {
+    expect(FIXER_COUNT).toBe(TOOLS.filter((t) => t.fixes).length);
     expect(FIXER_COUNT).toBe(15);
   });
 

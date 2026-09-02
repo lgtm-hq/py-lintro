@@ -990,7 +990,9 @@
 /* ── Responsive ────────────────────────────────────────────────────────── */
 
 @media (max-width: 1180px) {
-  .docs-layout {
+  .docs-layout,
+  .docs-layout:not(:has(.docs-toc)),
+  .docs-layout:has(.docs-toc[hidden]) {
     grid-template-columns: var(--docs-sidebar-width) minmax(0, 1fr);
   }
 
@@ -1000,7 +1002,9 @@
 }
 
 @media (max-width: 900px) {
-  .docs-layout {
+  .docs-layout,
+  .docs-layout:not(:has(.docs-toc)),
+  .docs-layout:has(.docs-toc[hidden]) {
     grid-template-columns: 1fr;
   }
 

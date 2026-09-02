@@ -229,6 +229,9 @@ const offset = (CIRCUMFERENCE * (1 - SCORE / 100)).toFixed(2);
     note?: string;
   }
 
+  let applyScore: ((detail: ScoreDetail) => void) | null = null;
+  let scoreListenerBound = false;
+
   function initHealthScore(): void {
     const root = document.getElementById('health');
     const arc = document.getElementById('dial-arc');
@@ -281,12 +284,17 @@ const offset = (CIRCUMFERENCE * (1 - SCORE / 100)).toFixed(2);
     badge(DEFAULT_SCORE);
     to(DEFAULT_SCORE, 1100);
 
-    document.addEventListener('lintro:score', (event) => {
-      const detail = (event as CustomEvent<ScoreDetail>).detail;
-      if (!detail) return;
+    applyScore = (detail) => {
       to(Math.min(100, Math.max(0, detail.score)));
       if (note && detail.note) note.textContent = detail.note;
-    });
+    };
+    if (!scoreListenerBound) {
+      scoreListenerBound = true;
+      document.addEventListener('lintro:score', (event) => {
+        const detail = (event as CustomEvent<ScoreDetail>).detail;
+        if (detail) applyScore?.(detail);
+      });
+    }
   }
 
   initHealthScore();

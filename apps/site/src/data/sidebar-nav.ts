@@ -1,4 +1,4 @@
-import { type DocCategory, isSectionOverview } from './docs-nav';
+import { type DocCategory, isSectionOverview, sectionOverviewIds } from './docs-nav';
 
 /** Sidebar group order inside each section. */
 export const SECTION_GROUP_ORDER: Partial<Record<DocCategory, readonly string[]>> = {
@@ -182,10 +182,12 @@ export function groupSectionDocs<T extends SidebarNavDoc>(
 
 /** Reading order for a section: landing page first, then groups in sidebar order. */
 export function flattenSectionDocs<T extends SidebarNavDoc>(category: DocCategory, docs: T[]): T[] {
-  const overview = docs.find((d) => isSectionOverview(d.id, category));
+  const overviews = sectionOverviewIds(category)
+    .map((id) => docs.find((d) => d.id === id))
+    .filter((d): d is T => d !== undefined);
   const { groups } = groupSectionDocs(category, docs);
   const ordered = groups.flatMap((group) => group.docs);
-  return overview ? [overview, ...ordered] : ordered;
+  return [...overviews, ...ordered];
 }
 
 export interface PrevNext<T extends SidebarNavDoc> {

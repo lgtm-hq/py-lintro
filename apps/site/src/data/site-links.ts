@@ -29,6 +29,26 @@ export const home = {
 } as const;
 
 export const external = {
+  homebrew: {
+    label: 'Homebrew tap',
+    href: 'https://github.com/lgtm-hq/homebrew-tap',
+  },
+  scorecard: {
+    label: 'OpenSSF Scorecard',
+    href: 'https://scorecard.dev/viewer/?uri=github.com/lgtm-hq/py-lintro',
+  },
+  bestPractices: {
+    label: 'OpenSSF Best Practices',
+    href: 'https://www.bestpractices.dev/projects/11142',
+  },
+  codeql: {
+    label: 'CodeQL',
+    href: 'https://github.com/lgtm-hq/py-lintro/actions/workflows/codeql.yml',
+  },
+  sbom: {
+    label: 'CycloneDX SBOM',
+    href: 'https://github.com/lgtm-hq/py-lintro/actions/workflows/sbom-on-main.yml',
+  },
   github: {
     label: 'GitHub',
     href: 'https://github.com/lgtm-hq/py-lintro',

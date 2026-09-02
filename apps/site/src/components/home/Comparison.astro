@@ -94,16 +94,23 @@ const rows: { capability: string; cells: Cell[] }[] = [
   </p>
 </header>
 
-<div class="scroll-x" tabindex="0">
+<div class="scroll-x" tabindex="0" role="region" aria-label="Feature comparison table">
   <table class="cmp">
     <thead>
-      <tr><th>Capability</th><th>Lintro</th><th>trunk</th><th>MegaLinter</th><th>pre-commit</th><th>qlty</th></tr>
+      <tr>
+        <th scope="col">Capability</th>
+        <th scope="col">Lintro</th>
+        <th scope="col">trunk</th>
+        <th scope="col">MegaLinter</th>
+        <th scope="col">pre-commit</th>
+        <th scope="col">qlty</th>
+      </tr>
     </thead>
     <tbody>
       {
         rows.map((r) => (
           <tr>
-            <td>{r.capability}</td>
+            <th scope="row">{r.capability}</th>
             {r.cells.map((cell) => (
               <td class={cell.tone}>{cell.text}</td>
             ))}

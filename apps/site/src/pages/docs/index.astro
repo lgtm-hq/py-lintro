@@ -73,7 +73,9 @@ const popular = [
                 <h2>
                   <a href={section.href}>{section.label}</a>
                 </h2>
-                <span class="docs-hub-card-count">{section.count} pages</span>
+                <span class="docs-hub-card-count">
+                  {section.count} {section.count === 1 ? 'page' : 'pages'}
+                </span>
               </div>
               <p>{section.blurb}</p>
               <ul>

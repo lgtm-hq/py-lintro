@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import { docIdFromVFilePath, shouldSkipResourceHref } from './doc-link-target.mjs';
-import { routeForDocHref } from './doc-route-map';
+import { isDirectoryDocPath, isMarkdownDocPath, routeForDocHref } from './doc-route-map';
 
 /**
  * Repo-root README links have no equivalent page on the site; GitHub renders
@@ -108,7 +108,7 @@ function isAuthoredDocLink(href) {
   if (!pathPart || pathPart.startsWith('/') || pathPart.includes('://')) {
     return false;
   }
-  return /\.md$/i.test(pathPart) || pathPart.endsWith('/');
+  return isMarkdownDocPath(pathPart) || isDirectoryDocPath(pathPart);
 }
 
 /**

@@ -56,11 +56,13 @@ describe('homepage MCP console content', () => {
   });
 
   it('escapes markup before colouring', () => {
-    expect(escapeHtml('<b>&</b>')).toBe('&lt;b>&amp;&lt;/b>');
+    expect(escapeHtml('<b>&</b> "q" \'a\'')).toBe(
+      '&lt;b&gt;&amp;&lt;/b&gt; &quot;q&quot; &#39;a&#39;'
+    );
     const out = colorJson('{ "ok": true, "msg": "<x>" }');
     expect(out).toContain('<span class="key">"ok"</span>');
     expect(out).toContain('<span class="ok">true</span>');
-    expect(out).toContain('&lt;x>');
+    expect(out).toContain('&lt;x&gt;');
     expect(out).not.toContain('<x>');
   });
 });

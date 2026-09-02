@@ -11,12 +11,9 @@ export const NATIVE_THEME_META = [
   { id: 'workbench-dark', label: 'Workbench Dark', appearance: 'dark' },
 ] as const satisfies readonly { id: string; label: string; appearance: 'light' | 'dark' }[];
 
-export const NATIVE_THEMES = NATIVE_THEME_META.map((theme) => theme.id) as unknown as readonly [
-  'workbench',
-  'workbench-dark',
-];
+export type NativeTheme = (typeof NATIVE_THEME_META)[number]['id'];
 
-export type NativeTheme = (typeof NATIVE_THEMES)[number];
+export const NATIVE_THEMES: readonly NativeTheme[] = NATIVE_THEME_META.map((theme) => theme.id);
 
 /** Default theme for viewers whose OS prefers a light scheme, or expresses no preference. */
 export const DEFAULT_THEME: NativeTheme = 'workbench';

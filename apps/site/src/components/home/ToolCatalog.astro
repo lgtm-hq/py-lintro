@@ -241,9 +241,11 @@ my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
 </style>
 
 <script>
+  import type { ToolCategory } from '../../data/tools-catalog';
+
   const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const CAT_SCORE: Record<string, number> = {
+  const CAT_SCORE: Record<ToolCategory | 'all', number> = {
     all: 91,
     lint: 88,
     fmt: 97,
@@ -309,7 +311,8 @@ my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
       }
       count.textContent = `Showing ${shown} of ${cards.length} tools`;
 
-      const score = Math.min(100, (CAT_SCORE[cat] ?? 91) + (fixOnly.checked ? 3 : 0));
+      const base = cat in CAT_SCORE ? CAT_SCORE[cat as ToolCategory | 'all'] : CAT_SCORE.all;
+      const score = Math.min(100, base + (fixOnly.checked ? 3 : 0));
       const active = chips.find((c) => c.dataset.cat === cat);
       const label = cat === 'all' ? 'all tools' : `only ${(active?.textContent ?? '').trim().toLowerCase()}`;
       const note = `Example score with ${label}${fixOnly.checked ? ', auto-fixable tools only' : ''}. Weights live in the score config section.`;

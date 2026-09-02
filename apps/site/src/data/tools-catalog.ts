@@ -32,7 +32,7 @@ export const TOOLS: readonly CatalogTool[] = [
   tool('golangci-lint', 'Go', 'lint', true),
   tool('hadolint', 'Dockerfile', 'lint'),
   tool('html-validate', 'HTML', 'lint'),
-  tool('markdownlint-cli2', 'Markdown', 'lint'),
+  tool('markdownlint', 'Markdown', 'lint'),
   tool('vale', 'Prose and docs', 'lint'),
   tool('oxlint', 'JS / TS', 'lint', true),
   tool('pydoclint', 'Python docstrings', 'lint'),

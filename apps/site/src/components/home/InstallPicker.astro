@@ -1,4 +1,5 @@
 ---
+import { DEFAULT_INSTALL, INSTALL_METHODS } from '../../data/install-methods';
 const methods = [
   { key: 'uv', label: 'uv' },
   { key: 'pip', label: 'pip' },
@@ -19,14 +20,10 @@ const methods = [
     }
   </div>
   <div class="install-cmd">
-    <pre tabindex="0" id="install-cmd">uv pip install lintro</pre>
+    <pre tabindex="0" id="install-cmd">{INSTALL_METHODS[DEFAULT_INSTALL].cmd}</pre>
     <button class="btn btn-sm" id="install-copy" type="button">Copy</button>
   </div>
-  <p class="install-note" id="install-note">
-    Python 3.11+. Add <code>'lintro[full]'</code> to bundle ruff, black, mypy, bandit, pydoclint
-    and yamllint. Then <code>lintro init &amp;&amp; lintro doctor &amp;&amp; lintro install --profile
-    recommended</code>.
-  </p>
+  <p class="install-note" id="install-note" set:html={INSTALL_METHODS[DEFAULT_INSTALL].note} />
 </div>
 
 <style>
@@ -107,33 +104,9 @@ const methods = [
 </style>
 
 <script>
-  interface InstallInfo {
-    cmd: string;
-    note: string;
-  }
+  import { DEFAULT_INSTALL, INSTALL_METHODS, isInstallKey } from '../../data/install-methods';
 
-  const INSTALLS: Record<string, InstallInfo> = {
-    uv: {
-      cmd: 'uv pip install lintro',
-      note: "Python 3.11+. Add <code>'lintro[full]'</code> to bundle ruff, black, mypy, bandit, pydoclint and yamllint. Then <code>lintro init &amp;&amp; lintro doctor &amp;&amp; lintro install --profile recommended</code>.",
-    },
-    pip: {
-      cmd: 'pip install lintro',
-      note: "Python 3.11+. Add <code>'lintro[ai]'</code> for AI features or <code>'lintro[mcp]'</code> for the MCP server. Then <code>lintro init &amp;&amp; lintro doctor</code>.",
-    },
-    bun: {
-      cmd: 'bun add -g @lgtm-hq/lintro',
-      note: 'Self-contained native binary. No Python required. Builds for darwin-arm64, darwin-x64, linux-arm64 and linux-x64. Works with <code>npm i -g</code> too.',
-    },
-    brew: {
-      cmd: 'brew tap lgtm-hq/tap && brew install lintro',
-      note: 'Use <code>brew install lintro-full</code> to bundle the Python tools. Then <code>lintro install --profile recommended</code> for the rest.',
-    },
-    docker: {
-      cmd: 'docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check',
-      note: 'Every tool preinstalled. Use <code>ghcr.io/lgtm-hq/py-lintro-base</code> for a CLI-only image.',
-    },
-  };
+  
 
   const STORAGE_KEY = 'lintro.install';
 
@@ -148,7 +121,7 @@ const methods = [
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-install]'));
 
     function setInstall(key: string, persist: boolean): void {
-      const info = INSTALLS[key] ?? INSTALLS.uv;
+      const info = isInstallKey(key) ? INSTALL_METHODS[key] : INSTALL_METHODS[DEFAULT_INSTALL];
       if (!info || !cmd || !note) return;
       cmd.textContent = info.cmd;
       note.innerHTML = info.note;
@@ -174,10 +147,16 @@ const methods = [
     } catch {
       saved = null;
     }
-    if (saved && INSTALLS[saved]) setInstall(saved, false);
+    if (saved && isInstallKey(saved)) setInstall(saved, false);
 
     copy.addEventListener('click', () => {
       const text = cmd.textContent ?? '';
+      const reset = (label: string): void => {
+        copy.textContent = label;
+        setTimeout(() => {
+          copy.textContent = 'Copy';
+        }, 1400);
+      };
       const done = (): void => {
         copy.textContent = 'Copied';
         setTimeout(() => {
@@ -186,10 +165,10 @@ const methods = [
       };
       if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(text).then(done, () => {
-          copy.textContent = 'Copy failed';
+          reset('Copy failed');
         });
       } else {
-        copy.textContent = 'Select and copy';
+        reset('Select and copy');
       }
     });
   }

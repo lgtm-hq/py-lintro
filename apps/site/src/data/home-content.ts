@@ -49,12 +49,22 @@ export function isMcpToolName(value: string): value is McpToolName {
 }
 
 export function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Escape the characters that matter for element text content (quotes stay readable). */
+export function escapeText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Wrap JSON keys, strings and literals in the terminal colour classes. */
 export function colorJson(s: string): string {
-  return escapeHtml(s)
+  return escapeText(s)
     .replace(/"([^"\\]|\\.)*"(?=\s*:)/g, (m) => `<span class="key">${m}</span>`)
     .replace(/:\s*"([^"\\]|\\.)*"/g, (m) => {
       const i = m.indexOf('"');

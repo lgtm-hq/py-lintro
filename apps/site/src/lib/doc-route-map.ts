@@ -36,6 +36,16 @@ export function sourceForDocId(
  * external, not a docs link, or does not point at a migrated doc (callers
  * should drop such links rather than emit them).
  */
+/** True for a link path that names a markdown source file. */
+export function isMarkdownDocPath(pathPart: string): boolean {
+  return /\.md$/i.test(pathPart);
+}
+
+/** True for a link path that names a directory (and so its README). */
+export function isDirectoryDocPath(pathPart: string): boolean {
+  return pathPart.endsWith('/') || pathPart === '.' || pathPart === '..';
+}
+
 export function routeForDocHref(
   href: string,
   currentDocId: string,
@@ -50,8 +60,8 @@ export function routeForDocHref(
   const pathPart = hashIndex === -1 ? trimmed : trimmed.slice(0, hashIndex);
   const hash = hashIndex === -1 ? '' : trimmed.slice(hashIndex);
 
-  const isMarkdownLink = /\.md$/i.test(pathPart);
-  const isDirectoryLink = pathPart.endsWith('/') || pathPart === '.' || pathPart === '..';
+  const isMarkdownLink = isMarkdownDocPath(pathPart);
+  const isDirectoryLink = isDirectoryDocPath(pathPart);
   if (!isMarkdownLink && !isDirectoryLink) {
     return null;
   }

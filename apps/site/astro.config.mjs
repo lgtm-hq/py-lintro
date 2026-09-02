@@ -7,6 +7,8 @@ import { rehypeTableScroll } from './src/lib/rehype-table-scroll.mjs';
 import { rehypeDocLinks, rehypeUnwrapHeadingLinks } from './src/lib/rehype-doc-links.mjs';
 
 const base = process.env.ASTRO_BASE || '/';
+/** `base` with a leading slash and no trailing slash, for building absolute site paths. */
+const basePath = `/${base.replace(/^\/+|\/+$/g, '')}`.replace(/^\/$/, '');
 
 /**
  * Routes published by the previous site layout, mapped to their new homes so
@@ -47,7 +49,7 @@ export default defineConfig({
   output: 'static',
   integrations: [sitemap()],
   redirects: Object.fromEntries(
-    Object.entries(retiredDocRoutes).map(([from, to]) => [from, `${base.replace(/\/$/, '')}${to}`])
+    Object.entries(retiredDocRoutes).map(([from, to]) => [from, `${basePath}${to}`])
   ),
   markdown: {
     processor: unified({

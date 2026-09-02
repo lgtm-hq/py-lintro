@@ -20,7 +20,7 @@ describe('rehypeTableScroll', () => {
   it('wraps a table in a scrolling container', async () => {
     const output = await transform('<table><tr><td>a</td></tr></table>');
     expect(output).toBe(
-      '<div class="table-scroll"><table><tbody><tr><td>a</td></tr></tbody></table></div>'
+      '<div class="table-scroll" tabindex="0" role="group" aria-label="Scrollable table"><table><tbody><tr><td>a</td></tr></tbody></table></div>'
     );
   });
 
