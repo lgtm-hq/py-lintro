@@ -56,9 +56,10 @@ def test_definition_attributes(
 
 
 def test_definition_file_patterns(get_plugin: Callable[[str], BaseToolPlugin]) -> None:
-    """Verify TscPlugin definition includes TypeScript file patterns.
+    """Verify TscPlugin definition includes TypeScript and JavaScript patterns.
 
-    Tests that the plugin is configured to handle TypeScript files (*.ts, *.tsx).
+    Tests that the plugin is configured to handle TypeScript files and
+    JSDoc-typed JavaScript (*.js / *.mjs / *.cjs / *.jsx) for checkJs.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -66,6 +67,10 @@ def test_definition_file_patterns(get_plugin: Callable[[str], BaseToolPlugin]) -
     tsc_plugin = get_plugin("tsc")
     assert_that(tsc_plugin.definition.file_patterns).contains("*.ts")
     assert_that(tsc_plugin.definition.file_patterns).contains("*.tsx")
+    assert_that(tsc_plugin.definition.file_patterns).contains("*.js")
+    assert_that(tsc_plugin.definition.file_patterns).contains("*.mjs")
+    assert_that(tsc_plugin.definition.file_patterns).contains("*.cjs")
+    assert_that(tsc_plugin.definition.file_patterns).contains("*.jsx")
 
 
 # --- Integration tests for tsc check command ---
@@ -246,4 +251,170 @@ def test_use_project_files_checks_all_files(
     )
 
     # Should find the error in error.ts even though we only passed clean.ts
+    assert_that(result.issues_count).is_greater_than(0)
+
+
+# --- Tests for checkJs / JSDoc JavaScript (issue #1185) ---
+
+
+def test_check_js_with_checkjs_finds_type_errors(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Verify tsc type-checks JSDoc JavaScript when checkJs is enabled.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "checkJs": true, "allowJs": true, '
+        '"noEmit": true}, "include": ["*.js"]}',
+    )
+    js_file = tmp_path / "bad.js"
+    js_file.write_text(
+        "/** @type {number} */\nconst x = 'not-a-number';\nexport { x };\n",
+    )
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
+def test_check_js_without_checkjs_skips(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Verify JS-only projects without checkJs do not activate tsc findings.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "allowJs": true, "noEmit": true}, '
+        '"include": ["*.js"]}',
+    )
+    js_file = tmp_path / "bad.js"
+    js_file.write_text(
+        "/** @type {number} */\nconst x = 'not-a-number';\nexport { x };\n",
+    )
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.skip_reason).contains("checkJs")
+
+
+def test_check_mixed_ts_js_with_checkjs(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Verify mixed TS+JS projects with checkJs report JSDoc errors.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "checkJs": true, "allowJs": true, '
+        '"noEmit": true}, "include": ["*.ts", "*.js"]}',
+    )
+    (tmp_path / "ok.ts").write_text("export const n: number = 1;\n")
+    (tmp_path / "bad.js").write_text(
+        "/** @type {number} */\nconst x = 'not-a-number';\nexport { x };\n",
+    )
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
+def test_check_mixed_without_allowjs_no_ts6504(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Mixed TS+JS without allowJs type-checks TS and does not emit TS6504.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "noEmit": true}}',
+    )
+    (tmp_path / "error.ts").write_text(
+        "const y: number = 'string';\nexport { y };\n",
+    )
+    (tmp_path / "plain.js").write_text("export const x = 1;\n")
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+    codes = [getattr(issue, "code", "") for issue in (result.issues or [])]
+    assert_that(codes).does_not_contain("TS6504")
+    output = result.output or ""
+    assert_that("TS6504" in output).is_false()
+
+
+def test_check_ts_check_pragma_without_checkjs(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Native ``// @ts-check`` JS files are type-checked without checkJs.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "noEmit": true}}',
+    )
+    (tmp_path / "checked.js").write_text(
+        "// @ts-check\n/** @type {number} */\nconst x = 'not-a-number';\n"
+        "export { x };\n",
+    )
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.issues_count).is_greater_than(0)
+
+
+def test_check_js_path_use_project_files_finds_ts_errors(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """JS-only input with use_project_files still type-checks tsconfig TS files.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions": {"strict": true, "noEmit": true}, '
+        '"include": ["*.ts"]}',
+    )
+    (tmp_path / "error.ts").write_text(
+        "const y: number = 'string';\nexport { y };\n",
+    )
+    js_file = tmp_path / "plain.js"
+    js_file.write_text("export const x = 1;\n")
+
+    tsc_plugin = get_plugin("tsc")
+    result = tsc_plugin.check(
+        [str(js_file)],
+        {"use_project_files": True},
+    )
+
+    assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_greater_than(0)

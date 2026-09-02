@@ -11,7 +11,6 @@ from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.tsc import (
     TSC_DEFAULT_PRIORITY,
     TSC_DEFAULT_TIMEOUT,
-    TSC_FILE_PATTERNS,
     TscPlugin,
 )
 
@@ -59,14 +58,22 @@ def test_definition_tool_type(tsc_plugin: TscPlugin) -> None:
 
 
 def test_definition_file_patterns(tsc_plugin: TscPlugin) -> None:
-    """Plugin handles TypeScript files.
+    """Plugin handles TypeScript and JavaScript files.
 
     Args:
         tsc_plugin: The TscPlugin instance to test.
     """
     patterns = tsc_plugin.definition.file_patterns
-    assert_that(patterns).is_equal_to(TSC_FILE_PATTERNS)
-    assert_that(patterns).contains("*.ts", "*.tsx", "*.mts", "*.cts")
+    assert_that(patterns).contains(
+        "*.ts",
+        "*.tsx",
+        "*.mts",
+        "*.cts",
+        "*.js",
+        "*.mjs",
+        "*.cjs",
+        "*.jsx",
+    )
 
 
 def test_definition_native_configs(tsc_plugin: TscPlugin) -> None:

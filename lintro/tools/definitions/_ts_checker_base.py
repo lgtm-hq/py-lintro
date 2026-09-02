@@ -477,3 +477,49 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             Directory to scan for tsconfigs.
         """
         return cwd_path
+
+    def _pre_run_skip(
+        self,
+        ctx: ExecutionContext,
+        paths: list[str],
+        cwd_path: Path,
+        merged_options: dict[str, object],
+    ) -> ToolResult | None:
+        """Optionally skip the check after file discovery.
+
+        The default implementation never skips. ``tsc`` overrides this to
+        skip JavaScript-only inputs when no discovered tsconfig enables
+        ``checkJs``, no file has ``@ts-check``, and native project
+        selection is not requested. It also drops uncheckable JS from the
+        file set for mixed trees.
+
+        Args:
+            ctx: Prepared execution context with discovered files.
+            paths: Original input paths passed to ``check``.
+            cwd_path: Prepared execution working directory.
+            merged_options: Merged runtime options.
+
+        Returns:
+            A ToolResult to return immediately, or ``None`` to continue.
+        """
+        return None
+
+    def _use_native_tsconfig_scoping(
+        self,
+        info: Any,
+        files: list[str],
+    ) -> bool:
+        """Return whether to run ``-p`` against the project's tsconfig as-is.
+
+        The default is to honour explicit include/exclude/files (#851).
+        ``tsc`` overrides this so remaining JavaScript (``@ts-check``)
+        is not dropped by native project loading without ``allowJs``.
+
+        Args:
+            info: Resolved tsconfig metadata for the project.
+            files: Absolute file paths assigned to this project.
+
+        Returns:
+            ``True`` to use the tsconfig path directly.
+        """
+        return True
