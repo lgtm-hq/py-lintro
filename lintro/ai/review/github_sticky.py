@@ -83,6 +83,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.patch_validation import describe_suggestion_drops
 from lintro.ai.review.review_state_codec import (
     decode_state,
     prune_state_to_fit,
@@ -920,6 +921,7 @@ def _assemble_body(
         _summary_section(result=result),
         _reasoning_section(result=result, verdict=verdict),
         _degraded_row(failure=inline_failure),
+        _suggestion_drops_row(result=result),
         _findings_round_section(
             match=match,
             result=result,
@@ -1356,6 +1358,30 @@ def _tiles_section(*, records: tuple[FindingRecord, ...]) -> str:
                 f"**{counts[Severity.P3]}** | **{fixed}** |"
             ),
         ],
+    )
+
+
+def _suggestion_drops_row(*, result: ReviewResult) -> str:
+    """Render the warning row shown when patch validation dropped suggestions.
+
+    A suggestion that no longer matches the file at head is withheld rather
+    than posted (#2101). Withholding it silently would leave the reader
+    believing the model simply had no mechanical fix, so the count and the
+    reasons are stated on the sticky next to the other no-silent-caps notices.
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote warning naming the count and reasons, or an empty string
+        when every suggestion validated.
+    """
+    notice = describe_suggestion_drops(findings=result.findings)
+    if not notice:
+        return ""
+    return (
+        f"> ✂️ **{sanitize_comment_text(notice, limit=300)}** — the described "
+        "fix is kept on each finding; only the one-click commit is withheld."
     )
 
 

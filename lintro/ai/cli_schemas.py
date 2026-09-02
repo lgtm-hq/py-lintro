@@ -132,6 +132,11 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                                 "maxItems": 2,
                             },
                             "replacement": {"type": "string"},
+                            # #2101 anchor block. Optional so a model that
+                            # omits it still produces a valid review; when
+                            # present it is what patch validation matches
+                            # against the file at head.
+                            "before": {"type": "string"},
                         },
                     },
                     # #1925 finding-model fields. All optional: the parser

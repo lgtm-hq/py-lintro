@@ -67,6 +67,7 @@ from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
+from lintro.ai.review.patch_validation import validate_result_suggested_patches
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.state_store import (
     load_ci_state,
@@ -717,6 +718,11 @@ def review_command(
             prior_state=prior_state,
         )
 
+    # Patch validation sits between parse and post (#2101): every suggestion
+    # is checked against the real file at head before any surface renders it,
+    # so --post can never publish a block that would corrupt the file when
+    # committed. Findings are never removed, only stripped and tagged.
+    result = validate_result_suggested_patches(result=result, context=context)
     result = enrich_review_result(result=result, question_map=question_map)
 
     skip_post_tail = _skip_sigterm_post_tail(result=result)

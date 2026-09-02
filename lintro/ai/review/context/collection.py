@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
@@ -395,7 +396,7 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
     if context.pr_metadata is not None:
         head_repo = context.pr_metadata.head_repo or context.pr_metadata.repo
     for path in workflow_paths:
-        content = _read_workflow_post_image(
+        content = read_file_at_head(
             path=path,
             head_ref=context.head_ref,
             repo=head_repo,
@@ -417,19 +418,86 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
     )
 
 
-def _read_workflow_post_image(
+def make_head_file_reader(
+    *,
+    context: ReviewContext,
+) -> Callable[[str], str | None]:
+    """Build a memoized reader for repository files at the review head.
+
+    Patch validation (#2101) needs the same never-execute-the-PR-tree access
+    the context layer already uses for workflow post-images: read the blob at
+    the head ref, falling back to the GitHub contents API in ``--pr`` mode.
+    Handing callers a plain callable keeps the validator pure and lets tests
+    substitute a dictionary lookup instead of a git or ``gh`` process.
+
+    Args:
+        context: Collected review context naming the head ref and, in ``--pr``
+            mode, the head repository to fetch from.
+
+    Returns:
+        A callable mapping a repository-relative path to the file's contents at
+        head, or ``None`` when the path is unreadable there. Results — misses
+        included — are cached for the callable's lifetime, so a file shared by
+        several findings costs one subprocess.
+    """
+    repo: str | None = None
+    if context.pr_metadata is not None:
+        repo = context.pr_metadata.head_repo or context.pr_metadata.repo
+    cache: dict[str, str | None] = {}
+
+    def _read(path: str) -> str | None:
+        """Return the file's content at head, memoized per path.
+
+        Args:
+            path: Repository-relative path to read.
+
+        Returns:
+            File content at head, or ``None`` when it is unreadable.
+        """
+        if path in cache:
+            return cache[path]
+        content = read_file_at_head(
+            path=path,
+            head_ref=context.head_ref,
+            repo=repo,
+        )
+        cache[path] = content
+        return content
+
+    return _read
+
+
+def read_file_at_head(
     *,
     path: str,
     head_ref: str,
     repo: str | None = None,
 ) -> str | None:
-    """Return workflow file content at head when readable."""
+    """Return a repository file's content at the head revision.
+
+    The PR tree is never checked out or executed: the content comes from the
+    local git object store when it is present, and from the GitHub contents API
+    otherwise.
+
+    Args:
+        path: Repository-relative path to read.
+        head_ref: Head ref to read at, or ``WORKTREE`` for the working tree.
+        repo: ``owner/name`` slug used for the API fallback in ``--pr`` mode.
+
+    Returns:
+        The file content, or ``None`` when the path is unreadable at head.
+    """
     if head_ref == "WORKTREE":
         try:
             repo_root = Path(
                 _run_git(args=["rev-parse", "--show-toplevel"]).stdout.strip(),
-            )
-            file_path = repo_root / path
+            ).resolve()
+            # ``path`` can be model-authored (finding paths feed patch
+            # validation, #2101): confine the read to the repository so an
+            # absolute path or a ``..`` hop cannot reach host files.
+            file_path = (repo_root / path).resolve()
+            if not file_path.is_relative_to(repo_root):
+                return None
             if not file_path.is_file():
                 return None
             return file_path.read_text(encoding="utf-8", errors="surrogateescape")
@@ -449,7 +517,7 @@ def _read_workflow_post_image(
     if content is not None:
         return content
     if repo is not None:
-        return _read_workflow_post_image_via_gh(
+        return _read_file_at_head_via_gh(
             path=path,
             head_ref=head_ref,
             repo=repo,
@@ -457,13 +525,22 @@ def _read_workflow_post_image(
     return None
 
 
-def _read_workflow_post_image_via_gh(
+def _read_file_at_head_via_gh(
     *,
     path: str,
     head_ref: str,
     repo: str,
 ) -> str | None:
-    """Fetch workflow file content from GitHub when local git objects are missing."""
+    """Fetch file content from GitHub when local git objects are missing.
+
+    Args:
+        path: Repository-relative path to read.
+        head_ref: Head ref to read at.
+        repo: ``owner/name`` slug to fetch from.
+
+    Returns:
+        The raw file content, or ``None`` when the API call failed.
+    """
     try:
         encoded_path = quote(path, safe="/")
         encoded_ref = quote(head_ref, safe="")

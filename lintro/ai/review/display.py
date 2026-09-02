@@ -17,6 +17,7 @@ from lintro.ai.review.checklist_display import (
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.patch_validation import describe_suggestion_drops
 
 __all__ = ["render_review_terminal"]
 
@@ -131,6 +132,9 @@ def _render_findings(
 
     console.print()
     console.print(f"[bold cyan]Findings ({len(sorted_findings)})[/bold cyan]")
+    drops = describe_suggestion_drops(findings=result.findings)
+    if drops:
+        console.print(f"[yellow]{drops}[/yellow]")
 
     for index, finding in enumerate(sorted_findings, start=1):
         _render_finding_panel(
@@ -169,6 +173,16 @@ def _render_finding_panel(
     body.append(f"{finding.cause}\n\n")
     body.append("Fix: ", style="bold")
     body.append(finding.fix)
+
+    if finding.suggestion_dropped is not None:
+        body.append("\n\n")
+        body.append("Suggestion dropped: ", style="bold yellow")
+        body.append(
+            f"{finding.suggestion_dropped} "
+            "(did not match the file at head; fix text kept, "
+            "one-click commit withheld)",
+            style="yellow",
+        )
 
     if show_linked_questions:
         linked_questions = questions_for_finding(

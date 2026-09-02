@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.suggested_change import SuggestedChange
 
@@ -79,6 +80,11 @@ class ReviewFinding:
             unranged blob cannot express. ``None`` when the model reported no
             structured change; ``suggested_code`` is then read as a
             single-line change over the finding's own line.
+        suggestion_dropped: Why patch validation stripped this finding's
+            suggestion (#2101), or ``None`` when nothing was dropped. A
+            dropped suggestion clears ``suggested_change`` and
+            ``suggested_code`` so no surface can render an unvalidated block,
+            while the finding's prose is kept intact.
     """
 
     severity: Severity
@@ -99,6 +105,7 @@ class ReviewFinding:
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     suggested_change: SuggestedChange | None = None
+    suggestion_dropped: SuggestionDropReason | None = None
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:

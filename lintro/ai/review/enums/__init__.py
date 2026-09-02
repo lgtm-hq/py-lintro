@@ -14,6 +14,7 @@ from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 
 __all__ = [
     "AgentPromptScopeKind",
@@ -28,4 +29,5 @@ __all__ = [
     "ReviewCategory",
     "ReviewContextErrorCode",
     "ReviewVerdict",
+    "SuggestionDropReason",
 ]

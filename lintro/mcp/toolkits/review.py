@@ -460,6 +460,11 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         "body": _finding_body(finding=finding),
         "confidence": finding.confidence,
         "suggested_code": finding.suggested_code,
+        "suggestion_dropped": (
+            str(finding.suggestion_dropped)
+            if finding.suggestion_dropped is not None
+            else ""
+        ),
         "checklist_ids": list(finding.checklist_ids),
         "source": finding.source,
     }
@@ -761,6 +766,12 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             message=failure.message,
             detail=failure.detail,
         ) from exc
+    # #2101: the MCP payload carries suggested_code, so it goes through the
+    # same head-content validation as the CLI's terminal, JSON, and --post
+    # surfaces rather than handing an agent a patch that no longer applies.
+    from lintro.ai.review.patch_validation import validate_result_suggested_patches
+
+    result = validate_result_suggested_patches(result=result, context=context)
     return _review_payload(result=result, budget=budget)
 
 

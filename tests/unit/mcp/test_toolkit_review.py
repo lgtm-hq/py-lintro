@@ -223,6 +223,39 @@ def _result(
     )
 
 
+def test_finding_dict_carries_suggestion_drop_state() -> None:
+    """The MCP finding payload distinguishes dropped from validated patches.
+
+    ``suggested_code`` is the only patch carrier MCP serializes, so a finding
+    that survived validation must still show it, and a dropped one must show
+    the reason with the patch cleared (#2101).
+    """
+    from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
+    from lintro.mcp.toolkits.review import _finding_to_dict
+
+    kept = _result().findings[0]
+    dropped = ReviewFinding(
+        severity=Severity.P2,
+        category="correctness",
+        file="app.py",
+        line=9,
+        title="Stale patch",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+        suggestion_dropped=SuggestionDropReason.STALE_ANCHOR,
+    )
+
+    kept_payload = _finding_to_dict(finding=kept)
+    dropped_payload = _finding_to_dict(finding=dropped)
+
+    assert_that(kept_payload["suggested_code"]).is_equal_to("i += 1")
+    assert_that(kept_payload["suggestion_dropped"]).is_equal_to("")
+    assert_that(dropped_payload["suggested_code"]).is_equal_to("")
+    assert_that(dropped_payload["suggestion_dropped"]).is_equal_to("stale_anchor")
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """Create a git workspace with one committed change to review.

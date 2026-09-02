@@ -166,6 +166,7 @@ Arguments (all optional):
       "body": "The loop never terminates.\n\nCause: ...\n\nFix: ...",
       "confidence": "high",
       "suggested_code": "i += 1",
+      "suggestion_dropped": "",
       "checklist_ids": [2],
       "source": ""
     }
@@ -192,6 +193,12 @@ Arguments (all optional):
   }
 }
 ```
+
+`suggestion_dropped` is empty when the finding's suggested patch validated against the
+file at HEAD. Otherwise it names why the one-click patch was withheld — `stale_anchor`,
+`ambiguous_anchor`, or `file_missing` — and `suggested_code` is cleared so no consumer
+can apply a hunk that no longer matches the file. The finding's prose (including its
+described fix) is always kept.
 
 Cost control:
 
