@@ -226,3 +226,51 @@ def test_missing_supplied_report_fails_before_docker(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("REPORT_JSON")
     assert_that(log_path.read_text()).is_empty()
+
+
+def test_zero_byte_supplied_report_fails_before_docker_pull(tmp_path: Path) -> None:
+    """A zero-byte artifact is rejected before Docker is invoked."""
+    report = tmp_path / "results.json"
+    report.touch()
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json=report.name,
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("REPORT_JSON")
+    assert_that(log_path.read_text()).is_empty()
+
+
+def test_absolute_outside_workspace_fails_before_docker(tmp_path: Path) -> None:
+    """An absolute report outside the mount is rejected before Docker runs."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    report = tmp_path / "outside.json"
+    _write_report(report)
+    allowlist = workspace / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+
+    result = _run_gate(
+        cwd=workspace,
+        report_json=str(report),
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("inside the mounted workspace")
+    assert_that(log_path.read_text()).is_empty()

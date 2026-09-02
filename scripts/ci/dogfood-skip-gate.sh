@@ -97,6 +97,23 @@ else
 	REPORT_JSON=dogfood-skip-report.json
 fi
 
+# The workspace is mounted at /code. Validate and translate an absolute
+# supplied path before touching Docker so an out-of-workspace report fails
+# without even pulling the image.
+report_in_container="/code/${REPORT_JSON}"
+if [[ "$REPORT_JSON" == /* ]]; then
+	workspace_dir="$(pwd -P)"
+	case "$REPORT_JSON" in
+	"${workspace_dir}"/*)
+		report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
+		;;
+	*)
+		log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
+		exit 2
+		;;
+	esac
+fi
+
 # Pull explicitly so a registry failure surfaces as a clear gate error rather
 # than an empty report.
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
@@ -165,19 +182,6 @@ fi
 # needed. The workspace is mounted at /code, so the report and allowlist are
 # both visible there.
 log_info "Checking skips against ${ALLOWLIST}..."
-report_in_container="/code/${REPORT_JSON}"
-if [[ "$REPORT_JSON" == /* ]]; then
-	workspace_dir="$(pwd -P)"
-	case "$REPORT_JSON" in
-	"${workspace_dir}"/*)
-		report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
-		;;
-	*)
-		log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
-		exit 2
-		;;
-	esac
-fi
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
 	/code/scripts/ci/check-dogfood-skips.py \
 	--report "$report_in_container" \
