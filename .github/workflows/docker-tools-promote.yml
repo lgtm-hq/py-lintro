@@ -33,7 +33,7 @@ name: Promote - Lintro Tools Candidate
 permissions: {}
 
 concurrency:
-  group: docker-tools-promote-${{ github.ref }}
+  group: lintro-tools-registry
   cancel-in-progress: false
 
 jobs:
@@ -43,6 +43,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      packages: read # resolve candidate tags from GHCR before promotion
     timeout-minutes: 10
     outputs:
       action: ${{ steps.candidate.outputs.action }}

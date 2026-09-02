@@ -5,26 +5,16 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess  # nosec B404 - fixed gh argv with environment-derived values
 import sys
 import time
 
+try:
+    from github_api import gh_json as _gh_json
+except ModuleNotFoundError:
+    from scripts.ci.github_api import gh_json as _gh_json
+
 DEFAULT_ATTEMPTS = 6
 DEFAULT_DELAY_SECONDS = 10
-
-
-def _gh_json(*args: str) -> object:
-    """Run ``gh api`` and decode its JSON response."""
-    result = subprocess.run(  # nosec B603, B607 - fixed gh executable and flags
-        ["gh", "api", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GH_TOKEN": os.environ.get("GITHUB_TOKEN", "")},
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "gh api failed")
-    return json.loads(result.stdout)
 
 
 def resolve_pr(

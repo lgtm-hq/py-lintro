@@ -6,12 +6,16 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess  # nosec B404 - fixed gh argv with validated values
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+
+try:
+    from github_api import gh_json as _gh_json
+except ModuleNotFoundError:
+    from scripts.ci.github_api import gh_json as _gh_json
 
 PACKAGE = "lintro-tools"
 CANDIDATE_RE = re.compile(
@@ -114,22 +118,6 @@ def should_delete(
         )
         and all(number in pr_states for number in candidate.pr_numbers)
     )
-
-
-def _gh_json(*args: str) -> object:
-    """Run a ``gh api`` request and decode JSON."""
-    result = subprocess.run(  # nosec B603, B607 - fixed gh executable and flags
-        ["gh", "api", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GH_TOKEN": os.environ.get("GH_TOKEN", "")},
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "gh api failed")
-    if not result.stdout.strip():
-        return None
-    return json.loads(result.stdout)
 
 
 def _gh_json_allow_not_found(*args: str) -> tuple[bool, object]:

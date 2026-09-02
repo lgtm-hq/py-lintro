@@ -169,6 +169,10 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert promote["if"] == "needs.resolve.outputs.action == 'promote'"
     assert fallback["if"] == "needs.resolve.outputs.action == 'publish'"
     assert "reusable-docker.yml@" in fallback["uses"]
+    assert resolve["permissions"]["packages"] == "read"
+    assert workflow["concurrency"]["group"] == "lintro-tools-registry"
+    cleanup = _load_workflow("ghcr-cleanup.yml")
+    assert cleanup["concurrency"]["group"] == workflow["concurrency"]["group"]
     assert "docker/tools.Dockerfile" in _trigger(workflow)["push"]["paths"]
     assert (
         ".github/workflows/docker-tools-publish.yml"
@@ -229,6 +233,32 @@ def test_digest_updater_rejects_missing_pin_without_partial_write(
             paths=(root, ai),
         )
     assert_that(root.read_text(encoding="utf-8")).contains(old)
+
+
+def test_digest_updater_rejects_trailing_digest_character(
+    *,
+    digest_module: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A digest pin cannot contain a 65th hexadecimal character."""
+    digest = "a" * 64
+    root = tmp_path / "Dockerfile"
+    ai = tmp_path / "ai-tools.Dockerfile"
+    root.write_text(
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{digest}0 AS tools\n",
+        encoding="utf-8",
+    )
+    ai.write_text(
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{digest} AS ai-tools\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="expected exactly one"):
+        digest_module.update_digest(
+            digest=f"sha256:{'b' * 64}",
+            paths=(root, ai),
+        )
+    assert_that(root.read_text(encoding="utf-8")).contains(f"sha256:{digest}0")
 
 
 def test_cleanup_parser_rejects_versions_with_persistent_tags(
@@ -378,10 +408,23 @@ def test_cleanup_main_skips_persistent_tag_added_before_delete(
         },
     }
     payloads = iter([[[old]], {"state": "closed", "merged_at": None}, promoted])
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh_json(*args: str) -> object:
+        calls.append(args)
+        return next(payloads)
+
     monkeypatch.setenv("GH_TOKEN", "token")
-    monkeypatch.setattr(cleanup_module, "_gh_json", lambda *args: next(payloads))
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
 
     assert_that(cleanup_module.main()).is_equal_to(0)
+    assert_that(
+        [
+            call
+            for call in calls
+            if "DELETE" in call and any("versions/7" in part for part in call)
+        ],
+    ).is_empty()
 
 
 def test_cleanup_main_treats_concurrent_404_as_benign(
@@ -397,10 +440,19 @@ def test_cleanup_main_treats_concurrent_404_as_benign(
             "container": {"tags": ["tools-candidate-pr42-abcdef1"]},
         },
     }
-    payloads = iter([[[candidate]], {"state": "closed", "merged_at": None}])
+    payloads = iter(
+        [
+            [[candidate]],
+            {"state": "closed", "merged_at": None},
+            candidate,
+            {"state": "closed", "merged_at": None},
+        ],
+    )
+    calls: list[tuple[str, ...]] = []
 
     def fake_gh_json(*args: str) -> object:
-        if "versions/7" in args[-1]:
+        calls.append(args)
+        if "--method" in args and "versions/7" in args[-1]:
             raise RuntimeError("HTTP 404: Not Found")
         return next(payloads)
 
@@ -408,6 +460,13 @@ def test_cleanup_main_treats_concurrent_404_as_benign(
     monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
 
     assert_that(cleanup_module.main()).is_equal_to(0)
+    assert_that(
+        [
+            call
+            for call in calls
+            if "DELETE" in call and any("versions/7" in part for part in call)
+        ],
+    ).is_length(1)
 
 
 def test_cleanup_deletes_closed_unmerged_pr_before_age_limit(
@@ -527,6 +586,78 @@ def test_promotion_resolves_newest_candidate_for_renovate_merge(
             merge_sha="a" * 40,
         ),
     ).is_equal_to(("promote", "tools-candidate-pr42-fedcba9"))
+
+
+def test_promotion_resolves_equal_timestamp_by_merged_head(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Equal registry timestamps select the candidate matching the merged head."""
+    payload = [
+        {
+            "updated_at": "2026-09-01T00:00:00Z",
+            "metadata": {
+                "container": {
+                    "tags": ["tools-candidate-pr42-abcdef1"],
+                },
+            },
+        },
+        {
+            "updated_at": "2026-09-01T00:00:00Z",
+            "metadata": {
+                "container": {
+                    "tags": ["tools-candidate-pr42-fedcba9"],
+                },
+            },
+        },
+    ]
+    monkeypatch.setattr(
+        promotion_module,
+        "_gh_json",
+        lambda *args: [payload],
+    )
+
+    assert_that(
+        promotion_module._candidate_tag_for_pr(  # noqa: SLF001
+            repository="lgtm-hq/py-lintro",
+            pr_number=42,
+            head_sha="fedcba9" + "0" * 33,
+        ),
+    ).is_equal_to("tools-candidate-pr42-fedcba9")
+
+
+def test_promotion_fails_closed_for_unresolved_equal_timestamp(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Equal timestamps without a matching head never choose lexicographically."""
+    payload = [
+        {
+            "updated_at": "2026-09-01T00:00:00Z",
+            "metadata": {
+                "container": {"tags": ["tools-candidate-pr42-abcdef1"]},
+            },
+        },
+        {
+            "updated_at": "2026-09-01T00:00:00Z",
+            "metadata": {
+                "container": {"tags": ["tools-candidate-pr42-fedcba9"]},
+            },
+        },
+    ]
+    monkeypatch.setattr(
+        promotion_module,
+        "_gh_json",
+        lambda *args: [payload],
+    )
+
+    with pytest.raises(RuntimeError, match="share an updated_at timestamp"):
+        promotion_module._candidate_tag_for_pr(  # noqa: SLF001
+            repository="lgtm-hq/py-lintro",
+            pr_number=42,
+        )
 
 
 def test_promotion_falls_back_for_ordinary_main_update(

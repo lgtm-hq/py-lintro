@@ -11,13 +11,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess  # nosec B404 - fixed gh argv with validated values
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
+try:
+    from github_api import gh_json as _gh_json
+except ModuleNotFoundError:
+    from scripts.ci.github_api import gh_json as _gh_json
+
 CANDIDATE_RE = re.compile(
-    r"^tools-candidate-pr(?P<number>[1-9][0-9]*)-[0-9a-f]{7,40}$",
+    r"^tools-candidate-pr(?P<number>[1-9][0-9]*)-(?P<sha>[0-9a-f]{7,40})$",
 )
 PACKAGE = "lintro-tools"
 # Keep this set in lockstep with docker-tools-candidate.yml. These are the
@@ -43,20 +47,6 @@ BUILD_PATHS = frozenset(
     },
 )
 CONSUMER_PATHS = frozenset({"Dockerfile", "docker/ai-tools.Dockerfile"})
-
-
-def _gh_json(*args: str) -> object:
-    """Run a fixed ``gh api`` command and decode JSON."""
-    result = subprocess.run(  # nosec B603, B607 - fixed gh executable and flags
-        ["gh", "api", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GH_TOKEN": os.environ.get("GITHUB_TOKEN", "")},
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "gh api failed")
-    return json.loads(result.stdout)
 
 
 def _pages(payload: object) -> list[dict[str, Any]]:
@@ -118,7 +108,12 @@ def _is_consumer_only(paths: set[str]) -> bool:
     return bool(paths) and paths.issubset(CONSUMER_PATHS)
 
 
-def _candidate_tag_for_pr(*, repository: str, pr_number: int) -> str | None:
+def _candidate_tag_for_pr(
+    *,
+    repository: str,
+    pr_number: int,
+    head_sha: str | None = None,
+) -> str | None:
     """Return the newest candidate tag for a PR number."""
     versions = _pages(
         _gh_json(
@@ -152,17 +147,22 @@ def _candidate_tag_for_pr(*, repository: str, pr_number: int) -> str | None:
             candidates.append((timestamp.astimezone(UTC), tag))
     if not candidates:
         return None
-    return max(candidates)[1]
-
-
-def resolve_candidate_tag(*, repository: str, merge_sha: str) -> str | None:
-    """Return the newest candidate tag for the PR merged by *merge_sha*."""
-    pr = _merged_pr(repository=repository, merge_sha=merge_sha)
-    if pr is None:
-        return None
-    return _candidate_tag_for_pr(
-        repository=repository,
-        pr_number=pr["number"],
+    newest_timestamp = max(timestamp for timestamp, _ in candidates)
+    newest = [tag for timestamp, tag in candidates if timestamp == newest_timestamp]
+    if len(newest) == 1:
+        return newest[0]
+    if head_sha:
+        matching = [
+            tag
+            for tag in newest
+            if (match := CANDIDATE_RE.fullmatch(tag)) is not None
+            and head_sha.startswith(match.group("sha"))
+        ]
+        if len(matching) == 1:
+            return matching[0]
+    raise RuntimeError(
+        f"candidate tags for PR #{pr_number} share an updated_at timestamp; "
+        "cannot determine the newest candidate",
     )
 
 
@@ -196,7 +196,13 @@ def resolve_main_action(*, repository: str, merge_sha: str) -> tuple[str, str | 
         # Be conservative for an unexpected Renovate file set. The main trigger
         # is broad enough that this is preferable to silently doing nothing.
         return "publish", None
-    tag = _candidate_tag_for_pr(repository=repository, pr_number=pr_number)
+    head = pr.get("head")
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    tag = _candidate_tag_for_pr(
+        repository=repository,
+        pr_number=pr_number,
+        head_sha=head_sha if isinstance(head_sha, str) else None,
+    )
     if tag is None:
         raise RuntimeError(
             f"merged Renovate PR #{pr_number} has no candidate image; "

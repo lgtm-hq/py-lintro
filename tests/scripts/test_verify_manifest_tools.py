@@ -153,6 +153,31 @@ def test_version_mismatch_names_manifest_bump_for_newer_image(
     assert_that(output).does_not_contain("digest-bump required")
 
 
+def test_version_mismatch_reports_unavailable_ordering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unparseable version ordering produces an actionable diagnostic."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="latest",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 1.2.3", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains("version ordering unavailable")
+
+
 def test_parse_allow_missing_splits_and_dedupes() -> None:
     """--allow-missing values are comma-split, trimmed, and de-duplicated."""
     module = _load_verify_manifest_tools_module()

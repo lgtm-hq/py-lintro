@@ -38,7 +38,7 @@ name: Maintenance - GHCR Registry Cleanup
         type: number
 
 concurrency:
-  group: ghcr-cleanup
+  group: lintro-tools-registry
   cancel-in-progress: false
 
 permissions: {}
