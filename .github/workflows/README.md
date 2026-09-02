@@ -134,4 +134,8 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
 ## Concurrency
 
 Standard pattern: `<workflow>-${{ github.ref }}` with
-`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows.
+`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows. The
+slower `docker-ci.yml` also maps `main` to `queue: max` and other refs to
+`queue: single`: up to 100 main runs can wait without displacement (GitHub does not
+guarantee dispatch order), while a new PR push still supersedes the prior pending and
+in-progress run.

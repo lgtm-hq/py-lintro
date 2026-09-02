@@ -1,3 +1,8 @@
 ---
 # Configuration for actionlint
 # See: https://github.com/rhysd/actionlint/blob/main/docs/config.md
+paths:
+  .github/workflows/docker-ci.yml:
+    ignore:
+      # actionlint v1.7.12 predates GitHub's supported concurrency.queue key.
+      - 'unexpected key "queue" for "concurrency" section'
