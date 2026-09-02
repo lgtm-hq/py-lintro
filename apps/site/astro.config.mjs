@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import sitemap from '@astrojs/sitemap';
 import { rehypeSiteImages } from './src/lib/rehype-site-images.mjs';
+import { rehypeTableScroll } from './src/lib/rehype-table-scroll.mjs';
 import { rehypeDocLinks, rehypeUnwrapHeadingLinks } from './src/lib/rehype-doc-links.mjs';
 
 const base = process.env.ASTRO_BASE || '/';
@@ -50,7 +51,12 @@ export default defineConfig({
   ),
   markdown: {
     processor: unified({
-      rehypePlugins: [[rehypeSiteImages, base], rehypeUnwrapHeadingLinks, [rehypeDocLinks, base]],
+      rehypePlugins: [
+        [rehypeSiteImages, base],
+        rehypeUnwrapHeadingLinks,
+        [rehypeDocLinks, base],
+        rehypeTableScroll,
+      ],
     }),
     shikiConfig: { theme: 'css-variables', wrap: true },
   },

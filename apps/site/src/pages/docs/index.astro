@@ -2,61 +2,99 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import DocsSectionTabs from '../../components/docs/DocsSectionTabs.astro';
-import PageHeader from '../../components/ui/PageHeader.astro';
-import Card from '../../components/ui/Card.astro';
-import { stripHtml } from '../../data/landing';
-import { CATEGORY_LABELS, CORE_DOC_CATEGORIES } from '../../data/docs-nav';
+import {
+  CATEGORY_BLURBS,
+  CATEGORY_LABELS,
+  DOC_CATEGORIES,
+  categoryLandingHref,
+  docRoute,
+  isSectionOverview,
+  navLabel,
+  sectionDocCount,
+} from '../../data/docs-nav';
+import { flattenSectionDocs } from '../../data/sidebar-nav';
+import { docHref, docs as docLinks } from '../../data/site-links';
+import '../../styles/docs.css';
 
 const base = import.meta.env.BASE_URL;
-const docs = await getCollection('docs', ({ data }) => !data.draft);
+const allDocs = await getCollection('docs', ({ data }) => !data.draft);
 
-const coreGrouped = CORE_DOC_CATEGORIES.map((key) => ({
-  key,
-  label: CATEGORY_LABELS[key],
-  docs: docs.filter((d) => d.data.category === key).sort((a, b) => a.data.order - b.data.order),
-})).filter((g) => g.docs.length > 0);
+const sections = DOC_CATEGORIES.map((key) => {
+  const inSection = allDocs.filter((d) => d.data.category === key && d.data.sidebar !== false);
+  const top = flattenSectionDocs(key, inSection)
+    .filter((d) => !isSectionOverview(d.id, key))
+    .slice(0, 4);
+  return {
+    key,
+    label: CATEGORY_LABELS[key],
+    blurb: CATEGORY_BLURBS[key],
+    href: categoryLandingHref(allDocs, key, base),
+    count: sectionDocCount(allDocs, key),
+    links: top.map((d) => ({ label: navLabel(d), href: docRoute(base, d.id) })),
+  };
+}).filter((s) => s.count > 0);
+
+const popular = [
+  { label: 'Getting started', href: docHref(base, docLinks.gettingStarted) },
+  { label: 'Configuration', href: docHref(base, docLinks.configuration) },
+  { label: 'AI features', href: docHref(base, docLinks.aiFeatures) },
+  { label: 'MCP server', href: docHref(base, docLinks.mcp) },
+  { label: 'Tool catalog', href: docHref(base, docLinks.toolsIndex) },
+  { label: 'Comparison', href: docHref(base, docLinks.comparison) },
+];
 ---
 
 <BaseLayout
   title="Documentation"
-  description="Lintro documentation — installation, configuration, supported tools, and contributing guides."
+  description="Lintro documentation: install, configure, run in CI, AI review, the tool catalog, and how the project is built."
 >
-  <div class="docs-shell docs-shell--hub">
+  <div class="docs-shell">
     <DocsSectionTabs />
-    <div class="container content docs-hub">
-      <PageHeader
-        kicker="// guides · reference"
-        title="documentation"
-        description="Unified linting, formatting, and testing for polyglot projects."
-      />
+    <div class="docs-hub">
+      <header class="docs-hub-header">
+        <span class="eyebrow">Documentation</span>
+        <h1>Everything lintro does, one section at a time.</h1>
+        <p class="lede">
+          Start with an install and a first check, then configure tools, wire up CI, and switch on
+          the AI features when you want them.
+        </p>
+      </header>
 
-      <div class="doc-categories">
-      {
-        coreGrouped.map(({ label, docs: catDocs }, i) => (
-          <Card feature number={String(i + 1).padStart(2, '0')} class="doc-category">
-            <h2>{label}</h2>
-            <ul>
-              {
-                catDocs.map((doc) => (
+      <nav class="docs-hub-popular" aria-label="Popular pages">
+        <span class="docs-hub-popular-label">Popular</span>
+        {popular.map((p) => <a href={p.href} class="docs-hub-chip">{p.label}</a>)}
+      </nav>
+
+      <div class="docs-hub-grid">
+        {
+          sections.map((section) => (
+            <article class="docs-hub-card">
+              <div class="docs-hub-card-head">
+                <h2>
+                  <a href={section.href}>{section.label}</a>
+                </h2>
+                <span class="docs-hub-card-count">{section.count} pages</span>
+              </div>
+              <p>{section.blurb}</p>
+              <ul>
+                {section.links.map((link) => (
                   <li>
-                    <a href={`${base}docs/${doc.id}/`}>{doc.data.title}</a>
-                    {doc.data.description && <span> — {stripHtml(doc.data.description)}</span>}
+                    <a href={link.href}>{link.label}</a>
                   </li>
-                ))
-              }
-            </ul>
-          </Card>
-        ))
-      }
+                ))}
+              </ul>
+              <a class="docs-hub-card-more" href={section.href}>
+                Open {section.label} →
+              </a>
+            </article>
+          ))
+        }
       </div>
+
+      <p class="docs-hub-foot">
+        Looking for test coverage? The <a href={docHref(base, docLinks.coverage)}>coverage report</a>{' '}
+        is deployed alongside this site after every merge to main.
+      </p>
     </div>
   </div>
 </BaseLayout>
-
-<style>
-  .docs-hub {
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 2rem 1.5rem 4rem;
-  }
-</style>
