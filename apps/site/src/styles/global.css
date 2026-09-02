@@ -1,3 +1,13 @@
+@import '@fontsource/sora/400.css';
+@import '@fontsource/sora/500.css';
+@import '@fontsource/sora/600.css';
+@import '@fontsource/sora/700.css';
+@import '@fontsource/public-sans/400.css';
+@import '@fontsource/public-sans/400-italic.css';
+@import '@fontsource/public-sans/500.css';
+@import '@fontsource/public-sans/600.css';
+@import '@fontsource/fira-code/400.css';
+@import '@fontsource/fira-code/500.css';
 @import './workbench-theme.css';
 
 /* ── Site-level tokens (every theme) ─────────────────────────────────────── */
@@ -33,9 +43,9 @@
 [data-theme] {
   --site-accent: var(--wb-accent);
   --site-accent-light: var(--wb-accent);
-  --turbo-text-muted: var(--turbo-text-secondary);
-  --turbo-text-default: var(--turbo-text-primary);
-  --turbo-text-tertiary: var(--turbo-text-secondary);
+  --turbo-text-muted: var(--turbo-text-secondary, var(--wb-muted));
+  --turbo-text-default: var(--turbo-text-primary, var(--wb-ink));
+  --turbo-text-tertiary: var(--turbo-text-secondary, var(--wb-muted));
 }
 
 /* ── Reset and base ──────────────────────────────────────────────────────── */
@@ -138,8 +148,8 @@ kbd {
 
 code:not(pre code) {
   font-size: 0.875em;
-  background: var(--turbo-code-inline-bg);
-  color: var(--turbo-code-inline-fg);
+  background: var(--turbo-code-inline-bg, var(--wb-surface-2));
+  color: var(--turbo-code-inline-fg, var(--wb-ink));
   border: 1px solid var(--wb-hair);
   border-radius: var(--radius-sm);
   padding: 0.05em 0.35em;
