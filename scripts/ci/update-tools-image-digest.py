@@ -23,7 +23,7 @@ PIN_FILES = (
 IMAGE_REF = "ghcr.io/lgtm-hq/lintro-tools:latest@"
 DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
 PIN_RE = re.compile(
-    rf"(?P<prefix>{re.escape(IMAGE_REF)})sha256:[a-f0-9]{{64}}(?![a-f0-9])",
+    rf"(?P<prefix>{re.escape(IMAGE_REF)})sha256:[a-f0-9]{{64}}(?=\s|$)",
 )
 
 

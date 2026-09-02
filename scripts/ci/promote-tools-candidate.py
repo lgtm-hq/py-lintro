@@ -24,6 +24,7 @@ CANDIDATE_RE = re.compile(
     r"^tools-candidate-pr(?P<number>[1-9][0-9]*)-(?P<sha>[0-9a-f]{7,40})$",
 )
 PACKAGE = "lintro-tools"
+MAIN_REF = "refs/heads/main"
 # Keep this set in lockstep with docker-tools-candidate.yml. These are the
 # only Renovate paths that can change the tools image being built.
 CANDIDATE_PATHS = frozenset(
@@ -80,6 +81,19 @@ def _is_renovate_pr(pr: dict[str, Any]) -> bool:
     branch = head.get("ref") if isinstance(head, dict) else None
     return author == "renovate[bot]" and (
         isinstance(branch, str) and branch.startswith("renovate/")
+    )
+
+
+def _is_merged_pr(pr: dict[str, Any]) -> bool:
+    """Return whether GitHub identifies a pull request as merged.
+
+    GitHub reports merged pull requests with ``state: closed`` and a non-null
+    ``merged_at`` timestamp.  Accept ``state: merged`` as well for API-shaped
+    fixtures and clients that normalize the state value.
+    """
+    return pr.get("state") in {"closed", "merged"} and isinstance(
+        pr.get("merged_at"),
+        str,
     )
 
 
@@ -166,23 +180,43 @@ def _candidate_tag_for_pr(
     )
 
 
-def resolve_main_action(*, repository: str, merge_sha: str) -> tuple[str, str | None]:
+def resolve_main_action(
+    *,
+    repository: str,
+    merge_sha: str,
+    ref: str,
+) -> tuple[str, str | None]:
     """Classify a main push as candidate promotion or canonical publication.
 
     A merged Renovate PR without a candidate is an error rather than a signal
     to rebuild: rebuilding would violate the no-rebuild promotion guarantee.
     Non-Renovate merges and direct pushes are safe canonical-build fallbacks.
     """
+    if ref != MAIN_REF:
+        raise RuntimeError(
+            f"tools image publication requires {MAIN_REF}, got {ref!r}",
+        )
+
     pr = _merged_pr(repository=repository, merge_sha=merge_sha)
     if pr is None or not _is_renovate_pr(pr):
         if pr is None:
             return "publish", None
+        if not _is_merged_pr(pr):
+            raise RuntimeError(
+                f"associated pull request #{pr.get('number', '?')} is not merged; "
+                "refusing tools image publication",
+            )
         paths = _pull_request_files(
             repository=repository,
             pr_number=pr["number"],
         )
         return ("skip", None) if _is_consumer_only(paths) else ("publish", None)
     pr_number = pr["number"]
+    if not _is_merged_pr(pr):
+        raise RuntimeError(
+            f"associated Renovate pull request #{pr_number} is not merged; "
+            "refusing candidate promotion",
+        )
     paths = _pull_request_files(repository=repository, pr_number=pr_number)
     if CANDIDATE_PATHS.isdisjoint(paths):
         if _is_consumer_only(paths):
@@ -217,6 +251,7 @@ def main() -> int:
         action, tag = resolve_main_action(
             repository=os.environ["GITHUB_REPOSITORY"],
             merge_sha=os.environ["GITHUB_SHA"],
+            ref=os.environ["GITHUB_REF"],
         )
     except (KeyError, RuntimeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)

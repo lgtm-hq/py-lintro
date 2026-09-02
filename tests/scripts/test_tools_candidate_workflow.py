@@ -261,10 +261,19 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert isinstance(promote, dict)
     assert isinstance(fallback, dict)
     assert "action" in resolve["outputs"]
-    assert promote["if"] == "needs.resolve.outputs.action == 'promote'"
-    assert fallback["if"] == "needs.resolve.outputs.action == 'publish'"
+    trigger = _trigger(workflow)
+    assert promote["if"] == (
+        "needs.resolve.outputs.action == 'promote' && "
+        "github.ref == 'refs/heads/main'"
+    )
+    assert fallback["if"] == (
+        "needs.resolve.outputs.action == 'publish' && "
+        "github.ref == 'refs/heads/main'"
+    )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
+    assert "workflow_dispatch" not in trigger
+    assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
     assert cleanup["concurrency"]["group"] == workflow["concurrency"]["group"]
@@ -340,17 +349,19 @@ def test_digest_updater_rejects_missing_pin_without_partial_write(
     assert_that(root.read_text(encoding="utf-8")).contains(old)
 
 
+@pytest.mark.parametrize("suffix", ["0", "g", "-"])
 def test_digest_updater_rejects_trailing_digest_character(
     *,
     digest_module: ModuleType,
+    suffix: str,
     tmp_path: Path,
 ) -> None:
-    """A digest pin cannot contain a 65th hexadecimal character."""
+    """A digest pin must end at a token boundary after 64 hex characters."""
     digest = "a" * 64
     root = tmp_path / "Dockerfile"
     ai = tmp_path / "ai-tools.Dockerfile"
     root.write_text(
-        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{digest}0 AS tools\n",
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{digest}{suffix} AS tools\n",
         encoding="utf-8",
     )
     ai.write_text(
@@ -363,7 +374,7 @@ def test_digest_updater_rejects_trailing_digest_character(
             digest=f"sha256:{'b' * 64}",
             paths=(root, ai),
         )
-    assert_that(root.read_text(encoding="utf-8")).contains(f"sha256:{digest}0")
+    assert_that(root.read_text(encoding="utf-8")).contains(f"sha256:{digest}{suffix}")
 
 
 def test_cleanup_parser_rejects_versions_with_persistent_tags(
@@ -675,6 +686,8 @@ def test_promotion_resolves_newest_candidate_for_renovate_merge(
             [
                 {
                     "number": 42,
+                    "state": "closed",
+                    "merged_at": "2026-09-01T00:00:00Z",
                     "user": {"login": "renovate[bot]"},
                     "head": {"ref": "renovate/rust-1.x"},
                 },
@@ -710,6 +723,7 @@ def test_promotion_resolves_newest_candidate_for_renovate_merge(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="a" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("promote", "tools-candidate-pr42-fedcba9"))
 
@@ -799,6 +813,8 @@ def test_promotion_falls_back_for_ordinary_main_update(
             [
                 {
                     "number": 43,
+                    "state": "closed",
+                    "merged_at": "2026-09-01T00:00:00Z",
                     "user": {"login": "maintainer"},
                     "head": {"ref": "fix/tools"},
                 },
@@ -812,6 +828,7 @@ def test_promotion_falls_back_for_ordinary_main_update(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="b" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("publish", None))
 
@@ -848,6 +865,8 @@ def test_promotion_fails_closed_when_renovate_candidate_is_missing(
             [
                 {
                     "number": 44,
+                    "state": "closed",
+                    "merged_at": "2026-09-01T00:00:00Z",
                     "user": {"login": "renovate[bot]"},
                     "head": {"ref": "renovate/tool"},
                 },
@@ -862,6 +881,64 @@ def test_promotion_fails_closed_when_renovate_candidate_is_missing(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="c" * 40,
+            ref=promotion_module.MAIN_REF,
+        )
+
+
+def test_promotion_rejects_arbitrary_ref(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The classifier cannot publish or promote from a non-main ref."""
+    calls: list[tuple[str, ...]] = []
+
+    def unexpected_github_call(*args: str) -> object:
+        calls.append(args)
+        raise AssertionError("GitHub must not be queried for an arbitrary ref")
+
+    monkeypatch.setattr(promotion_module, "_gh_json", unexpected_github_call)
+
+    with pytest.raises(RuntimeError, match="requires refs/heads/main"):
+        promotion_module.resolve_main_action(
+            repository="lgtm-hq/py-lintro",
+            merge_sha="c" * 40,
+            ref="refs/heads/feature",
+        )
+    assert_that(calls).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("state", "merged_at"),
+    [("open", None), ("closed", None)],
+)
+def test_promotion_rejects_unmerged_renovate_pr(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    state: str,
+    merged_at: str | None,
+) -> None:
+    """An open or closed-unmerged Renovate PR cannot trigger promotion."""
+    monkeypatch.setattr(
+        promotion_module,
+        "_gh_json",
+        lambda *args: [
+            {
+                "number": 48,
+                "state": state,
+                "merged_at": merged_at,
+                "user": {"login": "renovate[bot]"},
+                "head": {"ref": "renovate/tool"},
+            },
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="is not merged"):
+        promotion_module.resolve_main_action(
+            repository="lgtm-hq/py-lintro",
+            merge_sha="c" * 40,
+            ref=promotion_module.MAIN_REF,
         )
 
 
@@ -883,6 +960,8 @@ def test_promotion_skips_unrelated_renovate_consumer_digest(
         return [
             {
                 "number": 45,
+                "state": "closed",
+                "merged_at": "2026-09-01T00:00:00Z",
                 "user": {"login": "renovate[bot]"},
                 "head": {"ref": "renovate/lintro-tools-digest"},
             },
@@ -894,6 +973,7 @@ def test_promotion_skips_unrelated_renovate_consumer_digest(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="d" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("skip", None))
 
@@ -909,6 +989,8 @@ def test_promotion_publishes_for_renovate_installer_update(
             [
                 {
                     "number": 46,
+                    "state": "closed",
+                    "merged_at": "2026-09-01T00:00:00Z",
                     "user": {"login": "renovate[bot]"},
                     "head": {"ref": "renovate/installer"},
                 },
@@ -922,6 +1004,7 @@ def test_promotion_publishes_for_renovate_installer_update(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="f" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("publish", None))
 
@@ -937,6 +1020,8 @@ def test_promotion_skips_unrelated_maintainer_consumer_digest(
             [
                 {
                     "number": 47,
+                    "state": "closed",
+                    "merged_at": "2026-09-01T00:00:00Z",
                     "user": {"login": "maintainer"},
                     "head": {"ref": "chore/consumer-pin"},
                 },
@@ -950,6 +1035,7 @@ def test_promotion_skips_unrelated_maintainer_consumer_digest(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="1" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("skip", None))
 
@@ -966,5 +1052,6 @@ def test_promotion_publishes_for_direct_main_push(
         promotion_module.resolve_main_action(
             repository="lgtm-hq/py-lintro",
             merge_sha="e" * 40,
+            ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("publish", None))
