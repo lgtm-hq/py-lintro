@@ -50,7 +50,7 @@ const tabs = [
       </div>
     </div>
     <div class="bench-out">
-      <div class="run-lines" id="check-lines">
+      <div class="run-lines" id="check-lines" aria-live="polite">
         <div class="run-line done"><span>ruff</span><span class="res"><span class="wr">! 3 issues</span> <span class="dim">(0.47s)</span></span></div>
         <div class="run-line done"><span>mypy</span><span class="res"><span class="ok">✓ passed</span> <span class="dim">(1.34s)</span></span></div>
         <div class="run-line done"><span>bandit</span><span class="res"><span class="ok">✓ passed</span> <span class="dim">(0.62s)</span></span></div>
@@ -121,7 +121,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
       </div>
     </div>
     <div class="bench-out">
-      <div class="watch-log" id="watch-log" tabindex="0"><span class="dim">Watching for changes in src/...</span>
+      <div class="watch-log" id="watch-log" tabindex="0" role="log" aria-live="polite"><span class="dim">Watching for changes in src/...</span>
 <span class="dim">Press Ctrl+C to stop</span>
 
 <span class="entry"><span class="key">[12:34:56]</span> foo.py modified
@@ -164,7 +164,7 @@ taplo      <span class="ok">✓ passed</span>    (0.03s)
       </dl>
       <p class="note small">Example figures. Findings and cost vary with the diff and the model.</p>
     </div>
-    <div class="bench-out"><pre tabindex="0" id="review-out"><span class="dim">Reviewing PR #214 · 7 files · depth 2 · balanced</span>
+    <div class="bench-out"><pre tabindex="0" id="review-out" aria-live="polite"><span class="dim">Reviewing PR #214 · 7 files · depth 2 · balanced</span>
 <span class="dim">Coverage: 5/7 files carried from round 1 · 2 new · 4 provider calls</span>
 
 <span class="er">P1</span> src/api/client.py:88  mutable default argument shared
