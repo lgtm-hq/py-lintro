@@ -154,15 +154,17 @@ CROSS_CHUNK_DOWNGRADE_REASON = "evidence claims a changed file was never touched
 #: request actually changed, so an ordinary cross-file reference is never
 #: enough on its own. False negatives are the accepted cost of that pairing:
 #: a missed contradiction leaves a finding at its reported severity, whereas a
-#: false positive would quietly demote a real defect.
+#: false positive would quietly demote a real defect. For the same reason the
+#: incomplete-update wording ("not updated", "hasn't been updated", "wasn't
+#: updated") is deliberately absent: "src/helpers.py is not updated to accept
+#: the new flag" is a real finding about a changed file, not a claim that the
+#: file sits at its base revision.
 UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "absent from the diff",
     "are unchanged",
     "are untouched",
     "at the base revision",
     "does not appear in the diff",
-    "hasn't been updated",
-    "haven't been updated",
     "is not in the diff",
     "is unchanged",
     "is untouched",
@@ -173,7 +175,6 @@ UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "not in the changed files",
     "not included in the diff",
     "not part of the diff",
-    "not updated",
     "remain unchanged",
     "remain untouched",
     "remains unchanged",
@@ -185,7 +186,6 @@ UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "was not modified",
     "was unchanged",
     "was untouched",
-    "wasn't updated",
     "were unchanged",
     "were untouched",
 )

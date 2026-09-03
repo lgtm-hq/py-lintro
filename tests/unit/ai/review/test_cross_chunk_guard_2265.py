@@ -1013,6 +1013,33 @@ def test_github_note_omits_the_band_clause_for_a_tagged_p3(
     assert_that(note).does_not_contain("one band lower")
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "The helper in src/helpers.py is not updated to accept the new flag.",
+        "src/helpers.py hasn't been updated for the renamed option.",
+        "The callers in src/helpers.py haven't been updated to the new signature.",
+        "src/helpers.py wasn't updated when the flag was renamed.",
+    ],
+    ids=["not_updated", "hasnt_been_updated", "havent_been_updated", "wasnt_updated"],
+)
+def test_incomplete_update_wording_keeps_its_band(description: str) -> None:
+    """A real incomplete-update finding about a changed file is never demoted.
+
+    Args:
+        description: Stock wording of an incomplete-update finding.
+    """
+    finding = _finding(severity=Severity.P1, file="src/app.py", description=description)
+
+    (guarded,) = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("src/app.py", "src/helpers.py"),
+    )
+
+    assert_that(guarded.severity).is_equal_to(Severity.P1)
+    assert_that(guarded.cross_chunk_contradiction).is_none()
+
+
 def test_still_uses_phrasing_alone_does_not_fire() -> None:
     """Ordinary incomplete-update prose is not an unchanged-file claim."""
     from lintro.ai.review.severity_gate import apply_cross_chunk_guard
