@@ -118,7 +118,8 @@ def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
     assert isinstance(candidate, dict)
     assert isinstance(digest, dict)
     assert_that(resolve["if"]).is_equal_to("github.actor == 'renovate[bot]'")
-    assert_that(candidate["if"]).is_equal_to("github.actor == 'renovate[bot]'")
+    assert_that(candidate["if"]).contains("github.actor == 'renovate[bot]'")
+    assert_that(candidate["if"]).contains("needs.resolve-pr.result == 'success'")
     assert_that(digest["needs"]).is_equal_to(["resolve-pr", "candidate-build"])
     assert_that(digest["if"]).contains("github.actor == 'renovate[bot]'")
     assert_that(digest["if"]).contains("needs.resolve-pr.result == 'success'")
@@ -225,6 +226,30 @@ def test_candidate_cleanup_checks_out_repository_script() -> None:
         and str(step.get("uses", "")).startswith("actions/checkout@")
         for step in steps
     )
+
+
+def test_candidate_cleanup_age_floor_is_dispatchable() -> None:
+    """Operators can override the candidate age floor on manual runs only."""
+    workflow = _load_workflow("ghcr-cleanup.yml")
+    trigger = _trigger(workflow)
+    dispatch = trigger["workflow_dispatch"]
+    assert isinstance(dispatch, dict)
+    assert_that(dispatch["inputs"]).contains_key("candidate_min_age_days")
+    assert_that(dispatch["inputs"]["candidate_min_age_days"]["default"]).is_equal_to(14)
+
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    steps = jobs["sweep-tools-candidates"]["steps"]
+    assert isinstance(steps, list)
+    sweep = next(
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and "sweep-tools-candidate-tags.py" in str(step.get("run", ""))
+    )
+    min_age = str(sweep["env"]["MIN_AGE_DAYS"])
+    assert_that(min_age).contains("github.event_name != 'workflow_dispatch' && 14")
+    assert_that(min_age).contains("inputs.candidate_min_age_days")
 
 
 def test_candidate_cleanup_runs_from_production_script_path() -> None:

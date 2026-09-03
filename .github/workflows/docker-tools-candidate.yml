@@ -70,9 +70,13 @@ jobs:
   candidate-build:
     name: Build candidate tools image
     needs: resolve-pr
-    # Keep this condition limited to github context. Reusable-workflow call
-    # jobs can fail startup validation when their if references needs outputs.
-    if: github.actor == 'renovate[bot]'
+    # Reusable-workflow call jobs can fail startup validation when their if
+    # references needs *outputs*; needs.<job>.result is safe and keeps the
+    # implicit dependency gate explicit, so an empty candidate tag can never
+    # reach the publishing reusable.
+    if: >-
+      github.actor == 'renovate[bot]' &&
+      needs.resolve-pr.result == 'success'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
     permissions:
