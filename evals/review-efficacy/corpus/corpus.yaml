@@ -1,0 +1,63 @@
+---
+# Review eval corpus (issue #2147), seeded from the #1962 pilot selections.
+#
+# Each item is a merged historical pull request that `lintro review --pr`
+# can re-review. `expected_findings` is optional: only labeled items take
+# part in the precision/recall table, and a label is a human adjudication,
+# not a competitor bot's comment.
+#
+# A label carries exactly the three fields that form a finding fingerprint
+# (file, category, title) plus its severity, because that is what
+# lintro/ai/review/finding_matcher.py hashes. Labels therefore survive line
+# drift and reworded prose the same way a tracked finding does.
+version: 1
+repo: lgtm-hq/py-lintro
+
+items:
+  - id: pr-916
+    pr: 916
+    title: 'chore(deps): update actions/cache to v6.1.0'
+
+  - id: pr-958
+    pr: 958
+    title: 'fix(astro-check): run non-interactively to prevent prompt hang'
+
+  - id: pr-1186
+    pr: 1186
+    title: 'pilot corpus item (small diff)'
+
+  - id: pr-1481
+    pr: 1481
+    title: 'pilot corpus item (large diff)'
+
+  - id: pr-1878
+    pr: 1878
+    title: 'pilot corpus item'
+
+  - id: pr-1886
+    pr: 1886
+    title: 'pilot corpus item (medium-large diff)'
+
+  - id: pr-1891
+    pr: 1891
+    title: 'pilot corpus item (large diff)'
+
+  - id: pr-1916
+    pr: 1916
+    title: 'pilot corpus item'
+
+  - id: pr-1928
+    pr: 1928
+    title: 'pilot corpus item'
+
+  - id: pr-1936
+    pr: 1936
+    title: 'pilot corpus item'
+
+  - id: pr-1939
+    pr: 1939
+    title: 'pilot corpus item'
+
+  - id: pr-1958
+    pr: 1958
+    title: 'pilot corpus item'

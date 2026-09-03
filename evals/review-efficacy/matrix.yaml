@@ -1,0 +1,52 @@
+---
+# Cross-provider review agreement matrix (issue #2147).
+#
+# Every cell is driven purely through the LINTRO_AI_* env overrides
+# (lintro/ai/config_overrides.py); the harness has no provider wiring.
+#
+# max_cost_usd is the per-run ceiling handed to LINTRO_AI_MAX_COST_USD.
+# projected_cost_usd is the expected per-run spend used by the pre-flight
+# estimate; it defaults to max_cost_usd when omitted, so the projection is
+# never accidentally optimistic.
+version: 1
+
+# Three repeats is the minimum at which a per-config noise floor means
+# anything: two runs can only ever score a flip rate of 0.0 or 1.0.
+repeats: 3
+
+# Shared review knobs. Held constant across configs so depth and timeout
+# never confound a cross-config comparison.
+depth: 1
+timeout_seconds: 900
+
+# Model ids are the ones lintro/ai/model_pricing.py knows (or, for cursor,
+# the id the Cursor CLI exposes), so cost accounting is real rather than the
+# unknown-model fallback.
+configs:
+  - id: anthropic-opus-api
+    provider: anthropic
+    model: claude-opus-4-20250514
+    transport: api
+    max_cost_usd: 3.0
+    projected_cost_usd: 1.2
+
+  - id: anthropic-sonnet-api
+    provider: anthropic
+    model: claude-sonnet-4-6
+    transport: api
+    max_cost_usd: 1.5
+    projected_cost_usd: 0.4
+
+  - id: openai-codex-api
+    provider: openai
+    model: gpt-5.3-codex-fast
+    transport: api
+    max_cost_usd: 2.0
+    projected_cost_usd: 0.8
+
+  - id: cursor-grok-cli
+    provider: cursor
+    model: cursor-grok-4.6-high
+    transport: cli
+    max_cost_usd: 2.0
+    projected_cost_usd: 0.8

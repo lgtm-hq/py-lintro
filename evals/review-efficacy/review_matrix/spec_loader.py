@@ -1,0 +1,311 @@
+"""Loaders for the committed matrix and corpus files.
+
+Both files may be written as YAML or JSON; YAML is a superset of JSON, so one
+parser reads either and the extension only decides nothing.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from lintro.ai.review.models.review_finding import Severity
+from review_matrix.models.corpus import Corpus, CorpusItem, LabeledFinding
+from review_matrix.models.matrix import MatrixConfig, MatrixSpec
+
+__all__ = [
+    "SpecError",
+    "load_corpus",
+    "load_matrix",
+    "parse_corpus",
+    "parse_matrix",
+]
+
+DEFAULT_DEPTH = 1
+DEFAULT_TIMEOUT_SECONDS = 900.0
+DEFAULT_REPEATS = 3
+
+
+class SpecError(ValueError):
+    """Raised when a matrix or corpus file cannot be read as specified."""
+
+
+def _load_document(path: Path) -> Mapping[str, Any]:
+    """Parse a YAML or JSON document from disk.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The decoded top-level mapping.
+
+    Raises:
+        SpecError: When the file is missing, unparseable, or not a mapping.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SpecError(f"cannot read {path}: {exc}") from exc
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise SpecError(f"cannot parse {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise SpecError(f"{path} must contain a top-level mapping")
+    return data
+
+
+def _require_str(mapping: Mapping[str, Any], key: str, *, where: str) -> str:
+    """Read a non-empty string field.
+
+    Args:
+        mapping: Mapping to read from.
+        key: Field name.
+        where: Human-readable location used in the error message.
+
+    Returns:
+        The stripped field value.
+
+    Raises:
+        SpecError: When the field is absent or empty.
+    """
+    value = str(mapping.get(key, "")).strip()
+    if not value:
+        raise SpecError(f"{where}: '{key}' is required")
+    return value
+
+
+def parse_matrix(document: Mapping[str, Any]) -> MatrixSpec:
+    """Build a matrix specification from a decoded document.
+
+    Args:
+        document: Decoded matrix mapping.
+
+    Returns:
+        The parsed specification.
+
+    Raises:
+        SpecError: When the document is malformed or defines no configs.
+    """
+    raw_configs = document.get("configs")
+    if not isinstance(raw_configs, list) or not raw_configs:
+        raise SpecError("matrix: 'configs' must be a non-empty list")
+    configs: list[MatrixConfig] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_configs):
+        if not isinstance(raw, dict):
+            raise SpecError(f"matrix: config #{index + 1} must be a mapping")
+        where = f"matrix config #{index + 1}"
+        config_id = _require_str(raw, "id", where=where)
+        if config_id in seen:
+            raise SpecError(f"matrix: duplicate config id '{config_id}'")
+        seen.add(config_id)
+        max_cost = _positive_float(
+            raw.get("max_cost_usd"),
+            where=where,
+            key="max_cost_usd",
+        )
+        projected_raw = raw.get("projected_cost_usd")
+        projected = (
+            max_cost
+            if projected_raw is None
+            else _positive_float(projected_raw, where=where, key="projected_cost_usd")
+        )
+        configs.append(
+            MatrixConfig(
+                config_id=config_id,
+                provider=_require_str(raw, "provider", where=where),
+                model=_require_str(raw, "model", where=where),
+                transport=_require_str(raw, "transport", where=where),
+                max_cost_usd=max_cost,
+                projected_cost_usd=projected,
+            ),
+        )
+    repeats = _positive_int(
+        document.get("repeats", DEFAULT_REPEATS),
+        where="matrix",
+        key="repeats",
+    )
+    return MatrixSpec(
+        version=_positive_int(
+            document.get("version", 1),
+            where="matrix",
+            key="version",
+        ),
+        repeats=repeats,
+        depth=_positive_int(
+            document.get("depth", DEFAULT_DEPTH),
+            where="matrix",
+            key="depth",
+        ),
+        timeout_seconds=_positive_float(
+            document.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS),
+            where="matrix",
+            key="timeout_seconds",
+        ),
+        configs=tuple(configs),
+    )
+
+
+def parse_corpus(document: Mapping[str, Any]) -> Corpus:
+    """Build a corpus from a decoded document.
+
+    Args:
+        document: Decoded corpus mapping.
+
+    Returns:
+        The parsed corpus.
+
+    Raises:
+        SpecError: When the document is malformed or defines no items.
+    """
+    raw_items = document.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        raise SpecError("corpus: 'items' must be a non-empty list")
+    default_repo = str(document.get("repo", "")).strip()
+    items: list[CorpusItem] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_items):
+        if not isinstance(raw, dict):
+            raise SpecError(f"corpus: item #{index + 1} must be a mapping")
+        where = f"corpus item #{index + 1}"
+        item_id = _require_str(raw, "id", where=where)
+        if item_id in seen:
+            raise SpecError(f"corpus: duplicate item id '{item_id}'")
+        seen.add(item_id)
+        repo = str(raw.get("repo", default_repo)).strip()
+        if not repo:
+            raise SpecError(f"{where}: 'repo' is required (no corpus-level default)")
+        items.append(
+            CorpusItem(
+                item_id=item_id,
+                repo=repo,
+                pr=_positive_int(raw.get("pr"), where=where, key="pr"),
+                title=str(raw.get("title", "")),
+                labeled_findings=_parse_labels(
+                    raw.get("expected_findings"),
+                    where=where,
+                ),
+            ),
+        )
+    return Corpus(
+        version=_positive_int(
+            document.get("version", 1),
+            where="corpus",
+            key="version",
+        ),
+        items=tuple(items),
+    )
+
+
+def _parse_labels(value: Any, *, where: str) -> tuple[LabeledFinding, ...]:
+    """Parse a corpus item's ground-truth labels.
+
+    Args:
+        value: Raw ``expected_findings`` value.
+        where: Human-readable location used in error messages.
+
+    Returns:
+        The parsed labels; empty when the item declares none.
+
+    Raises:
+        SpecError: When the labels are malformed.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise SpecError(f"{where}: 'expected_findings' must be a list")
+    labels: list[LabeledFinding] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, dict):
+            raise SpecError(f"{where}: label #{index + 1} must be a mapping")
+        label_where = f"{where} label #{index + 1}"
+        severity_raw = str(raw.get("severity", Severity.P2.value)).upper()
+        try:
+            severity = Severity(severity_raw)
+        except ValueError as exc:
+            raise SpecError(
+                f"{label_where}: unknown severity '{severity_raw}'",
+            ) from exc
+        labels.append(
+            LabeledFinding(
+                file=_require_str(raw, "file", where=label_where),
+                category=_require_str(raw, "category", where=label_where),
+                title=_require_str(raw, "title", where=label_where),
+                severity=severity,
+            ),
+        )
+    return tuple(labels)
+
+
+def _positive_int(value: Any, *, where: str, key: str) -> int:
+    """Read a strictly positive integer field.
+
+    Args:
+        value: Raw field value.
+        where: Human-readable location used in the error message.
+        key: Field name.
+
+    Returns:
+        The parsed integer.
+
+    Raises:
+        SpecError: When the value is not a positive integer.
+    """
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SpecError(f"{where}: '{key}' must be an integer") from exc
+    if parsed <= 0:
+        raise SpecError(f"{where}: '{key}' must be positive")
+    return parsed
+
+
+def _positive_float(value: Any, *, where: str, key: str) -> float:
+    """Read a strictly positive float field.
+
+    Args:
+        value: Raw field value.
+        where: Human-readable location used in the error message.
+        key: Field name.
+
+    Returns:
+        The parsed float.
+
+    Raises:
+        SpecError: When the value is not a positive number.
+    """
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise SpecError(f"{where}: '{key}' must be a number") from exc
+    if parsed <= 0:
+        raise SpecError(f"{where}: '{key}' must be positive")
+    return parsed
+
+
+def load_matrix(path: Path) -> MatrixSpec:
+    """Load a matrix specification from a YAML or JSON file.
+
+    Args:
+        path: Matrix file path.
+
+    Returns:
+        The parsed specification.
+    """
+    return parse_matrix(_load_document(path))
+
+
+def load_corpus(path: Path) -> Corpus:
+    """Load a corpus from a YAML or JSON file.
+
+    Args:
+        path: Corpus file path.
+
+    Returns:
+        The parsed corpus.
+    """
+    return parse_corpus(_load_document(path))

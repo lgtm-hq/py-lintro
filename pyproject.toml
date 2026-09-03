@@ -340,6 +340,9 @@ exclude = [
 
 [tool.mypy]
 python_version = "3.11"
+# The offline eval harness (#2147) is repo-only tooling, not a package: its
+# root has to be on the search path for ``review_matrix`` imports to resolve.
+mypy_path = ["evals/review-efficacy"]
 strict = true
 ignore_missing_imports = false
 warn_unused_ignores = true
