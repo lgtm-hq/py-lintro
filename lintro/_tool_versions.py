@@ -66,7 +66,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
-    ToolName.BUF: "1.71.0",
+    ToolName.BUF: "1.72.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
@@ -80,11 +80,11 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.13.1",
+    ToolName.SHFMT: "3.14.0",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.97.0",
+    ToolName.TRUFFLEHOG: "3.97.3",
     ToolName.TYPOS: "1.49.0",
-    ToolName.VALE: "3.17.1",
+    ToolName.VALE: "3.20.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
