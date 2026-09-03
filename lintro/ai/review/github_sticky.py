@@ -74,6 +74,7 @@ from lintro.ai.review.github_render import (
     _format_checklist_appendix_markdown,
     _severity_counts,
     format_coverage_limited_warning,
+    format_inline_post_note,
     format_timings_note,
     sanitize_comment_text,
 )
@@ -1408,6 +1409,10 @@ def _coverage_limited_row(*, result: ReviewResult) -> str:
 def _degraded_row(*, failure: InlinePostFailure | None) -> str:
     """Render the warning row shown when inline posting failed.
 
+    Shares its text with the failure's ``reason`` through
+    :func:`format_inline_post_note`, so the row can only ever name the cause
+    GitHub actually reported (#2266).
+
     Args:
         failure: Findings whose inline comments could not be posted.
 
@@ -1415,16 +1420,7 @@ def _degraded_row(*, failure: InlinePostFailure | None) -> str:
         A blockquote warning naming the count and cause, or an empty string
         when inline posting succeeded.
     """
-    if failure is None or failure.is_empty:
-        return ""
-    noun = _plural(count=failure.count, noun="finding")
-    reason = sanitize_comment_text(failure.reason, limit=200).strip()
-    cause = f" ({reason})" if reason else ""
-    surface = "an inline comment" if failure.count == 1 else "inline comments"
-    return (
-        f"> ⚠️ **{failure.count} {noun} could not be posted as {surface}**"
-        f"{cause}. Full details are folded in below instead."
-    )
+    return format_inline_post_note(failure=failure)
 
 
 def _open_findings_section(

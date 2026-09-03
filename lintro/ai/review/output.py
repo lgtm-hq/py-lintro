@@ -7,18 +7,41 @@ from dataclasses import asdict
 from typing import Any
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import (
     count_dropped_suggestions,
     drop_reason_counts,
 )
 
+#: Key the CI classifier looks for in the captured review log to tell a
+#: sticky-only round from one whose findings reached inline comments (#2266).
+INLINE_POST_FAILURE_KEY = "inline_post_failure"
+
 __all__ = [
+    "INLINE_POST_FAILURE_KEY",
+    "render_inline_post_failure_json",
     "render_review_json",
     "render_review_output",
     "review_result_to_dict",
     "review_result_to_json",
 ]
+
+
+def render_inline_post_failure_json(*, failure: InlinePostFailure) -> str:
+    """Serialize an inline-post failure as a one-line machine envelope.
+
+    ``scripts/ci/classify_review_outcome.py`` scans the captured review log
+    for this envelope, so a round whose findings only reached the sticky
+    comment is never summarized as "P1 findings posted" (#2266).
+
+    Args:
+        failure: Findings whose inline comments could not be posted.
+
+    Returns:
+        A compact JSON object keyed by :data:`INLINE_POST_FAILURE_KEY`.
+    """
+    return json.dumps({INLINE_POST_FAILURE_KEY: failure.to_dict()})
 
 
 def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:

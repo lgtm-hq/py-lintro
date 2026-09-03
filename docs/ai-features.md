@@ -312,6 +312,30 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### When inline comments cannot be posted
+
+A finding always has a surface. When GitHub refuses the inline review batch — or a
+finding anchors to a line that is not in the PR's diff — the affected findings are
+folded into the sticky comment in full, and the sticky says which of the two happened:
+
+- `GitHub rate limit (HTTP <status>)` — the token was throttled: any HTTP 429, or a 403
+  whose message names a rate limit (primary API quota or the secondary content-creation
+  limit); the next round retries posting the comments and may be throttled again.
+- `some findings map to no line in this PR's diff (HTTP 422)` — GitHub rejected a
+  comment's anchor (a 422 whose errors name `line` or `position`). The same phrase
+  without an `HTTP` suffix marks findings lintro itself could not map to a diff line
+  before posting; no request was rejected in that case.
+- `this token is not permitted to post reviews on this PR (HTTP 403)` — a 401 or 403
+  whose message names no rate limit; the status shown is the one GitHub returned.
+- `the inline review comments could not be posted` — anything else, including a request
+  that never reached GitHub.
+
+The cause is classified from the status and message GitHub actually returned, so a
+throttled round is never reported as a diff-mapping problem. When GitHub rejects the
+inline POST, the CI job summary reads the same classification and says the findings
+reached the sticky comment only, instead of claiming they were posted inline. Exit codes
+are unaffected: the review still ran.
+
 ### Suggested-patch validation
 
 A GitHub `suggestion` block is a one-click commit, so every one is checked against the

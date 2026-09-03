@@ -18,11 +18,19 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.error_contract import (
     REVIEW_ERROR_EXIT_CODE,
     render_error_contract_json,
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.github_render import format_inline_post_cause
+from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.output import (
+    INLINE_POST_FAILURE_KEY,
+    render_inline_post_failure_json,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "classify_review_outcome.py"
@@ -225,6 +233,124 @@ def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
     assert_that(report.outcome.produced_review).is_true()
     assert_that(report.exit_code).is_equal_to(0)
     assert_that(report.headline).contains("P1 findings")
+
+
+def _inline_failure_log(*, kind: str, status: int) -> str:
+    """Render the inline-post failure envelope as lintro logs it.
+
+    Args:
+        kind: Classified failure kind.
+        status: HTTP status GitHub answered the review POST with.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    failure_kind = InlinePostFailureKind(kind)
+    payload = {
+        INLINE_POST_FAILURE_KEY: {
+            "kind": failure_kind.value,
+            "count": 94,
+            "reason": format_inline_post_cause(kind=failure_kind, status=status),
+            "status": status,
+        },
+    }
+    return f"log line\ninline comments were not posted: {json.dumps(payload)}\n"
+
+
+def test_rejected_inline_batch_is_reported_as_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """A round GitHub throttled must not claim its findings went up inline.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_inline_failure_log(kind="rate_limited", status=403),
+    )
+
+    assert_that(report.outcome.produced_review).is_true()
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only")
+    assert_that(report.headline).contains("rate_limited")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("rate limit")
+
+
+def test_clean_round_with_a_rejected_inline_batch_is_still_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """The fallback is named even when no P1 finding was raised.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_inline_failure_log(kind="line_mapping", status=422),
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only (line_mapping)")
+
+
+def test_real_envelope_round_trips_from_lintro_to_the_classifier(
+    classifier: ModuleType,
+) -> None:
+    """The envelope lintro renders is the one the classifier reads.
+
+    Producer and consumer are wired through the real serializer rather than
+    a hand-built log line, so a wrapped or renamed envelope on either side
+    breaks this test instead of silently restoring "P1 findings posted".
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    finding = ReviewFinding(
+        severity=Severity.P1,
+        category="logic-bug",
+        file="lintro/a.py",
+        line=3,
+        title="Off by one",
+        description="The loop stops early.",
+        cause="",
+        fix="",
+        confidence="high",
+    )
+    failure = InlinePostFailure(
+        reason=format_inline_post_cause(
+            kind=InlinePostFailureKind.RATE_LIMITED,
+            status=429,
+        ),
+        findings=(finding,),
+        kind=InlinePostFailureKind.RATE_LIMITED,
+        status=429,
+    )
+    output = (
+        "review log line\n"
+        "Inline review comments were not posted; this round's findings "
+        f"reached the sticky comment only: {render_inline_post_failure_json(failure=failure)}\n"
+    )
+
+    report = classifier.classify(status=1, output=output)
+
+    assert_that(report.headline).contains("sticky comment only (rate_limited)")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("HTTP 429")
+
+
+def test_inline_post_failure_key_matches_the_lintro_payload(
+    classifier: ModuleType,
+) -> None:
+    """The classifier's copy of the envelope key cannot drift from lintro's.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    assert_that(classifier.INLINE_POST_FAILURE_KEY).is_equal_to(
+        INLINE_POST_FAILURE_KEY,
+    )
 
 
 def test_depleted_balance_never_reports_success(classifier: ModuleType) -> None:
