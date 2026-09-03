@@ -1020,8 +1020,19 @@ def test_github_note_omits_the_band_clause_for_a_tagged_p3(
         "src/helpers.py hasn't been updated for the renamed option.",
         "The callers in src/helpers.py haven't been updated to the new signature.",
         "src/helpers.py wasn't updated when the flag was renamed.",
+        "src/helpers.py was not changed to handle the new flag.",
+        "The reader in src/helpers.py was not modified for the renamed key.",
+        "src/helpers.py is unchanged so that the old key still resolves.",
     ],
-    ids=["not_updated", "hasnt_been_updated", "havent_been_updated", "wasnt_updated"],
+    ids=[
+        "not_updated",
+        "hasnt_been_updated",
+        "havent_been_updated",
+        "wasnt_updated",
+        "not_changed_to",
+        "not_modified_for",
+        "unchanged_so_that",
+    ],
 )
 def test_incomplete_update_wording_keeps_its_band(description: str) -> None:
     """A real incomplete-update finding about a changed file is never demoted.
@@ -1038,6 +1049,23 @@ def test_incomplete_update_wording_keeps_its_band(description: str) -> None:
 
     assert_that(guarded.severity).is_equal_to(Severity.P1)
     assert_that(guarded.cross_chunk_contradiction).is_none()
+
+
+def test_a_bare_not_changed_claim_still_fires() -> None:
+    """Without a purpose complement, "was not changed" is a base-revision claim."""
+    finding = _finding(
+        severity=Severity.P1,
+        file="src/app.py",
+        description="src/helpers.py was not changed in this PR.",
+    )
+
+    (guarded,) = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("src/app.py", "src/helpers.py"),
+    )
+
+    assert_that(guarded.severity).is_equal_to(Severity.P2)
+    assert_that(guarded.cross_chunk_contradiction).is_not_none()
 
 
 def test_still_uses_phrasing_alone_does_not_fire() -> None:

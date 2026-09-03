@@ -156,9 +156,10 @@ CROSS_CHUNK_DOWNGRADE_REASON = "evidence claims a changed file was never touched
 #: a missed contradiction leaves a finding at its reported severity, whereas a
 #: false positive would quietly demote a real defect. For the same reason the
 #: incomplete-update wording ("not updated", "hasn't been updated", "wasn't
-#: updated") is deliberately absent: "src/helpers.py is not updated to accept
-#: the new flag" is a real finding about a changed file, not a claim that the
-#: file sits at its base revision.
+#: updated") is deliberately absent, and any phrase followed by a purpose
+#: complement ("was not changed to handle the new flag") is ignored: those are
+#: real findings about a changed file, not claims that it sits at its base
+#: revision.
 UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "absent from the diff",
     "are unchanged",
@@ -203,6 +204,12 @@ _PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]{1,12}")
 #: Sentence boundary: a terminator followed by whitespace. Paths carry dots
 #: with no following space, so ``a/b.py`` never splits.
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;:])\s+")
+
+#: A claim phrase followed by a purpose complement ("was not changed *to*
+#: handle the flag", "was not modified *for* the new option") is
+#: incomplete-update wording about a changed file, not a claim that the file
+#: sits at its base revision. Such a hit never counts.
+_INCOMPLETE_UPDATE_COMPLEMENT_RE = re.compile(r"^\s+(?:to|for|so that)\b")
 
 
 def _normalize_claim_text(*, text: str) -> str:
@@ -345,6 +352,27 @@ def _finding_claim_text(*, finding: ReviewFinding) -> str:
     )
 
 
+def _sentence_carries_claim(*, sentence: str) -> bool:
+    """Return True when a sentence asserts a file is at its base revision.
+
+    Args:
+        sentence: One sentence of a finding's evidence text, lower-cased.
+
+    Returns:
+        True when a claim phrase appears without a purpose complement right
+        after it; "was not changed to handle the flag" is a real
+        incomplete-update finding and does not count.
+    """
+    for phrase in UNCHANGED_CLAIM_PHRASES:
+        start = sentence.find(phrase)
+        while start != -1:
+            tail = sentence[start + len(phrase) :]
+            if not _INCOMPLETE_UPDATE_COMPLEMENT_RE.match(tail):
+                return True
+            start = sentence.find(phrase, start + 1)
+    return False
+
+
 def _contradicted_changed_paths(
     *,
     finding: ReviewFinding,
@@ -373,7 +401,7 @@ def _contradicted_changed_paths(
     # file, never a dropped finding.
     hits: list[str] = []
     for sentence in _SENTENCE_SPLIT_RE.split(text):
-        if not any(phrase in sentence for phrase in UNCHANGED_CLAIM_PHRASES):
+        if not _sentence_carries_claim(sentence=sentence):
             continue
         for path in _contradicted_paths(
             text=sentence,

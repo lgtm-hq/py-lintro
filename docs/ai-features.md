@@ -409,8 +409,8 @@ model anything. It fires only when both halves hold for one finding:
   unchanged claim — `is untouched`, `was never updated`, `is not in the diff`,
   `at the base revision`, and the rest of the phrase set in
   `lintro/ai/review/severity_gate.py`. Incomplete-update wording such as
-  `is not updated to accept the new flag` is deliberately not a claim: that is a real
-  finding about a changed file; **and**
+  `is not updated to accept the new flag` or `was not changed to handle it` is
+  deliberately not a claim: that is a real finding about a changed file; **and**
 - that text names a file the PR actually changed, other than the finding's own file.
   Matching folds case, `\` to `/`, and `-` to `_`, and falls back to a path-suffix or
   basename match, so `migrate-docs-content.py` still matches
