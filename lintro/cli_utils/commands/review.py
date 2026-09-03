@@ -56,6 +56,7 @@ from lintro.ai.review.checklist_display import (
 from lintro.ai.review.convergence import (
     evaluate_convergence,
     format_convergence_stamp,
+    format_trajectory,
 )
 from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.custom_agents import (
@@ -225,6 +226,10 @@ def _finish_converged_review(
         click.echo(render_convergence_outcome_json(decision=decision))
     else:
         click.echo(f"🔁 Review skipped — {format_convergence_stamp(decision=decision)}")
+        if decision.trajectory:
+            click.echo(
+                f"   Score trajectory: {format_trajectory(scores=decision.trajectory)}",
+            )
         click.echo("   Re-run with --full to force another round.")
     raise SystemExit(0)
 
@@ -677,8 +682,11 @@ def review_command(
         source=cap_source,
         basis=resolved_profile.cost_basis,
     )
+    # The PR detected from CI for --post is the one whose state was persisted;
+    # a bare --pr without --post still names the PR directly.
+    state_pr = resolved_pr if resolved_pr is not None else pr
     prior_state = _load_prior_review_state(
-        pr_number=pr,
+        pr_number=state_pr,
         head_ref=context.head_ref,
         repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
         post=post,
@@ -788,7 +796,7 @@ def review_command(
                 context=context,
                 prior=prior_state,
                 force_full=force_full,
-                pr_number=pr,
+                pr_number=state_pr,
                 repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
             )
         except Exception:
@@ -893,7 +901,7 @@ def review_command(
                     context=context,
                     prior=prior_state,
                     force_full=force_full,
-                    pr_number=pr,
+                    pr_number=state_pr,
                     repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
                     inline_comment_ids=captured_comment_ids,
                 )

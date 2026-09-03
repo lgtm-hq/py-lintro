@@ -217,6 +217,29 @@ class ReviewConvergenceConfig(BaseModel):
         ),
     )
 
+    @field_validator("threshold", "stable_rounds", mode="before")
+    @classmethod
+    def _reject_booleans(cls, value: object) -> object:
+        """Refuse a YAML boolean where a number is expected.
+
+        Pydantic's lax mode would coerce ``true`` to ``1.0``, silently arming
+        the stop rule at a threshold of one. A rule that skips reviews must
+        never switch itself on by accident.
+
+        Args:
+            value: Raw configured value.
+
+        Returns:
+            The value unchanged when it is not a boolean.
+
+        Raises:
+            ValueError: When the value is a boolean.
+        """
+        if isinstance(value, bool):
+            msg = "must be a number, not a boolean"
+            raise ValueError(msg)
+        return value
+
 
 class ReviewConfig(BaseModel):
     """Configuration for the lintro review command."""

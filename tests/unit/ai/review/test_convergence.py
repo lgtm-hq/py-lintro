@@ -513,3 +513,18 @@ def test_carried_finding_keeps_its_scored_evidence_style() -> None:
 
     assert_that(carried.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
     assert_that(regressed.evidence_style).is_equal_to(EvidenceStyle.SPECULATIVE)
+
+
+@pytest.mark.parametrize("field", ["threshold", "stable_rounds"])
+def test_config_rejects_boolean_values(field: str) -> None:
+    """A YAML ``true`` must not coerce into a numeric setting that arms the rule.
+
+    Args:
+        field: Config field under test.
+    """
+    from pydantic import ValidationError
+
+    from lintro.config.review_config import ReviewConvergenceConfig
+
+    with pytest.raises(ValidationError):
+        ReviewConvergenceConfig(**{field: True})

@@ -178,6 +178,7 @@ def test_two_quiet_rounds_skip_the_round_without_calling_the_provider(
     assert_that(result.output).contains(
         "converged at round 3 (score 0.50 < threshold 3.00)",
     )
+    assert_that(result.output).contains("Score trajectory: 1.00 → 0.50")
 
 
 def test_a_single_quiet_round_still_reviews(
@@ -296,3 +297,42 @@ def test_a_degraded_prior_round_still_reviews(
     CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["run_review"]).is_equal_to(1)
+
+
+def test_post_loads_state_for_the_pr_detected_from_ci(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With --post and no --pr, state is looked up for the CI-detected PR.
+
+    The stop rule reads prior rounds from persisted state; if the lookup used
+    the absent ``--pr`` value instead of the detected one, a CI review could
+    never see its own history and would never converge.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.cli_utils.commands.review as review_module
+
+    del patched_review, review_calls
+    seen: dict[str, object] = {}
+
+    def _load(**kwargs: object) -> ReviewState:
+        seen.update(kwargs)
+        return _quiet_state(scores=(1.0, 0.5))
+
+    monkeypatch.setattr(review_module, "_load_prior_review_state", _load)
+    monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
+    monkeypatch.setattr(
+        "lintro.ai.review.github.post_review_converged_to_github",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+
+    result = CliRunner().invoke(review_command, ["--post"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(seen["pr_number"]).is_equal_to(42)
