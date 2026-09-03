@@ -65,7 +65,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Counts are asserted so a partial rewrite is a failure rather than a silent
 # half-update — the same contract tests/unit/test_workflow_wiring.py enforces.
 PINNED_SITES: dict[str, int] = {
-    ".github/workflows/dogfood-nightly.yml": 3,
+    # 5: dogfood-full, its bounded retry, the digest-lag verifier, the
+    # skip gate and its bounded retry (#2246).
+    ".github/workflows/dogfood-nightly.yml": 5,
     ".github/workflows/docker-ci.yml": 4,
 }
 

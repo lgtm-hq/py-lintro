@@ -11,6 +11,15 @@ name: Nightly - Dogfooding Lint
 # the pinned release image and, on failure, opens or pings a deduplicated
 # issue via the lgtm-ci main-failure notifier (one open issue per workflow
 # key; repeat failures comment on it).
+#
+# Runner loss is not a regression (#2246, epic #2245). GitHub-side kills
+# ("The runner has received a shutdown signal", SIGTERM / exit 143) take the
+# lint and skip-gate jobs down mid-run and used to reach the tracker looking
+# exactly like a nightly regression. Two things prevent that now: each of
+# those jobs has ONE bounded retry that runs only when the primary published
+# no verdict, and `classify-failure` decides from the effective (post-retry)
+# same-run state whether the tracker hears about the night at all. Everything
+# it cannot classify still pings, exactly as before.
 
 'on':
   schedule:
@@ -36,6 +45,52 @@ jobs:
     with:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🌙 Nightly Dogfooding Lint'
+      lintro-tool-options: >-
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+      egress-policy: block
+      # No CI build in this workflow: lint main with the pinned release
+      # image (same digest the fork-PR fallback in docker-ci.yml uses).
+      # Pinned release digest. Renovate keeps every pin site in this file
+      # and in docker-ci.yml on the same release (see the customManager in
+      # renovate.json matching ghcr.io/lgtm-hq/py-lintro); the tag is carried
+      # alongside the digest so the pinned release is readable at a glance
+      # and Renovate has a version to bump. Do not hand-edit one site alone —
+      # tests/unit/test_workflow_wiring.py fails on a partial bump.
+      lintro-image: >-
+        ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+
+  # Bounded retry (1 attempt) of the full-repo lint, mirroring
+  # `dogfooding_lint_retry` in docker-ci.yml (#1313, #2246). It runs only when
+  # the primary attempt ended WITHOUT a lint verdict — the signature of a
+  # runner-loss kill ("The runner has received a shutdown signal", SIGTERM /
+  # exit 143) — so a sporadic kill still yields a real verdict the same night.
+  # A genuine verdict (status=failed / exit-code=1) is never retried: it is a
+  # regression the tracker must hear about tonight, and re-running it would
+  # only burn another 20 minutes to reach the same answer.
+  dogfood_full_retry:
+    needs: [dogfood-full]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        needs.dogfood-full.result == 'failure' ||
+        needs.dogfood-full.result == 'cancelled'
+      ) &&
+      (
+        needs.dogfood-full.outputs.exit-code == '143' ||
+        (
+          needs.dogfood-full.outputs.status != 'failed' &&
+          needs.dogfood-full.outputs.exit-code != '1'
+        )
+      )
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    permissions:
+      contents: read
+      packages: read # pull lintro-image from GHCR in reusable-quality-lint
+    with:
+      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      job-name: '🌙 Nightly Dogfooding Lint (retry)'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
@@ -116,6 +171,13 @@ jobs:
       packages: read # pull the pinned release image from GHCR
     # 30 leaves healthy runs room to complete and fails stalls fast (#1704).
     timeout-minutes: 30
+    outputs:
+      # Written by scripts/ci/dogfood-skip-gate.sh once the skip check reaches
+      # a verdict (#2246). Their ABSENCE is the load-bearing signal: a runner
+      # killed mid-lint leaves both empty, which is what distinguishes a night
+      # with no coverage from a real non-allowlisted skip.
+      status: ${{ steps.skips.outputs.status }}
+      exit-code: ${{ steps.skips.outputs.exit-code }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -166,6 +228,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check for silent tool skips
+        id: skips
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
           TOOL_OPTIONS: >-
@@ -183,12 +246,197 @@ jobs:
           scripts/ci/run-with-memory-trace.sh
           scripts/ci/dogfood-skip-gate.sh
 
+  # Bounded retry (1 attempt) of the gate above (#2246). Same job, same
+  # image, same tool options — GitHub Actions has no job-level retry, and the
+  # kills this exists to absorb take the whole runner down mid-step, so a
+  # second job is the only way to reach a verdict the same night. It runs only
+  # when the primary gate published no verdict at all (its `status` output is
+  # written by scripts/ci/dogfood-skip-gate.sh once the skip check completes),
+  # so a real non-allowlisted skip is reported immediately, never re-run.
+  dogfood_skip_gate_retry:
+    name: 🚦 Dogfood No-Silent-Skip Gate (retry)
+    needs: [dogfood-skip-gate]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        needs.dogfood-skip-gate.result == 'failure' ||
+        needs.dogfood-skip-gate.result == 'cancelled'
+      ) &&
+      needs.dogfood-skip-gate.outputs.status == ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the pinned release image from GHCR
+    # 30 leaves healthy runs room to complete and fails stalls fast (#1704).
+    timeout-minutes: 30
+    outputs:
+      # Written by scripts/ci/dogfood-skip-gate.sh once the skip check reaches
+      # a verdict (#2246). Their ABSENCE is the load-bearing signal: a runner
+      # killed mid-lint leaves both empty, which is what distinguishes a night
+      # with no coverage from a real non-allowlisted skip.
+      status: ${{ steps.skips.outputs.status }}
+      exit-code: ${{ steps.skips.outputs.exit-code }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for silent tool skips
+        id: skips
+        env:
+          # Same tool coverage as dogfood-full so skip behaviour matches.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+          # Same pinned release image dogfood-full lints with.
+          # Bumped as one set by Renovate (see the dogfood-full job above).
+          LINTRO_IMAGE: >-
+            ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+        # Memory trace (#1761): this job is repeatedly killed mid-lint with
+        # "runner has received a shutdown signal" + container EOF, and memory
+        # pressure is the leading hypothesis. Samples stream into this step's
+        # log rather than an artifact, because a runner death skips later
+        # steps and would discard the evidence.
+        run: >-
+          scripts/ci/run-with-memory-trace.sh
+          scripts/ci/dogfood-skip-gate.sh
+
+  # Classify before notifying (#2246, epic #2245). The nightly tracker (#2212)
+  # is a human triage queue, so a GitHub-side runner kill must not land on it
+  # looking like a nightly regression. Classification is same-run — job results
+  # and the jobs' own outputs, never Actions API logs, whose ingestion race is
+  # what #2238 exists to fix — and reuses the PR path's signature set through
+  # scripts/ci/is-infra-flake-failure.sh rather than duplicating it.
+  classify-failure:
+    name: 🧭 Classify Nightly Failure
+    needs:
+      - dogfood-full
+      - dogfood_full_retry
+      - verify-pinned-image-tools
+      - dogfood-skip-gate
+      - dogfood_skip_gate_retry
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the classifier scripts below
+    timeout-minutes: 5
+    outputs:
+      notify: ${{ steps.classify.outputs.notify }}
+      action-required: ${{ steps.classify.outputs.action-required }}
+      annotation: ${{ steps.classify.outputs.annotation }}
+      reason: ${{ steps.classify.outputs.reason }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout classifier scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/classify-nightly-dogfood-failure.py
+            scripts/ci/is-infra-flake-failure.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Classify nightly failure
+        id: classify
+        env:
+          LINT_RESULT: ${{ needs.dogfood-full.result }}
+          LINT_STATUS: ${{ needs.dogfood-full.outputs.status }}
+          LINT_EXIT_CODE: ${{ needs.dogfood-full.outputs.exit-code }}
+          # Tool-execution timeout evidence from the attempt's OWN report
+          # (#1653, lgtm-ci#746) — the same input the PR gate absorbs on.
+          LINT_TIMEOUT_FLAKE: ${{ needs.dogfood-full.outputs.timeout-flake }}
+          LINT_TIMED_OUT_TOOLS: >-
+            ${{ needs.dogfood-full.outputs.timed-out-tools }}
+          LINT_RETRY_RESULT: ${{ needs.dogfood_full_retry.result }}
+          LINT_RETRY_STATUS: ${{ needs.dogfood_full_retry.outputs.status }}
+          LINT_RETRY_EXIT_CODE: >-
+            ${{ needs.dogfood_full_retry.outputs.exit-code }}
+          LINT_RETRY_TIMEOUT_FLAKE: >-
+            ${{ needs.dogfood_full_retry.outputs.timeout-flake }}
+          LINT_RETRY_TIMED_OUT_TOOLS: >-
+            ${{ needs.dogfood_full_retry.outputs.timed-out-tools }}
+          SKIP_GATE_RESULT: ${{ needs.dogfood-skip-gate.result }}
+          SKIP_GATE_STATUS: ${{ needs.dogfood-skip-gate.outputs.status }}
+          SKIP_GATE_EXIT_CODE: >-
+            ${{ needs.dogfood-skip-gate.outputs.exit-code }}
+          SKIP_GATE_RETRY_RESULT: ${{ needs.dogfood_skip_gate_retry.result }}
+          SKIP_GATE_RETRY_STATUS: >-
+            ${{ needs.dogfood_skip_gate_retry.outputs.status }}
+          SKIP_GATE_RETRY_EXIT_CODE: >-
+            ${{ needs.dogfood_skip_gate_retry.outputs.exit-code }}
+          VERIFY_RESULT: ${{ needs.verify-pinned-image-tools.result }}
+        run: python3 scripts/ci/classify-nightly-dogfood-failure.py
+
   notify-failure:
-    needs: [dogfood-full, verify-pinned-image-tools, dogfood-skip-gate]
+    needs: [classify-failure]
     # Main-only: a manual dispatch from a feature branch must not open or
-    # ping the main-failure issue for the dogfood-nightly key. Fires when the
-    # full lint OR the no-silent-skip gate regresses.
-    if: failure() && github.ref == 'refs/heads/main'
+    # ping the main-failure issue for the dogfood-nightly key. Fires on the
+    # EFFECTIVE (post-retry) verdict from classify-failure, so a full lint or
+    # no-silent-skip regression still pings while a runner kill the retry
+    # answered does not (#2246). Fails closed twice over: the classifier pings
+    # on anything it cannot classify, and a classifier job that did not itself
+    # succeed pings regardless of its (missing) output.
+    if: >-
+      always() &&
+      !cancelled() &&
+      github.ref == 'refs/heads/main' &&
+      (
+        needs.classify-failure.outputs.notify == 'true' ||
+        needs.classify-failure.result != 'success'
+      )
     # Deduplicated failure issue (same mechanism as the release workflows):
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
