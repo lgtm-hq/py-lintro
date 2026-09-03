@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.140.1] - 2026-09-03
+
+### Changed
+
+- **ci**: drop the duplicated full-repo lintro run in the no-silent-skip gate (#2258)
+  (dac996b)
+
+### Fixed
+
+- **ci**: renovate tool bumps redden main until the tools-image digest republishes —
+  close the manifest-image ordering gap (#2252) (bd6a25d)
+
 ## [0.140.0] - 2026-09-03
 
 ### Added
