@@ -328,9 +328,10 @@ folded into the sticky comment in full, and the sticky says which of the two hap
   that never reached GitHub.
 
 The cause is classified from the status and message GitHub actually returned, so a
-throttled round is never reported as a diff-mapping problem. The CI job summary reads
-the same classification and says the findings reached the sticky comment only, instead
-of claiming they were posted inline. Exit codes are unaffected: the review still ran.
+throttled round is never reported as a diff-mapping problem. When GitHub rejects the
+inline POST, the CI job summary reads the same classification and says the findings
+reached the sticky comment only, instead of claiming they were posted inline. Exit codes
+are unaffected: the review still ran.
 
 ### Suggested-patch validation
 

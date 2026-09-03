@@ -114,6 +114,7 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
         (401, "Bad credentials", InlinePostFailureKind.PERMISSION),
         (500, "Server Error", InlinePostFailureKind.OTHER),
         (422, "Validation Failed", InlinePostFailureKind.OTHER),
+        (422, "pipeline disposition rejected", InlinePostFailureKind.OTHER),
         (None, "", InlinePostFailureKind.OTHER),
     ],
     ids=[
@@ -123,6 +124,7 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
         "kind=permission_unauthorized",
         "kind=other_server_error",
         "kind=other_unspecific_422",
+        "kind=other_422_substring_only",
         "kind=other_no_answer",
     ],
 )

@@ -239,7 +239,7 @@ def _inline_failure_log(*, kind: str, status: int) -> str:
         Captured-output text containing the envelope.
     """
     payload = {
-        "inline_post_failure": {
+        INLINE_POST_FAILURE_KEY: {
             "kind": kind,
             "count": 94,
             "reason": "GitHub secondary rate limit (HTTP 403)",

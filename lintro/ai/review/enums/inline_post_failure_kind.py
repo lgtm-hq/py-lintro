@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum, auto
 
 #: Substring GitHub uses when it throttles content creation on a token.
 _SECONDARY_RATE_LIMIT: str = "secondary rate limit"
 
-#: Words a 422 validation error uses when a comment anchors outside the diff.
-_LINE_ANCHOR_WORDS: tuple[str, ...] = ("line", "position")
+#: Whole words a 422 validation error uses when a comment anchors outside
+#: the diff. Bounded so "pipeline" or "disposition" in an unrelated message
+#: never reads as a line-mapping problem.
+_LINE_ANCHOR_RE: re.Pattern[str] = re.compile(r"\b(?:line|position)\b")
 
 
 class InlinePostFailureKind(StrEnum):
@@ -57,7 +60,7 @@ class InlinePostFailureKind(StrEnum):
         # endpoint and 429 on others; both carry the same sentence.
         if status in (403, 429) and _SECONDARY_RATE_LIMIT in text:
             return cls.RATE_LIMITED
-        if status == 422 and any(word in text for word in _LINE_ANCHOR_WORDS):
+        if status == 422 and _LINE_ANCHOR_RE.search(text):
             return cls.LINE_MAPPING
         if status in (401, 403):
             return cls.PERMISSION
