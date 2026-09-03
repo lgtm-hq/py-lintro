@@ -74,6 +74,7 @@ from lintro.ai.review.github_render import (
     _format_checklist_appendix_markdown,
     _severity_counts,
     format_coverage_limited_warning,
+    format_cross_chunk_note,
     format_inline_post_note,
     format_timings_note,
     sanitize_comment_text,
@@ -926,6 +927,7 @@ def _assemble_body(
         _degraded_row(failure=inline_failure),
         _suggestion_drops_row(result=result),
         _coverage_limited_row(result=result),
+        _cross_chunk_row(result=result),
         _findings_round_section(
             match=match,
             result=result,
@@ -1404,6 +1406,24 @@ def _coverage_limited_row(*, result: ReviewResult) -> str:
         A blockquote warning, or an empty string when coverage was complete.
     """
     return format_coverage_limited_warning(metadata=result.metadata)
+
+
+def _cross_chunk_row(*, result: ReviewResult) -> str:
+    """Render the note shown when the cross-chunk guard downgraded findings.
+
+    Sits with the other no-silent-edit notices (``_degraded_row``,
+    ``_suggestion_drops_row``, ``_coverage_limited_row``) and shares its text
+    with the per-review body through :func:`format_cross_chunk_note`, so the
+    sticky can never present a guard-lowered severity as the model's own
+    (#2265).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote note, or an empty string when the guard did not fire.
+    """
+    return format_cross_chunk_note(findings=result.findings)
 
 
 def _degraded_row(*, failure: InlinePostFailure | None) -> str:

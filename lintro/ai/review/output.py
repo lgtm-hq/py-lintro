@@ -13,6 +13,7 @@ from lintro.ai.review.patch_validation import (
     count_dropped_suggestions,
     drop_reason_counts,
 )
+from lintro.ai.review.severity_gate import count_cross_chunk_contradictions
 
 #: Key the CI classifier looks for in the captured review log to tell a
 #: sticky-only round from one whose findings reached inline comments (#2266).
@@ -56,6 +57,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     whether a CLI findings cap or an output-exhaustion retry may have
     suppressed findings (#2003). They are always present, so a classifier can
     tell "the model found N issues" from "we capped the model at N".
+
+    ``cross_chunk_contradictions`` (#2265) reports how many findings the
+    cross-chunk guard downgraded for claiming a changed file was never
+    touched, so a consumer can tell a chunk-local claim from a calibrated
+    severity.
 
     Args:
         result: Review result to serialize.
@@ -104,6 +110,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         # the sibling "reviewed, but not at full depth" axis.
         "findings_coverage_complete": result.metadata.findings_coverage_complete,
         "coverage_degradations": degradations,
+        # #2265: chunk-local contradictions are downgraded, never dropped, so
+        # the count is the only way a consumer can see the guard fired.
+        "cross_chunk_contradictions": count_cross_chunk_contradictions(
+            findings=result.findings,
+        ),
         "findings_cap_applied": result.metadata.findings_cap_applied,
         "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
     }

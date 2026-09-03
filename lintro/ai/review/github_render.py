@@ -26,11 +26,13 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
 from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
     "format_coverage_limited_warning",
+    "format_cross_chunk_note",
     "format_inline_post_cause",
     "format_inline_post_note",
     "format_timings_note",
@@ -305,6 +307,33 @@ def format_inline_post_note(*, failure: InlinePostFailure | None) -> str:
     return (
         f"> ⚠️ **{failure.count} {noun} could not be posted as {surface}**"
         f"{cause}. Full details are folded in below instead."
+    )
+
+
+def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
+    """Render the shared cross-chunk downgrade note for posted GitHub surfaces.
+
+    The review body and the sticky comment both call this, so neither can
+    describe the guard differently from the other (#2265). The note says what
+    was downgraded and why, because the alternative — editing severities the
+    model reported and saying nothing — is exactly the silent behavior the
+    other no-silent-caps notices exist to prevent.
+
+    Args:
+        findings: Findings for the current round.
+
+    Returns:
+        A blockquote note naming the count, or an empty string when the guard
+        did not fire.
+    """
+    notice = describe_cross_chunk_contradictions(findings=findings)
+    if not notice:
+        return ""
+    return (
+        f"> 🧩 **{sanitize_comment_text(notice, limit=300)}** — chunked review "
+        "shows each chunk the other files at the base commit, so the claim is "
+        "chunk-local; the finding is kept, and P1/P2 findings sit one band "
+        "lower."
     )
 
 

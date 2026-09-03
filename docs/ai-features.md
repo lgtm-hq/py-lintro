@@ -395,6 +395,48 @@ An uncapped, complete run renders exactly as it always has — no banner, no war
 This is distinct from the hard `cli_max_diff_bytes` ceiling: a diff over that limit is
 refused outright with `DIFF_TOO_LARGE` and is a hard failure, not a degraded success.
 
+### Cross-chunk contradiction guard
+
+A chunked review shows each chunk the _other_ files at the base commit. When a source
+file and its test, or a module and its importer, land in different chunks, a chunk can
+report in good faith that the other side "was never updated" — and a phantom P1 like
+that is enough to render the whole PR blocked.
+
+A deterministic guard runs at finalize, next to the P1 evidence gate, and never asks the
+model anything. It fires only when both halves hold for one finding:
+
+- its own text (title, description, cause, failure scenario) carries an explicit
+  unchanged claim — `is untouched`, `not updated`, `is not in the diff`, `still uses`,
+  and the rest of the phrase set in `lintro/ai/review/severity_gate.py`; **and**
+- that text names a file the PR actually changed, other than the finding's own file.
+  Matching folds case, `\` to `/`, and `-` to `_`, and falls back to a path-suffix or
+  basename match, so `migrate-docs-content.py` still matches
+  `scripts/migrate_docs_content.py`.
+
+Both halves must sit in the same sentence of the same field. Within that sentence,
+co-occurrence is enough: the claim is not parsed for which file it predicates, so a
+sentence that mixes an unchanged claim about one file with a changed file it also names
+is treated as a contradiction. That is deliberate; the cost of a false positive is a
+visible one-band downgrade, never a dropped finding. A bare basename such as `utils.py`
+only counts when exactly one changed file has that name; a directory-qualified path must
+match the changed path or be a `/`-delimited suffix of it.
+
+On a hit the finding is tagged `cross_chunk_contradiction: unchanged_file_claim` and
+moved down one severity band (P1 → P2, P2 → P3, P3 stays P3 and is tagged). Nothing is
+dropped: the prose is kept, and a downgraded P1 can no longer drive `Blocked` on its
+own. Questions are never touched.
+
+The pairing is deliberate. A missed contradiction only leaves a finding at its reported
+severity, while a false positive would quietly demote a real defect — so the guard
+prefers false negatives, and an ordinary cross-file reference with no unchanged claim
+never fires it.
+
+The downgrade is visible everywhere: the terminal prints the count under the findings
+header, `--output json` carries `cross_chunk_contradictions` at the payload root plus a
+per-finding `cross_chunk_contradiction` tag, and the GitHub review body (in **📊 Run
+stats**) and the sticky comment share one note. A run the guard did not touch renders
+exactly as before.
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked

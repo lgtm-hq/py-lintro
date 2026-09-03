@@ -129,6 +129,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.state_store import state_dir, write_state_part
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 from lintro.ai.sanitize import make_boundary_marker
@@ -1479,6 +1480,14 @@ async def run_review_async(
         findings=filtered_findings,
         allowed_paths=set(resume.queue),
         eligible_paths=set(resume.eligible),
+    )
+    # #2265: a chunk only ever sees the other files at the base commit, so a
+    # finding asserting that a file this PR changed was never touched is
+    # reporting its own blind spot. The guard runs over the run's full changed
+    # set, not the chunk's, and downgrades rather than drops.
+    filtered_findings = apply_cross_chunk_guard(
+        findings=filtered_findings,
+        changed_paths=tuple(file.path for file in context.changed_files),
     )
     prior_flags = prior_state.flagged_files if prior_state is not None else ()
     prior_consumed = (

@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from lintro.ai.review.enums.cross_chunk_contradiction import (
+    CrossChunkContradiction,
+)
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
@@ -85,6 +88,12 @@ class ReviewFinding:
             dropped suggestion clears ``suggested_change`` and
             ``suggested_code`` so no surface can render an unvalidated block,
             while the finding's prose is kept intact.
+        cross_chunk_contradiction: Why the cross-chunk guard tagged this
+            finding (#2265), or ``None`` when nothing contradicted the diff.
+            Set when the finding's own text claims a file in the pull
+            request's changed set was never touched, which only a chunk-local
+            view of the diff can produce. The finding keeps its prose and is
+            downgraded one severity band rather than dropped.
     """
 
     severity: Severity
@@ -106,6 +115,7 @@ class ReviewFinding:
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     suggested_change: SuggestedChange | None = None
     suggestion_dropped: SuggestionDropReason | None = None
+    cross_chunk_contradiction: CrossChunkContradiction | None = None
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:
