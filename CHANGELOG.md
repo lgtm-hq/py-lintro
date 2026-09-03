@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.141.1] - 2026-09-03
+
+### Fixed
+
+- **ai**: pair tests with hyphenated or non-mirrored sources in the review chunker
+  (#2270) (13aef16)
+
 ## [0.141.0] - 2026-09-03
 
 ### Added
