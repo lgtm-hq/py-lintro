@@ -15,6 +15,7 @@ from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
+from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.enums.review_category import ReviewCategory
@@ -32,6 +33,7 @@ __all__ = [
     "FileSkipReason",
     "FindingKind",
     "FindingMatchOutcome",
+    "FindingOrigin",
     "FindingStatus",
     "LifecycleStage",
     "ReviewCategory",

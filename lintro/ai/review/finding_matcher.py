@@ -208,6 +208,7 @@ def _current_records(
             cause=finding.cause,
             fix=finding.fix,
             confidence=finding.confidence,
+            origin=finding.origin,
         )
         for index, finding in enumerate(findings)
     ]
@@ -320,6 +321,10 @@ def _merge_pair(
         cause=current.cause or prior.cause,
         fix=current.fix or prior.fix,
         confidence=current.confidence or prior.confidence,
+        # Provenance belongs to the first sighting: a cross-chunk finding
+        # stays attributed to the synthesis pass even on a later round
+        # where an ordinary chunk happened to report it too.
+        origin=prior.origin or current.origin,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
@@ -384,6 +389,7 @@ def review_findings_from_unposted(
                 occurrences=record.occurrences,
                 severity_downgraded=record.severity_downgraded,
                 cross_chunk_contradiction=record.cross_chunk_contradiction,
+                origin=record.origin,
             ),
         )
     return tuple(extra)

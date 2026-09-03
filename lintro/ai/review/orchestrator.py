@@ -94,6 +94,7 @@ from lintro.ai.review.interrupt import (
     sigterm_timeout_error,
 )
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.file_assessment import FileAssessment
@@ -132,6 +133,11 @@ from lintro.ai.review.sensitivity import (
 )
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.state_store import state_dir, write_state_part
+from lintro.ai.review.synthesis import (
+    SynthesisPass,
+    run_synthesis_pass,
+    should_run_synthesis,
+)
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
@@ -146,6 +152,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.file_classification import FileClassification
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.resume import ResumePlan
+    from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
     "guard_changed_paths",
@@ -939,6 +946,7 @@ def run_review(
     force_full: bool = False,
     enforce_cost_cap: bool = True,
     stop: asyncio.Event | None = None,
+    synthesis: ReviewSynthesisConfig | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review from synchronous code.
 
@@ -973,6 +981,8 @@ def run_review(
         enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
             chunk calls so concurrency cannot violate queue order.
         stop: Optional event set to persist and halt (tests inject this).
+        synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
+            disabled config means no extra pass runs.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -1000,6 +1010,7 @@ def run_review(
             force_full=force_full,
             enforce_cost_cap=enforce_cost_cap,
             stop=stop,
+            synthesis=synthesis,
         ),
     )
 
@@ -1049,6 +1060,7 @@ async def run_review_async(
     force_full: bool = False,
     enforce_cost_cap: bool = True,
     stop: asyncio.Event | None = None,
+    synthesis: ReviewSynthesisConfig | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -1081,6 +1093,10 @@ async def run_review_async(
             chunk calls so concurrency cannot violate queue order.
         stop: Optional event set to persist and halt (tests inject this;
             production uses SIGTERM/SIGINT via :func:`install_review_interrupt`).
+        synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
+            disabled config means no extra pass runs, and the run is
+            byte-identical on every surface to one from before the pass
+            existed.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -1226,6 +1242,7 @@ async def run_review_async(
     partials: list[_ChunkReviewPartial] = []
     custom_results: list[CustomAgentPassResult] = []
     custom_agents_failed: list[str] = []
+    synthesis_pass: SynthesisPass | None = None
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
     custom_findings: tuple[ReviewFinding, ...] = ()
@@ -1328,6 +1345,33 @@ async def run_review_async(
         total_findings = len(filtered_findings)
         parse_merge_seconds = time.monotonic() - merge_started
         timings.add_phase(name=ReviewPhase.PARSE_MERGE, seconds=parse_merge_seconds)
+        # --- cross-chunk synthesis seam (#2269) -------------------------------
+        # The one place the optional whole-PR pass hooks in: after the chunk
+        # findings are merged and filtered, before the result is assembled.
+        # Everything the pass does lives in lintro.ai.review.synthesis, so
+        # #1972 Phase 4 can move this call without touching the pass itself.
+        # Only the completed path runs it: a review already stopped by a cost
+        # cap or a timeout must not spend another call.
+        if should_run_synthesis(config=synthesis, chunks_reviewed=len(partials)):
+            with timings.phase(name=ReviewPhase.SYNTHESIS):
+                synthesis_pass = await run_synthesis_pass(
+                    context=context,
+                    summaries=_chunk_summaries(chunks=chunks, partials=partials),
+                    existing_findings=filtered_findings,
+                    provider=provider,
+                    ai_config=effective_ai_config,
+                    # ``should_run_synthesis`` already rejected a None config.
+                    config=synthesis,  # type: ignore[arg-type]
+                    policy=review_sensitivity,
+                    budget=budget,
+                    repo_root=repo_root,
+                    # Never reuse the built-in review's durable session: the
+                    # pass is a standalone whole-PR question, not a chunk.
+                    use_one_shot=True,
+                    diff_budget=diff_budget,
+                )
+            filtered_findings = filtered_findings + synthesis_pass.findings
+            total_findings = len(filtered_findings)
         completed = True
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: a cost cap or timeout stopped the run
@@ -1406,14 +1450,22 @@ async def run_review_async(
         "parse_merge": max(parse_merge_seconds, 0.0),
     }
 
-    total_input = sum(item.input_tokens for item in partials) + sum(
-        result.input_tokens for result in custom_results
+    # The synthesis pass is one more provider call against the same budget, so
+    # its usage joins the run totals rather than hiding outside them (#2269).
+    total_input = (
+        sum(item.input_tokens for item in partials)
+        + sum(result.input_tokens for result in custom_results)
+        + (synthesis_pass.input_tokens if synthesis_pass is not None else 0)
     )
-    total_output = sum(item.output_tokens for item in partials) + sum(
-        result.output_tokens for result in custom_results
+    total_output = (
+        sum(item.output_tokens for item in partials)
+        + sum(result.output_tokens for result in custom_results)
+        + (synthesis_pass.output_tokens if synthesis_pass is not None else 0)
     )
-    total_cost = sum(item.cost_estimate for item in partials) + sum(
-        result.cost_estimate for result in custom_results
+    total_cost = (
+        sum(item.cost_estimate for item in partials)
+        + sum(result.cost_estimate for result in custom_results)
+        + (synthesis_pass.cost_estimate if synthesis_pass is not None else 0.0)
     )
     chunks_reviewed = len(partials)
     summary = (
@@ -1471,11 +1523,15 @@ async def run_review_async(
         custom_agents_skipped=(
             len(agent_selection.skipped) + len(custom_agents_failed)
         ),
-        coverage_degradations=tuple(
-            degradation
-            for item in partials
-            for degradation in item.coverage_degradations
+        coverage_degradations=(
+            *(
+                degradation
+                for item in partials
+                for degradation in item.coverage_degradations
+            ),
+            *(synthesis_pass.degradations if synthesis_pass is not None else ()),
         ),
+        synthesis=synthesis_pass.outcome if synthesis_pass is not None else None,
     )
 
     completed_files = {path for partial in partials for path in partial.files}
@@ -1575,6 +1631,34 @@ async def run_review_async(
             reviewed_now=covered_now,
         ),
         consumed_flags=consumed_flags,
+    )
+
+
+def _chunk_summaries(
+    *,
+    chunks: list[ReviewChunk],
+    partials: list[_ChunkReviewPartial],
+) -> tuple[ChunkSummary, ...]:
+    """Build the per-chunk digest the cross-chunk synthesis pass reads.
+
+    Args:
+        chunks: Chunks planned for this run, in plan order.
+        partials: Completed chunk partials, in completion order.
+
+    Returns:
+        One digest per completed chunk. The chunk id is recovered from the
+        plan by file set so the digest names the same chunk the reader sees
+        elsewhere; a partial that matches no planned chunk falls back to its
+        position, which keeps the digest readable rather than blank.
+    """
+    ids = {tuple(chunk.files): chunk.id for chunk in chunks}
+    return tuple(
+        ChunkSummary(
+            chunk_id=ids.get(tuple(item.files), position),
+            files=tuple(item.files),
+            findings=item.findings,
+        )
+        for position, item in enumerate(partials, start=1)
     )
 
 

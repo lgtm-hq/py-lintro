@@ -76,6 +76,7 @@ from lintro.ai.review.github_render import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
     format_inline_post_note,
+    format_synthesis_note_line,
     format_timings_note,
     sanitize_comment_text,
 )
@@ -1687,6 +1688,11 @@ def _this_run_section(
                 f"| {metadata.files_reviewed} "
                 f"| {metadata.checklist_items} "
                 f"| {metadata.duration_seconds:.0f}s |"
+            ),
+            *(
+                ["", synthesis_note]
+                if (synthesis_note := format_synthesis_note_line(metadata=metadata))
+                else []
             ),
             *(
                 ["", timings_note]

@@ -54,6 +54,9 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
         "sensitivity",
         "force_semantic_chunking",
         "workspace_root",
+        # #2269: the cross-chunk synthesis config is shared preparation —
+        # both adapters read it from the same project config section.
+        "synthesis",
     },
 )
 

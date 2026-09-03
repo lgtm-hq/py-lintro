@@ -8,6 +8,7 @@ from typing import Any
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import (
     count_dropped_suggestions,
@@ -21,6 +22,7 @@ INLINE_POST_FAILURE_KEY = "inline_post_failure"
 
 __all__ = [
     "INLINE_POST_FAILURE_KEY",
+    "finding_to_dict",
     "render_inline_post_failure_json",
     "render_review_json",
     "render_review_output",
@@ -45,12 +47,37 @@ def render_inline_post_failure_json(*, failure: InlinePostFailure) -> str:
     return json.dumps({INLINE_POST_FAILURE_KEY: failure.to_dict()})
 
 
+def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
+    """Serialize one finding, omitting provenance the run never set.
+
+    ``origin`` (#2269) is present only on a finding the cross-chunk synthesis
+    pass produced. Emitting ``"origin": null`` on every other finding would
+    change the JSON of every run that never enabled the pass, so the key is
+    dropped when unset and rendered as its plain string label when set.
+
+    Args:
+        finding: Finding to serialize.
+
+    Returns:
+        JSON-serializable mapping for the finding.
+    """
+    payload = asdict(finding)
+    origin = payload.pop("origin", None)
+    if origin is not None:
+        payload["origin"] = str(origin)
+    return payload
+
+
 def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     """Convert a review result to a JSON-serializable dictionary.
 
     The ``timings`` block carries the per-phase breakdown (#2148): ordered
     phase spans plus per-chunk queued/in-flight detail. It is ``None`` when
     the result predates timing instrumentation.
+
+    The top-level ``synthesis`` block reports the optional cross-chunk pass
+    (#2269): ``enabled``, ``findings_added``, and ``truncated``. It is absent
+    entirely when the pass did not run, which is the default.
 
     The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
     ``findings_cap_applied`` / ``output_exhaustion_retried`` keys report
@@ -75,6 +102,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     # block (#2148): the breakdown is run instrumentation, not review
     # content, and consumers should not have to dig for it.
     metadata.pop("timings", None)
+    # #2269: same treatment for the synthesis block. It is hoisted to the top
+    # level and emitted only when the optional pass actually ran, so a default
+    # (disabled) run's payload is byte-identical to one from before the pass
+    # existed.
+    metadata.pop("synthesis", None)
     # #2003: ``asdict`` renders the degradations as raw dataclass dicts with a
     # StrEnum reason; normalize them through the model's own serializer so the
     # reason is a plain string on every consumer.
@@ -98,7 +130,7 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
             asdict(assessment) for assessment in result.file_assessments
         ],
         "checklist": [asdict(answer) for answer in result.checklist],
-        "findings": [asdict(finding) for finding in result.findings],
+        "findings": [finding_to_dict(finding=finding) for finding in result.findings],
         # #2101: dropped suggestions are never silent. Each finding carries its
         # own ``suggestion_dropped`` tag; these keys give consumers the run
         # total without re-deriving it from the finding list.
@@ -119,6 +151,8 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         "findings_cap_applied": result.metadata.findings_cap_applied,
         "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
     }
+    if result.metadata.synthesis is not None:
+        payload["synthesis"] = result.metadata.synthesis.to_dict()
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()
         payload["partial"] = result.metadata.partial

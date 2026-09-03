@@ -28,6 +28,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
 from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
+from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "format_cross_chunk_note",
     "format_inline_post_cause",
     "format_inline_post_note",
+    "format_synthesis_note_line",
     "format_timings_note",
     "sanitized_timing_summary",
     "format_badge_table",
@@ -224,6 +226,26 @@ def format_timings_note(*, metadata: ReviewMetadata) -> str:
     """
     summary = sanitized_timing_summary(metadata=metadata)
     return f"<sub>Timings: {summary}</sub>" if summary else ""
+
+
+def format_synthesis_note_line(*, metadata: ReviewMetadata) -> str:
+    """Render the cross-chunk synthesis note as a small note for comments.
+
+    Shares its wording with the terminal through
+    :func:`format_synthesis_note`, so the posted comment can never describe
+    the extra pass differently from the run that produced it (#2269).
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A ``<sub>`` line describing the pass, or an empty string when the pass
+        did not run.
+    """
+    note = format_synthesis_note(metadata=metadata)
+    if not note:
+        return ""
+    return f"<sub>{sanitize_comment_text(note, limit=400)}</sub>"
 
 
 def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:

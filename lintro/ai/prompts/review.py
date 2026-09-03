@@ -7,13 +7,17 @@ remain here as Python; only the static prompt copy lives in template files.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
+from typing import TYPE_CHECKING
 
 from lintro.ai.prompts._loader import load_prompt_template
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.verdict import VERDICT_LABELS
+
+if TYPE_CHECKING:
+    from lintro.ai.review.models.chunk_summary import ChunkSummary
 
 __all__ = [
     "CHUNK_FILE_MARKER",
@@ -29,9 +33,11 @@ __all__ = [
     "REVIEW_OUTPUT_RULES_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SCHEMA_REMINDER_TEMPLATE",
+    "REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE",
     "REVIEW_SYSTEM",
     "REVIEW_USER_PROMPT_TEMPLATE",
     "format_changed_files_for_prompt",
+    "format_chunk_summaries_for_prompt",
     "format_checklist_table_for_prompt",
     "format_deferred_scope_section",
     "format_external_review_section",
@@ -76,6 +82,11 @@ REVIEW_GENERATE_QUESTIONS_TEMPLATE = load_prompt_template(
 REVIEW_ADVERSARIAL_SWEEP_TEMPLATE = load_prompt_template(
     "review",
     "adversarial_sweep.md",
+)
+
+REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE = load_prompt_template(
+    "review",
+    "synthesis_user.md",
 )
 
 REVIEW_SCHEMA_REMINDER_TEMPLATE = load_prompt_template(
@@ -178,6 +189,39 @@ def format_pr_changed_files_for_prompt(
         )
         for file in files
     )
+
+
+def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> str:
+    """Format the per-chunk digest the cross-chunk synthesis pass reasons over.
+
+    One block per chunk: the files that chunk reviewed, and one line per
+    finding it already reported. The finding lines exist so the pass can be
+    told not to restate them, so they carry only what makes a finding
+    recognizable — severity, location, title — and never its prose.
+
+    Args:
+        summaries: Per-chunk digests in chunk order.
+
+    Returns:
+        A plain-text block suitable for prompt injection, or a sentinel line
+        when no chunk produced a digest.
+    """
+    if not summaries:
+        return "- (no chunk summaries)"
+    blocks: list[str] = []
+    for summary in summaries:
+        files = ", ".join(f"`{path}`" for path in summary.files) or "(no files)"
+        lines = [f"Piece {summary.chunk_id} reviewed: {files}"]
+        if summary.findings:
+            lines.extend(
+                f"  - already reported: {finding.severity} "
+                f"{finding.file}:{finding.line} — {finding.title}"
+                for finding in summary.findings
+            )
+        else:
+            lines.append("  - already reported: (nothing)")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def format_deferred_scope_section(*, text: str | None) -> str:

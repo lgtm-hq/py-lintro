@@ -755,6 +755,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             force_semantic_chunking=lintro_config.review.force_semantic_chunking,
             workspace_root=workspace,
             context_collection_seconds=context_collection_seconds,
+            synthesis=lintro_config.review.synthesis,
         )
     except ReviewContextError as exc:
         # Context errors raised inside run_review (e.g. the CLI diff-size
