@@ -551,3 +551,25 @@ def test_exact_mirror_still_pairs_without_a_unique_stem() -> None:
             source_path="lintro/ai/review/chunker.py",
         ),
     ).is_true()
+
+
+def test_unique_stem_fallback_still_rejects_near_miss_source_roots() -> None:
+    """A unique stem never lets a ``src2/`` tree claim a ``tests/`` file."""
+    from lintro.ai.review.path_utils import matches_test_for_source
+
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/api/foo.test.ts",
+            source_stem="foo",
+            source_path="src2/api/foo.ts",
+            stem_is_unique=True,
+        ),
+    ).is_false()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/api/foo.test.ts",
+            source_stem="foo",
+            source_path="src/api/foo.ts",
+            stem_is_unique=True,
+        ),
+    ).is_true()

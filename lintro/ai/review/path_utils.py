@@ -367,6 +367,21 @@ def _parents_compatible(
     return False
 
 
+def _has_near_miss_source_root(*, path: str | None) -> bool:
+    """Return True when a source path sits under a ``src``-like but non-``src`` root.
+
+    Args:
+        path: Source file path, or ``None`` when unknown.
+
+    Returns:
+        True for roots such as ``src2/`` or ``srcs/`` that must never pair.
+    """
+    if not path:
+        return False
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    return len(parts) > 1 and parts[0].startswith("src") and parts[0] != "src"
+
+
 def matches_test_for_source(
     *,
     test_path: str,
@@ -405,4 +420,10 @@ def matches_test_for_source(
     ):
         return True
 
+    # The unique-stem fallback may cross directory trees, but never from a
+    # near-miss source root such as ``src2/``: that guard exists to stop a
+    # look-alike tree from claiming ``tests/`` files, and a unique stem does
+    # not change what the root is.
+    if _has_near_miss_source_root(path=source_path):
+        return False
     return stem_is_unique and _is_under_tests_directory(pure_path=test_pure)
