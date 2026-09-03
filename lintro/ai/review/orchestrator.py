@@ -148,6 +148,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.resume import ResumePlan
 
 __all__ = [
+    "guard_changed_paths",
     "build_git_native_review_prompt",
     "build_review_prompt",
     "merge_checklist_answers",
@@ -1003,6 +1004,28 @@ def run_review(
     )
 
 
+def guard_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
+    """Return every path the cross-chunk guard treats as changed by the PR.
+
+    Current paths plus rename and copy sources: a chunk-local claim that a
+    rename's old path was never touched contradicts the diff just as a claim
+    about the new path does. This list is only for the guard; custom-agent
+    scoping keys on post-rename paths, whose diff sections exist.
+
+    Args:
+        context: Collected review context.
+
+    Returns:
+        Changed paths and rename/copy sources, in changed-file order.
+    """
+    return tuple(
+        path
+        for file in context.changed_files
+        for path in (file.path, file.previous_path)
+        if path
+    )
+
+
 async def run_review_async(
     context: ReviewContext,
     *,
@@ -1159,12 +1182,7 @@ async def run_review_async(
             chunks = []
     agent_selection = select_custom_agents(
         agents=custom_agents,
-        changed_paths=tuple(
-            path
-            for file in context.changed_files
-            for path in (file.path, file.previous_path)
-            if path
-        ),
+        changed_paths=tuple(file.path for file in context.changed_files),
     )
     for skipped_agent in agent_selection.skipped:
         logger.info(
@@ -1493,12 +1511,7 @@ async def run_review_async(
     # set, not the chunk's, and downgrades rather than drops.
     filtered_findings = apply_cross_chunk_guard(
         findings=filtered_findings,
-        changed_paths=tuple(
-            path
-            for file in context.changed_files
-            for path in (file.path, file.previous_path)
-            if path
-        ),
+        changed_paths=guard_changed_paths(context=context),
     )
     prior_flags = prior_state.flagged_files if prior_state is not None else ()
     prior_consumed = (

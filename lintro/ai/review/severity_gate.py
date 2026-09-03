@@ -161,9 +161,7 @@ UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "are untouched",
     "at the base revision",
     "does not appear in the diff",
-    "has not been updated",
     "hasn't been updated",
-    "have not been updated",
     "haven't been updated",
     "is not in the diff",
     "is unchanged",
@@ -466,7 +464,7 @@ def cross_chunk_contradictions(
 
 
 def count_cross_chunk_contradictions(*, findings: Iterable[ReviewFinding]) -> int:
-    """Count the findings the cross-chunk guard downgraded.
+    """Count the findings the cross-chunk guard tagged (downgraded or P3 kept).
 
     Args:
         findings: Findings to count over.

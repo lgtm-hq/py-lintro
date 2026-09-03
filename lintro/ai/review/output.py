@@ -59,9 +59,10 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     tell "the model found N issues" from "we capped the model at N".
 
     ``cross_chunk_contradictions`` (#2265) reports how many findings the
-    cross-chunk guard downgraded for claiming a changed file was never
-    touched, so a consumer can tell a chunk-local claim from a calibrated
-    severity.
+    cross-chunk guard tagged for claiming a changed file was never touched
+    (P1/P2 among them were moved one band down; a tagged P3 keeps its
+    severity), so a consumer can tell a chunk-local claim from a calibrated
+    severity. The key is always present, so an unaffected run carries ``0``.
 
     Args:
         result: Review result to serialize.

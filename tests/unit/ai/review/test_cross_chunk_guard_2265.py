@@ -899,12 +899,38 @@ def test_claim_and_path_in_different_fields_do_not_fire() -> None:
     assert_that(guarded[0].cross_chunk_contradiction).is_none()
 
 
-def test_rename_sources_count_as_changed_paths() -> None:
-    """A claim that a rename's old path was never touched contradicts the diff."""
+def test_guard_changed_paths_includes_rename_and_copy_sources() -> None:
+    """The guard's changed set carries previous paths; agent scoping does not."""
+    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
     from lintro.ai.review.models.changed_file import ChangedFile
     from lintro.ai.review.models.review_context import ReviewContext
+    from lintro.ai.review.orchestrator import guard_changed_paths
 
-    del ChangedFile, ReviewContext  # imported to prove the model carries previous_path
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/helpers.py",
+                status=ChangedFileStatus.RENAMED,
+                previous_path="src/legacy_helpers.py",
+                additions=1,
+                deletions=0,
+            ),
+            ChangedFile(path="src/app.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff="",
+        pr_metadata=None,
+        repo_root=".",
+    )
+
+    assert_that(guard_changed_paths(context=context)).is_equal_to(
+        ("src/helpers.py", "src/legacy_helpers.py", "src/app.py"),
+    )
+
+
+def test_a_claim_about_a_rename_source_is_a_contradiction() -> None:
+    """A claim that a rename's old path was never touched contradicts the diff."""
     from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 
     finding = _finding(
