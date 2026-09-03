@@ -296,7 +296,7 @@ def test_review_body_carries_the_warning_only_when_capped(
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
     # Production-independent copy: the detail sentence, not just the headline.
     assert_that(clean).does_not_contain("may go unreported")
-    assert_that(capped).contains("retried at a tighter 6-finding cap")
+    assert_that(capped).contains("ran under a 12-finding per-call cap")
     assert_that(capped).contains("may go unreported")
 
 
