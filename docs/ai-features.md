@@ -351,9 +351,11 @@ That is recorded and surfaced rather than left silent:
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
-- `--output json` and the MCP `lintro_review` payload expose
-  `findings_coverage_complete`, `coverage_degradations`, `findings_cap_applied`, and
-  `output_exhaustion_retried`.
+- `--output json` exposes `findings_coverage_complete`, `coverage_degradations`,
+  `findings_cap_applied`, and `output_exhaustion_retried` at the payload root (and
+  `coverage_degradations` inside `metadata`). The MCP `lintro_review` payload carries
+  all four on its `run` block and hoists only `findings_coverage_complete` to the
+  tool-result root, next to `coverage`.
 
 **Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
 mean the run _stopped early_ and planned review work was left undone (built-in chunks or
