@@ -96,7 +96,7 @@ jobs:
     # Base image (tools layer) publishes before full; a full-image failure must
     # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: write
@@ -144,7 +144,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in
@@ -165,7 +165,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-base.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: write
@@ -213,7 +213,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in
@@ -242,7 +242,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-full.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: write
@@ -290,7 +290,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in

@@ -130,7 +130,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: write
@@ -152,7 +152,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       egress-policy: block
       egress-preset: docker
       allowed-endpoints-mode: replace
