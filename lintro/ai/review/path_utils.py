@@ -65,6 +65,26 @@ def _meaningful_source_identify_tags(*, name: str) -> set[str]:
     return tags - _GENERIC_IDENTIFY_TAGS - _NON_SOURCE_IDENTIFY_TAGS
 
 
+def is_source_code_path(path: str) -> bool:
+    """Return True when a path names source code rather than docs, config, or data.
+
+    Used when deciding whether a file can own a test: a changed
+    ``docs/migrate-docs-content.md`` next to ``scripts/ci/site/migrate-docs-content.py``
+    must not make the script's stem look ambiguous.
+
+    Args:
+        path: Repository-relative path.
+
+    Returns:
+        True when identify reports a meaningful language tag for the file
+        name and the path is not a docs, config, or fixture artifact.
+    """
+    pure_path = PurePosixPath(path.replace("\\", "/"))
+    if _is_non_test_artifact(pure_path=pure_path):
+        return False
+    return bool(_meaningful_source_identify_tags(name=pure_path.name))
+
+
 def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:
     """Return True when a basename looks like executable test or helper code."""
     name = pure_path.name

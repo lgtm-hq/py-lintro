@@ -460,3 +460,26 @@ def test_workflow_pairing_uses_the_unique_stem_fallback() -> None:
 
     assert_that(paired).is_true()
     assert_that(unpaired).is_false()
+
+
+def test_same_stem_non_source_files_do_not_spoil_uniqueness() -> None:
+    """A changed doc sharing the script's stem does not block the fallback."""
+    from lintro.ai.review.chunker.grouping import _group_source_test_pairs
+
+    groups = _group_source_test_pairs(
+        file_paths=[
+            "docs/migrate-docs-content.md",
+            "scripts/ci/site/migrate-docs-content.py",
+            "tests/scripts/ci/test_migrate_docs_content.py",
+        ],
+        assigned=set(),
+    )
+
+    assert_that(groups).is_equal_to(
+        [
+            [
+                "scripts/ci/site/migrate-docs-content.py",
+                "tests/scripts/ci/test_migrate_docs_content.py",
+            ],
+        ],
+    )

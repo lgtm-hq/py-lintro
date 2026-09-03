@@ -31,6 +31,7 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.path_utils import (
+    is_source_code_path,
     is_test_path,
     matches_test_for_source,
     normalize_stem,
@@ -392,7 +393,8 @@ def _unreferenced_workflow_script_warnings(
 def _unique_source_stems(*, file_paths: list[str]) -> set[str]:
     """Return normalised stems held by exactly one source file in the review.
 
-    Uniqueness is counted over every non-test file in the diff, not only the
+    Uniqueness is counted over every non-test source-code file in the diff
+    (docs, config, and data files never own a test), not only the
     unassigned ones: a same-stem source already claimed by an earlier grouping
     pass must still count, or the survivor would look unique and take a test
     that belongs to the claimed file.
@@ -406,7 +408,7 @@ def _unique_source_stems(*, file_paths: list[str]) -> set[str]:
     counts: Counter[str] = Counter(
         normalize_stem(stem=PurePosixPath(path).stem)
         for path in file_paths
-        if not is_test_path(path)
+        if not is_test_path(path) and is_source_code_path(path)
     )
     return {stem for stem, count in counts.items() if count == 1}
 
@@ -422,7 +424,9 @@ def _group_source_test_pairs(
     unique_stems = _unique_source_stems(file_paths=file_paths)
 
     for path in file_paths:
-        if path in assigned or is_test_path(path):
+        # Only source code can own a test; a same-stem doc or config file is
+        # never offered as the pairing target.
+        if path in assigned or is_test_path(path) or not is_source_code_path(path):
             continue
 
         stem = PurePosixPath(path).stem
