@@ -406,9 +406,11 @@ A deterministic guard runs at finalize, next to the P1 evidence gate, and never 
 model anything. It fires only when both halves hold for one finding:
 
 - its own text (title, description, cause, failure scenario) carries an explicit
-  unchanged claim — `is untouched`, `not updated`, `is not in the diff`,
+  unchanged claim — `is untouched`, `was never updated`, `is not in the diff`,
   `at the base revision`, and the rest of the phrase set in
-  `lintro/ai/review/severity_gate.py`; **and**
+  `lintro/ai/review/severity_gate.py`. Incomplete-update wording such as
+  `is not updated to accept the new flag` is deliberately not a claim: that is a real
+  finding about a changed file; **and**
 - that text names a file the PR actually changed, other than the finding's own file.
   Matching folds case, `\` to `/`, and `-` to `_`, and falls back to a path-suffix or
   basename match, so `migrate-docs-content.py` still matches
