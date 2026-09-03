@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import PurePosixPath
 
@@ -30,7 +30,12 @@ from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.path_utils import is_test_path, matches_test_for_source
+from lintro.ai.review.path_utils import (
+    is_source_code_path,
+    is_test_path,
+    matches_test_for_source,
+    normalize_stem,
+)
 from lintro.ai.token_budget import estimate_tokens, truncate_to_budget
 
 _LOW_PRIORITY_DOMAINS = frozenset({FileDomain.TEST, FileDomain.DOCS})
@@ -304,6 +309,7 @@ def _group_workflow_script_test(
 
     groups: list[list[str]] = []
     assigned_tests: set[str] = set()
+    unique_stems = _unique_source_stems(file_paths=file_paths)
     for member_paths in components.values():
         group = set(member_paths)
         script_sources = [
@@ -312,7 +318,11 @@ def _group_workflow_script_test(
         for path in file_paths:
             if path in group or path in assigned_tests:
                 continue
-            if script_sources and _is_test_for_any(path=path, sources=script_sources):
+            if script_sources and _is_test_for_any(
+                path=path,
+                sources=script_sources,
+                unique_stems=unique_stems,
+            ):
                 group.add(path)
                 assigned_tests.add(path)
         if len(group) > 1:
@@ -380,6 +390,29 @@ def _unreferenced_workflow_script_warnings(
     return warnings
 
 
+def _unique_source_stems(*, file_paths: list[str]) -> set[str]:
+    """Return normalised stems held by exactly one source file in the review.
+
+    Uniqueness is counted over every non-test source-code file in the diff
+    (docs, config, and data files never own a test), not only the
+    unassigned ones: a same-stem source already claimed by an earlier grouping
+    pass must still count, or the survivor would look unique and take a test
+    that belongs to the claimed file.
+
+    Args:
+        file_paths: Every changed path under review.
+
+    Returns:
+        Normalised stems that exactly one source file carries.
+    """
+    counts: Counter[str] = Counter(
+        normalize_stem(stem=PurePosixPath(path).stem)
+        for path in file_paths
+        if not is_test_path(path) and is_source_code_path(path)
+    )
+    return {stem for stem, count in counts.items() if count == 1}
+
+
 def _group_source_test_pairs(
     *,
     file_paths: list[str],
@@ -388,12 +421,16 @@ def _group_source_test_pairs(
     """Group source files with related test files."""
     groups: list[list[str]] = []
     assigned_tests: set[str] = set()
+    unique_stems = _unique_source_stems(file_paths=file_paths)
 
     for path in file_paths:
-        if path in assigned or is_test_path(path):
+        # Only source code can own a test; a same-stem doc or config file is
+        # never offered as the pairing target.
+        if path in assigned or is_test_path(path) or not is_source_code_path(path):
             continue
 
         stem = PurePosixPath(path).stem
+        stem_is_unique = normalize_stem(stem=stem) in unique_stems
         related_tests = [
             candidate
             for candidate in file_paths
@@ -403,6 +440,7 @@ def _group_source_test_pairs(
                 test_path=candidate,
                 source_stem=stem,
                 source_path=path,
+                stem_is_unique=stem_is_unique,
             )
         ]
         if related_tests:
@@ -724,13 +762,32 @@ def _hunk_signature(*, diff_text: str, path: str) -> str:
     ).hexdigest()
 
 
-def _is_test_for_any(*, path: str, sources: list[str]) -> bool:
-    """Return True when ``path`` is a test for any source in ``sources``."""
+def _is_test_for_any(
+    *,
+    path: str,
+    sources: list[str],
+    unique_stems: frozenset[str] | set[str] = frozenset(),
+) -> bool:
+    """Return True when ``path`` is a test for any source in ``sources``.
+
+    Args:
+        path: Candidate test path.
+        sources: Source paths the test may belong to.
+        unique_stems: Normalised stems held by exactly one source in the
+            review; a source with a unique stem may pair through the looser
+            non-mirrored layouts (#2264).
+
+    Returns:
+        True when ``path`` tests at least one of ``sources``.
+    """
     return any(
         matches_test_for_source(
             test_path=path,
             source_stem=PurePosixPath(source).stem,
             source_path=source,
+            stem_is_unique=(
+                normalize_stem(stem=PurePosixPath(source).stem) in unique_stems
+            ),
         )
         for source in sources
         if not is_test_path(source)
