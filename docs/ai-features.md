@@ -406,8 +406,9 @@ A deterministic guard runs at finalize, next to the P1 evidence gate, and never 
 model anything. It fires only when both halves hold for one finding:
 
 - its own text (title, description, cause, failure scenario) carries an explicit
-  unchanged claim — `is untouched`, `not updated`, `is not in the diff`, `still uses`,
-  and the rest of the phrase set in `lintro/ai/review/severity_gate.py`; **and**
+  unchanged claim — `is untouched`, `not updated`, `is not in the diff`,
+  `at the base revision`, and the rest of the phrase set in
+  `lintro/ai/review/severity_gate.py`; **and**
 - that text names a file the PR actually changed, other than the finding's own file.
   Matching folds case, `\` to `/`, and `-` to `_`, and falls back to a path-suffix or
   basename match, so `migrate-docs-content.py` still matches
@@ -421,8 +422,10 @@ visible one-band downgrade, never a dropped finding. A bare basename such as `ut
 only counts when exactly one changed file has that name; a directory-qualified path must
 match the changed path or be a `/`-delimited suffix of it.
 
-On a hit the finding is tagged `cross_chunk_contradiction: unchanged_file_claim` and
-moved down one severity band (P1 → P2, P2 → P3, P3 stays P3 and is tagged). Nothing is
+On a hit the finding is tagged
+`cross_chunk_contradiction: unchanged_file_claim_downgraded` (or
+`unchanged_file_claim_tagged` when it was already P3, which has no lower band) and moved
+down one severity band (P1 → P2, P2 → P3, P3 stays P3 and is tagged). Nothing is
 dropped: the prose is kept, and a downgraded P1 can no longer drive `Blocked` on its
 own. Questions are never touched.
 

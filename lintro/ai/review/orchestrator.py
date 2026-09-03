@@ -1158,7 +1158,12 @@ async def run_review_async(
             chunks = []
     agent_selection = select_custom_agents(
         agents=custom_agents,
-        changed_paths=tuple(file.path for file in context.changed_files),
+        changed_paths=tuple(
+            path
+            for file in context.changed_files
+            for path in (file.path, file.previous_path)
+            if path
+        ),
     )
     for skipped_agent in agent_selection.skipped:
         logger.info(
@@ -1487,7 +1492,12 @@ async def run_review_async(
     # set, not the chunk's, and downgrades rather than drops.
     filtered_findings = apply_cross_chunk_guard(
         findings=filtered_findings,
-        changed_paths=tuple(file.path for file in context.changed_files),
+        changed_paths=tuple(
+            path
+            for file in context.changed_files
+            for path in (file.path, file.previous_path)
+            if path
+        ),
     )
     prior_flags = prior_state.flagged_files if prior_state is not None else ()
     prior_consumed = (

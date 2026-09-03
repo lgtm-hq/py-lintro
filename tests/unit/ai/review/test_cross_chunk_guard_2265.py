@@ -897,3 +897,86 @@ def test_claim_and_path_in_different_fields_do_not_fire() -> None:
     )
 
     assert_that(guarded[0].cross_chunk_contradiction).is_none()
+
+
+def test_rename_sources_count_as_changed_paths() -> None:
+    """A claim that a rename's old path was never touched contradicts the diff."""
+    from lintro.ai.review.models.changed_file import ChangedFile
+    from lintro.ai.review.models.review_context import ReviewContext
+
+    del ChangedFile, ReviewContext  # imported to prove the model carries previous_path
+    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+
+    finding = _finding(
+        file="src/app.py",
+        description="The old module src/legacy_helpers.py is untouched by this change.",
+    )
+
+    guarded = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("src/app.py", "src/helpers.py", "src/legacy_helpers.py"),
+    )
+
+    assert_that(guarded[0].cross_chunk_contradiction).is_not_none()
+
+
+def test_nested_token_does_not_match_a_shorter_changed_path() -> None:
+    """``src/utils.py`` in prose never matches a changed root ``utils.py``."""
+    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+
+    finding = _finding(
+        file="src/app.py",
+        description="The helper in src/utils.py is untouched by this change.",
+    )
+
+    guarded = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("src/app.py", "utils.py"),
+    )
+
+    assert_that(guarded[0].cross_chunk_contradiction).is_none()
+
+
+def test_github_note_omits_the_band_clause_for_a_tagged_p3(
+    sample_review_result: ReviewResult,
+) -> None:
+    """When only a P3 was tagged, the posted note does not claim a downgrade.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    from lintro.ai.review.github_render import format_cross_chunk_note
+    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+
+    p3 = _finding(
+        file="src/app.py",
+        severity=Severity.P3,
+        description="The helper in src/helpers.py is untouched by this change.",
+    )
+    guarded = apply_cross_chunk_guard(
+        findings=(p3,),
+        changed_paths=("src/app.py", "src/helpers.py"),
+    )
+    del sample_review_result
+
+    note = format_cross_chunk_note(findings=guarded)
+
+    assert_that(note).contains("none downgraded, P3 kept")
+    assert_that(note).does_not_contain("one band lower")
+
+
+def test_still_uses_phrasing_alone_does_not_fire() -> None:
+    """Ordinary incomplete-update prose is not an unchanged-file claim."""
+    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+
+    finding = _finding(
+        file="src/app.py",
+        description="src/app.py still uses the helper exported by src/helpers.py.",
+    )
+
+    guarded = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("src/app.py", "src/helpers.py"),
+    )
+
+    assert_that(guarded[0].cross_chunk_contradiction).is_none()

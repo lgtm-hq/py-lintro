@@ -18,6 +18,7 @@ from lintro.ai.review.coverage_degradation import (
     describe_coverage_degradations,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
@@ -310,6 +311,24 @@ def format_inline_post_note(*, failure: InlinePostFailure | None) -> str:
     )
 
 
+def _cross_chunk_band_clause(*, findings: Sequence[ReviewFinding]) -> str:
+    """Describe the severity effect of the tagged findings, if any moved.
+
+    Args:
+        findings: Findings after the cross-chunk guard ran.
+
+    Returns:
+        ``", one band lower"`` when at least one tagged finding was actually
+        downgraded; an empty string when only P3 findings were tagged.
+    """
+    lowered = any(
+        finding.cross_chunk_contradiction
+        is CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED
+        for finding in findings
+    )
+    return ", one band lower" if lowered else ""
+
+
 def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
     """Render the shared cross-chunk downgrade note for posted GitHub surfaces.
 
@@ -332,8 +351,8 @@ def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
     return (
         f"> 🧩 **{sanitize_comment_text(notice, limit=300)}** — chunked review "
         "shows each chunk the other files at the base commit, so the claim is "
-        "chunk-local; the finding is kept, and P1/P2 findings sit one band "
-        "lower."
+        f"chunk-local; the finding is kept"
+        f"{_cross_chunk_band_clause(findings=findings)}."
     )
 
 

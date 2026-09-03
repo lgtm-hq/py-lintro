@@ -182,11 +182,6 @@ UNCHANGED_CLAIM_PHRASES: tuple[str, ...] = (
     "remains untouched",
     "stays unchanged",
     "stays untouched",
-    "still defines",
-    "still exports",
-    "still imports",
-    "still references",
-    "still uses",
     "was never touched",
     "was not changed",
     "was not modified",
@@ -253,17 +248,24 @@ def _paths_match(*, token: str, path: str) -> bool:
         path: Normalized repository-relative path.
 
     Returns:
-        True on an exact match or when either side is a ``/``-delimited path
-        suffix of the other. A directory-qualified token therefore never
-        matches a different directory that happens to share a basename; bare
-        basenames are handled by the caller, which requires them to be
-        unique among the changed paths.
+        True on an exact match, when the token is a ``/``-delimited suffix of
+        the changed path, or when the token carries exactly one extra leading
+        segment (a repository name or a checkout prefix) in front of the
+        changed path. A nested token never matches a shorter changed path
+        (``src/utils.py`` does not match a changed root ``utils.py``), and a
+        directory-qualified token never matches a different directory that
+        shares a basename. Bare basenames are handled by the caller, which
+        requires them to be unique among the changed paths.
     """
     if not token or not path:
         return False
-    if token == path:
+    if token == path or path.endswith(f"/{token}"):
         return True
-    return path.endswith(f"/{token}") or token.endswith(f"/{path}")
+    # One extra leading segment (a repository name or checkout prefix) may be
+    # dropped, but only when what remains is itself nested: a root-level
+    # changed file is never reached by stripping a directory off the token.
+    head, sep, rest = token.partition("/")
+    return bool(sep) and "/" not in head and "/" in rest and rest == path
 
 
 def _contradicted_paths(
