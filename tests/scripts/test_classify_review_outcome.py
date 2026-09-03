@@ -18,11 +18,13 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.error_contract import (
     REVIEW_ERROR_EXIT_CODE,
     render_error_contract_json,
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.github_render import format_inline_post_cause
 from lintro.ai.review.output import INLINE_POST_FAILURE_KEY
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -238,11 +240,12 @@ def _inline_failure_log(*, kind: str, status: int) -> str:
     Returns:
         Captured-output text containing the envelope.
     """
+    failure_kind = InlinePostFailureKind(kind)
     payload = {
         INLINE_POST_FAILURE_KEY: {
-            "kind": kind,
+            "kind": failure_kind.value,
             "count": 94,
-            "reason": "GitHub secondary rate limit (HTTP 403)",
+            "reason": format_inline_post_cause(kind=failure_kind, status=status),
             "status": status,
         },
     }
@@ -267,7 +270,7 @@ def test_rejected_inline_batch_is_reported_as_sticky_only(
     assert_that(report.headline).contains("sticky comment only")
     assert_that(report.headline).contains("rate_limited")
     assert_that(report.headline).does_not_contain("P1 findings posted")
-    assert_that(report.detail).contains("secondary rate limit")
+    assert_that(report.detail).contains("rate limit")
 
 
 def test_clean_round_with_a_rejected_inline_batch_is_still_sticky_only(

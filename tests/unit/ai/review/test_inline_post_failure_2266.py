@@ -105,6 +105,8 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
     ("status", "message", "expected"),
     [
         (403, _RATE_LIMIT_MESSAGE, InlinePostFailureKind.RATE_LIMITED),
+        (429, _RATE_LIMIT_MESSAGE, InlinePostFailureKind.RATE_LIMITED),
+        (403, "API rate limit exceeded for user", InlinePostFailureKind.RATE_LIMITED),
         (422, _LINE_MESSAGE, InlinePostFailureKind.LINE_MAPPING),
         (
             403,
@@ -119,6 +121,8 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
     ],
     ids=[
         "kind=rate_limited",
+        "kind=rate_limited_429",
+        "kind=rate_limited_primary",
         "kind=line_mapping",
         "kind=permission_forbidden",
         "kind=permission_unauthorized",
@@ -148,7 +152,7 @@ def test_secondary_rate_limit_is_named_instead_of_guessed_line_mapping(
         response=GitHubApiResponse(status=403, message=_RATE_LIMIT_MESSAGE),
     )
 
-    assert_that(body).contains("GitHub secondary rate limit (HTTP 403)")
+    assert_that(body).contains("GitHub rate limit (HTTP 403)")
     assert_that(body).does_not_contain("map to no line in this PR's diff")
 
 
@@ -252,14 +256,14 @@ def test_sticky_row_reports_the_kind_supplied_by_the_caller(
     body = build_sticky_comment(
         result=sample_review_result,
         inline_failure=InlinePostFailure(
-            reason="GitHub secondary rate limit (HTTP 403)",
+            reason="GitHub rate limit (HTTP 403)",
             findings=sample_review_result.findings,
             kind=InlinePostFailureKind.RATE_LIMITED,
             status=403,
         ),
     )
 
-    assert_that(body).contains("GitHub secondary rate limit (HTTP 403)")
+    assert_that(body).contains("GitHub rate limit (HTTP 403)")
 
 
 def test_inline_post_result_carries_the_status_and_attempted_ids(

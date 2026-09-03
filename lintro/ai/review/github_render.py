@@ -250,7 +250,7 @@ def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
 #: finding anchors outside the diff: attributing that to a throttled token is
 #: exactly the misreport #2266 fixes.
 _INLINE_POST_CAUSES: dict[InlinePostFailureKind, str] = {
-    InlinePostFailureKind.RATE_LIMITED: "GitHub secondary rate limit",
+    InlinePostFailureKind.RATE_LIMITED: "GitHub rate limit",
     InlinePostFailureKind.LINE_MAPPING: (
         "some findings map to no line in this PR's diff"
     ),

@@ -45,7 +45,7 @@ import json
 import os
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -188,14 +188,19 @@ def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
     return False
 
 
-def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
-    """Extract the coverage object from a successful review JSON envelope.
+def _iter_json_objects(*, text: str) -> Iterator[dict[str, Any]]:
+    """Yield every JSON object embedded in captured review output.
+
+    The captured output interleaves lintro's logging with one or more JSON
+    envelopes, so each ``{`` is tried as a document start and the objects
+    that decode are yielded in order. The single scan shared by every
+    envelope parser below, so a fix here applies to all of them.
 
     Args:
         text: Combined stdout/stderr captured from the review run.
 
-    Returns:
-        The coverage mapping, or ``None`` when absent.
+    Yields:
+        dict[str, Any]: Each top-level JSON object found in ``text``.
     """
     decoder = json.JSONDecoder()
     index = text.find("{")
@@ -205,26 +210,41 @@ def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
         except ValueError:
             index = text.find("{", index + 1)
             continue
-        if isinstance(payload, dict) and "readiness_verdict" in payload:
-            coverage = payload.get("coverage")
-            extras = {
-                "stopped_reason": payload.get("stopped_reason") or "",
-                "has_p1_findings": _payload_has_p1_findings(payload),
-            }
-            if isinstance(coverage, dict):
-                merged = {**coverage}
-                if not merged.get("stopped_reason") and extras["stopped_reason"]:
-                    merged["stopped_reason"] = extras["stopped_reason"]
-                merged["has_p1_findings"] = extras["has_p1_findings"]
-                return merged
-            if payload.get("readiness_verdict") == "incomplete":
-                return {
-                    "complete": False,
-                    "covered_at_head": 0,
-                    "eligible": 0,
-                    **extras,
-                }
+        if isinstance(payload, dict):
+            yield payload
         index = text.find("{", index + 1)
+
+
+def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the coverage object from a successful review JSON envelope.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The coverage mapping, or ``None`` when absent.
+    """
+    for payload in _iter_json_objects(text=text):
+        if "readiness_verdict" not in payload:
+            continue
+        coverage = payload.get("coverage")
+        extras = {
+            "stopped_reason": payload.get("stopped_reason") or "",
+            "has_p1_findings": _payload_has_p1_findings(payload),
+        }
+        if isinstance(coverage, dict):
+            merged = {**coverage}
+            if not merged.get("stopped_reason") and extras["stopped_reason"]:
+                merged["stopped_reason"] = extras["stopped_reason"]
+            merged["has_p1_findings"] = extras["has_p1_findings"]
+            return merged
+        if payload.get("readiness_verdict") == "incomplete":
+            return {
+                "complete": False,
+                "covered_at_head": 0,
+                "eligible": 0,
+                **extras,
+            }
     return None
 
 
@@ -242,19 +262,10 @@ def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
     Returns:
         The failure mapping, or ``None`` when inline posting was fine.
     """
-    decoder = json.JSONDecoder()
-    index = text.find("{")
-    while index != -1:
-        try:
-            payload, _end = decoder.raw_decode(text[index:])
-        except ValueError:
-            index = text.find("{", index + 1)
-            continue
-        if isinstance(payload, dict):
-            failure = payload.get(INLINE_POST_FAILURE_KEY)
-            if isinstance(failure, dict):
-                return failure
-        index = text.find("{", index + 1)
+    for payload in _iter_json_objects(text=text):
+        failure = payload.get(INLINE_POST_FAILURE_KEY)
+        if isinstance(failure, dict):
+            return failure
     return None
 
 
@@ -270,18 +281,10 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     Returns:
         The ``error`` mapping, or ``None`` when no envelope is present.
     """
-    decoder = json.JSONDecoder()
-    index = text.find("{")
-    while index != -1:
-        try:
-            payload, _end = decoder.raw_decode(text[index:])
-        except ValueError:
-            index = text.find("{", index + 1)
-            continue
-        error = payload.get("error") if isinstance(payload, dict) else None
+    for payload in _iter_json_objects(text=text):
+        error = payload.get("error")
         if isinstance(error, dict):
             return error
-        index = text.find("{", index + 1)
     return None
 
 
