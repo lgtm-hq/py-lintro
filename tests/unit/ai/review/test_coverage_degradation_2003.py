@@ -834,3 +834,40 @@ def test_advanced_state_persists_coverage_limited_from_a_capped_result(
     assert_that(clean_state.runs[-1].coverage_limited).is_false()
     # The flag survives the flat persisted shape.
     assert_that(RunRecord.from_dict(capped_run.to_dict()).coverage_limited).is_true()
+
+
+def test_unknown_degradation_reason_still_renders_a_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reason the describer does not know never yields an empty sentence.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.coverage_degradation import describe_coverage_degradations
+    from lintro.ai.review.models.review_metadata import ReviewMetadata
+
+    class _Novel(str):
+        """Stand-in for a future ``CoverageDegradationReason`` member."""
+
+        def __str__(self) -> str:
+            return "novel_limit"
+
+    novel = replace(_CAP, reason=_Novel())  # type: ignore[arg-type]
+    metadata = ReviewMetadata(
+        model="m",
+        provider="p",
+        context_window=1,
+        depth=1,
+        chunks_total=1,
+        chunks_current=1,
+        files_reviewed=1,
+        files_total=1,
+        checklist_items=0,
+        coverage_degradations=(novel,),
+    )
+
+    text = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(text).starts_with("1 other limit applied (novel_limit).")
+    assert_that(text[0]).is_not_equal_to(".")

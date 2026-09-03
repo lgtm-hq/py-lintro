@@ -89,6 +89,21 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "provider output limit",
         )
 
+    known = {
+        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    }
+    other = sorted(
+        {str(item.reason) for item in degradations if item.reason not in known},
+    )
+    if other:
+        # A reason this describer does not yet know still gets a clause, so a
+        # new enum member can never render an empty, leading-period sentence.
+        clauses.append(
+            f"{len(other)} other {_plural(count=len(other), noun='limit')} "
+            f"applied ({', '.join(other)})",
+        )
+
     # A run can be capped *and* stopped early; only claim full chunk
     # coverage when ``partial`` says the run reached every chunk.
     coverage = "" if metadata.partial else "Every chunk was reviewed, but "
