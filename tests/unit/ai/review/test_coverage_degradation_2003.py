@@ -805,3 +805,32 @@ def test_sticky_history_marks_a_prior_capped_round(
     assert_that(with_marker).contains("Run-by-run history")
     assert_that(with_marker).contains("⚠️ coverage limited")
     assert_that(without_marker).does_not_contain("⚠️ coverage limited")
+
+
+def test_advanced_state_persists_coverage_limited_from_a_capped_result(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A capped result stamps coverage_limited on the persisted run record.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    from lintro.ai.review.github_sticky import advance_review_state
+    from lintro.ai.review.models.run_record import RunRecord
+
+    capped_state = advance_review_state(
+        result=_with_degradations(result=sample_review_result, degradations=(_CAP,)),
+        head_sha="abc1234",
+        transport="cli",
+    )
+    clean_state = advance_review_state(
+        result=sample_review_result,
+        head_sha="abc1234",
+        transport="cli",
+    )
+
+    capped_run = capped_state.runs[-1]
+    assert_that(capped_run.coverage_limited).is_true()
+    assert_that(clean_state.runs[-1].coverage_limited).is_false()
+    # The flag survives the flat persisted shape.
+    assert_that(RunRecord.from_dict(capped_run.to_dict()).coverage_limited).is_true()

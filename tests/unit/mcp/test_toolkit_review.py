@@ -443,6 +443,10 @@ def test_review_returns_findings_and_run_metadata(
 
     assert_that(result.is_error).is_false()
     assert_that(payload["summary"]).is_equal_to("One blocking issue.")
+    # #2003: a completed, uncapped review reports full findings coverage at
+    # the top level and in the run block.
+    assert_that(payload["findings_coverage_complete"]).is_true()
+    assert_that(payload["run"]["findings_coverage_complete"]).is_true()
     finding = payload["findings"][0]
     assert_that(finding).contains_key(
         "file",
