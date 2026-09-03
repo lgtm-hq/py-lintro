@@ -25,10 +25,13 @@ from lintro.ai.review.error_contract import (
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
 from lintro.ai.review.github_render import format_inline_post_cause
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.output import (
+    CONVERGED_ENVELOPE_KEY,
     INLINE_POST_FAILURE_KEY,
+    render_convergence_outcome_json,
     render_inline_post_failure_json,
 )
 
@@ -901,3 +904,99 @@ def test_main_transport_flag_reaches_summary_and_labels(
     assert_that(summary).contains("AI Review (api)")
     assert_that(summary).contains("auth_failed:key")
     assert_that(capsys.readouterr().out).contains("[api]")
+
+
+# --- converged rounds (#2099) ------------------------------------------------
+
+
+def _converged_output(*, round_number: int = 3) -> str:
+    """Render what ``lintro review`` prints when the stop rule fires.
+
+    Built by lintro's own renderer rather than hand-written JSON, so the
+    classifier is tested against the envelope actually emitted.
+
+    Args:
+        round_number: Round the stop rule skipped.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    decision = ConvergenceDecision(
+        converged=True,
+        round_number=round_number,
+        score=0.5,
+        threshold=3.0,
+        stable_rounds=2,
+        trajectory=(1.0, 0.5),
+    )
+    return f"some log line\n{render_convergence_outcome_json(decision=decision)}"
+
+
+def test_converged_envelope_is_its_own_green_outcome(classifier: ModuleType) -> None:
+    """A deliberately skipped round is neither a review nor a failure.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output())
+
+    assert_that(str(report.outcome)).is_equal_to("converged")
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.outcome.produced_review).is_false()
+    assert_that(report.outcome.review_unavailable).is_false()
+
+
+def test_converged_headline_names_the_skipped_round(classifier: ModuleType) -> None:
+    """CI states which round was skipped and on what evidence.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output(round_number=7))
+
+    assert_that(report.headline).contains("converged")
+    assert_that(report.headline).contains("round 7")
+    assert_that(report.headline).contains("2 stable rounds")
+    assert_that(report.detail).contains("score 0.50 < threshold 3.00")
+
+
+def test_converged_summary_does_not_tell_reviewers_to_fall_back(
+    classifier: ModuleType,
+) -> None:
+    """The un-reviewed advice belongs to failures, not to a chosen stop.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output())
+
+    summary = classifier.render_summary(report=report)
+
+    assert_that(summary).contains("No provider call was made")
+    assert_that(summary).does_not_contain("fall back to CodeRabbit")
+
+
+def test_converged_envelope_key_matches_the_producer(classifier: ModuleType) -> None:
+    """The classifier keys on the exact key lintro writes.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    assert_that(classifier.CONVERGED_ENVELOPE_KEY).is_equal_to(CONVERGED_ENVELOPE_KEY)
+
+
+def test_a_normal_review_is_still_classified_as_reviewed(
+    classifier: ModuleType,
+) -> None:
+    """The converged branch does not swallow ordinary review output.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=json.dumps({"readiness_verdict": "ready", "findings": []}),
+    )
+
+    assert_that(str(report.outcome)).is_equal_to("reviewed")
+    assert_that(report.exit_code).is_equal_to(0)

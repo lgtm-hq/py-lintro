@@ -30,6 +30,7 @@ __all__ = [
     "ReviewChecklistConfig",
     "ReviewChecklistItemConfig",
     "ReviewConfig",
+    "ReviewConvergenceConfig",
     "ReviewSensitivityOverrides",
     "ReviewSynthesisConfig",
 ]
@@ -181,6 +182,42 @@ class ReviewSynthesisConfig(BaseModel):
         return value
 
 
+class ReviewConvergenceConfig(BaseModel):
+    """Deterministic re-review stop rule for ``lintro review`` (#2099).
+
+    Each round scores its still-open findings (see
+    :mod:`lintro.ai.review.convergence`). Once ``stable_rounds`` consecutive
+    rounds have scored below ``threshold``, the next round short-circuits
+    before any provider call. The decision is made in code from persisted
+    state, never asked of the model.
+
+    Disabled by default: with ``threshold`` unset, every round runs exactly as
+    it did before the rule existed.
+    """
+
+    model_config = ConfigDict(frozen=False, extra="forbid")
+
+    threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        description=(
+            "Convergence score strictly below which a round counts as quiet. "
+            "null (the default) disables the stop rule and reviews every "
+            "round. For calibration: one low-confidence P3 scores 1.25, one "
+            "high-confidence P1 scores 10.0."
+        ),
+    )
+    stable_rounds: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "How many consecutive rounds must score below the threshold "
+            "before the next round is skipped. A partial or coverage-limited "
+            "round never counts toward the streak."
+        ),
+    )
+
+
 class ReviewConfig(BaseModel):
     """Configuration for the lintro review command."""
 
@@ -234,6 +271,13 @@ class ReviewConfig(BaseModel):
         description=(
             "Final cross-chunk synthesis pass (#2269). Off by default pending "
             "the #2147 cost/agreement measurement."
+        ),
+    )
+    convergence: ReviewConvergenceConfig = Field(
+        default_factory=ReviewConvergenceConfig,
+        description=(
+            "Deterministic re-review stop rule; disabled unless "
+            "review.convergence.threshold is set."
         ),
     )
     custom_agents: CustomAgentMode = Field(

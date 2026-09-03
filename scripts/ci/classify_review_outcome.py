@@ -8,6 +8,10 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
 ``lintro review`` invocation to one of three outcomes:
 
 * **reviewed** -- a review was produced (with or without P1 findings). Green.
+* **converged** -- the deterministic convergence stop rule (#2099) skipped the
+  round before any provider call, because the last N rounds all scored below
+  the configured threshold. Green: nothing was reviewed, but nothing needed to
+  be, and the reason is stated rather than implied by a silent pass.
 * **not reviewed** -- no credential, a dead credential, a depleted balance, or an
   unreachable provider. The check goes red with a visible reason. It is
   deliberately *not* a required check, so a billing condition is loud without
@@ -83,6 +87,11 @@ INLINE_POST_FAILURE_KEY: Final[str] = "inline_post_failure"
 
 DEFAULT_TRANSPORT: Final[str] = "cli"
 
+# Top-level key `lintro review` writes when the convergence stop rule skipped
+# the round (#2099). Mirrors lintro.ai.review.output.CONVERGED_ENVELOPE_KEY;
+# tests/scripts/test_classify_review_outcome.py fails if the two drift.
+CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
+
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
 _API_KIND_LABELS: Final[dict[str, str]] = {
@@ -126,6 +135,8 @@ class ReviewOutcome(StrEnum):
     Members:
         REVIEWED: A review was produced; findings may or may not be present.
         INCOMPLETE: A review was produced but coverage-at-HEAD is not 100%.
+        CONVERGED: The round was deliberately skipped by the convergence stop
+            rule before any provider call (#2099).
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
@@ -133,6 +144,7 @@ class ReviewOutcome(StrEnum):
 
     REVIEWED = auto()
     INCOMPLETE = auto()
+    CONVERGED = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
@@ -146,6 +158,25 @@ class ReviewOutcome(StrEnum):
             review was produced).
         """
         return self in {ReviewOutcome.REVIEWED, ReviewOutcome.INCOMPLETE}
+
+    @property
+    def review_unavailable(self) -> bool:
+        """Return whether the diff went un-reviewed for a bad reason.
+
+        A skipped-because-converged round produced no review either, but it
+        is a decision rather than a failure: it must not carry the
+        "treat the diff as un-reviewed, fall back to CodeRabbit/Greptile"
+        advice, and it must not redden the check.
+
+        Returns:
+            True only for the outcomes where a review was wanted and could
+            not be produced.
+        """
+        return self in {
+            ReviewOutcome.NO_CREDENTIAL,
+            ReviewOutcome.PROVIDER_UNAVAILABLE,
+            ReviewOutcome.BROKEN,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +298,62 @@ def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
         if isinstance(failure, dict):
             return failure
     return None
+
+
+def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the convergence stop-rule object from captured review output.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The ``converged`` mapping, or ``None`` when the round was not skipped.
+    """
+    decoder = json.JSONDecoder()
+    index = text.find("{")
+    while index != -1:
+        try:
+            payload, _end = decoder.raw_decode(text[index:])
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        if isinstance(payload, dict):
+            converged = payload.get(CONVERGED_ENVELOPE_KEY)
+            if isinstance(converged, dict):
+                return {**converged, "detail": str(payload.get("detail") or "")}
+        index = text.find("{", index + 1)
+    return None
+
+
+def _converged_report(
+    *,
+    converged: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the CONVERGED outcome from a parsed stop-rule envelope.
+
+    Args:
+        converged: The ``converged`` mapping from the review JSON envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Green report naming the round that was skipped and why.
+    """
+    round_number = converged.get("round", 0)
+    stable_rounds = converged.get("stable_rounds", 0)
+    return OutcomeReport(
+        outcome=ReviewOutcome.CONVERGED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                f"converged — round {round_number} skipped after "
+                f"{stable_rounds} stable rounds"
+            ),
+        ),
+        detail=str(converged.get("detail") or ""),
+        exit_code=0,
+        transport=transport,
+    )
 
 
 def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
@@ -490,6 +577,13 @@ def classify(
             transport=transport,
         )
 
+    # A converged round is checked first: it produces no coverage and no
+    # error envelope at all, so every later branch would have to guess at a
+    # review that deliberately never ran.
+    converged = _parse_converged_envelope(text=output)
+    if converged is not None:
+        return _converged_report(converged=converged, transport=transport)
+
     # A persist envelope wins over the wrapper exit status. ``wait`` reports
     # 143 when the runner SIGTERMs the step after lintro already wrote
     # INCOMPLETE JSON and exited 0 (#2156 / #2166 round 5).
@@ -596,6 +690,8 @@ def render_summary(*, report: OutcomeReport) -> str:
     """
     if report.outcome is ReviewOutcome.INCOMPLETE:
         icon = "⚠️"
+    elif report.outcome is ReviewOutcome.CONVERGED:
+        icon = "🔁"
     elif report.outcome.produced_review:
         icon = "✅"
     else:
@@ -614,9 +710,19 @@ def render_summary(*, report: OutcomeReport) -> str:
                 "",
             ],
         )
+    if report.outcome is ReviewOutcome.CONVERGED:
+        lines.extend(
+            [
+                "No provider call was made: the convergence stop rule found "
+                "the open findings stable below the configured threshold, so "
+                "another round would have re-reported the same set. Re-run "
+                "the review with `--full` to force one.",
+                "",
+            ],
+        )
     if report.detail:
         lines.extend(["> " + report.detail, ""])
-    if not report.outcome.produced_review:
+    if report.outcome.review_unavailable:
         lines.extend(
             [
                 "This check is informational and not required, so it cannot "
@@ -635,7 +741,7 @@ def _emit(*, report: OutcomeReport) -> None:
     Args:
         report: The classified outcome.
     """
-    annotation = "notice" if report.outcome.produced_review else "error"
+    annotation = "error" if report.outcome.review_unavailable else "notice"
     title = f"AI Review ({report.transport})"
     body = report.headline
     if report.detail:
@@ -709,7 +815,7 @@ def main(*, argv: list[str] | None = None) -> int:
         transport=args.transport,
     )
     _emit(report=report)
-    if not report.outcome.produced_review:
+    if report.outcome.review_unavailable:
         print(f"AI Review: {report.headline}", file=sys.stderr)
     return report.exit_code
 

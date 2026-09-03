@@ -575,6 +575,71 @@ What it adds to the surfaces:
   _Review coverage completeness_ above) when the input was cut or the pass did not
   complete. The run stays complete for the chunk findings either way.
 
+### Review convergence (deterministic re-review stop)
+
+Every push re-reviews the whole diff, so a long-lived PR pays for round after round that
+re-reports the same open findings. Convergence scoring ends that treadmill in code —
+never by asking the model.
+
+Each round scores the findings still open after it:
+
+```text
+score = floor + (ceiling - floor) × confidence × likelihood
+```
+
+| Input                         | Value                                                   |
+| ----------------------------- | ------------------------------------------------------- |
+| Severity band (floor–ceiling) | P1 `6.0`–`10.0` · P2 `3.0`–`6.0` · P3 `0.5`–`3.0`       |
+| Confidence multiplier         | `high` 1.0 · `medium` 0.6 · `low` 0.3 (absent ⇒ medium) |
+| Likelihood (`evidence_style`) | `diff_local` 1.0 · `cross_file` 0.8 · `speculative` 0.4 |
+| Systemic categories           | `contract-drift`, `breaking-change` ⇒ likelihood 1.0    |
+
+The round score is the **sum over the open findings**. Questions are excluded, exactly
+as they are excluded from the readiness verdict. Resolved findings contribute nothing,
+so a round that fixed everything scores `0.00`. For calibration: one high-confidence P1
+read straight off the diff scores `10.00`; one low-confidence P3 scores `1.25`.
+
+Every input is a field lintro already parses, so the score is a pure function of the
+tracked findings — no wall clock, no randomness, no extra provider call. The score and
+its trajectory are persisted per round in the review state (schema v3) and rendered
+under the sticky comment's `Findings` heading:
+
+```text
+Convergence score 1.25 · trajectory 12.40 → 4.50 → 1.25
+```
+
+**The short-circuit contract.** With `review.convergence.threshold` set, the next round
+is skipped when the last `review.convergence.stable_rounds` recorded scores are all
+_strictly_ below the threshold. The decision is made from persisted state before the
+provider is constructed, so a converged round costs nothing:
+
+- No provider call, no findings, no state write — the round counter, the tracked
+  findings, and the carried coverage stay exactly as the last real round left them, and
+  the next round that does run resumes from there.
+- The sticky comment is re-rendered from the last good board with a
+  `🔁 Converged — converged at round N (score X < threshold Y)` banner.
+- Exit code `0`, and `--output json` emits a distinct envelope
+  (`{"outcome": "converged", "converged": {...}}`) that carries no `readiness_verdict`,
+  no `findings`, and no `partial` key. `scripts/ci/classify_review_outcome.py` reports
+  it as its own green **converged** outcome — never as "reviewed, found nothing" and
+  never as a failure.
+- A `partial` or coverage-limited round can never count toward the streak: a low score
+  from a round that never looked properly is not evidence of stability. Rounds persisted
+  before scoring existed carry no score and are likewise not evidence.
+- `lintro review --full` always forces a round, so a manual dispatch or ChatOps
+  re-review is never blocked by the rule.
+
+**Disabled by default.** With `threshold` unset — the default — behavior is identical to
+a build without the feature: every round reviews.
+
+```yaml
+# .lintro-config.yaml
+review:
+  convergence:
+    threshold: null # float ≥ 0; null (default) disables the stop rule
+    stable_rounds: 2 # consecutive sub-threshold rounds required (int ≥ 1)
+```
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked

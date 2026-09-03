@@ -12,10 +12,14 @@ ARCHIVE_MARKER = "<!-- lintro-ai-review-archive -->"
 PRIMARY_SOFT_LIMIT = 56_000
 STATE_MARKER_PREFIX = "<!-- lintro-ai-review-state:"
 STATE_MARKER_SUFFIX = "-->"
-# Current review-state schema version. v2 adds per-run statistics and
-# per-finding identity records on top of v1's run aggregates (issue #1906).
-STATE_VERSION = 2
+# Current review-state schema version. v2 added per-run statistics and
+# per-finding identity records on top of v1's run aggregates (issue #1906);
+# v3 adds the per-round convergence score and the per-finding evidence style
+# it is computed from (issue #2099). Both v3 additions are written only when
+# present, so a v2 blob re-encodes byte-identically.
+STATE_VERSION = 3
 STATE_VERSION_V1 = 1
+STATE_VERSION_V2 = 2
 
 # GitHub rejects comment bodies over 65,536 characters.
 GITHUB_COMMENT_HARD_LIMIT = 65_536

@@ -1,4 +1,4 @@
-"""JSON serialization for AI review results."""
+"""JSON serialization for AI review results and skipped rounds."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import json
 from dataclasses import asdict
 from typing import Any
 
+from lintro.ai.review.convergence import format_convergence_stamp
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
@@ -21,14 +23,68 @@ from lintro.ai.review.severity_gate import count_cross_chunk_contradictions
 INLINE_POST_FAILURE_KEY = "inline_post_failure"
 
 __all__ = [
+    "CONVERGED_ENVELOPE_KEY",
+    "CONVERGED_OUTCOME",
     "INLINE_POST_FAILURE_KEY",
+    "convergence_outcome_to_dict",
     "finding_to_dict",
+    "render_convergence_outcome_json",
     "render_inline_post_failure_json",
     "render_review_json",
     "render_review_output",
     "review_result_to_dict",
     "review_result_to_json",
 ]
+
+#: Top-level key that marks a review invocation as short-circuited by the
+#: convergence stop rule (#2099). ``scripts/ci/classify_review_outcome.py``
+#: keys on it to report the skipped round as its own CI outcome instead of
+#: misreading a review that never ran as a clean one; a contract test pins the
+#: two spellings together.
+CONVERGED_ENVELOPE_KEY = "converged"
+
+#: Value of the envelope's ``outcome`` field for a short-circuited round.
+CONVERGED_OUTCOME = "converged"
+
+
+def convergence_outcome_to_dict(
+    *,
+    decision: ConvergenceDecision,
+) -> dict[str, Any]:
+    """Build the machine-readable envelope for a short-circuited round.
+
+    The envelope deliberately carries no ``readiness_verdict``, ``coverage``,
+    or ``findings``: no review was produced this round, and synthesizing an
+    empty finding list would read as "reviewed, found nothing". It is also
+    emphatically not the ``partial`` axis — a converged round did not stop
+    early with work left undone, it declined to start.
+
+    Args:
+        decision: The converged decision that skipped the round.
+
+    Returns:
+        JSON-serializable mapping describing why the round was skipped.
+    """
+    return {
+        "outcome": CONVERGED_OUTCOME,
+        CONVERGED_ENVELOPE_KEY: decision.to_dict(),
+        "detail": format_convergence_stamp(decision=decision),
+    }
+
+
+def render_convergence_outcome_json(*, decision: ConvergenceDecision) -> str:
+    """Serialize the skipped-round envelope to pretty-printed JSON.
+
+    Args:
+        decision: The converged decision that skipped the round.
+
+    Returns:
+        JSON string with two-space indentation.
+    """
+    return json.dumps(
+        convergence_outcome_to_dict(decision=decision),
+        indent=2,
+    )
 
 
 def render_inline_post_failure_json(*, failure: InlinePostFailure) -> str:

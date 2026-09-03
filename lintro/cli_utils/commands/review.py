@@ -53,6 +53,10 @@ from lintro.ai.review.checklist_display import (
     enrich_review_result,
     resolve_checklist_display,
 )
+from lintro.ai.review.convergence import (
+    evaluate_convergence,
+    format_convergence_stamp,
+)
 from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.custom_agents import (
     CustomAgentSpec,
@@ -64,9 +68,13 @@ from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
-from lintro.ai.review.output import render_review_output
+from lintro.ai.review.output import (
+    render_convergence_outcome_json,
+    render_review_output,
+)
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
@@ -171,6 +179,54 @@ def _fail_review_command(
     # A wrapper that cannot tell the two apart reports a green check for a
     # review that never ran (#1826).
     raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
+
+
+def _finish_converged_review(
+    *,
+    decision: ConvergenceDecision,
+    output_format: str,
+    post: bool,
+    resolved_pr: int | None,
+    effective_repo: str | None,
+    prior_state: ReviewState,
+) -> NoReturn:
+    """Stamp a short-circuited round and exit 0 without calling the provider.
+
+    Reached only when the convergence stop rule fired (#2099), which happens
+    before the provider is constructed — so this path costs nothing and can
+    never touch the coverage or resume bookkeeping. Deliberately no state is
+    persisted: no round ran, so the round counter, the tracked findings, and
+    the carried coverage all stay exactly as the last real round left them,
+    and the next round that *does* run resumes from there untouched.
+
+    Args:
+        decision: The converged decision that skipped the round.
+        output_format: CLI ``--output`` value (``json`` or ``terminal``).
+        post: Whether ``--post`` requested a GitHub comment.
+        resolved_pr: PR number when posting is requested.
+        effective_repo: ``owner/repo`` when posting is requested.
+        prior_state: State already loaded for this invocation, re-rendered as
+            the board the banner is stamped onto.
+
+    Raises:
+        SystemExit: Always, with ``0`` — a converged round is a clean run.
+    """
+    if post and resolved_pr is not None and effective_repo:
+        from lintro.ai.review.github import post_review_converged_to_github
+
+        with suppress(Exception):
+            post_review_converged_to_github(
+                decision=decision,
+                pr_number=resolved_pr,
+                repo=effective_repo,
+                prior_state=prior_state,
+            )
+    if output_format == "json":
+        click.echo(render_convergence_outcome_json(decision=decision))
+    else:
+        click.echo(f"🔁 Review skipped — {format_convergence_stamp(decision=decision)}")
+        click.echo("   Re-run with --full to force another round.")
+    raise SystemExit(0)
 
 
 def _advisory_failure_error(results: list[ToolResult]) -> AIError:
@@ -627,6 +683,24 @@ def review_command(
         repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
         post=post,
     )
+    if not force_full:
+        # Evaluated before the provider is constructed, so a converged round
+        # costs nothing at all. ``--full`` is the always-available escape
+        # hatch that forces a round from CI or a manual dispatch.
+        decision = evaluate_convergence(
+            runs=prior_state.runs,
+            threshold=lintro_config.review.convergence.threshold,
+            stable_rounds=lintro_config.review.convergence.stable_rounds,
+        )
+        if decision.converged:
+            _finish_converged_review(
+                decision=decision,
+                output_format=output_format,
+                post=post,
+                resolved_pr=resolved_pr,
+                effective_repo=effective_repo,
+                prior_state=prior_state,
+            )
     try:
         provider = get_provider(effective_ai_config, workspace_root=workspace_root)
         result = run_review(

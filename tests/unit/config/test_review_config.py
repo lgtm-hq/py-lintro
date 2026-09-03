@@ -7,6 +7,7 @@ from re import escape
 
 import pytest
 from assertpy import assert_that
+from pydantic import ValidationError
 
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
@@ -392,3 +393,66 @@ def test_custom_agents_rejects_unknown_mode() -> None:
     """An unrecognized mode names the offending key in the error."""
     with pytest.raises(ValueError, match=escape("review.custom_agents must be")):
         ReviewConfig.model_validate({"custom_agents": "sometimes"})
+
+
+def test_convergence_is_disabled_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project that says nothing about convergence reviews every round.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("review:\n  depth: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.convergence.threshold).is_none()
+    assert_that(config.review.convergence.stable_rounds).is_equal_to(2)
+
+
+def test_convergence_reads_the_threshold_and_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both keys are read from the nested ``review.convergence`` block.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        "review:\n  convergence:\n    threshold: 2.5\n    stable_rounds: 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.convergence.threshold).is_equal_to(2.5)
+    assert_that(config.review.convergence.stable_rounds).is_equal_to(3)
+
+
+def test_convergence_rejects_a_negative_threshold() -> None:
+    """A score can never be negative, so neither can the threshold."""
+    with pytest.raises(ValidationError):
+        ReviewConfig.model_validate({"convergence": {"threshold": -1.0}})
+
+
+def test_convergence_rejects_a_streak_shorter_than_one_round() -> None:
+    """Zero stable rounds would mean stopping on no evidence at all."""
+    with pytest.raises(ValidationError):
+        ReviewConfig.model_validate({"convergence": {"stable_rounds": 0}})
+
+
+def test_convergence_rejects_unknown_keys() -> None:
+    """A near-miss key name never silently takes effect."""
+    with pytest.raises(ValidationError):
+        ReviewConfig.model_validate({"convergence": {"stable_round": 2}})

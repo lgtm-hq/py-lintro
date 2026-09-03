@@ -3,8 +3,17 @@
 The blob lives in the sticky PR comment as an HTML comment so GitHub renders
 nothing while later rounds can recover the full history. Schema v2 adds
 per-round statistics and per-finding identity on top of v1's run aggregates;
-v1 blobs are migrated on read and unknown versions start fresh rather than
-crashing a review run.
+schema v3 adds the per-round convergence score and the per-finding evidence
+style it is derived from (#2099). v1 and v2 blobs are migrated on read and
+unknown versions start fresh rather than crashing a review run.
+
+Both v2 -> v3 additions are optional keys that the record serializers omit
+when unset, so migrating a v2 blob is a pure re-stamp of the version: every
+run and finding parses with its new field defaulted, and re-encoding a blob
+that carries no scores produces the same bytes v2 wrote apart from the
+version number itself. The migrated state is simply unscored history, which
+:mod:`lintro.ai.review.convergence` treats as "not measured" rather than as
+evidence of a quiet round.
 """
 
 from __future__ import annotations
@@ -20,6 +29,7 @@ from lintro.ai.review.github_constants import (
     STATE_MARKER_SUFFIX,
     STATE_VERSION,
     STATE_VERSION_V1,
+    STATE_VERSION_V2,
 )
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_state import ReviewState
@@ -44,7 +54,7 @@ def encode_state(*, state: ReviewState) -> str:
 
     Returns:
         Compact JSON string. The stored version is always the current schema
-        version, so a migrated v1 blob is written back as v2.
+        version, so a migrated v1 or v2 blob is written back as v3.
     """
     payload = state.to_dict()
     payload["version"] = STATE_VERSION
@@ -225,15 +235,19 @@ def decode_state(*, body: str) -> ReviewState:
         return ReviewState()
 
     if version == STATE_VERSION_V1:
+        # v1 stored runs only, and no round numbers; findings tracking did not
+        # exist yet, so there is nothing else to carry forward.
         return ReviewState(
             version=STATE_VERSION,
             runs=tuple(migrate_v1_runs(runs=_parse_runs(payload=payload))),
         )
-    if version != STATE_VERSION:
+    if version not in (STATE_VERSION_V2, STATE_VERSION):
         # Forward-incompatible blob written by a newer lintro: start fresh
         # instead of guessing at unknown semantics.
         return ReviewState()
 
+    # v2 -> v3 needs no field rewriting: the record parsers default the two
+    # v3 additions, so a v2 blob decodes as unscored v3 history.
     return ReviewState(
         version=STATE_VERSION,
         runs=tuple(_parse_runs(payload=payload)),

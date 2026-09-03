@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,13 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
 from lintro.ai.transport import resolve_cost_basis
 
-__all__ = ["RunRecord"]
+__all__ = ["CONVERGENCE_SCORE_PRECISION", "RunRecord"]
+
+#: Decimal places a persisted convergence score is rounded to. It lives here
+#: rather than in :mod:`lintro.ai.review.convergence` only because that module
+#: imports this one; the scoring module re-exports it as ``SCORE_PRECISION``
+#: so every surface rounds a score exactly once, the same way.
+CONVERGENCE_SCORE_PRECISION = 2
 
 
 def _strict_bool(value: object) -> bool:
@@ -91,6 +98,12 @@ class RunRecord:
         narrative: One-line recap of the round in the model's own words, taken
             from the structured summary headline (or the review summary's first
             sentence). Empty when the model produced neither.
+        convergence_score: Aggregate convergence score over the findings still
+            open after this round (#2099), or ``None`` on a record persisted
+            before scoring existed. Serialized only when present, so a legacy
+            record round-trips byte-identically and a missing score reads as
+            "not measured" rather than as a fabricated ``0.0`` — which would
+            claim the round was quiet.
     """
 
     round: int = 1
@@ -126,6 +139,7 @@ class RunRecord:
     resolved: int | None = None
     open_after: int | None = None
     narrative: str = ""
+    convergence_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the run record for the hidden state blob.
@@ -176,6 +190,11 @@ class RunRecord:
             payload["open_after"] = self.open_after
         if self.narrative:
             payload["narrative"] = self.narrative
+        if self.convergence_score is not None:
+            payload["convergence_score"] = round(
+                self.convergence_score,
+                CONVERGENCE_SCORE_PRECISION,
+            )
         return payload
 
     @classmethod
@@ -236,6 +255,7 @@ class RunRecord:
             resolved=_optional_count(payload.get("resolved")),
             open_after=_optional_count(payload.get("open_after")),
             narrative=str(payload.get("narrative", "")),
+            convergence_score=_optional_score(payload.get("convergence_score")),
         )
 
 
@@ -276,6 +296,34 @@ def _optional_count(value: Any) -> int | None:
             # ``int(float("inf"))`` raises OverflowError, and a corrupted blob
             # must degrade to "unknown" rather than abort the whole decode.
             return None
+    return None
+
+
+def _optional_score(value: Any) -> float | None:
+    """Parse a convergence score that may be absent from a legacy record.
+
+    Args:
+        value: Raw value decoded from the state blob, or ``None`` when the key
+            was never written.
+
+    Returns:
+        The parsed score, or ``None`` when the key is absent or unusable. A
+        corrupted value degrades to "not measured" rather than to ``0.0``: a
+        zero is the strongest possible evidence of convergence, and inventing
+        one from bad data would stop re-reviewing a PR that still has open
+        blockers. Negative values are impossible by construction, so they are
+        rejected the same way.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(parsed) or parsed < 0:
+            return None
+        return round(parsed, CONVERGENCE_SCORE_PRECISION)
     return None
 
 
