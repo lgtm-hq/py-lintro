@@ -413,6 +413,11 @@ def apply_cross_chunk_guard(
     """
     guarded: list[ReviewFinding] = []
     for finding in findings:
+        if finding.cross_chunk_contradiction is not None:
+            # Already guarded: the tag records the one-band move, so a second
+            # pass over the same finding must not move it again.
+            guarded.append(finding)
+            continue
         contradicted = (
             ()
             if finding.is_question

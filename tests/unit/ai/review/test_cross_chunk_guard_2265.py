@@ -222,6 +222,24 @@ def test_the_guard_moves_a_finding_down_exactly_one_band(
     assert_that(finding.cross_chunk_contradiction).is_not_none()
 
 
+def test_the_guard_is_idempotent() -> None:
+    """A second pass leaves a tagged finding exactly where the first left it.
+
+    The CLI used to re-run the guard over findings finalize had already
+    guarded when it replayed unposted findings, so a contradicted P1 became a
+    P3 (#2268 review). The tag now short-circuits the guard.
+    """
+    once = _guard(
+        severity=Severity.P1,
+        description="tests/unit/test_migrate_docs.py was never updated.",
+    )
+
+    (twice,) = apply_cross_chunk_guard(findings=(once,), changed_paths=_CHANGED)
+
+    assert_that(twice).is_equal_to(once)
+    assert_that(twice.severity).is_equal_to(Severity.P2)
+
+
 def test_nothing_is_dropped_by_the_guard() -> None:
     """A contradicted finding keeps its prose and its place in the payload."""
     findings = apply_cross_chunk_guard(

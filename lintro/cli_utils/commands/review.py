@@ -65,11 +65,10 @@ from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.orchestrator import guard_changed_paths, run_review
+from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.state_store import (
     load_ci_state,
     load_local_state,
@@ -690,12 +689,14 @@ def review_command(
                 reviewed_paths=frozenset(result.metadata.reviewed_paths),
             )
             if replayed:
+                # Replayed findings were guarded by their own round's
+                # finalize and carry the severity that guard produced, and
+                # this run's findings were guarded once already. Running the
+                # cross-chunk guard here again would move a contradicted P1
+                # down a second band (#2268 review).
                 result = dc_replace(
                     result,
-                    findings=apply_cross_chunk_guard(
-                        findings=(*result.findings, *replayed),
-                        changed_paths=guard_changed_paths(context=context),
-                    ),
+                    findings=(*result.findings, *replayed),
                 )
         try:
             _persist_review_state(
