@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.path_utils import (
@@ -504,6 +505,41 @@ def test_matches_test_for_source_unique_stem_crosses_unrelated_trees() -> None:
             stem_is_unique=True,
         ),
     ).is_false()
+
+
+@pytest.mark.parametrize(
+    "test_path",
+    [
+        "other/tests/foo.test.py",
+        "other/tests/test_foo.py",
+        "other/__tests__/foo.test.ts",
+    ],
+    ids=["nested_tests_dotted", "nested_tests_prefixed", "nested_dunder_tests"],
+)
+def test_unique_stem_fallback_rejects_nested_tests_in_another_tree(
+    test_path: str,
+) -> None:
+    """A tests directory nested in an unrelated tree is not a top-level root."""
+    assert_that(
+        matches_test_for_source(
+            test_path=test_path,
+            source_stem="foo",
+            source_path="pkg/foo.py",
+            stem_is_unique=True,
+        ),
+    ).is_false()
+
+
+def test_unique_stem_fallback_accepts_top_level_dunder_tests() -> None:
+    """``__tests__/`` at the repository root is a test root like ``tests/``."""
+    assert_that(
+        matches_test_for_source(
+            test_path="__tests__/foo.test.ts",
+            source_stem="foo",
+            source_path="src/lib/foo.ts",
+            stem_is_unique=True,
+        ),
+    ).is_true()
 
 
 def test_normalize_stem_folds_case_and_separators() -> None:

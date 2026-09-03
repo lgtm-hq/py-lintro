@@ -43,9 +43,20 @@ def _has_tests_ancestor(path: PurePosixPath) -> bool:
     return any(part in ("tests", "__tests__") for part in path.parts[:-1])
 
 
+#: First path segments that mark a repository-level test tree.
+_TOP_LEVEL_TESTS_ROOTS: frozenset[tuple[str, ...]] = frozenset(
+    {("tests",), ("__tests__",)},
+)
+
+
 def _is_under_tests_directory(*, pure_path: PurePosixPath) -> bool:
     """Return True when a path sits under tests/ or __tests__."""
     return _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",)
+
+
+def _is_top_level_tests_root(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a path's first segment is ``tests`` or ``__tests__``."""
+    return pure_path.parts[:1] in _TOP_LEVEL_TESTS_ROOTS
 
 
 def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
@@ -426,4 +437,7 @@ def matches_test_for_source(
     # not change what the root is.
     if _has_near_miss_source_root(path=source_path):
         return False
-    return stem_is_unique and _is_under_tests_directory(pure_path=test_pure)
+    # Only a top-level test root may pair across trees. A nested
+    # ``other/tests/`` belongs to the ``other/`` tree, and
+    # ``_parents_compatible`` has already rejected that tree above.
+    return stem_is_unique and _is_top_level_tests_root(pure_path=test_pure)
