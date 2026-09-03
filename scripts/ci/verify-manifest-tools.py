@@ -254,6 +254,30 @@ def _is_image_newer_than_manifest(*, expected: str, actual: str) -> bool:
     return _is_image_older_than_manifest(expected=actual, actual=expected)
 
 
+def _versions_compare_equal(*, expected: str, actual: str) -> bool:
+    """Return True when two unequal version strings compare numerically equal.
+
+    ``7.1`` and ``7.1.0`` are the same release written two ways. Neither the
+    older nor the newer check fires for such a pair, so report the mismatch as
+    a manifest-string alignment rather than as unorderable versions.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when both sides parse and compare equal under numeric padding.
+    """
+    expected_parts = _version_tuple(expected)
+    actual_parts = _version_tuple(actual)
+    if not expected_parts or not actual_parts:
+        return False
+    width = max(len(expected_parts), len(actual_parts))
+    return expected_parts + (0,) * (width - len(expected_parts)) == actual_parts + (
+        0,
+    ) * (width - len(actual_parts))
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -390,6 +414,10 @@ def main() -> int:
                 guidance = (
                     f"manifest bump required: image {image_ref} is newer than "
                     f"the manifest; update the manifest to {actual}"
+                )
+            elif _versions_compare_equal(expected=expected, actual=actual):
+                guidance = (
+                    f"align the manifest string to the installed version {actual}"
                 )
             else:
                 guidance = (

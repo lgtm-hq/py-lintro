@@ -49,8 +49,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: lintro-tools-registry
-  cancel-in-progress: false
+  # PR runs only validate; keeping them out of the registry group stops a
+  # synchronize from evicting a pending scheduled publish (a group holds one
+  # pending run, so a third arrival cancels the waiting one).
+  # yamllint disable-line rule:line-length
+  group: ${{ github.event_name == 'pull_request' && format('docker-tools-{0}', github.ref) || 'lintro-tools-registry' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tools-image:

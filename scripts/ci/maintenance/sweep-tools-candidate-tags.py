@@ -102,6 +102,16 @@ def candidate_version(payload: dict[str, Any]) -> CandidateVersion | None:
     )
 
 
+def _gh_json_allow_not_found(*args: str) -> tuple[bool, object]:
+    """Run ``gh api``, treating a concurrent package removal as benign."""
+    try:
+        return True, _gh_json(*args)
+    except RuntimeError as exc:
+        if re.search(r"\bHTTP\s+404\b", str(exc), flags=re.IGNORECASE):
+            return False, None
+        raise
+
+
 def should_delete(
     candidate: CandidateVersion,
     *,
@@ -127,16 +137,6 @@ def should_delete(
     )
 
 
-def _gh_json_allow_not_found(*args: str) -> tuple[bool, object]:
-    """Run ``gh api``, treating a concurrent package removal as benign."""
-    try:
-        return True, _gh_json(*args)
-    except RuntimeError as exc:
-        if re.search(r"\bHTTP\s+404\b", str(exc), flags=re.IGNORECASE):
-            return False, None
-        raise
-
-
 def _package_versions(*, owner: str) -> list[dict[str, Any]]:
     """List all package versions, preserving pagination."""
     payload = _gh_json(
@@ -155,8 +155,15 @@ def _package_versions(*, owner: str) -> list[dict[str, Any]]:
 
 
 def _pull_request(*, repository: str, number: int) -> tuple[str | None, str | None]:
-    """Return a PR's state and merge timestamp."""
-    payload = _gh_json(f"repos/{repository}/pulls/{number}")
+    """Return a PR's state and merge timestamp.
+
+    A missing pull request yields ``(None, None)`` rather than raising: an
+    unknown state never satisfies the closed-unmerged delete rule, so the
+    candidate is simply left alone instead of aborting the sweep.
+    """
+    found, payload = _gh_json_allow_not_found(f"repos/{repository}/pulls/{number}")
+    if not found:
+        return (None, None)
     if not isinstance(payload, dict):
         raise RuntimeError("GitHub returned a malformed pull-request response")
     state = payload.get("state")
@@ -196,6 +203,57 @@ def _refresh_candidate(
     return candidate_version(payload)
 
 
+def _sweep_candidate(
+    *,
+    candidate: CandidateVersion,
+    owner: str,
+    repository: str,
+    now: datetime,
+    min_age_days: int,
+    dry_run: bool,
+) -> None:
+    """Evaluate a single candidate version and delete it when eligible."""
+    pr_states = _pull_request_states(repository=repository, candidate=candidate)
+    if not should_delete(
+        candidate,
+        now=now,
+        pr_states=pr_states,
+        min_age_days=min_age_days,
+    ):
+        return
+    # Eligibility is evaluated on the initial listing first. Refresh only now,
+    # immediately before reporting or deleting, to narrow the TOCTOU window for
+    # a newly-added persistent tag.
+    refreshed = _refresh_candidate(owner=owner, candidate=candidate)
+    if refreshed is None:
+        print(
+            f"Skipping {candidate.version_id}: package tags changed "
+            "or the version was removed",
+        )
+        return
+    pr_states = _pull_request_states(repository=repository, candidate=refreshed)
+    if not should_delete(
+        refreshed,
+        now=now,
+        pr_states=pr_states,
+        min_age_days=min_age_days,
+    ):
+        return
+    endpoint = (
+        f"orgs/{owner}/packages/container/{PACKAGE}/versions/{refreshed.version_id}"
+    )
+    if dry_run:
+        print(
+            f"[dry-run] Would delete {endpoint} (tags: {', '.join(refreshed.tags)})",
+        )
+        return
+    found, _ = _gh_json_allow_not_found("--method", "DELETE", endpoint)
+    if not found:
+        print(f"Skipping {endpoint}: version was already removed")
+        return
+    print(f"Deleted {endpoint} (tags: {', '.join(refreshed.tags)})")
+
+
 def main() -> int:
     """Sweep candidate versions according to environment configuration."""
     token = os.environ.get("GH_TOKEN")
@@ -221,58 +279,27 @@ def main() -> int:
             for payload in _package_versions(owner=owner)
             if (parsed := candidate_version(payload)) is not None
         ]
-        for candidate in candidates:
-            pr_states = _pull_request_states(
-                repository=repository,
-                candidate=candidate,
-            )
-            if not should_delete(
-                candidate,
-                now=now,
-                pr_states=pr_states,
-                min_age_days=min_age_days,
-            ):
-                continue
-            # Eligibility is evaluated on the initial listing first. Refresh
-            # only now, immediately before reporting/deleting, to close the
-            # TOCTOU window for a newly-added persistent tag.
-            refreshed = _refresh_candidate(owner=owner, candidate=candidate)
-            if refreshed is None:
-                print(
-                    f"Skipping {candidate.version_id}: package tags changed "
-                    "or the version was removed",
-                )
-                continue
-            pr_states = _pull_request_states(
-                repository=repository,
-                candidate=refreshed,
-            )
-            if not should_delete(
-                refreshed,
-                now=now,
-                pr_states=pr_states,
-                min_age_days=min_age_days,
-            ):
-                continue
-            endpoint = (
-                f"orgs/{owner}/packages/container/{PACKAGE}/versions/"
-                f"{refreshed.version_id}"
-            )
-            if dry_run:
-                print(
-                    f"[dry-run] Would delete {endpoint} "
-                    f"(tags: {', '.join(refreshed.tags)})",
-                )
-            else:
-                found, _ = _gh_json_allow_not_found("--method", "DELETE", endpoint)
-                if not found:
-                    print(f"Skipping {endpoint}: version was already removed")
-                    continue
-                print(f"Deleted {endpoint} (tags: {', '.join(refreshed.tags)})")
     except (RuntimeError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    return 0
+
+    failed = False
+    for candidate in candidates:
+        try:
+            _sweep_candidate(
+                candidate=candidate,
+                owner=owner,
+                repository=repository,
+                now=now,
+                min_age_days=min_age_days,
+                dry_run=dry_run,
+            )
+        except (RuntimeError, json.JSONDecodeError) as exc:
+            # One unreachable version or pull request must not strand every
+            # other candidate; report it, keep sweeping, and exit non-zero.
+            print(f"Skipping {candidate.version_id}: {exc}", file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

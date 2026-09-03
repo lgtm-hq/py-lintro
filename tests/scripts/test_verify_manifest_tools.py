@@ -589,3 +589,30 @@ def test_timeout_with_wrong_version_still_fails(
     code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
 
     assert_that(code).is_equal_to(1)
+
+
+def test_numerically_equal_versions_ask_for_a_manifest_string_alignment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``7.1`` vs ``7.1.0`` is a spelling mismatch, not an unorderable pair."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="7.1",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 7.1.0", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("align the manifest string to the installed version")
+    assert_that(output).does_not_contain("version ordering unavailable")

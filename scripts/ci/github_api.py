@@ -12,7 +12,7 @@ def gh_json(*args: str) -> object:
     """Run a fixed ``gh api`` command and decode its JSON response.
 
     Args:
-        *args: Validated arguments passed to ``gh api``.
+        *args: Arguments passed through to ``gh api``.
 
     Raises:
         RuntimeError: If the GitHub CLI exits unsuccessfully.
@@ -21,7 +21,7 @@ def gh_json(*args: str) -> object:
         The decoded GitHub API response.
     """
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
-    result = subprocess.run(  # nosec B603, B607 - fixed gh executable and flags
+    result = subprocess.run(  # nosec B603, B607 - gh argv, shell=False
         ["gh", "api", *args],
         check=False,
         capture_output=True,

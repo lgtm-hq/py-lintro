@@ -221,11 +221,23 @@ def test_candidate_cleanup_checks_out_repository_script() -> None:
     assert isinstance(cleanup, dict)
     steps = cleanup["steps"]
     assert isinstance(steps, list)
-    assert any(
-        isinstance(step, dict)
-        and str(step.get("uses", "")).startswith("actions/checkout@")
+    checkout = next(
+        step
         for step in steps
+        if isinstance(step, dict)
+        and str(step.get("uses", "")).startswith("actions/checkout@")
     )
+    assert_that(checkout["with"]["persist-credentials"]).is_false()
+    sweep = next(
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and "scripts/ci/maintenance/sweep-tools-candidate-tags.py"
+        in str(step.get("run", ""))
+    )
+    assert_that(str(sweep["env"]["GH_TOKEN"])).contains("GITHUB_TOKEN")
+    assert_that(cleanup["permissions"]["packages"]).is_equal_to("write")
+    assert_that(cleanup["permissions"]["pull-requests"]).is_equal_to("read")
 
 
 def test_candidate_cleanup_age_floor_is_dispatchable() -> None:
@@ -302,8 +314,16 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
     assert cleanup["concurrency"]["group"] == workflow["concurrency"]["group"]
+    # PR runs validate only and stay out of the shared registry group so a
+    # synchronize cannot evict a pending scheduled publish; every event that
+    # actually writes to GHCR serializes on lintro-tools-registry.
     publish = _load_workflow("docker-tools-publish.yml")
-    assert_that(publish["concurrency"]).is_equal_to(workflow["concurrency"])
+    assert_that(str(publish["concurrency"]["group"])).contains(
+        workflow["concurrency"]["group"],
+    )
+    assert_that(str(publish["concurrency"]["group"])).contains(
+        "github.event_name == 'pull_request'",
+    )
     promote_steps = [
         step
         for step in promote["steps"]
@@ -1080,3 +1100,104 @@ def test_promotion_publishes_for_direct_main_push(
             ref=promotion_module.MAIN_REF,
         ),
     ).is_equal_to(("publish", None))
+
+
+def test_publish_workflow_keeps_pr_runs_out_of_the_registry_group() -> None:
+    """PR validation must not evict a pending scheduled registry publish."""
+    workflow = _load_workflow("docker-tools-publish.yml")
+    concurrency = workflow["concurrency"]
+    assert isinstance(concurrency, dict)
+    group = str(concurrency["group"])
+    assert_that(group).contains("github.event_name == 'pull_request'")
+    assert_that(group).contains("lintro-tools-registry")
+    assert_that(str(concurrency["cancel-in-progress"])).contains(
+        "github.event_name == 'pull_request'",
+    )
+
+
+def test_sweep_keeps_going_when_one_pull_request_lookup_fails(
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single failing candidate must not strand the rest of the sweep."""
+    swept: list[str] = []
+
+    def fake_versions(*, owner: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": 1,
+                "updated_at": "2020-01-01T00:00:00Z",
+                "metadata": {"container": {"tags": ["tools-candidate-pr1-abcdef1"]}},
+            },
+            {
+                "id": 2,
+                "updated_at": "2020-01-01T00:00:00Z",
+                "metadata": {"container": {"tags": ["tools-candidate-pr2-abcdef2"]}},
+            },
+        ]
+
+    def fake_sweep(*, candidate: Any, **_: Any) -> None:
+        if candidate.version_id == "1":
+            raise RuntimeError("gh: HTTP 500")
+        swept.append(candidate.version_id)
+
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setattr(cleanup_module, "_package_versions", fake_versions)
+    monkeypatch.setattr(cleanup_module, "_sweep_candidate", fake_sweep)
+
+    exit_code = cleanup_module.main()
+
+    assert_that(exit_code).is_equal_to(1)
+    assert_that(swept).is_equal_to(["2"])
+
+
+def test_missing_pull_request_does_not_raise(
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deleted PR yields an unknown state instead of aborting the sweep."""
+
+    def fake_gh_json(*args: str) -> object:
+        raise RuntimeError("gh: Not Found (HTTP 404)")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    assert_that(
+        cleanup_module._pull_request(  # noqa: SLF001
+            repository="lgtm-hq/py-lintro",
+            number=7,
+        ),
+    ).is_equal_to((None, None))
+
+
+def test_merged_pr_prefers_the_merged_renovate_pull_request(
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open companion PR listed first must not decide classification."""
+    payload = [
+        {
+            "number": 10,
+            "state": "open",
+            "merged_at": None,
+            "user": {"login": "someone"},
+            "head": {"ref": "feature/x"},
+        },
+        {
+            "number": 11,
+            "state": "closed",
+            "merged_at": "2026-01-01T00:00:00Z",
+            "user": {"login": "renovate[bot]"},
+            "head": {"ref": "renovate/tools"},
+        },
+    ]
+    monkeypatch.setattr(promotion_module, "_gh_json", lambda *args: payload)
+
+    resolved = promotion_module._merged_pr(  # noqa: SLF001
+        repository="lgtm-hq/py-lintro",
+        merge_sha="abc123",
+    )
+
+    assert resolved is not None
+    assert_that(resolved["number"]).is_equal_to(11)

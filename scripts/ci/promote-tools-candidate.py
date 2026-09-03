@@ -67,10 +67,22 @@ def _merged_pr(*, repository: str, merge_sha: str) -> dict[str, Any] | None:
     payload = _gh_json(f"repos/{repository}/commits/{merge_sha}/pulls")
     if not isinstance(payload, list):
         raise RuntimeError("GitHub returned a non-list merged-PR response")
-    for item in payload:
-        if isinstance(item, dict) and isinstance(item.get("number"), int):
-            return item
-    return None
+    associated = [
+        item
+        for item in payload
+        if isinstance(item, dict) and isinstance(item.get("number"), int)
+    ]
+    # A merge SHA can list an open companion PR alongside the one that landed.
+    # Classification must follow the PR that was actually merged, so prefer a
+    # merged Renovate PR, then any merged PR, before falling back to order.
+    for predicate in (
+        lambda pr: _is_merged_pr(pr) and _is_renovate_pr(pr),
+        _is_merged_pr,
+    ):
+        for item in associated:
+            if predicate(item):
+                return item
+    return associated[0] if associated else None
 
 
 def _is_renovate_pr(pr: dict[str, Any]) -> bool:
