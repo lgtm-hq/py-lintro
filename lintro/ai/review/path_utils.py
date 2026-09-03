@@ -6,6 +6,8 @@ from pathlib import PurePosixPath
 
 from identify import identify
 
+from lintro.ai.review.file_language import languages_for_path
+
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
 _E2E_DIR_EXACT: frozenset[str] = frozenset({"e2e", "playwright-tests"})
@@ -89,12 +91,20 @@ def is_source_code_path(path: str) -> bool:
 
     Returns:
         True when identify reports a meaningful language tag for the file
-        name and the path is not a docs, config, or fixture artifact.
+        name, or when the path is an extensionless script under a top-level
+        ``bin/`` or ``scripts/`` directory (which
+        :func:`~lintro.ai.review.file_language.languages_for_path` treats as
+        shell), and the path is not a docs, config, or fixture artifact.
     """
     pure_path = PurePosixPath(path.replace("\\", "/"))
     if _is_non_test_artifact(pure_path=pure_path):
         return False
-    return bool(_meaningful_source_identify_tags(name=pure_path.name))
+    if _meaningful_source_identify_tags(name=pure_path.name):
+        return True
+    # ``scripts/ci/run`` carries no identify tag from its name alone, yet the
+    # language layer already calls it shell; pairing must agree so the
+    # script can own ``test_run.bats`` and count toward stem uniqueness.
+    return "shell" in languages_for_path(path=path)
 
 
 def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:

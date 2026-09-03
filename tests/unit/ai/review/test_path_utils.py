@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.ai.review.path_utils import (
     is_e2e_test_path,
+    is_source_code_path,
     is_test_path,
     matches_test_for_source,
     normalize_stem,
@@ -609,3 +610,21 @@ def test_unique_stem_fallback_still_rejects_near_miss_source_roots() -> None:
             stem_is_unique=True,
         ),
     ).is_true()
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("scripts/ci/run", True),
+        ("bin/lintro-dev", True),
+        ("scripts/ci/README", False),
+        ("lib/run", False),
+    ],
+    ids=["scripts_extensionless", "bin_extensionless", "scripts_readme", "other_tree"],
+)
+def test_is_source_code_path_agrees_with_the_language_layer_on_scripts(
+    path: str,
+    expected: bool,
+) -> None:
+    """Extensionless scripts under bin/ or scripts/ are source, like file_language says."""
+    assert_that(is_source_code_path(path)).is_equal_to(expected)

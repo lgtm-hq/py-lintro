@@ -428,6 +428,16 @@ def test_group_source_test_pairs_falls_back_to_unique_stems() -> None:
     assert_that(same_tree).is_empty()
 
 
+def test_extensionless_script_owns_its_bats_test() -> None:
+    """An extensionless ``scripts/`` file is source and pairs with its bats test."""
+    groups = _group_source_test_pairs(
+        file_paths=["scripts/ci/run", "scripts/ci/test_run.bats"],
+        assigned=set(),
+    )
+
+    assert_that(groups).is_equal_to([["scripts/ci/run", "scripts/ci/test_run.bats"]])
+
+
 def test_stem_uniqueness_counts_sources_already_assigned() -> None:
     """A same-stem source claimed by an earlier pass still blocks the fallback."""
     from lintro.ai.review.chunker.grouping import _group_source_test_pairs
