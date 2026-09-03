@@ -9,6 +9,8 @@
 #   RETRY_LINT_RESULT
 #   PRIMARY_LINT_STATUS, PRIMARY_LINT_EXIT_CODE, PRIMARY_LINT_CONCLUSION
 #   RETRY_LINT_STATUS, RETRY_LINT_EXIT_CODE, RETRY_LINT_CONCLUSION
+#   PRIMARY_LINT_TIMEOUT_FLAKE, PRIMARY_LINT_TIMED_OUT_TOOLS
+#   RETRY_LINT_TIMEOUT_FLAKE, RETRY_LINT_TIMED_OUT_TOOLS
 
 set -euo pipefail
 
@@ -24,7 +26,9 @@ Usage:
 
 Writes result, passed, status, exit-code, and infra-flake to GITHUB_OUTPUT
 when set. infra-flake=true means the gate passed by absorbing runner noise
-rather than by observing a successful lint run.
+rather than by observing a successful lint run — including a tool-execution
+timeout in the authoritative lint attempt (#1653), which is absorbed only on
+that attempt's own zero-findings report.
 EOF
 	exit 0
 fi
@@ -72,18 +76,27 @@ upstream_result="$(grep -E '^upstream-result=' "${EVALUATE_OUTPUT}" | tail -1 | 
 status_output="$(grep -E '^status-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 exit_code_output="$(grep -E '^exit-code-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 upstream_conclusion="$(grep -E '^upstream-conclusion=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
-# evaluate-code-quality-gate.sh also writes verdict-source (docker-build
-# or lint). Nothing consumes it yet: it exists so lint-only
-# evidence can be scoped to a lint verdict once the authoritative run publishes
-# a structured report (#1653, lgtm-ci#746) — an upstream build failure also
-# surfaces as failed/1 here, so that scoping is mandatory before any such
-# evidence is trusted.
+verdict_source="$(grep -E '^verdict-source=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
+timeout_flake="$(grep -E '^timeout-flake-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
+timed_out_tools="$(grep -E '^timed-out-tools-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
+
+# The authoritative attempt's own tool-execution timeout verdict is lint-only
+# evidence (#1653, lgtm-ci#746): an upstream docker-build failure is normalized
+# to failed/1 here too, so it would be indistinguishable from a lint verdict.
+# Scope it by verdict-source and drop it for anything that is not a lint
+# verdict, so a build failure can never be absorbed as a lint timeout.
+if [[ "${verdict_source}" != "lint" ]]; then
+	timeout_flake=false
+	timed_out_tools=""
+fi
 
 if UPSTREAM_RESULT="${upstream_result}" \
 	STATUS_OUTPUT="${status_output}" \
 	STATUS_EXPECTED=passed \
 	EXIT_CODE_OUTPUT="${exit_code_output}" \
 	UPSTREAM_CONCLUSION="${upstream_conclusion}" \
+	TIMEOUT_FLAKE="${timeout_flake}" \
+	TIMED_OUT_TOOLS="${timed_out_tools}" \
 	GITHUB_OUTPUT="${ASSERT_OUTPUT}" \
 	bash "${SCRIPT_DIR}/assert-required-check.sh"; then
 	# infra-flake=true means the required check is green without a lint

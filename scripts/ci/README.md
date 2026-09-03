@@ -76,6 +76,17 @@ and absorbs. Missing outputs are _not_ evidence of a flake and stay red; the bou
 the gate does absorb noise it sets `infra-flake=true`, and `publish` refuses to promote
 an image on that basis.
 
+Tool-execution timeouts (#1653, #2242): a per-tool timeout inside lintro also reports
+`status=failed` / `exit-code=1`, so it needs its own positive evidence. The reusable
+lint workflow classifies the authoritative run's own JSON report and publishes
+`timeout-flake` / `timed-out-tools`; `evaluate-code-quality-gate.sh` carries those
+through the same attempt selection as the verdict, `run-code-quality-gate.sh` scopes
+them to `verdict-source=lint`, and `is-infra-flake-failure.sh` absorbs only an exact
+`true`. The classifier fails closed — it needs at least one timed-out tool, zero
+findings from every tool, and no non-timeout failure. Changed-scope runs publish no JSON
+report, so they pass an empty flag and stay red: that asymmetry is a decision, not an
+omission.
+
 ## Local Development
 
 Many scripts support `--help`. Check individual headers for usage. Dogfooding scripts

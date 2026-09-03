@@ -588,22 +588,16 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
         Path(output_path).unlink(missing_ok=True)
 
 
-# --- Tool-execution timeout classification (#1653) ---------------------------
+# --- Tool-execution timeout classification (#1653, #2242) --------------------
 
 
-def test_gate_never_absorbs_on_a_timeout_claim() -> None:
-    """A tool-timeout claim must not green a lint-shaped verdict.
+def test_gate_never_absorbs_without_timeout_evidence() -> None:
+    """A lint-shaped verdict with no timeout evidence stays red.
 
-    #1653 originally absorbed a lint failure when the no-silent-skip gate
-    reported ``timeout-flake=true``. That evidence comes from a *different*
-    job which always lints the full repo, so it is not evidence about the
-    authoritative run: under ``lint-scope == 'changed'`` the verdict comes from
-    changed files only, and a tool that times out contributes zero findings
-    precisely because it did not finish. A genuine finding could therefore be
-    absorbed and the required check turned green (lgtm-ci#746).
-
-    The absorb was removed. This asserts it stays removed: an unknown
-    environment variable must not change the classification of a lint verdict.
+    A per-tool execution timeout makes lintro exit ``1`` with
+    ``status=failed`` — indistinguishable from a genuine verdict by outputs
+    alone. Absorption therefore needs positive evidence; absence of the flag
+    is never evidence.
     """
     proc = _run_script(
         "scripts/ci/is-infra-flake-failure.sh",
@@ -611,31 +605,254 @@ def test_gate_never_absorbs_on_a_timeout_claim() -> None:
             "UPSTREAM_RESULT": "failure",
             "STATUS_OUTPUT": "failed",
             "EXIT_CODE_OUTPUT": "1",
-            # Whatever a future caller passes, a real lint verdict stays red.
-            "TIMEOUT_FLAKE": "true",
+            "TIMEOUT_FLAKE": "",
         },
     )
 
     assert_that(proc.returncode).is_equal_to(1)
 
 
-def test_gate_scripts_carry_no_timeout_flake_plumbing() -> None:
-    """No gate script may consume a tool-timeout flag.
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "false",
+        "True",
+        "TRUE",
+        "yes",
+        "1",
+        " true",
+        "true ",
+        "maybe",
+    ],
+)
+def test_infra_flake_absorbs_only_the_exact_true_literal(flag: str) -> None:
+    """Anything but the literal ``true`` must fail closed and stay red."""
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+            "TIMEOUT_FLAKE": flag,
+        },
+    )
 
-    Guards against the absorb being reintroduced by wiring the flag back in
-    (lgtm-ci#746). A sound implementation must classify the authoritative
-    run's own structured report, which the upstream reusable lint workflow
-    does not publish today.
+    assert_that(proc.returncode).is_equal_to(1)
+
+
+def test_infra_flake_absorbs_the_authoritative_timeout_verdict() -> None:
+    """``timeout-flake=true`` from the same attempt is non-blocking (#2242).
+
+    The reusable lint workflow computes the flag from the authoritative run's
+    own JSON report and fails closed: it needs at least one timed-out tool,
+    zero findings from every tool, and no non-timeout failure.
     """
-    for name in (
-        "is-infra-flake-failure.sh",
-        "assert-required-check.sh",
-        "run-code-quality-gate.sh",
-    ):
-        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(
-            encoding="utf-8",
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+            "TIMEOUT_FLAKE": "true",
+            "TIMED_OUT_TOOLS": "mypy,semgrep",
+        },
+    )
+
+    assert_that(proc.returncode).is_equal_to(0)
+    assert_that(proc.stdout).contains("mypy,semgrep")
+
+
+@pytest.mark.parametrize(
+    ("primary_flag", "retry_flag", "expected"),
+    [
+        # The retry is authoritative here, so only its own verdict counts: a
+        # stale flag from the losing primary must not be paired with it.
+        ("true", "false", "timeout-flake-output=false"),
+        ("false", "true", "timeout-flake-output=true"),
+    ],
+)
+def test_evaluate_gate_takes_timeout_evidence_from_the_effective_attempt(
+    *,
+    primary_flag: str,
+    retry_flag: str,
+    expected: str,
+) -> None:
+    """Timeout evidence follows the same attempt precedence as the verdict."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": primary_flag,
+                "RETRY_LINT_RESULT": "failure",
+                "RETRY_LINT_STATUS": "failed",
+                "RETRY_LINT_EXIT_CODE": "1",
+                "RETRY_LINT_TIMEOUT_FLAKE": retry_flag,
+            },
         )
-        assert_that(script).described_as(name).does_not_contain("TIMEOUT_FLAKE")
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(Path(output_path).read_text()).contains(expected)
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_evaluate_gate_drops_timeout_evidence_on_a_build_failure() -> None:
+    """Lint-only evidence must never be attached to a docker-build verdict."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "failure",
+                "PRIMARY_LINT_RESULT": "success",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("verdict-source=docker-build")
+        assert_that(output).contains("timeout-flake-output=false")
+        assert_that(output).does_not_contain("timeout-flake-output=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_evaluate_gate_sanitizes_the_timed_out_tool_list() -> None:
+    """The log-only tool list is reduced to tool-name characters."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy;rm -rf /$(id)",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("timed-out-tools-output=mypyrm-rf")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_absorbs_an_authoritative_tool_timeout() -> None:
+    """End-to-end: a proven tool timeout greens the gate as an infra flake."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "semgrep",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=success")
+        # The gate is green without a lint verdict, so `publish` must still
+        # refuse to promote the image built from an incompletely linted tree.
+        assert_that(output).contains("infra-flake=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_stays_red_for_a_changed_scope_timeout() -> None:
+    """Changed-files scope has no timeout verdict and stays fail-closed.
+
+    ``dogfooding-lint-changed`` publishes no JSON report, so the workflow
+    passes an empty flag. Changed-scope runs lint a handful of files, so a
+    per-tool timeout there is unlikely and worth a human look — this
+    asymmetry is a decision (#2242), not an omission.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=failure")
+        assert_that(output).contains("passed=false")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_does_not_absorb_a_build_failure_on_timeout_evidence() -> None:
+    """A docker-build failure normalizes to failed/1 and must stay red.
+
+    ``run-code-quality-gate.sh`` scopes the timeout evidence by
+    ``verdict-source``, so lint-only proof can never green a build failure.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "failure",
+                "PRIMARY_LINT_RESULT": "success",
+                "PRIMARY_LINT_STATUS": "passed",
+                "PRIMARY_LINT_EXIT_CODE": "0",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        assert_that(Path(output_path).read_text()).contains("passed=false")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_never_consumes_the_skip_gate_verdict() -> None:
+    """Only the authoritative attempt's own outputs may reach the gate.
+
+    ``dogfood-skip-gate`` runs its own copy of the classifier over a full-repo
+    lint that is a different run from the authoritative one, so its verdict
+    must stay diagnostic. The gate reads ``*_LINT_TIMEOUT_FLAKE`` from the
+    reusable lint workflow only.
+    """
+    for name in ("run-code-quality-gate.sh", "evaluate-code-quality-gate.sh"):
+        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(encoding="utf-8")
+        assert_that(script).described_as(name).does_not_contain("dogfood-skip-gate")
+        assert_that(script).described_as(name).does_not_contain("SKIP_GATE")
 
 
 @pytest.mark.parametrize(
