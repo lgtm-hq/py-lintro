@@ -483,3 +483,76 @@ def test_same_stem_non_source_files_do_not_spoil_uniqueness() -> None:
             ],
         ],
     )
+
+
+def test_diff_and_patch_artifacts_do_not_spoil_uniqueness() -> None:
+    """A changed ``.diff`` next to a same-stem script is not a source file."""
+    from lintro.ai.review.chunker.grouping import _group_source_test_pairs
+
+    groups = _group_source_test_pairs(
+        file_paths=[
+            "docs/migrate-docs-content.diff",
+            "scripts/ci/site/migrate-docs-content.py",
+            "tests/scripts/ci/test_migrate_docs_content.py",
+        ],
+        assigned=set(),
+    )
+
+    assert_that(groups).is_equal_to(
+        [
+            [
+                "scripts/ci/site/migrate-docs-content.py",
+                "tests/scripts/ci/test_migrate_docs_content.py",
+            ],
+        ],
+    )
+
+
+def test_chunker_keeps_hyphenated_pair_when_a_workflow_claims_the_script() -> None:
+    """The workflow-first pass absorbs the non-mirrored test with its script.
+
+    Without the unique-stem wiring in that pass, the workflow group would claim
+    the script alone, the test would become a singleton chunk, and the later
+    source/test pass could not repair the split (#2264, #1914).
+    """
+    context = make_review_context(
+        unified_diff=load_review_fixture("chunk_hyphenated_script_workflow.diff")
+        + load_review_fixture("chunk_hyphenated_script_source.diff")
+        + load_review_fixture("chunk_hyphenated_script_test.diff"),
+        changed_files=[
+            ChangedFile(
+                path=".github/workflows/site.yml",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+            ChangedFile(
+                path="scripts/ci/site/migrate-docs-content.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+            ChangedFile(
+                path="tests/scripts/ci/test_migrate_docs_content.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+    )
+    classifications = classify_changed_files(files=context.changed_files)
+    result = chunk_review_context(
+        context=context,
+        max_tokens=10_000,
+        classifications=classifications,
+    )
+    workflow_chunk = next(
+        chunk for chunk in result.chunks if ".github/workflows/site.yml" in chunk.files
+    )
+
+    assert_that(workflow_chunk.files).contains(
+        ".github/workflows/site.yml",
+        "scripts/ci/site/migrate-docs-content.py",
+        "tests/scripts/ci/test_migrate_docs_content.py",
+    )
+    assert_that(workflow_chunk.relationship).is_equal_to(REL_WORKFLOW_SCRIPT_TEST)

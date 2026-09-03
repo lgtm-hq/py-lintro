@@ -16,6 +16,7 @@ _GENERIC_IDENTIFY_TAGS: frozenset[str] = frozenset({"plain-text", "text"})
 # coverage lives in identify's maintained map — not a local suffix table.
 _NON_SOURCE_IDENTIFY_TAGS: frozenset[str] = frozenset(
     {
+        "diff",
         "audio",
         "binary",
         "csv",
