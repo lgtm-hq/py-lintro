@@ -274,3 +274,92 @@ def test_absolute_outside_workspace_fails_before_docker(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("inside the mounted workspace")
     assert_that(log_path.read_text()).is_empty()
+
+
+_FAILING_CHECKER_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >>"${DOCKER_ARGS_LOG}"
+if [[ "$*" == *"--entrypoint python3"* ]]; then
+\texit 1
+fi
+exit 0
+"""
+
+
+def test_completed_gate_publishes_its_verdict(tmp_path: Path) -> None:
+    """A gate that reaches a verdict publishes status/exit-code (#2246).
+
+    The nightly retry and the failure classifier both key off these outputs:
+    a published verdict means the gate ran to completion, so the failure (if
+    any) is a real non-allowlisted skip rather than a runner kill.
+    """
+    report = tmp_path / "results.json"
+    _write_report(report)
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json="results.json",
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    written = output_path.read_text()
+    assert_that(written).contains("status=passed")
+    assert_that(written).contains("exit-code=0")
+
+
+def test_failing_skip_check_publishes_a_failed_verdict(tmp_path: Path) -> None:
+    """A non-allowlisted skip is reported as a verdict, not as a missing one."""
+    report = tmp_path / "results.json"
+    _write_report(report)
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    (bin_dir / "docker").write_text(_FAILING_CHECKER_STUB)
+    (bin_dir / "docker").chmod(0o755)
+    output_path = tmp_path / "github-output"
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json="results.json",
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    written = output_path.read_text()
+    assert_that(written).contains("status=failed")
+    assert_that(written).contains("exit-code=1")
+
+
+def test_configuration_error_publishes_no_verdict(tmp_path: Path) -> None:
+    """A gate that never reaches the skip check leaves the verdict empty.
+
+    That absence is what a killed runner looks like to the nightly workflow,
+    so it must never be filled in by a path that did not check anything.
+    """
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    output_path = tmp_path / "github-output"
+    output_path.touch()
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json="missing-report.json",
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(output_path.read_text()).does_not_contain("status=")
