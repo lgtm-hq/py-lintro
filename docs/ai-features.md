@@ -318,11 +318,13 @@ A finding always has a surface. When GitHub refuses the inline review batch — 
 finding anchors to a line that is not in the PR's diff — the affected findings are
 folded into the sticky comment in full, and the sticky says which of the two happened:
 
-- `GitHub rate limit (HTTP <status>)` — the token was throttled, by the primary API
-  quota or the secondary content-creation limit (HTTP 403 or 429); the next round
-  retries posting the comments and may be throttled again.
+- `GitHub rate limit (HTTP <status>)` — the token was throttled: any HTTP 429, or a 403
+  whose message names a rate limit (primary API quota or the secondary content-creation
+  limit); the next round retries posting the comments and may be throttled again.
 - `some findings map to no line in this PR's diff (HTTP 422)` — GitHub rejected a
-  comment's anchor. This wording is used **only** for that rejection.
+  comment's anchor (a 422 whose errors name `line` or `position`). The same phrase
+  without an `HTTP` suffix marks findings lintro itself could not map to a diff line
+  before posting; no request was rejected in that case.
 - `this token is not permitted to post reviews on this PR (HTTP 403)` — a 401 or 403
   whose message names no rate limit; the status shown is the one GitHub returned.
 - `the inline review comments could not be posted` — anything else, including a request

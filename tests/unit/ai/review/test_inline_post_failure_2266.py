@@ -17,6 +17,7 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
+from lintro.ai.integrations.github_pr import _error_message
 from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
@@ -107,6 +108,7 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
         (403, _RATE_LIMIT_MESSAGE, InlinePostFailureKind.RATE_LIMITED),
         (429, _RATE_LIMIT_MESSAGE, InlinePostFailureKind.RATE_LIMITED),
         (403, "API rate limit exceeded for user", InlinePostFailureKind.RATE_LIMITED),
+        (429, "Too Many Requests", InlinePostFailureKind.RATE_LIMITED),
         (422, _LINE_MESSAGE, InlinePostFailureKind.LINE_MAPPING),
         (
             403,
@@ -123,6 +125,7 @@ def _degraded_sticky(*, result: ReviewResult, response: GitHubApiResponse) -> st
         "kind=rate_limited",
         "kind=rate_limited_429",
         "kind=rate_limited_primary",
+        "kind=rate_limited_429_terse",
         "kind=line_mapping",
         "kind=permission_forbidden",
         "kind=permission_unauthorized",
@@ -304,3 +307,76 @@ def test_secondary_rate_limit_is_classified_on_both_statuses(status: int) -> Non
     )
 
     assert_that(kind).is_equal_to(InlinePostFailureKind.RATE_LIMITED)
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (
+            422,
+            json.dumps(
+                {
+                    "message": "Validation Failed",
+                    "errors": [
+                        {
+                            "resource": "PullRequestReviewComment",
+                            "code": "custom",
+                            "field": "line",
+                            "message": "line must be part of the diff",
+                        },
+                    ],
+                },
+            ),
+            InlinePostFailureKind.LINE_MAPPING,
+        ),
+        (
+            422,
+            json.dumps(
+                {
+                    "message": "Validation Failed",
+                    "errors": [
+                        {
+                            "resource": "PullRequestReviewComment",
+                            "code": "custom",
+                            "field": "position",
+                            "message": "must be within the diff",
+                        },
+                    ],
+                },
+            ),
+            InlinePostFailureKind.LINE_MAPPING,
+        ),
+        (
+            403,
+            json.dumps({"message": _RATE_LIMIT_MESSAGE}),
+            InlinePostFailureKind.RATE_LIMITED,
+        ),
+        (
+            422,
+            json.dumps({"message": "Validation Failed", "errors": ["pipeline"]}),
+            InlinePostFailureKind.OTHER,
+        ),
+    ],
+    ids=[
+        "folded_line_field",
+        "folded_position_field",
+        "folded_secondary_rate_limit",
+        "folded_unrelated_422",
+    ],
+)
+def test_real_github_bodies_classify_after_folding(
+    status: int,
+    body: str,
+    expected: InlinePostFailureKind,
+) -> None:
+    """A raw GitHub error body reaches the right kind once errors[] is folded in.
+
+    A 422 says only "Validation Failed" until its per-field entries are merged,
+    so this wires ``_error_message`` to ``from_response`` the way the reporter
+    does at runtime.
+    """
+    message = _error_message(body=body)
+
+    kind = InlinePostFailureKind.from_response(status=status, message=message)
+
+    assert_that(kind).is_equal_to(expected)

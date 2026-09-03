@@ -25,8 +25,8 @@ class InlinePostFailureKind(StrEnum):
     line-mapping problem.
 
     Attributes:
-        RATE_LIMITED: GitHub throttled this token (HTTP 403 or 429 whose
-            message mentions a rate limit, primary or secondary).
+        RATE_LIMITED: GitHub throttled this token: any HTTP 429, or a 403
+            whose message names a rate limit (primary or secondary).
         LINE_MAPPING: A comment anchored to a line that is not in the diff.
         PERMISSION: The token may not post reviews on this pull request.
         OTHER: Any other rejection, including transport failures where GitHub
@@ -57,9 +57,9 @@ class InlinePostFailureKind(StrEnum):
             :attr:`OTHER` rather than to a specific cause the code never saw.
         """
         text = message.lower()
-        # GitHub answers a throttle with 403 on the reviews endpoint and 429
-        # on others; primary and secondary limits both name a "rate limit".
-        if status in (403, 429) and _RATE_LIMIT in text:
+        # 429 is only ever a throttle. A 403 is one only when GitHub says so:
+        # primary and secondary limits both name a "rate limit" in the body.
+        if status == 429 or (status == 403 and _RATE_LIMIT in text):
             return cls.RATE_LIMITED
         if status == 422 and _LINE_ANCHOR_RE.search(text):
             return cls.LINE_MAPPING
