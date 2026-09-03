@@ -33,11 +33,11 @@ describe('collectDocResources', () => {
           'Read [gosu](https://github.com/tianon/gosu).',
         ].join('\n'),
       ],
-      currentDocId: 'usage/docker',
+      currentDocId: 'guides/docker',
     });
 
     expect(resources).toEqual([
-      { label: 'Configuration', href: 'docs/usage/configuration/' },
+      { label: 'Configuration', href: 'docs/guides/configuration/' },
       { label: 'gosu', href: 'https://github.com/tianon/gosu' },
     ]);
   });
@@ -76,22 +76,22 @@ describe('collectDocResources', () => {
           '[Getting Started → Troubleshooting](getting-started.md#troubleshooting)',
         ].join('\n'),
       ],
-      currentDocId: 'getting-started/hub',
+      currentDocId: 'start/overview',
     });
 
     expect(resources).toEqual([
-      { label: 'Quick Start', href: 'docs/usage/docker/#quick-start' },
-      { label: 'Troubleshooting', href: 'docs/getting-started/getting-started/#troubleshooting' },
+      { label: 'Quick Start', href: 'docs/guides/docker/#quick-start' },
+      { label: 'Troubleshooting', href: 'docs/start/getting-started/#troubleshooting' },
     ]);
   });
 
   it('drops markdown links whose targets were not migrated', () => {
     const resources = collectDocResources({
-      markdown: ['See [Comparison](comparison.md) and [Docker](docker.md).'],
-      currentDocId: 'getting-started/hub',
+      markdown: ['See [Missing](does-not-exist.md) and [Docker](docker.md).'],
+      currentDocId: 'start/overview',
     });
 
-    expect(resources).toEqual([{ label: 'Docker', href: 'docs/usage/docker/' }]);
+    expect(resources).toEqual([{ label: 'Docker', href: 'docs/guides/docker/' }]);
   });
 
   it('enriches generic table labels from href targets', () => {
@@ -102,11 +102,11 @@ describe('collectDocResources', () => {
           '| pydoclint | [Analysis](tool-analysis/pydoclint-analysis.md) |',
         ].join('\n'),
       ],
-      currentDocId: 'getting-started/hub',
+      currentDocId: 'start/overview',
     });
 
     expect(resources).toEqual([
-      { label: 'Ruff Config', href: 'docs/usage/configuration/#ruff-configuration' },
+      { label: 'Ruff Config', href: 'docs/guides/configuration/#ruff-configuration' },
       { label: 'Pydoclint Analysis', href: 'docs/tools/pydoclint/' },
     ]);
   });

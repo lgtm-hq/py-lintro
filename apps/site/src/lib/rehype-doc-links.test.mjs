@@ -100,3 +100,48 @@ describe('rehypeDocLinks', () => {
     expect(output).not.toContain('<a');
   });
 });
+
+describe('rehypeDocLinks cross-page resolution', () => {
+  /**
+   * @param {string} html
+   * @param {string} docPath
+   * @returns {Promise<string>}
+   */
+  async function transformAs(html, docPath) {
+    const file = await rehype()
+      .data('settings', { fragment: true })
+      .use(rehypeDocLinks, BASE)
+      .use(rehypeStringify)
+      .process({ value: html, path: docPath });
+
+    return String(file);
+  }
+
+  it('resolves authored .md cross-links to their migrated routes', async () => {
+    const output = await transformAs(
+      '<p><a href="../configuration.md#ruff-configuration">Ruff config</a></p>',
+      '/repo/apps/site/src/content/docs/tools/ruff.md'
+    );
+
+    expect(output).toContain('href="/Rustume/docs/guides/configuration/#ruff-configuration"');
+    expect(output).toContain('Ruff config');
+  });
+
+  it('resolves directory links to the section landing page', async () => {
+    const output = await transformAs(
+      '<p><a href="tool-analysis/">Tool analysis</a></p>',
+      '/repo/apps/site/src/content/docs/start/overview.md'
+    );
+
+    expect(output).toContain('href="/Rustume/docs/tools/"');
+  });
+
+  it('unwraps links whose target was not migrated', async () => {
+    const output = await transformAs(
+      '<p><a href="does-not-exist.md">Missing</a> page</p>',
+      '/repo/apps/site/src/content/docs/start/overview.md'
+    );
+
+    expect(output).toBe('<p>Missing page</p>');
+  });
+});

@@ -1,0 +1,37 @@
+---
+import { getCollection } from 'astro:content';
+import {
+  CATEGORY_LABELS,
+  categoryLandingHref,
+  isSectionOverview,
+  type DocCategory,
+} from '../../data/docs-nav';
+
+interface Props {
+  category: DocCategory;
+  slug: string;
+  title: string;
+}
+
+const { category, slug, title } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const allDocs = await getCollection('docs', ({ data }) => !data.draft);
+const sectionHref = categoryLandingHref(allDocs, category, base);
+const onOverview = isSectionOverview(slug, category);
+---
+
+<nav class="docs-breadcrumbs" aria-label="Breadcrumb" data-pagefind-ignore>
+  <a href={`${base}docs/`}>Docs</a>
+  <span class="docs-breadcrumbs-sep" aria-hidden="true">›</span>
+  {
+    onOverview ? (
+      <span aria-current="page">{CATEGORY_LABELS[category]}</span>
+    ) : (
+      <>
+        <a href={sectionHref}>{CATEGORY_LABELS[category]}</a>
+        <span class="docs-breadcrumbs-sep" aria-hidden="true">›</span>
+        <span aria-current="page">{title}</span>
+      </>
+    )
+  }
+</nav>

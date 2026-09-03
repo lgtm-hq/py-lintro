@@ -1,0 +1,260 @@
+/*
+ * Workbench — the site's native theme, in a light and a dark variant.
+ *
+ * Two token layers live here:
+ *   --wb-*     the Workbench design tokens every site component is built on
+ *   --turbo-*  the turbo-themes contract, mapped from the Workbench palette so
+ *              docs prose, tables, callouts and dropdowns pick it up as well
+ *
+ * Any other turbo flavor selected from the theme picker loads its own
+ * --turbo-* file; the bridge at the bottom derives --wb-* from those tokens so
+ * the homepage and docs chrome stay coherent under every theme.
+ */
+
+:root {
+  --wb-font-display: 'Sora', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  --wb-font-body: 'Public Sans', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  --wb-font-mono: 'Fira Code', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --wb-radius: 10px;
+  --wb-radius-sm: 6px;
+}
+
+[data-theme='workbench'] {
+  color-scheme: light;
+
+  --wb-ground: #f1f3f6;
+  --wb-surface: #fff;
+  --wb-surface-2: #f7f8fa;
+  --wb-ink: #101827;
+  --wb-muted: #5a6473;
+  --wb-hair: #d8dee6;
+  --wb-accent: #e9a21b;
+  --wb-accent-text: #8a5a00;
+  --wb-accent-ink: #1a1200;
+  --wb-accent-soft: #fbefd3;
+  --wb-navy: #1b2a4a;
+  --wb-chrome: #1b2a4a;
+  --wb-chrome-ink: #e9edf5;
+  --wb-chrome-muted: #9aa7bf;
+  --wb-chrome-hair: #2c3d63;
+  --wb-terminal: #0a0f1a;
+  --wb-pass: #2e9e6b;
+  --wb-warn: #d08a00;
+  --wb-fail: #d64545;
+  --wb-pass-soft: #dff3e9;
+  --wb-warn-soft: #fbebc7;
+  --wb-fail-soft: #fbe1e1;
+  --wb-pass-text: #1f6b48;
+  --wb-warn-text: #7a5200;
+  --wb-fail-text: #a32d2d;
+  --wb-shadow: 0 1px 2px rgba(16, 24, 39, 0.06), 0 8px 24px rgba(16, 24, 39, 0.06);
+
+  --turbo-bg-base: var(--wb-ground);
+  --turbo-bg-surface: var(--wb-surface);
+  --turbo-bg-overlay: var(--wb-surface-2);
+  --turbo-text-primary: var(--wb-ink);
+  --turbo-text-secondary: var(--wb-muted);
+  --turbo-text-inverse: #fff;
+  --turbo-brand-primary: var(--wb-accent);
+  --turbo-brand-primary-text: var(--wb-accent-ink);
+  --turbo-accent-link: #1f4fb8;
+  --turbo-link-default: #1f4fb8;
+  --turbo-state-info: #1f4fb8;
+  --turbo-state-success: var(--wb-pass);
+  --turbo-state-warning: var(--wb-warn);
+  --turbo-state-danger: var(--wb-fail);
+  --turbo-border-default: var(--wb-hair);
+  --turbo-heading-h1: var(--wb-navy);
+  --turbo-heading-h2: var(--wb-navy);
+  --turbo-heading-h3: var(--wb-ink);
+  --turbo-heading-h4: var(--wb-ink);
+  --turbo-heading-h5: var(--wb-ink);
+  --turbo-heading-h6: var(--wb-muted);
+  --turbo-body-primary: var(--wb-ink);
+  --turbo-body-secondary: var(--wb-muted);
+  --turbo-code-inline-fg: #8a4b00;
+  --turbo-code-inline-bg: var(--wb-surface-2);
+  --turbo-code-block-fg: #cfd8e6;
+  --turbo-code-block-bg: var(--wb-terminal);
+  --turbo-syntax-fg: #cfd8e6;
+  --turbo-syntax-bg: var(--wb-terminal);
+  --turbo-syntax-comment: #7f8da6;
+  --turbo-syntax-keyword: #8fd3f4;
+  --turbo-syntax-string: #ffd46a;
+  --turbo-syntax-number: #5fd39a;
+  --turbo-syntax-function: #8fd3f4;
+  --turbo-syntax-type: #c7b8ff;
+  --turbo-syntax-variable: #e6eaf0;
+  --turbo-syntax-operator: #9aa7bf;
+  --turbo-syntax-punctuation: #9aa7bf;
+  --turbo-syntax-tag: #ff7b7b;
+  --turbo-syntax-attribute: #8fd3f4;
+  --turbo-syntax-value: #ffd46a;
+  --turbo-syntax-error: #ff7b7b;
+  --turbo-syntax-deleted: #ff7b7b;
+  --turbo-syntax-inserted: #5fd39a;
+  --turbo-table-border: var(--wb-hair);
+  --turbo-table-stripe: var(--wb-surface-2);
+  --turbo-table-thead-bg: var(--wb-surface-2);
+  --turbo-table-cell-bg: var(--wb-surface);
+  --turbo-table-header-fg: var(--wb-muted);
+  --turbo-card-bg: var(--wb-surface);
+  --turbo-card-border: var(--wb-hair);
+  --turbo-card-header-bg: var(--wb-surface-2);
+  --turbo-card-footer-bg: var(--wb-surface-2);
+  --turbo-message-bg: var(--wb-surface);
+  --turbo-message-header-bg: var(--wb-surface-2);
+  --turbo-message-border: var(--wb-hair);
+  --turbo-message-body-fg: var(--wb-ink);
+  --turbo-blockquote-bg: var(--wb-surface-2);
+  --turbo-blockquote-border: var(--wb-accent);
+  --turbo-blockquote-fg: var(--wb-ink);
+  --turbo-panel-bg: var(--wb-surface);
+  --turbo-panel-header-bg: var(--wb-surface-2);
+  --turbo-panel-header-fg: var(--wb-ink);
+  --turbo-panel-border: var(--wb-hair);
+  --turbo-dropdown-bg: var(--wb-surface);
+  --turbo-dropdown-border: var(--wb-hair);
+  --turbo-dropdown-item-hover: var(--wb-surface-2);
+  --turbo-selection-bg: var(--wb-accent-soft);
+  --turbo-selection-fg: var(--wb-ink);
+  --turbo-font-sans: var(--wb-font-body);
+  --turbo-font-mono: var(--wb-font-mono);
+}
+
+[data-theme='workbench-dark'] {
+  color-scheme: dark;
+
+  --wb-ground: #0f141b;
+  --wb-surface: #161c25;
+  --wb-surface-2: #1c2330;
+  --wb-ink: #e6eaf0;
+  --wb-muted: #97a2b3;
+  --wb-hair: #273140;
+  --wb-accent: #e9a21b;
+  --wb-accent-text: #f0b74a;
+  --wb-accent-ink: #1a1200;
+  --wb-accent-soft: #3a2c0e;
+  --wb-navy: #bfcbe6;
+  --wb-chrome: #0b1220;
+  --wb-chrome-ink: #e6eaf0;
+  --wb-chrome-muted: #8a97b0;
+  --wb-chrome-hair: #1e2a42;
+  --wb-terminal: #0a0f1a;
+  --wb-pass: #4cbf8a;
+  --wb-warn: #e5a63a;
+  --wb-fail: #ef6b6b;
+  --wb-pass-soft: #163325;
+  --wb-warn-soft: #3a2c0e;
+  --wb-fail-soft: #3d1a1a;
+  --wb-pass-text: #5fd39a;
+  --wb-warn-text: #f0b74a;
+  --wb-fail-text: #ff8a8a;
+  --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  --turbo-bg-base: var(--wb-ground);
+  --turbo-bg-surface: var(--wb-surface);
+  --turbo-bg-overlay: var(--wb-surface-2);
+  --turbo-text-primary: var(--wb-ink);
+  --turbo-text-secondary: var(--wb-muted);
+  --turbo-text-inverse: #0f141b;
+  --turbo-brand-primary: var(--wb-accent);
+  --turbo-brand-primary-text: var(--wb-accent-ink);
+  --turbo-accent-link: #8fb4ff;
+  --turbo-link-default: #8fb4ff;
+  --turbo-state-info: #8fb4ff;
+  --turbo-state-success: var(--wb-pass);
+  --turbo-state-warning: var(--wb-warn);
+  --turbo-state-danger: var(--wb-fail);
+  --turbo-border-default: var(--wb-hair);
+  --turbo-heading-h1: var(--wb-ink);
+  --turbo-heading-h2: var(--wb-ink);
+  --turbo-heading-h3: var(--wb-ink);
+  --turbo-heading-h4: var(--wb-ink);
+  --turbo-heading-h5: var(--wb-ink);
+  --turbo-heading-h6: var(--wb-muted);
+  --turbo-body-primary: var(--wb-ink);
+  --turbo-body-secondary: var(--wb-muted);
+  --turbo-code-inline-fg: #f2c46a;
+  --turbo-code-inline-bg: var(--wb-surface-2);
+  --turbo-code-block-fg: #cfd8e6;
+  --turbo-code-block-bg: var(--wb-terminal);
+  --turbo-syntax-fg: #cfd8e6;
+  --turbo-syntax-bg: var(--wb-terminal);
+  --turbo-syntax-comment: #7f8da6;
+  --turbo-syntax-keyword: #8fd3f4;
+  --turbo-syntax-string: #ffd46a;
+  --turbo-syntax-number: #5fd39a;
+  --turbo-syntax-function: #8fd3f4;
+  --turbo-syntax-type: #c7b8ff;
+  --turbo-syntax-variable: #e6eaf0;
+  --turbo-syntax-operator: #9aa7bf;
+  --turbo-syntax-punctuation: #9aa7bf;
+  --turbo-syntax-tag: #ff7b7b;
+  --turbo-syntax-attribute: #8fd3f4;
+  --turbo-syntax-value: #ffd46a;
+  --turbo-syntax-error: #ff7b7b;
+  --turbo-syntax-deleted: #ff7b7b;
+  --turbo-syntax-inserted: #5fd39a;
+  --turbo-table-border: var(--wb-hair);
+  --turbo-table-stripe: var(--wb-surface-2);
+  --turbo-table-thead-bg: var(--wb-surface-2);
+  --turbo-table-cell-bg: var(--wb-surface);
+  --turbo-table-header-fg: var(--wb-muted);
+  --turbo-card-bg: var(--wb-surface);
+  --turbo-card-border: var(--wb-hair);
+  --turbo-card-header-bg: var(--wb-surface-2);
+  --turbo-card-footer-bg: var(--wb-surface-2);
+  --turbo-message-bg: var(--wb-surface);
+  --turbo-message-header-bg: var(--wb-surface-2);
+  --turbo-message-border: var(--wb-hair);
+  --turbo-message-body-fg: var(--wb-ink);
+  --turbo-blockquote-bg: var(--wb-surface-2);
+  --turbo-blockquote-border: var(--wb-accent);
+  --turbo-blockquote-fg: var(--wb-ink);
+  --turbo-panel-bg: var(--wb-surface);
+  --turbo-panel-header-bg: var(--wb-surface-2);
+  --turbo-panel-header-fg: var(--wb-ink);
+  --turbo-panel-border: var(--wb-hair);
+  --turbo-dropdown-bg: var(--wb-surface);
+  --turbo-dropdown-border: var(--wb-hair);
+  --turbo-dropdown-item-hover: var(--wb-surface-2);
+  --turbo-selection-bg: var(--wb-accent-soft);
+  --turbo-selection-fg: var(--wb-ink);
+  --turbo-font-sans: var(--wb-font-body);
+  --turbo-font-mono: var(--wb-font-mono);
+}
+
+/* Bridge: any turbo flavor picked from the theme menu feeds the --wb-* layer. */
+[data-theme]:not([data-theme='workbench']):not([data-theme='workbench-dark']) {
+  --wb-ground: var(--turbo-bg-base);
+  --wb-surface: var(--turbo-bg-surface);
+  --wb-surface-2: var(--turbo-bg-overlay);
+  --wb-ink: var(--turbo-text-primary);
+  --wb-muted: var(--turbo-text-secondary);
+  --wb-hair: var(--turbo-border-default);
+  --wb-accent: var(--turbo-brand-primary);
+  --wb-accent-text: var(--turbo-link-default, var(--turbo-brand-primary));
+  --wb-accent-ink: var(--turbo-brand-primary-text, var(--turbo-text-inverse));
+  --wb-accent-soft: color-mix(in srgb, var(--turbo-brand-primary) 18%, var(--turbo-bg-surface));
+  --wb-navy: var(--turbo-heading-h1);
+  --wb-chrome: var(--turbo-bg-surface);
+  --wb-chrome-ink: var(--turbo-text-primary);
+  --wb-chrome-muted: var(--turbo-text-secondary);
+  --wb-chrome-hair: var(--turbo-border-default);
+  --wb-terminal: var(--turbo-code-block-bg);
+  --wb-pass: var(--turbo-state-success);
+  --wb-warn: var(--turbo-state-warning);
+  --wb-fail: var(--turbo-state-danger);
+  --wb-pass-soft: color-mix(in srgb, var(--turbo-state-success) 18%, var(--turbo-bg-surface));
+  --wb-warn-soft: color-mix(in srgb, var(--turbo-state-warning) 18%, var(--turbo-bg-surface));
+  --wb-fail-soft: color-mix(in srgb, var(--turbo-state-danger) 18%, var(--turbo-bg-surface));
+  --wb-pass-text: color-mix(in srgb, var(--turbo-state-success) 80%, var(--turbo-text-primary));
+  --wb-warn-text: color-mix(in srgb, var(--turbo-state-warning) 80%, var(--turbo-text-primary));
+  --wb-fail-text: color-mix(in srgb, var(--turbo-state-danger) 80%, var(--turbo-text-primary));
+  --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+[data-appearance='dark']:not([data-theme='workbench-dark']) {
+  --wb-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+}

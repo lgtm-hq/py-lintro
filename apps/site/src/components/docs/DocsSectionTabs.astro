@@ -2,8 +2,7 @@
 import { getCollection } from 'astro:content';
 import {
   CATEGORY_LABELS,
-  CATEGORY_TAB_LABELS,
-  CORE_DOC_CATEGORIES,
+  DOC_CATEGORIES,
   categoryLandingHref,
   sectionDocCount,
   type DocCategory,
@@ -17,10 +16,9 @@ const { currentCategory } = Astro.props;
 const base = import.meta.env.BASE_URL;
 
 const allDocs = await getCollection('docs', ({ data }) => !data.draft);
-const tabs = CORE_DOC_CATEGORIES.map((key) => ({
+const tabs = DOC_CATEGORIES.map((key) => ({
   key,
-  label: CATEGORY_TAB_LABELS[key],
-  title: CATEGORY_LABELS[key],
+  label: CATEGORY_LABELS[key],
   href: categoryLandingHref(allDocs, key, base),
   count: sectionDocCount(allDocs, key),
 })).filter((t) => t.count > 0);
@@ -34,11 +32,11 @@ const tabs = CORE_DOC_CATEGORIES.map((key) => ({
           href={tab.href}
           class:list={['docs-section-tab', { active: tab.key === currentCategory }]}
           aria-current={tab.key === currentCategory ? 'true' : undefined}
-          title={`${tab.title} (${tab.count})`}
         >
-          <span class="docs-section-tab-short">{tab.label}</span>
-          <span class="docs-section-tab-full">{tab.title}</span>
-          <span class="docs-section-tab-count">{tab.count}</span>
+          {tab.label}
+          <span class="docs-section-tab-count" aria-label={`${tab.count} pages`}>
+            {tab.count}
+          </span>
         </a>
       ))
     }

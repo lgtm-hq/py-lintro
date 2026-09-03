@@ -1,0 +1,66 @@
+---
+import { docHref, docs } from '../../data/site-links';
+import { LINTRO_VERSION } from '../../data/lintro-version';
+import { TOOL_COUNT } from '../../data/tools-catalog';
+
+const NAMED_TOOLS = 5;
+
+const base = import.meta.env.BASE_URL;
+---
+
+<div class="hero-intro">
+  <span class="eyebrow">One CLI · {TOOL_COUNT} tools · optional AI review</span>
+  <h1>Every linter, formatter and scanner in your stack. One command, one output.</h1>
+  <p class="lede">
+    Lintro runs ruff, prettier, mypy, clippy, gitleaks and {TOOL_COUNT - NAMED_TOOLS} more behind a single interface,
+    normalizes their findings, and adds a bring-your-own-key AI reviewer that posts to your pull
+    requests.
+  </p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href={docHref(base, docs.gettingStarted)}>Get started</a>
+    <a class="btn btn-secondary" href={docHref(base, docs.aiFeatures)}>Read about AI review</a>
+  </div>
+  <ul class="hero-meta" aria-label="At a glance">
+    <li>v{LINTRO_VERSION}</li>
+    <li>MIT license</li>
+    <li>Same CLI locally and in CI</li>
+    <li>No Python needed via npm or Docker</li>
+  </ul>
+</div>
+
+<style>
+  .hero-intro {
+    display: grid;
+    gap: 16px;
+    max-width: 72ch;
+    margin-bottom: 36px;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--wb-muted);
+  }
+
+  .hero-meta li::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--wb-accent);
+    vertical-align: 2px;
+  }
+</style>

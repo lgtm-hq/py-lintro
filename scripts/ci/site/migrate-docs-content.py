@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Copy repo-root docs/ into apps/site/src/content/docs/ with Astro frontmatter."""
+"""Copy repo-root docs/ into apps/site/src/content/docs/ with Astro frontmatter.
+
+Every markdown file under ``docs/`` is mapped into one of six task-based site
+sections (start, guides, ai, tools, contribute, project). The mapping is a
+single table (:data:`DOC_SPECS` plus the tool-analysis rule) and the migration
+refuses to run when a source file is not covered, so a new doc cannot silently
+drop off the published site.
+"""
 
 from __future__ import annotations
 
 import re
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -11,120 +20,304 @@ DOCS_SRC = ROOT / "docs"
 DOCS_DEST = ROOT / "apps" / "site" / "src" / "content" / "docs"
 ROUTE_MAP_DEST = ROOT / "apps" / "site" / "src" / "generated" / "docs-route-map.ts"
 
-CATEGORY_MAP: dict[str, tuple[str, int]] = {
-    "getting-started.md": ("getting-started", 10),
-    "configuration.md": ("usage", 20),
-    "watch-mode.md": ("usage", 25),
-    "docker.md": ("usage", 30),
-    "github-integration.md": ("usage", 40),
-    "ai-features.md": ("usage", 50),
-    "ai-review-transports.md": ("usage", 55),
-    "troubleshooting.md": ("usage", 60),
-    "debugging.md": ("usage", 70),
-    "plugins.md": ("usage", 80),
-    "contributing.md": ("contributing", 10),
-    "style-guide.md": ("contributing", 20),
-    "lintro-self-use.md": ("contributing", 30),
-    "SHELL-SCRIPT-STYLE-GUIDE.md": ("contributing", 40),
+SECTION_LABELS: dict[str, str] = {
+    "start": "Start",
+    "guides": "Guides",
+    "ai": "AI",
+    "tools": "Tools",
+    "contribute": "Contribute",
+    "project": "Project",
 }
 
-ARCHITECTURE_ORDER = {
-    "README.md": 5,
-    "VISION.md": 10,
-    "ARCHITECTURE.md": 20,
-    "ROADMAP.md": 30,
+
+@dataclass(frozen=True)
+class DocSpec:
+    """Where one source markdown file lands on the site.
+
+    Attributes:
+        source: Path relative to ``docs/`` as authored in cross-links.
+        category: Site section key (one of :data:`SECTION_LABELS`).
+        slug: Destination id inside the section; ``index`` marks the section
+            landing page and nested ``adr/index`` style ids are allowed.
+        order: Sort position inside the section.
+        nav_title: Short label used in the sidebar and page header.
+        nav_group: Sidebar group key inside the section.
+    """
+
+    source: str
+    category: str
+    slug: str
+    order: int
+    nav_title: str
+    nav_group: str | None = None
+
+
+# Source files that intentionally never reach the site.
+SKIP_SOURCES: frozenset[str] = frozenset({"adr/template.md"})
+
+DOC_SPECS: tuple[DocSpec, ...] = (
+    # Start
+    DocSpec("README.md", "start", "overview", 5, "Overview"),
+    DocSpec(
+        "getting-started.md",
+        "start",
+        "getting-started",
+        10,
+        "Getting started",
+        "start",
+    ),
+    DocSpec("comparison.md", "start", "comparison", 20, "Comparison", "evaluate"),
+    # Guides
+    DocSpec("usage/README.md", "guides", "index", 5, "Guides"),
+    DocSpec(
+        "configuration.md",
+        "guides",
+        "configuration",
+        10,
+        "Configuration",
+        "setup",
+    ),
+    DocSpec("watch-mode.md", "guides", "watch-mode", 20, "Watch mode", "setup"),
+    DocSpec("docker.md", "guides", "docker", 30, "Docker", "setup"),
+    DocSpec("pre-commit.md", "guides", "pre-commit", 40, "Pre-commit", "ci"),
+    DocSpec(
+        "github-integration.md",
+        "guides",
+        "github-integration",
+        50,
+        "GitHub Actions",
+        "ci",
+    ),
+    DocSpec(
+        "npm-distribution.md",
+        "guides",
+        "npm-distribution",
+        60,
+        "npm distribution",
+        "distribute",
+    ),
+    DocSpec(
+        "usage/library-api.md",
+        "guides",
+        "library-api",
+        70,
+        "Library API",
+        "distribute",
+    ),
+    DocSpec(
+        "troubleshooting.md",
+        "guides",
+        "troubleshooting",
+        80,
+        "Troubleshooting",
+        "debug",
+    ),
+    DocSpec("debugging.md", "guides", "debugging", 90, "Debugging", "debug"),
+    # AI
+    DocSpec("ai-features.md", "ai", "ai-features", 10, "AI features", "features"),
+    DocSpec(
+        "ai-review-transports.md",
+        "ai",
+        "review-transports",
+        20,
+        "Review transports",
+        "review",
+    ),
+    DocSpec(
+        "ai-review-report.md",
+        "ai",
+        "review-report",
+        30,
+        "Reading a review report",
+        "review",
+    ),
+    DocSpec("mcp.md", "ai", "mcp", 40, "MCP server", "agents"),
+    DocSpec(
+        "architecture/AI-REVIEW-EXECUTION.md",
+        "ai",
+        "review-execution",
+        50,
+        "Review execution",
+        "internals",
+    ),
+    # Contribute
+    DocSpec("contributing.md", "contribute", "index", 5, "Contributing"),
+    DocSpec(
+        "contributing/adding-a-new-tool.md",
+        "contribute",
+        "adding-a-new-tool",
+        10,
+        "Adding a tool",
+        "develop",
+    ),
+    DocSpec("testing.md", "contribute", "testing", 20, "Testing", "develop"),
+    DocSpec("plugins.md", "contribute", "plugins", 30, "Plugins", "develop"),
+    DocSpec(
+        "style-guide.md",
+        "contribute",
+        "style-guide",
+        40,
+        "Style guide",
+        "standards",
+    ),
+    DocSpec(
+        "SHELL-SCRIPT-STYLE-GUIDE.md",
+        "contribute",
+        "shell-script-style-guide",
+        50,
+        "Shell script style",
+        "standards",
+    ),
+    DocSpec(
+        "lintro-self-use.md",
+        "contribute",
+        "self-use",
+        60,
+        "Self-use",
+        "practices",
+    ),
+    # Project
+    DocSpec("architecture/README.md", "project", "index", 5, "Project"),
+    DocSpec(
+        "architecture/ARCHITECTURE.md",
+        "project",
+        "architecture",
+        10,
+        "Architecture",
+        "architecture",
+    ),
+    DocSpec(
+        "architecture/VISION.md",
+        "project",
+        "vision",
+        20,
+        "Vision",
+        "architecture",
+    ),
+    DocSpec(
+        "architecture/ROADMAP.md",
+        "project",
+        "roadmap",
+        30,
+        "Roadmap",
+        "architecture",
+    ),
+    DocSpec(
+        "adr/README.md",
+        "project",
+        "adr/index",
+        100,
+        "Decision records",
+        "decisions",
+    ),
+    DocSpec(
+        "design/README.md",
+        "project",
+        "design/index",
+        300,
+        "Design notes",
+        "design",
+    ),
+    DocSpec(
+        "security/README.md",
+        "project",
+        "security/index",
+        500,
+        "Security",
+        "security",
+    ),
+    DocSpec(
+        "security/assurance.md",
+        "project",
+        "security/assurance",
+        501,
+        "Assurance",
+        "security",
+    ),
+    DocSpec(
+        "security/requirements.md",
+        "project",
+        "security/requirements",
+        502,
+        "Requirements",
+        "security",
+    ),
+)
+
+# Directories whose files are mapped by rule rather than one row each.
+ADR_DIR = "adr"
+DESIGN_DIR = "design"
+TOOLS_DIR = "tool-analysis"
+
+TOOL_GROUPS: dict[str, str] = {
+    "actionlint": "ci-ops",
+    "astro-check": "frameworks",
+    "bandit": "python",
+    "black": "python",
+    "buf": "config",
+    "cargo-deny": "rust",
+    "clippy": "rust",
+    "commitlint": "ci-ops",
+    "dotenv-linter": "config",
+    "golangci-lint": "go",
+    "hadolint": "ci-ops",
+    "html-validate": "frameworks",
+    "idiom-review": "python",
+    "markdownlint": "docs",
+    "mypy": "python",
+    "osv-scanner": "security",
+    "oxc": "js-ts",
+    "pip-audit": "security",
+    "prettier": "js-ts",
+    "pydoclint": "python",
+    "pytest": "python",
+    "ruff": "python",
+    "spectral": "config",
+    "stylelint": "js-ts",
+    "svelte-check": "frameworks",
+    "trufflehog": "security",
+    "tsc": "js-ts",
+    "typos": "docs",
+    "vale": "docs",
+    "vue-tsc": "frameworks",
+    "yamllint": "config",
 }
 
-SECURITY_ORDER = {
-    "README.md": 5,
-    "assurance.md": 10,
-    "requirements.md": 20,
-}
-
-USAGE_OVERVIEW_ORDER = {
-    "README.md": 5,
-}
-
-TOOL_ORDER = {
-    "README.md": 5,
-}
-
-# Short titles for sidebar and page headers (category/slug -> title, optional navGroup).
-DOC_NAV: dict[str, tuple[str, str | None]] = {
-    "getting-started/hub": ("hub", None),
-    "usage/index": ("usage", None),
-    "security/index": ("security", None),
-    "getting-started/getting-started": ("getting started", "start"),
-    "usage/configuration": ("configuration", "setup"),
-    "usage/watch-mode": ("watch mode", "setup"),
-    "usage/docker": ("docker", "setup"),
-    "usage/github-integration": ("github", "ci"),
-    "usage/ai-features": ("ai features", "extend"),
-    "usage/ai-review-transports": ("ai transports", "extend"),
-    "usage/troubleshooting": ("troubleshooting", "extend"),
-    "usage/debugging": ("debugging", "extend"),
-    "usage/plugins": ("plugins", "extend"),
-    "contributing/contributing": ("contributing", None),
-    "contributing/style-guide": ("style guide", "standards"),
-    "contributing/lintro-self-use": ("self-use", "meta"),
-    "contributing/shell-script-style-guide": ("shell scripts", "standards"),
-    "architecture/overview": ("overview", None),
-    "architecture/architecture": ("architecture", "design"),
-    "architecture/vision": ("vision", "design"),
-    "architecture/roadmap": ("roadmap", "design"),
-    "security/assurance": ("assurance", "policy"),
-    "security/requirements": ("requirements", "policy"),
-    "tools/index": ("tools", None),
-    "tools/actionlint": ("actionlint", "ci-ops"),
-    "tools/astro-check": ("astro-check", "frameworks"),
-    "tools/bandit": ("bandit", "python"),
-    "tools/black": ("black", "python"),
-    "tools/cargo-deny": ("cargo-deny", "rust"),
-    "tools/clippy": ("clippy", "rust"),
-    "tools/golangci-lint": ("golangci-lint", "go"),
-    "tools/hadolint": ("hadolint", "ci-ops"),
-    "tools/html-validate": ("html-validate", "frameworks"),
-    "tools/idiom-review": ("idiom-review", "python"),
-    "tools/markdownlint": ("markdownlint", "config"),
-    "tools/mypy": ("mypy", "python"),
-    "tools/osv-scanner": ("osv-scanner", "security"),
-    "tools/oxc": ("oxc", "js-ts"),
-    "tools/pip-audit": ("pip-audit", "security"),
-    "tools/prettier": ("prettier", "js-ts"),
-    "tools/pydoclint": ("pydoclint", "python"),
-    "tools/pytest": ("pytest", "python"),
-    "tools/ruff": ("ruff", "python"),
-    "tools/spectral": ("spectral", "config"),
-    "tools/svelte-check": ("svelte-check", "frameworks"),
-    "tools/trufflehog": ("trufflehog", "security"),
-    "tools/tsc": ("tsc", "js-ts"),
-    "tools/typos": ("typos", "config"),
-    "tools/vue-tsc": ("vue-tsc", "frameworks"),
-    "tools/yamllint": ("yamllint", "config"),
+# Sections without a README of their own get a generated landing page.
+GENERATED_LANDINGS: dict[str, tuple[str, str]] = {
+    "ai": (
+        "AI",
+        "Optional, bring-your-own-key features: summaries and interactive fixes on "
+        "every check, a diff-based review that posts to pull requests, and an MCP "
+        "server so coding agents can call the same tools. Everything here is off "
+        "by default and never moves the deterministic health-score gate.",
+    ),
 }
 
 
 ROOT_README_URL = "https://github.com/lgtm-hq/py-lintro"
-ROOT_README_LINK = re.compile(
-    r"\((?P<ups>(?:\.\./)+)README\.md(?P<hash>#[A-Za-z0-9._-]*)?\)",
+REPO_LINK = re.compile(
+    r"\((?P<ups>(?:\.\./)+)(?P<path>[^)#\s]*)(?P<hash>#[A-Za-z0-9._-]*)?\)",
 )
 
 
 def rewrite_root_readme_links(body: str, src_dir: str) -> str:
-    """Point links that resolve to the repo-root README at the GitHub repo.
+    """Point links that escape ``docs/`` at the file on GitHub.
 
-    The repo-root README has no equivalent page on the site; GitHub renders it
-    (with heading anchors) on the repository home page instead. Only links
-    whose ``../`` chain escapes ``docs/`` are rewritten — e.g. ``../README.md``
-    from ``docs/README.md`` targets the repo root, while the same link from
-    ``docs/architecture/`` targets the docs hub and is left alone.
+    Only links whose ``../`` chain leaves ``docs/`` are rewritten — e.g.
+    ``../README.md`` from ``docs/README.md`` targets the repo root, while the
+    same link from ``docs/architecture/`` targets the docs hub and is left
+    alone. The repo-root README maps to the repository home page (GitHub
+    renders it there, anchors included); any other file maps to its ``blob``
+    URL and a directory to its ``tree`` URL, since neither has a page on the
+    site.
 
     Args:
         body: Markdown source being migrated.
         src_dir: Source directory relative to ``docs/`` ("" for the root).
 
     Returns:
-        The body with repo-root README links rewritten.
+        The body with repo-relative links rewritten.
     """
     depth = len([part for part in src_dir.split("/") if part])
 
@@ -132,13 +325,26 @@ def rewrite_root_readme_links(body: str, src_dir: str) -> str:
         ups = match.group("ups").count("../")
         if ups != depth + 1:
             return match.group(0)
-        return f"({ROOT_README_URL}{match.group('hash') or ''})"
+        path = match.group("path")
+        hash_part = match.group("hash") or ""
+        if path in {"", "README.md"}:
+            return f"({ROOT_README_URL}{hash_part})"
+        kind = "tree" if path.endswith("/") else "blob"
+        return f"({ROOT_README_URL}/{kind}/main/{path.rstrip('/')}{hash_part})"
 
-    return ROOT_README_LINK.sub(_replace, body)
+    return REPO_LINK.sub(_replace, body)
 
 
 def title_from_markdown(text: str, fallback: str) -> str:
-    """Extract the first markdown H1 title or return ``fallback``."""
+    """Extract the first markdown H1 title or return ``fallback``.
+
+    Args:
+        text: Markdown source.
+        fallback: Title used when the source has no H1.
+
+    Returns:
+        The page title.
+    """
     for line in text.splitlines():
         if line.startswith("# "):
             return line.removeprefix("# ").strip()
@@ -146,11 +352,24 @@ def title_from_markdown(text: str, fallback: str) -> str:
 
 
 def description_from_markdown(text: str) -> str:
-    """Build a short description from prose after the first H1."""
+    """Build a short description from prose after the first H1.
+
+    Args:
+        text: Markdown source.
+
+    Returns:
+        Up to 200 characters of the opening prose, or an empty string.
+    """
     lines = text.splitlines()
     started = False
+    in_fence = False
     parts: list[str] = []
     for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if line.startswith("# "):
             started = True
             continue
@@ -159,8 +378,9 @@ def description_from_markdown(text: str) -> str:
         if line.startswith("#"):
             break
         stripped = line.strip()
-        if stripped:
-            parts.append(stripped)
+        if not stripped or stripped[0] in "<>|!-*":
+            continue
+        parts.append(stripped)
         if len(" ".join(parts)) > 160:
             break
     desc = " ".join(parts)
@@ -168,20 +388,168 @@ def description_from_markdown(text: str) -> str:
 
 
 def slug_name(path: Path) -> str:
-    """Normalize a source path stem into a URL-friendly slug."""
-    name = path.stem
-    if name == "SHELL-SCRIPT-STYLE-GUIDE":
-        return "shell-script-style-guide"
-    return name.lower().replace("_", "-")
+    """Normalize a source path stem into a URL-friendly slug.
+
+    Args:
+        path: Source markdown path.
+
+    Returns:
+        Lowercase, hyphenated slug.
+    """
+    return path.stem.lower().replace("_", "-")
 
 
-def nav_meta(dest_rel: str, fallback_title: str) -> tuple[str, str, str | None]:
-    """Return (title, navTitle, navGroup) for a destination path."""
-    key = dest_rel.removesuffix(".md")
-    if key in DOC_NAV:
-        short, group = DOC_NAV[key]
-        return short, short, group
-    return fallback_title, fallback_title, None
+def strip_leading_h1(text: str) -> str:
+    """Drop the first H1 line; the layout renders the title itself.
+
+    Args:
+        text: Markdown source.
+
+    Returns:
+        The source without its first ``# `` heading line.
+    """
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.startswith("# "):
+            del lines[index]
+            break
+        if line.strip() and not line.startswith("<!--"):
+            break
+    return "".join(lines)
+
+
+def adr_nav_title(body: str, slug: str) -> str:
+    """Short sidebar label for an ADR, e.g. ``ADR-0001 Native parser per tool``.
+
+    Args:
+        body: ADR markdown source.
+        slug: ADR file slug used as a fallback.
+
+    Returns:
+        The sidebar label.
+    """
+    title = title_from_markdown(body, slug)
+    match = re.match(r"ADR-(\d+):\s*(.+)", title)
+    if match:
+        return f"ADR-{match.group(1)} {match.group(2).strip()}"
+    return title
+
+
+def rule_specs(docs_src: Path) -> list[DocSpec]:
+    """Build specs for directories mapped by rule (ADRs, design notes, tools).
+
+    Args:
+        docs_src: The ``docs/`` root.
+
+    Returns:
+        Specs for every rule-mapped file that exists.
+
+    Raises:
+        ValueError: If a tool page has no entry in :data:`TOOL_GROUPS`.
+    """
+    specs: list[DocSpec] = []
+
+    adr_dir = docs_src / ADR_DIR
+    if adr_dir.is_dir():
+        order = 101
+        for src in sorted(adr_dir.glob("*.md")):
+            rel = f"{ADR_DIR}/{src.name}"
+            if src.name == "README.md" or rel in SKIP_SOURCES:
+                continue
+            slug = slug_name(src)
+            body = src.read_text(encoding="utf-8")
+            specs.append(
+                DocSpec(
+                    rel,
+                    "project",
+                    f"adr/{slug}",
+                    order,
+                    adr_nav_title(body, slug),
+                    "decisions",
+                ),
+            )
+            order += 1
+
+    design_dir = docs_src / DESIGN_DIR
+    if design_dir.is_dir():
+        order = 301
+        for src in sorted(design_dir.glob("*.md")):
+            rel = f"{DESIGN_DIR}/{src.name}"
+            if src.name == "README.md" or rel in SKIP_SOURCES:
+                continue
+            slug = slug_name(src)
+            body = src.read_text(encoding="utf-8")
+            nav_title = title_from_markdown(body, slug).split(" — ")[0].strip()
+            specs.append(
+                DocSpec(rel, "project", f"design/{slug}", order, nav_title, "design"),
+            )
+            order += 1
+
+    tools_dir = docs_src / TOOLS_DIR
+    if tools_dir.is_dir():
+        order = 20
+        for src in sorted(tools_dir.glob("*.md")):
+            rel = f"{TOOLS_DIR}/{src.name}"
+            if rel in SKIP_SOURCES:
+                continue
+            if src.name == "README.md":
+                specs.append(DocSpec(rel, "tools", "index", 5, "Tools"))
+                continue
+            slug = re.sub(r"-analysis$", "", slug_name(src))
+            group = TOOL_GROUPS.get(slug)
+            if group is None:
+                msg = f"tool page {rel} has no entry in TOOL_GROUPS"
+                raise ValueError(msg)
+            specs.append(DocSpec(rel, "tools", slug, order, slug, group))
+            order += 10
+
+    return specs
+
+
+def all_specs(docs_src: Path) -> list[DocSpec]:
+    """Every spec that applies to the given docs tree.
+
+    Args:
+        docs_src: The ``docs/`` root.
+
+    Returns:
+        Table rows whose source exists plus rule-generated rows.
+    """
+    table = [spec for spec in DOC_SPECS if (docs_src / spec.source).exists()]
+    return table + rule_specs(docs_src)
+
+
+def assert_all_sources_mapped(docs_src: Path, specs: list[DocSpec]) -> None:
+    """Fail loudly when a ``docs/`` markdown file has no site mapping.
+
+    Args:
+        docs_src: The ``docs/`` root.
+        specs: The specs about to be migrated.
+
+    Raises:
+        ValueError: If any markdown source is neither mapped nor skipped, or a
+            spec names a section that has no label.
+    """
+    unknown = sorted({spec.category for spec in specs} - set(SECTION_LABELS))
+    if unknown:
+        msg = (
+            f"DOC_SPECS use sections missing from SECTION_LABELS: {', '.join(unknown)}"
+        )
+        raise ValueError(msg)
+    mapped = {spec.source for spec in specs}
+    sources = {
+        path.relative_to(docs_src).as_posix()
+        for path in docs_src.rglob("*.md")
+        if path.is_file()
+    }
+    missing = sorted(sources - mapped - SKIP_SOURCES)
+    if missing:
+        listed = "\n  ".join(missing)
+        msg = (
+            "docs/ files without a site mapping (add them to DOC_SPECS or "
+            f"SKIP_SOURCES in {Path(__file__).name}):\n  {listed}"
+        )
+        raise ValueError(msg)
 
 
 def write_doc(
@@ -193,11 +561,24 @@ def write_doc(
     *,
     nav_title: str | None = None,
     nav_group: str | None = None,
+    description: str | None = None,
 ) -> None:
-    """Write a docs content file with Astro frontmatter."""
+    """Write a docs content file with Astro frontmatter.
+
+    Args:
+        dest_rel: Destination path relative to the content root.
+        category: Site section key.
+        order: Sort position inside the section.
+        body: Markdown body.
+        title: Page title.
+        nav_title: Short sidebar label, written when it differs from ``title``.
+        nav_group: Sidebar group key.
+        description: Meta description; derived from the body when omitted.
+    """
     dest = DOCS_DEST / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
-    description = description_from_markdown(body)
+    if description is None:
+        description = description_from_markdown(body)
 
     def safe(s: str) -> str:
         return s.replace(chr(34), chr(39))
@@ -217,24 +598,54 @@ def write_doc(
     dest.write_text(frontmatter + body.lstrip(), encoding="utf-8")
 
 
-def write_doc_with_nav(
-    dest_rel: str,
-    category: str,
-    order: int,
-    body: str,
-    fallback_title: str,
-) -> None:
-    """Write a doc using navigation metadata from :data:`DOC_NAV`."""
-    title, nav_title, nav_group = nav_meta(dest_rel, fallback_title)
+def migrate_spec(spec: DocSpec, docs_src: Path) -> tuple[str, str]:
+    """Migrate one source file according to its spec.
+
+    Args:
+        spec: The mapping row.
+        docs_src: The ``docs/`` root.
+
+    Returns:
+        The ``(source, doc_id)`` pair for the route map.
+    """
+    src = docs_src / spec.source
+    src_dir = spec.source.rsplit("/", 1)[0] if "/" in spec.source else ""
+    body = rewrite_root_readme_links(src.read_text(encoding="utf-8"), src_dir)
+    title = title_from_markdown(body, spec.nav_title)
+    description = description_from_markdown(body)
     write_doc(
-        dest_rel,
-        category,
-        order,
-        body,
+        f"{spec.category}/{spec.slug}.md",
+        spec.category,
+        spec.order,
+        strip_leading_h1(body),
         title,
-        nav_title=nav_title,
-        nav_group=nav_group,
+        nav_title=spec.nav_title,
+        nav_group=spec.nav_group,
+        description=description,
     )
+    return spec.source, f"{spec.category}/{spec.slug}"
+
+
+def write_generated_landings(specs: list[DocSpec]) -> None:
+    """Write landing pages for sections that have no README of their own.
+
+    Args:
+        specs: Migrated specs, used to skip sections that already have a
+            landing page.
+    """
+    landing_slugs = {"index", "overview"}
+    has_landing = {spec.category for spec in specs if spec.slug in landing_slugs}
+    for category, (title, intro) in GENERATED_LANDINGS.items():
+        if category in has_landing:
+            continue
+        write_doc(
+            f"{category}/index.md",
+            category,
+            5,
+            f"{intro}\n",
+            title,
+            description=intro,
+        )
 
 
 def write_route_map(route_map: dict[str, str]) -> None:
@@ -242,8 +653,8 @@ def write_route_map(route_map: dict[str, str]) -> None:
 
     The map keys are paths relative to ``docs/`` exactly as authored in
     markdown cross-links (e.g. ``architecture/ARCHITECTURE.md``); values are
-    the migrated Astro doc ids (e.g. ``architecture/architecture``). The site
-    uses it to rewrite ``.md`` cross-links to final ``/docs/<id>/`` routes.
+    the migrated Astro doc ids (e.g. ``project/architecture``). The site uses
+    it to rewrite ``.md`` cross-links to final ``/docs/<id>/`` routes.
 
     Args:
         route_map: Mapping of source-relative markdown paths to doc ids.
@@ -263,114 +674,24 @@ def write_route_map(route_map: dict[str, str]) -> None:
 
 def main() -> None:
     """Copy ``docs/`` sources into ``apps/site/src/content/docs/``."""
-    route_map: dict[str, str] = {}
+    specs = all_specs(DOCS_SRC)
+    assert_all_sources_mapped(DOCS_SRC, specs)
+
     if DOCS_DEST.exists():
         for child in DOCS_DEST.iterdir():
             if child.is_dir():
-                import shutil
-
                 shutil.rmtree(child)
             else:
                 child.unlink()
 
-    for filename, (category, order) in CATEGORY_MAP.items():
-        src = DOCS_SRC / filename
-        if not src.exists():
-            continue
-        body = rewrite_root_readme_links(src.read_text(encoding="utf-8"), "")
-        slug = slug_name(src)
-        fallback = title_from_markdown(body, slug.replace("-", " ").title())
-        write_doc_with_nav(f"{category}/{slug}.md", category, order, body, fallback)
-        route_map[filename] = f"{category}/{slug}"
+    route_map: dict[str, str] = {}
+    for spec in specs:
+        source, doc_id = migrate_spec(spec, DOCS_SRC)
+        route_map[source] = doc_id
 
-    arch_dir = DOCS_SRC / "architecture"
-    if arch_dir.is_dir():
-        for src in sorted(arch_dir.glob("*.md")):
-            body = rewrite_root_readme_links(
-                src.read_text(encoding="utf-8"),
-                "architecture",
-            )
-            slug = slug_name(src)
-            if slug == "readme":
-                slug = "overview"
-            order = ARCHITECTURE_ORDER.get(src.name, 100)
-            fallback = title_from_markdown(body, slug.replace("-", " ").title())
-            write_doc_with_nav(
-                f"architecture/{slug}.md",
-                "architecture",
-                order,
-                body,
-                fallback,
-            )
-            route_map[f"architecture/{src.name}"] = f"architecture/{slug}"
-
-    usage_dir = DOCS_SRC / "usage"
-    if usage_dir.is_dir():
-        for src in sorted(usage_dir.glob("*.md")):
-            body = rewrite_root_readme_links(src.read_text(encoding="utf-8"), "usage")
-            slug = "index" if src.name == "README.md" else slug_name(src)
-            order = USAGE_OVERVIEW_ORDER.get(src.name, 100)
-            fallback = title_from_markdown(body, slug.replace("-", " ").title())
-            write_doc_with_nav(f"usage/{slug}.md", "usage", order, body, fallback)
-            route_map[f"usage/{src.name}"] = f"usage/{slug}"
-
-    sec_dir = DOCS_SRC / "security"
-    if sec_dir.is_dir():
-        for src in sorted(sec_dir.glob("*.md")):
-            body = rewrite_root_readme_links(
-                src.read_text(encoding="utf-8"),
-                "security",
-            )
-            slug = slug_name(src)
-            if slug == "readme":
-                slug = "index"
-            order = SECURITY_ORDER.get(src.name, 100)
-            fallback = title_from_markdown(body, slug.replace("-", " ").title())
-            write_doc_with_nav(f"security/{slug}.md", "security", order, body, fallback)
-            route_map[f"security/{src.name}"] = f"security/{slug}"
-
-    tools_dir = DOCS_SRC / "tool-analysis"
-    if tools_dir.is_dir():
-        order = 20
-        for src in sorted(tools_dir.glob("*.md")):
-            if src.name == "README.md":
-                body = rewrite_root_readme_links(
-                    src.read_text(encoding="utf-8"),
-                    "tool-analysis",
-                )
-                write_doc_with_nav(
-                    "tools/index.md",
-                    "tools",
-                    TOOL_ORDER["README.md"],
-                    body,
-                    "Tools",
-                )
-                route_map["tool-analysis/README.md"] = "tools/index"
-                continue
-            body = rewrite_root_readme_links(
-                src.read_text(encoding="utf-8"),
-                "tool-analysis",
-            )
-            slug = re.sub(r"-analysis$", "", slug_name(src))
-            fallback = slug
-            write_doc_with_nav(f"tools/{slug}.md", "tools", order, body, fallback)
-            route_map[f"tool-analysis/{src.name}"] = f"tools/{slug}"
-            order += 10
-
-    hub = DOCS_SRC / "README.md"
-    if hub.exists():
-        body = rewrite_root_readme_links(hub.read_text(encoding="utf-8"), "")
-        write_doc_with_nav(
-            "getting-started/hub.md",
-            "getting-started",
-            5,
-            body,
-            "Documentation Hub",
-        )
-        route_map["README.md"] = "getting-started/hub"
-
+    write_generated_landings(specs)
     write_route_map(route_map)
-    print(f"Migrated docs to {DOCS_DEST}")
+    print(f"Migrated {len(specs)} docs to {DOCS_DEST}")
     print(f"Wrote route map to {ROUTE_MAP_DEST}")
 
 

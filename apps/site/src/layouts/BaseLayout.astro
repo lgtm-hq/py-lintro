@@ -4,10 +4,10 @@ import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import ExternalLinks from '../components/ExternalLinks.astro';
 import {
+  DEFAULT_DARK_THEME,
   DEFAULT_THEME,
-  NATIVE_THEME,
+  nativeThemeIds,
   themeAppearances,
-  turboThemeIds,
   validThemeIds,
 } from '../data/themes';
 import '../styles/global.css';
@@ -19,38 +19,54 @@ interface Props {
 
 const {
   title = 'Lintro',
-  description = 'Unified linting, formatting, and testing for modern projects.',
+  description = 'One CLI for every linter, formatter, type checker and security scanner in your stack, with optional AI review.',
 } = Astro.props;
 
 const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
 <!doctype html>
-<html lang="en" data-theme={DEFAULT_THEME} data-baseurl={baseUrl}>
+<html lang="en" data-theme={DEFAULT_THEME} data-appearance="light" data-baseurl={baseUrl}>
   <head>
     <SEOHead title={title} description={description} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-core.css`} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-base.css`} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-syntax.css`} />
     <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-components.css`} />
-    <link
-      id="turbo-theme-css"
-      rel="stylesheet"
-      href={`${baseUrl}/assets/css/themes/${DEFAULT_THEME}.css`}
-      disabled
-    />
+    <link id="turbo-theme-css" rel="stylesheet" href="about:blank" disabled />
     <script
       is:inline
-      define:vars={{ validThemeIds, turboThemeIds, NATIVE_THEME, DEFAULT_THEME, themeAppearances, baseUrl }}
+      define:vars={{
+        validThemeIds,
+        nativeThemeIds,
+        DEFAULT_THEME,
+        DEFAULT_DARK_THEME,
+        themeAppearances,
+        baseUrl,
+      }}
     >
       (function () {
         var STORAGE_KEY = 'turbo-theme';
 
+        function systemDefault() {
+          try {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? DEFAULT_DARK_THEME
+              : DEFAULT_THEME;
+          } catch (_) {
+            return DEFAULT_THEME;
+          }
+        }
+
+        // Preferences saved by the retired terminal theme map to the dark workbench.
+        var LEGACY_THEMES = { terminal: DEFAULT_DARK_THEME };
+
         function applyTheme(id) {
-          var themeId = validThemeIds.indexOf(id) !== -1 ? id : DEFAULT_THEME;
-          var isNative = themeId === NATIVE_THEME;
+          id = LEGACY_THEMES[id] || id;
+          var themeId = validThemeIds.indexOf(id) !== -1 ? id : systemDefault();
+          var isNative = nativeThemeIds.indexOf(themeId) !== -1;
           var root = document.documentElement;
-          var appearance = themeAppearances[themeId] || 'dark';
+          var appearance = themeAppearances[themeId] || 'light';
 
           root.setAttribute('data-theme', themeId);
           root.setAttribute('data-appearance', appearance);
@@ -60,69 +76,83 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
             if (isNative) {
               link.setAttribute('disabled', 'true');
             } else {
-              link.removeAttribute('disabled');
               link.href = baseUrl + '/assets/css/themes/' + themeId + '.css';
+              link.removeAttribute('disabled');
             }
           }
-
-          try {
-            localStorage.setItem(STORAGE_KEY, themeId);
-          } catch (_) {}
 
           document.dispatchEvent(
             new CustomEvent('turbo-theme-applied', { detail: { themeId: themeId } })
           );
         }
 
-        window.__applyTheme = applyTheme;
-
-        try {
-          var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
-          applyTheme(saved);
-        } catch (e) {
-          applyTheme(DEFAULT_THEME);
+        function saveTheme(id) {
+          try {
+            localStorage.setItem(STORAGE_KEY, id);
+          } catch (_) {}
         }
 
-        document.addEventListener('astro:page-load', function () {
+        function savedTheme() {
           try {
-            var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
-            applyTheme(saved);
+            var id = localStorage.getItem(STORAGE_KEY);
+            if (id && LEGACY_THEMES[id]) {
+              id = LEGACY_THEMES[id];
+              localStorage.setItem(STORAGE_KEY, id);
+            }
+            if (id && validThemeIds.indexOf(id) !== -1) return id;
+            if (id) localStorage.removeItem(STORAGE_KEY);
+            return null;
           } catch (_) {
-            applyTheme(DEFAULT_THEME);
+            return null;
           }
+        }
+
+        window.__applyTheme = function (id) {
+          applyTheme(id);
+          saveTheme(id);
+        };
+
+        applyTheme(savedTheme() || systemDefault());
+
+        document.addEventListener('astro:page-load', function () {
+          applyTheme(savedTheme() || systemDefault());
         });
+
+        try {
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+            if (!savedTheme()) applyTheme(systemDefault());
+          });
+        } catch (_) {}
       })();
     </script>
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <Header />
-    <main class="main">
+    <main class="main" id="main">
       <slot />
     </main>
     <Footer />
     <ExternalLinks />
-    <script is:inline>
-      function initCodeBlockCursors() {
-        document.querySelectorAll('pre.astro-code code').forEach(function (codeEl) {
-          var lines = codeEl.querySelectorAll(':scope > .line');
-          var lastLine = lines.length > 0 ? lines[lines.length - 1] : codeEl;
-          if (lastLine.querySelector('.code-block-cursor')) {
-            return;
-          }
-          var cursor = document.createElement('span');
-          cursor.className = 'code-block-cursor';
-          cursor.setAttribute('aria-hidden', 'true');
-          lastLine.appendChild(cursor);
-        });
-      }
-
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initCodeBlockCursors);
-      } else {
-        initCodeBlockCursors();
-      }
-
-      document.addEventListener('astro:page-load', initCodeBlockCursors);
-    </script>
   </body>
 </html>
+
+<style is:global>
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -3rem;
+    z-index: 1000;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-md);
+    background: var(--wb-accent);
+    color: var(--wb-accent-ink);
+    font-weight: 600;
+    transition: top 0.15s ease;
+  }
+
+  .skip-link:focus {
+    top: 0.75rem;
+    text-decoration: none;
+  }
+</style>

@@ -1,0 +1,988 @@
+---
+const tabs = [
+  { key: 'check', label: 'Check' },
+  { key: 'format', label: 'Format' },
+  { key: 'watch', label: 'Watch' },
+  { key: 'review', label: 'Review' },
+  { key: 'mcp', label: 'MCP' },
+] as const;
+---
+
+<div class="bench" id="workbench" aria-label="Interactive workbench">
+  <div class="bench-tabs" role="tablist" aria-label="Commands">
+    {
+      tabs.map((t, i) => (
+        <button
+          type="button"
+          class="bench-tab"
+          role="tab"
+          id={`bt-${t.key}`}
+          aria-controls={`bp-${t.key}`}
+          aria-selected={i === 0 ? 'true' : 'false'}
+          tabindex={i === 0 ? 0 : -1}
+        >
+          {t.label}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="bench-panel" role="tabpanel" id="bp-check" aria-labelledby="bt-check">
+    <div class="bench-cmd">
+      <pre tabindex="0" id="check-cmd"><span class="prompt">$</span> lintro check <span class="flag">--output-format grid</span></pre>
+      <p class="note">
+        <b>Pick files, watch only the relevant tools run.</b> Lintro maps each tool to its own file
+        patterns, reads your existing <code>.prettierrc</code> and <code>pyproject.toml</code>, and
+        runs the matches in parallel.
+      </p>
+      <div class="filetree" id="filetree" aria-label="Example files to check">
+        <span class="dir">src/</span>
+        <label class="on"><input type="checkbox" value="src/utils/paths.py" data-kind="py" checked /> src/utils/paths.py</label>
+        <label class="on"><input type="checkbox" value="src/api/client.py" data-kind="py" checked /> src/api/client.py</label>
+        <span class="dir">root</span>
+        <label class="on"><input type="checkbox" value="config.yaml" data-kind="yaml" checked /> config.yaml</label>
+        <label><input type="checkbox" value="Dockerfile" data-kind="docker" /> Dockerfile</label>
+        <label><input type="checkbox" value="README.md" data-kind="md" /> README.md</label>
+      </div>
+      <div class="ctl">
+        <button type="button" class="primary" id="check-run">Run check</button>
+        <span class="note small">Example figures. Real timings depend on your machine.</span>
+      </div>
+    </div>
+    <div class="bench-out" aria-live="polite">
+      <div class="run-lines" id="check-lines">
+        <div class="run-line done"><span>ruff</span><span class="res"><span class="wr">! 3 issues</span> <span class="dim">(0.47s)</span></span></div>
+        <div class="run-line done"><span>mypy</span><span class="res"><span class="ok">✓ passed</span> <span class="dim">(1.34s)</span></span></div>
+        <div class="run-line done"><span>bandit</span><span class="res"><span class="ok">✓ passed</span> <span class="dim">(0.62s)</span></span></div>
+        <div class="run-line done"><span>black</span><span class="res"><span class="wr">! 1 issue</span> <span class="dim">(0.31s)</span></span></div>
+        <div class="run-line done"><span>yamllint</span><span class="res"><span class="wr">! 1 issue</span> <span class="dim">(0.09s)</span></span></div>
+        <div class="run-line done"><span>prettier</span><span class="res"><span class="ok">✓ passed</span> <span class="dim">(0.41s)</span></span></div>
+      </div>
+      <div class="findings" id="check-findings"><span class="dim">ruff         </span>src/utils/paths.py:12:8  <span class="key">F401 </span> `os` imported but unused  <span class="ok">fixable</span>
+<span class="dim">ruff         </span>src/utils/paths.py:40:1  <span class="key">E302 </span> expected 2 blank lines  <span class="ok">fixable</span>
+<span class="dim">ruff         </span>src/api/client.py:88:5   <span class="key">B006 </span> mutable default argument
+<span class="dim">black        </span>src/api/client.py        <span class="key">     </span> would reformat  <span class="ok">fixable</span>
+<span class="dim">yamllint     </span>config.yaml:3:81          <span class="key">line-length</span> line too long (94 &gt; 80)</div>
+      <div class="sim-foot">
+        <span id="check-summary">6 tools · 3 files · 5 issues · 1.34s wall</span>
+        <span>Health score: <span class="hi" id="check-score">85 / 100</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="bench-panel" role="tabpanel" id="bp-format" aria-labelledby="bt-format" hidden>
+    <div class="bench-cmd">
+      <pre tabindex="0"><span class="prompt">$</span> lintro format <span class="flag">--diff</span></pre>
+      <p class="note">
+        <b>Fix what the formatters can fix.</b> Fifteen of the forty tools write changes. Chain
+        commands with a comma: <code>lintro fmt . , chk .</code>
+      </p>
+      <dl>
+        <dt>--diff</dt><dd>Format only changed files</dd>
+        <dt>--tools black,shfmt</dt><dd>Pick formatters</dd>
+        <dt>ai.lint: true</dt><dd>AI suggests fixes for what remains, then summarizes</dd>
+      </dl>
+    </div>
+    <div class="bench-out"><pre tabindex="0"><span class="dim">Formatting 6 changed files vs origin/HEAD</span>
+
+ruff       <span class="ok">✓ fixed 2</span>   (0.66s)
+black      <span class="ok">✓ fixed 1</span>   (0.31s)
+prettier   <span class="ok">✓ fixed 1</span>   (0.44s)
+shfmt      <span class="ok">✓ passed</span>    (0.05s)
+taplo      <span class="ok">✓ passed</span>    (0.03s)
+
+<span class="wr">1 issue could not be auto-fixed</span>
+  src/api/client.py:88:5  B006  mutable default argument
+
+<span class="dim">Run</span> lintro check --fix <span class="dim">to review an AI-generated diff for it.</span></pre></div>
+  </div>
+
+  <div class="bench-panel" role="tabpanel" id="bp-watch" aria-labelledby="bt-watch" hidden>
+    <div class="bench-cmd">
+      <pre tabindex="0"><span class="prompt">$</span> lintro watch src/</pre>
+      <p class="note">
+        <b>Instant feedback while you edit.</b> Only the tools that match the changed file run. A
+        300 ms debounce folds a burst of saves into one run.
+      </p>
+      <dl>
+        <dt>--fix</dt><dd>Format on save</dd>
+        <dt>--tools ruff,mypy</dt><dd>Narrow the set</dd>
+        <dt>--debounce 500</dt><dd>Wait longer for quiet</dd>
+      </dl>
+      <div class="ctl">
+        <button type="button" class="primary" id="watch-save">Save foo.py</button>
+        <button type="button" id="watch-save-ts">Save app.ts</button>
+        <span class="note small">Click twice quickly: one run, not two.</span>
+      </div>
+      <div class="debounce" id="watch-debounce">
+        <span>debounce 300 ms</span>
+        <span class="bar"><i id="watch-debounce-bar"></i></span>
+        <span id="watch-debounce-txt"></span>
+      </div>
+    </div>
+    <div class="bench-out">
+      <div class="watch-log" id="watch-log" tabindex="0" role="log" aria-live="polite"><span class="dim">Watching for changes in src/...</span>
+<span class="dim">Press Ctrl+C to stop</span>
+
+<span class="entry"><span class="key">[12:34:56]</span> foo.py modified
+  ├─ ruff: <span class="ok">✓ passed</span> (0.12s)
+  ├─ mypy: <span class="wr">! 1 issue</span> (1.34s)
+  │  foo.py:42: Missing type annotation
+  └─ bandit: <span class="ok">✓ passed</span> (0.40s)
+</span></div>
+    </div>
+  </div>
+
+  <div class="bench-panel" role="tabpanel" id="bp-review" aria-labelledby="bt-review" hidden>
+    <div class="bench-cmd">
+      <pre tabindex="0" id="review-cmd"><span class="prompt">$</span> lintro review <span class="flag">--pr 214 --depth 2 --strictness balanced --post</span></pre>
+      <p class="note">
+        <b>AI reviews the diff, not the repo.</b> Findings get P1/P2/P3 severity. The verdict is
+        computed from severities in code, never asked of the model. <code>--post</code> writes a
+        sticky summary plus inline comments to the PR.
+      </p>
+      <div class="ctl">
+        <label>Depth
+          <select id="review-depth" aria-label="Review depth">
+            <option value="1">1 · checklist</option>
+            <option value="2" selected>2 · + questions</option>
+            <option value="3">3 · + adversarial</option>
+          </select>
+        </label>
+        <label>Strictness
+          <select id="review-strict" aria-label="Review strictness">
+            <option value="focused">focused</option>
+            <option value="balanced" selected>balanced</option>
+            <option value="thorough">thorough</option>
+          </select>
+        </label>
+      </div>
+      <dl>
+        <dt>--base main</dt><dd>Diff against a branch</dd>
+        <dt>--uncommitted</dt><dd>Review your working tree</dd>
+        <dt>--max-cost-usd 2</dt><dd>Hard cap on the api transport</dd>
+      </dl>
+      <p class="note small">Example figures. Findings and cost vary with the diff and the model.</p>
+    </div>
+    <div class="bench-out"><pre tabindex="0" id="review-out" aria-live="polite"><span class="dim">Reviewing PR #214 · 7 files · depth 2 · balanced</span>
+<span class="dim">Coverage: 5/7 files carried from round 1 · 2 new · 4 provider calls</span>
+
+<span class="er">P1</span> src/api/client.py:88  mutable default argument shared
+   across calls; <span class="dim">rubric: correctness &gt; shared state</span>
+<span class="wr">P2</span> src/db/orders.py:41   raw cursor.execute outside
+   repository layer  <span class="dim">source: no-raw-sql</span>
+<span class="wr">P2</span> src/api/client.py:112 retry loop swallows the last exception
+   <span class="dim">rubric: error handling &gt; silent failure · generated question</span>
+<span class="hi">P3</span> docs/usage.md:12      stale flag name --format
+
+<span class="dim">Verdict:</span> <span class="er">Blocked</span> <span class="dim">(1 open P1)</span>
+<span class="dim">Posted sticky summary + 4 inline comments</span>
+<span class="dim">Cost: $0.25 · exit 1 · example figures</span></pre></div>
+  </div>
+
+  <div class="bench-panel" role="tabpanel" id="bp-mcp" aria-labelledby="bt-mcp" hidden>
+    <div class="bench-cmd">
+      <pre tabindex="0"><span class="prompt">$</span> lintro mcp <span class="flag">--workspace .</span></pre>
+      <p class="note">
+        <b>Give your coding agent the same tools.</b> Seven MCP tools over stdio, returning
+        structured findings from the same serializer that feeds JSON and SARIF.
+      </p>
+      <dl>
+        <dt>lintro_check</dt><dd>Findings + per-tool summary</dd>
+        <dt>lintro_format</dt><dd>dry_run defaults to true; returns real diffs</dd>
+        <dt>lintro_review</dt><dd>AI review with budget metadata</dd>
+      </dl>
+    </div>
+    <div class="bench-out"><pre tabindex="0"><span class="dim">// lintro_check → response</span>
+&#123;
+  <span class="key">"findings"</span>: [&#123;
+    <span class="key">"tool"</span>: <span class="hi">"ruff"</span>, <span class="key">"file"</span>: <span class="hi">"src/utils/paths.py"</span>,
+    <span class="key">"line"</span>: 12, <span class="key">"column"</span>: 8, <span class="key">"rule"</span>: <span class="hi">"F401"</span>,
+    <span class="key">"severity"</span>: <span class="hi">"WARNING"</span>,
+    <span class="key">"message"</span>: <span class="hi">"`os` imported but unused"</span>,
+    <span class="key">"fixable"</span>: <span class="ok">true</span>
+  &#125;],
+  <span class="key">"tools"</span>: [&#123; <span class="key">"tool"</span>: <span class="hi">"ruff"</span>, <span class="key">"status"</span>: <span class="hi">"issues"</span>,
+              <span class="key">"issue_count"</span>: 1, <span class="key">"duration"</span>: 0.47 &#125;],
+  <span class="key">"summary"</span>: &#123; <span class="key">"total_findings"</span>: 1, <span class="key">"success"</span>: <span class="er">false</span> &#125;
+&#125;</pre></div>
+  </div>
+</div>
+
+<style>
+  .bench {
+    overflow: hidden;
+    background: var(--wb-chrome);
+    color: var(--wb-chrome-ink);
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: 14px;
+    box-shadow: var(--wb-shadow);
+  }
+
+  .bench-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 8px 12px 0;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--wb-chrome-hair);
+  }
+
+  .bench-tab {
+    margin-bottom: -1px;
+    padding: 10px 16px 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    font-family: var(--wb-font-display);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--wb-chrome-muted);
+    white-space: nowrap;
+  }
+
+  .bench-tab:hover {
+    color: var(--wb-chrome-ink);
+  }
+
+  .bench-tab[aria-selected='true'] {
+    color: var(--wb-chrome-ink);
+    border-bottom-color: var(--wb-accent);
+  }
+
+  .bench-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
+
+  .bench-panel[hidden] {
+    display: none;
+  }
+
+  .bench-cmd {
+    display: grid;
+    align-content: start;
+    gap: 18px;
+    padding: 22px 24px;
+    border-right: 1px solid var(--wb-chrome-hair);
+  }
+
+  .bench-cmd pre {
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    white-space: pre;
+    color: var(--wb-chrome-ink);
+  }
+
+  .bench-cmd :global(.prompt) {
+    color: var(--wb-accent);
+  }
+
+  .bench-cmd :global(.flag) {
+    color: #8fd3f4;
+  }
+
+  .note {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--wb-chrome-muted);
+  }
+
+  .note.small {
+    font-size: 0.78rem;
+  }
+
+  .note b {
+    font-weight: 600;
+    color: var(--wb-chrome-ink);
+  }
+
+  .bench-cmd code {
+    padding: 0.05em 0.35em;
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    font-family: var(--wb-font-mono);
+    font-size: 0.85em;
+    color: var(--wb-chrome-ink);
+  }
+
+  .bench-cmd dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 14px;
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .bench-cmd dt {
+    font-family: var(--wb-font-mono);
+    color: #8fd3f4;
+  }
+
+  .bench-cmd dd {
+    margin: 0;
+    color: var(--wb-chrome-muted);
+  }
+
+  .ctl {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ctl button {
+    padding: 6px 12px;
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: 6px;
+    background: transparent;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--wb-chrome-ink);
+  }
+
+  .ctl button:hover {
+    border-color: var(--wb-accent);
+  }
+
+  .ctl button.primary {
+    background: var(--wb-accent);
+    border-color: var(--wb-accent);
+    color: var(--wb-accent-ink);
+  }
+
+  .ctl label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--wb-chrome-muted);
+  }
+
+  .bench-cmd select {
+    padding: 6px 8px;
+    border: 1px solid var(--wb-chrome-hair);
+    border-radius: 6px;
+    background: var(--wb-terminal);
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--wb-chrome-ink);
+  }
+
+  .bench-out {
+    padding: 22px 24px;
+    background: var(--wb-terminal);
+  }
+
+  .bench-out pre {
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    white-space: pre;
+    color: #cfd8e6;
+  }
+
+  .bench-out :global(.ok) {
+    color: #5fd39a;
+  }
+  .bench-out :global(.wr) {
+    color: #f2b84b;
+  }
+  .bench-out :global(.er) {
+    color: #ff7b7b;
+  }
+  .bench-out :global(.dim) {
+    color: #7f8da6;
+  }
+  .bench-out :global(.hi) {
+    color: #ffd46a;
+  }
+  .bench-out :global(.key) {
+    color: #8fd3f4;
+  }
+
+  .filetree {
+    display: grid;
+    gap: 4px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+  }
+
+  .filetree label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    color: var(--wb-chrome-muted);
+    cursor: pointer;
+  }
+
+  .filetree label:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--wb-chrome-ink);
+  }
+
+  .filetree label.on {
+    color: var(--wb-chrome-ink);
+  }
+
+  .filetree input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--wb-accent);
+  }
+
+  .filetree .dir {
+    margin-top: 6px;
+    padding-left: 6px;
+    font-family: var(--wb-font-body);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wb-chrome-muted);
+  }
+
+  .filetree .dir:first-child {
+    margin-top: 0;
+  }
+
+  .run-lines {
+    display: grid;
+    gap: 4px;
+  }
+
+  .run-lines :global(.run-line) {
+    display: grid;
+    grid-template-columns: 10ch 1fr;
+    gap: 12px;
+    align-items: center;
+    min-height: 22px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    color: #cfd8e6;
+  }
+
+  .run-lines :global(.bar) {
+    position: relative;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .run-lines :global(.bar i) {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0;
+    border-radius: 3px;
+    background: var(--wb-accent);
+    transition: width 0.5s linear;
+  }
+
+  .run-lines :global(.run-line.done .bar) {
+    display: none;
+  }
+
+  .run-lines :global(.res) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+  }
+
+  .findings {
+    margin-top: 10px;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.8rem;
+    white-space: pre;
+    color: #cfd8e6;
+  }
+
+  .sim-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    color: #7f8da6;
+  }
+
+  .debounce {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 20px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.78rem;
+    color: var(--wb-chrome-muted);
+  }
+
+  .debounce .bar {
+    position: relative;
+    width: 160px;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .debounce .bar i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0;
+    background: var(--wb-accent);
+    transition: width 0.3s linear;
+  }
+
+  .watch-log {
+    max-height: 300px;
+    overflow: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    white-space: pre;
+    color: #cfd8e6;
+  }
+
+  .watch-log :global(.entry.is-new) {
+    animation: bench-slidein 0.25s ease-out;
+  }
+
+  @keyframes bench-slidein {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (max-width: 860px) {
+    .bench-panel {
+      grid-template-columns: 1fr;
+    }
+
+    .bench-cmd {
+      border-right: 0;
+      border-bottom: 1px solid var(--wb-chrome-hair);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .watch-log :global(.entry.is-new),
+    .run-lines :global(.bar i),
+    .debounce .bar i {
+      animation: none;
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  import { escapeHtml as esc } from '../../data/home-content';
+
+  const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function wireTabs(root: HTMLElement): void {
+    const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('.bench-tab'));
+    const select = (tab: HTMLButtonElement): void => {
+      for (const t of tabs) {
+        const on = t === tab;
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(t.getAttribute('aria-controls') ?? '');
+        if (panel) panel.hidden = !on;
+      }
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (e) => {
+        const delta = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!delta) return;
+        const next = tabs[(i + delta + tabs.length) % tabs.length];
+        if (!next) return;
+        e.preventDefault();
+        select(next);
+        next.focus();
+      });
+    });
+  }
+
+  /* ---------- check simulator ---------- */
+  const KIND_TOOLS: Record<string, string[]> = {
+    py: ['ruff', 'mypy', 'bandit', 'black'],
+    yaml: ['yamllint', 'prettier'],
+    docker: ['hadolint'],
+    md: ['markdownlint'],
+  };
+
+  interface ToolResult {
+    t: number;
+    issues: (files: string[]) => number;
+  }
+
+  const TOOL_RESULTS: Record<string, ToolResult> = {
+    ruff: { t: 0.47, issues: (files) => countFindings('ruff', files) },
+    mypy: { t: 1.34, issues: (files) => countFindings('mypy', files) },
+    bandit: { t: 0.62, issues: (files) => countFindings('bandit', files) },
+    black: { t: 0.31, issues: (files) => countFindings('black', files) },
+    yamllint: { t: 0.09, issues: (files) => countFindings('yamllint', files) },
+    prettier: { t: 0.41, issues: (files) => countFindings('prettier', files) },
+    hadolint: { t: 0.18, issues: (files) => countFindings('hadolint', files) },
+    markdownlint: { t: 0.22, issues: (files) => countFindings('markdownlint', files) },
+  };
+
+  type Finding = [tool: string, loc: string, rule: string, msg: string, fixable: boolean];
+
+  const FINDINGS: Record<string, Finding[]> = {
+    'src/utils/paths.py': [
+      ['ruff', 'src/utils/paths.py:12:8 ', 'F401 ', '`os` imported but unused', true],
+      ['ruff', 'src/utils/paths.py:40:1 ', 'E302 ', 'expected 2 blank lines', true],
+    ],
+    'src/api/client.py': [
+      ['ruff', 'src/api/client.py:88:5  ', 'B006 ', 'mutable default argument', false],
+      ['black', 'src/api/client.py       ', '     ', 'would reformat', true],
+    ],
+    'config.yaml': [
+      ['yamllint', 'config.yaml:3:81         ', 'line-length', 'line too long (94 > 80)', false],
+    ],
+    Dockerfile: [
+      ['hadolint', 'Dockerfile:1            ', 'DL3007', 'using latest is prone to errors', false],
+      ['hadolint', 'Dockerfile:7            ', 'DL3008', 'pin versions in apt-get install', false],
+    ],
+    'README.md': [['markdownlint', 'README.md:14          ', 'MD013', 'line length', false]],
+  };
+
+  /** Issue count for one tool over the selected paths, so totals match the findings pane. */
+  function countFindings(tool: string, files: string[]): number {
+    return files.flatMap((p) => FINDINGS[p] ?? []).filter((f) => f[0] === tool).length;
+  }
+
+  function initCheck(): void {
+    const tree = document.getElementById('filetree');
+    const cmd = document.getElementById('check-cmd');
+    const lines = document.getElementById('check-lines');
+    const findings = document.getElementById('check-findings');
+    const summary = document.getElementById('check-summary');
+    const score = document.getElementById('check-score');
+    const run = document.getElementById('check-run');
+    if (!tree || !cmd || !lines || !findings || !summary || !score || !run) return;
+
+    let runToken = 0;
+
+    const selected = (): { path: string; kind: string }[] =>
+      Array.from(tree.querySelectorAll<HTMLInputElement>('input:checked')).map((i) => ({
+        path: i.value,
+        kind: i.dataset.kind ?? '',
+      }));
+
+    const updateCmd = (): void => {
+      const files = selected();
+      const all = tree.querySelectorAll('input').length;
+      const args =
+        files.length === 0 || files.length === all ? '.' : files.map((f) => f.path).join(' ');
+      cmd.innerHTML = `<span class="prompt">$</span> lintro check ${esc(args)} <span class="flag">--output-format grid</span>`;
+      for (const label of tree.querySelectorAll<HTMLLabelElement>('label')) {
+        label.classList.toggle('on', label.querySelector('input')?.checked ?? false);
+      }
+    };
+
+    const toolsFor = (files: { kind: string }[]): string[] => {
+      const seen = new Set<string>();
+      for (const f of files) for (const t of KIND_TOOLS[f.kind] ?? []) seen.add(t);
+      return [...seen];
+    };
+
+    const runCheck = (animate: boolean): void => {
+      const token = ++runToken;
+      const files = selected();
+      const paths = files.map((f) => f.path);
+      const tools = toolsFor(files);
+      lines.innerHTML = '';
+      findings.textContent = '';
+      summary.textContent = '';
+      if (tools.length === 0) {
+        findings.innerHTML = '<span class="dim">No files selected. Pick something in the tree.</span>';
+        score.textContent = '— / 100';
+        return;
+      }
+      const rows = tools.map((t) => {
+        const row = document.createElement('div');
+        row.className = 'run-line';
+        row.innerHTML = `<span>${t}</span><span class="bar"><i></i></span>`;
+        lines.appendChild(row);
+        return row;
+      });
+      let total = 0;
+      let maxT = 0;
+      for (const t of tools) maxT = Math.max(maxT, TOOL_RESULTS[t]?.t ?? 0);
+
+      const finish = (row: HTMLElement, t: string): void => {
+        const result = TOOL_RESULTS[t];
+        if (!result) return;
+        const n = result.issues(paths);
+        total += n;
+        row.classList.add('done');
+        const status = n
+          ? `<span class="wr">! ${n} issue${n > 1 ? 's' : ''}</span>`
+          : '<span class="ok">✓ passed</span>';
+        row.innerHTML = `<span>${t}</span><span class="res">${status} <span class="dim">(${result.t.toFixed(2)}s)</span></span>`;
+      };
+
+      const done = (): void => {
+        if (token !== runToken) return;
+        const out: string[] = [];
+        for (const p of paths) {
+          for (const f of FINDINGS[p] ?? []) {
+            if (!tools.includes(f[0])) continue;
+            out.push(
+              `<span class="dim">${f[0].padEnd(13)}</span>${esc(f[1])} <span class="key">${esc(f[2])}</span> ${esc(f[3])}${f[4] ? '  <span class="ok">fixable</span>' : ''}`
+            );
+          }
+        }
+        const plural = paths.length > 1 ? 's' : '';
+        findings.innerHTML = out.length
+          ? out.join('\n')
+          : `<span class="ok">No issues in ${paths.length} file${plural}.</span>`;
+        const value = Math.max(0, 100 - total * 3);
+        summary.textContent = `${tools.length} tools · ${paths.length} file${plural} · ${total} issue${total === 1 ? '' : 's'} · ${maxT.toFixed(2)}s wall`;
+        score.textContent = `${value} / 100`;
+      };
+
+      if (!animate || REDUCE) {
+        rows.forEach((row, i) => finish(row, tools[i] ?? ''));
+        done();
+        return;
+      }
+      let pending = rows.length;
+      rows.forEach((row, i) => {
+        const t = tools[i] ?? '';
+        const ms = 250 + (TOOL_RESULTS[t]?.t ?? 0) * 500;
+        const bar = row.querySelector<HTMLElement>('i');
+        if (bar) {
+          bar.style.transitionDuration = `${ms}ms`;
+          requestAnimationFrame(() => {
+            bar.style.width = '100%';
+          });
+        }
+        setTimeout(() => {
+          if (token !== runToken) return;
+          finish(row, t);
+          if (--pending === 0) done();
+        }, ms);
+      });
+    };
+
+    tree.addEventListener('change', () => {
+      updateCmd();
+      runCheck(true);
+    });
+    run.addEventListener('click', () => runCheck(true));
+    updateCmd();
+    runCheck(false);
+  }
+
+  /* ---------- watch simulator ---------- */
+  type WatchRun = [tool: string, cls: string, status: string, secs: number, detail?: string];
+
+  const WATCH_RUNS: Record<string, WatchRun[]> = {
+    'foo.py': [
+      ['ruff', 'ok', '✓ passed', 0.12],
+      ['mypy', 'wr', '! 1 issue', 1.34, 'foo.py:42: Missing type annotation'],
+      ['bandit', 'ok', '✓ passed', 0.4],
+    ],
+    'app.ts': [
+      ['oxlint', 'ok', '✓ passed', 0.09],
+      ['tsc', 'ok', '✓ passed', 0.88],
+    ],
+  };
+
+  function clock(): string {
+    const d = new Date();
+    const p = (n: number): string => (n < 10 ? '0' : '') + n;
+    return `[${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}]`;
+  }
+
+  function initWatch(): void {
+    const log = document.getElementById('watch-log');
+    const bar = document.getElementById('watch-debounce-bar');
+    const txt = document.getElementById('watch-debounce-txt');
+    const savePy = document.getElementById('watch-save');
+    const saveTs = document.getElementById('watch-save-ts');
+    if (!log || !bar || !txt || !savePy || !saveTs) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pending: string[] = [];
+
+    const save = (file: string): void => {
+      pending.push(file);
+      if (timer) clearTimeout(timer);
+      txt.textContent = pending.length > 1 ? `${pending.length} saves folded` : 'waiting for quiet';
+      bar.style.transition = 'none';
+      bar.style.width = '0';
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          bar.style.transition = REDUCE ? 'none' : 'width 0.3s linear';
+          bar.style.width = '100%';
+        });
+      });
+      timer = setTimeout(() => {
+        timer = null;
+        const files = [...new Set(pending)];
+        pending = [];
+        let body = `<span class="key">${clock()}</span> ${files.join(', ')} modified\n`;
+        const runs = files.flatMap((f) => WATCH_RUNS[f] ?? []);
+        runs.forEach((r, i) => {
+          const last = i === runs.length - 1;
+          body += `  ${last ? '└─' : '├─'} ${r[0]}: <span class="${r[1]}">${r[2]}</span> (${r[3].toFixed(2)}s)\n`;
+          if (r[4]) body += `  ${last ? '  ' : '│ '} ${esc(r[4])}\n`;
+        });
+        const entry = document.createElement('span');
+        entry.className = 'entry is-new';
+        entry.innerHTML = body;
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+        txt.textContent = 'ran once';
+        bar.style.transition = 'none';
+        bar.style.width = '0';
+      }, 300);
+    };
+
+    savePy.addEventListener('click', () => save('foo.py'));
+    saveTs.addEventListener('click', () => save('app.ts'));
+  }
+
+  /* ---------- review simulator ---------- */
+  type ReviewFinding = [
+    cls: string,
+    sev: string,
+    loc: string,
+    msg: string,
+    minDepth: number,
+    minStrict: string,
+  ];
+
+  const REVIEW_FINDINGS: ReviewFinding[] = [
+    [
+      'er',
+      'P1',
+      'src/api/client.py:88 ',
+      'mutable default argument shared\n   across calls; <span class="dim">rubric: correctness &gt; shared state</span>',
+      1,
+      'focused',
+    ],
+    [
+      'wr',
+      'P2',
+      'src/db/orders.py:41  ',
+      'raw cursor.execute outside\n   repository layer  <span class="dim">source: no-raw-sql</span>',
+      1,
+      'focused',
+    ],
+    [
+      'wr',
+      'P2',
+      'src/api/client.py:112',
+      'retry loop swallows the last exception\n   <span class="dim">rubric: error handling &gt; silent failure · generated question</span>',
+      2,
+      'balanced',
+    ],
+    ['hi', 'P3', 'docs/usage.md:12     ', 'stale flag name --format', 1, 'balanced'],
+    [
+      'hi',
+      'P3',
+      'src/db/migrations/0042.py',
+      'no down() migration\n   <span class="dim">rubric: migrations &gt; reversibility</span>',
+      1,
+      'thorough',
+    ],
+    [
+      'wr',
+      'P2',
+      'src/api/client.py:130',
+      'timeout not applied to the retry path\n   <span class="dim">adversarial pass: "what if the first attempt hangs?"</span>',
+      3,
+      'balanced',
+    ],
+    ['hi', 'P3', 'src/api/client.py:9  ', 'docstring says seconds, code uses ms', 3, 'thorough'],
+  ];
+
+  const STRICT_RANK: Record<string, number> = { focused: 0, balanced: 1, thorough: 2 };
+
+  function initReview(): void {
+    const depthEl = document.getElementById('review-depth') as HTMLSelectElement | null;
+    const strictEl = document.getElementById('review-strict') as HTMLSelectElement | null;
+    const out = document.getElementById('review-out');
+    const cmd = document.getElementById('review-cmd');
+    if (!depthEl || !strictEl || !out || !cmd) return;
+
+    const render = (): void => {
+      const depth = Number.parseInt(depthEl.value, 10);
+      const strict = strictEl.value;
+      cmd.innerHTML = `<span class="prompt">$</span> lintro review <span class="flag">--pr 214 --depth ${depth} --strictness ${strict} --post</span>`;
+      const shown = REVIEW_FINDINGS.filter(
+        (f) => f[4] <= depth && (STRICT_RANK[f[5]] ?? 0) <= (STRICT_RANK[strict] ?? 0)
+      );
+      let p1 = 0;
+      let p2 = 0;
+      let p3 = 0;
+      for (const f of shown) {
+        if (f[1] === 'P1') p1++;
+        else if (f[1] === 'P2') p2++;
+        else p3++;
+      }
+      const verdict = p1
+        ? `<span class="er">Blocked</span> <span class="dim">(${p1} open P1)</span>`
+        : p2
+          ? `<span class="wr">Changes requested</span> <span class="dim">(${p2} open P2)</span>`
+          : p3
+            ? '<span class="hi">Nits only</span>'
+            : '<span class="ok">Ready</span>';
+      const calls = 2 + (depth - 1) * 2 + (strict === 'thorough' ? 1 : 0);
+      const cost = (0.05 * calls + shown.length * 0.012).toFixed(2);
+      let body =
+        `<span class="dim">Reviewing PR #214 · 7 files · depth ${depth} · ${strict}</span>\n` +
+        `<span class="dim">Coverage: 5/7 files carried from round 1 · 2 new · ${calls} provider calls</span>\n\n`;
+      if (shown.length === 0) {
+        body += '<span class="ok">No findings at this depth and strictness.</span>\n';
+      }
+      for (const f of shown) {
+        body += `<span class="${f[0]}">${f[1]}</span> ${esc(f[2])} ${f[3]}\n`;
+      }
+      body +=
+        `\n<span class="dim">Verdict:</span> ${verdict}\n` +
+        `<span class="dim">Posted sticky summary + ${shown.length} inline comment${shown.length === 1 ? '' : 's'}</span>\n` +
+        `<span class="dim">Cost: $${cost} · exit ${p1 ? 1 : 0} · example figures</span>`;
+      out.innerHTML = body;
+    };
+
+    depthEl.addEventListener('change', render);
+    strictEl.addEventListener('change', render);
+    render();
+  }
+
+  function initWorkbench(): void {
+    const root = document.getElementById('workbench');
+    if (!root || root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+    wireTabs(root);
+    initCheck();
+    initWatch();
+    initReview();
+  }
+
+  initWorkbench();
+  document.addEventListener('astro:page-load', initWorkbench);
+</script>

@@ -1,0 +1,41 @@
+---
+import { getCollection } from 'astro:content';
+import { docRoute, type DocCategory } from '../../data/docs-nav';
+import { groupSectionDocs, sidebarLabel } from '../../data/sidebar-nav';
+import { stripHtml } from '../../data/landing';
+
+interface Props {
+  category: DocCategory;
+}
+
+const { category } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const sectionDocs = (
+  await getCollection(
+    'docs',
+    ({ data }) => !data.draft && data.category === category && data.sidebar !== false
+  )
+).sort((a, b) => a.data.order - b.data.order);
+const { groups } = groupSectionDocs(category, sectionDocs);
+---
+
+{
+  groups.length > 0 && (
+    <section class="docs-section-pages" aria-label="Pages in this section" data-pagefind-ignore>
+      <p class="docs-section-pages-title">In this section</p>
+      {groups.map((group) => (
+        <div class="docs-section-pages-group">
+          <h3>{group.label}</h3>
+          <div class="docs-page-grid">
+            {group.docs.map((doc) => (
+              <a href={docRoute(base, doc.id)} class="docs-page-card">
+                <strong>{sidebarLabel(doc)}</strong>
+                {doc.data.description && <span>{stripHtml(doc.data.description)}</span>}
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}

@@ -1,0 +1,178 @@
+---
+import { DEFAULT_INSTALL, INSTALL_METHODS } from '../../data/install-methods';
+const methods = [
+  { key: 'uv', label: 'uv' },
+  { key: 'pip', label: 'pip' },
+  { key: 'bun', label: 'bun' },
+  { key: 'brew', label: 'brew' },
+  { key: 'docker', label: 'docker' },
+] as const;
+---
+
+<div class="install" id="install">
+  <div class="seg" role="group" aria-label="Install method">
+    {
+      methods.map((m) => (
+        <button type="button" data-install={m.key} aria-pressed={m.key === 'uv' ? 'true' : 'false'}>
+          {m.label}
+        </button>
+      ))
+    }
+  </div>
+  <div class="install-cmd">
+    <pre tabindex="0" id="install-cmd">{INSTALL_METHODS[DEFAULT_INSTALL].cmd}</pre>
+    <button class="btn btn-sm" id="install-copy" type="button">Copy</button>
+  </div>
+  <p class="install-note" id="install-note" set:html={INSTALL_METHODS[DEFAULT_INSTALL].note} />
+</div>
+
+<style>
+  .install {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 12px 18px;
+    align-items: center;
+    margin-top: 20px;
+    padding: 14px 18px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--wb-surface-2);
+    border: 1px solid var(--wb-hair);
+    border-radius: 8px;
+  }
+
+  .seg button {
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--wb-muted);
+  }
+
+  .seg button[aria-pressed='true'] {
+    background: var(--wb-navy);
+    color: var(--wb-chrome-ink);
+  }
+
+  :global([data-theme='workbench-dark']) .seg button[aria-pressed='true'] {
+    background: var(--wb-accent);
+    color: var(--wb-accent-ink);
+  }
+
+  .install-cmd {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .install-cmd pre {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 8px 12px;
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.9rem;
+    background: var(--wb-surface-2);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius-sm);
+    color: var(--wb-ink);
+  }
+
+  .install-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--wb-muted);
+  }
+
+  @media (max-width: 700px) {
+    .install {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  import { DEFAULT_INSTALL, INSTALL_METHODS, isInstallKey } from '../../data/install-methods';
+
+  
+
+  const STORAGE_KEY = 'lintro.install';
+
+  function initInstallPicker(): void {
+    const root = document.getElementById('install');
+    const cmd = document.getElementById('install-cmd');
+    const note = document.getElementById('install-note');
+    const copy = document.getElementById('install-copy') as HTMLButtonElement | null;
+    if (!root || !cmd || !note || !copy || root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-install]'));
+
+    function setInstall(key: string, persist: boolean): void {
+      const info = isInstallKey(key) ? INSTALL_METHODS[key] : INSTALL_METHODS[DEFAULT_INSTALL];
+      if (!info || !cmd || !note) return;
+      cmd.textContent = info.cmd;
+      note.innerHTML = info.note;
+      for (const b of buttons) {
+        b.setAttribute('aria-pressed', b.dataset.install === key ? 'true' : 'false');
+      }
+      if (persist) {
+        try {
+          localStorage.setItem(STORAGE_KEY, key);
+        } catch {
+          /* storage unavailable */
+        }
+      }
+    }
+
+    for (const b of buttons) {
+      b.addEventListener('click', () => setInstall(b.dataset.install ?? 'uv', true));
+    }
+
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(STORAGE_KEY);
+    } catch {
+      saved = null;
+    }
+    if (saved && isInstallKey(saved)) setInstall(saved, false);
+
+    copy.addEventListener('click', () => {
+      const text = cmd.textContent ?? '';
+      const reset = (label: string): void => {
+        copy.textContent = label;
+        setTimeout(() => {
+          copy.textContent = 'Copy';
+        }, 1400);
+      };
+      const done = (): void => {
+        copy.textContent = 'Copied';
+        setTimeout(() => {
+          copy.textContent = 'Copy';
+        }, 1400);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(done, () => {
+          reset('Copy failed');
+        });
+      } else {
+        reset('Select and copy');
+      }
+    });
+  }
+
+  initInstallPicker();
+  document.addEventListener('astro:page-load', initInstallPicker);
+</script>

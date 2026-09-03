@@ -5,33 +5,51 @@ export interface ThemeOption {
   label: string;
 }
 
-/** Site-native Terminal Brutalist styling — no per-theme CSS file. */
-export const NATIVE_THEME = 'terminal';
+/** Site-native Workbench themes — tokens live in src/styles/workbench-theme.css. */
+export const NATIVE_THEME_META = [
+  { id: 'workbench', label: 'Workbench', appearance: 'light' },
+  { id: 'workbench-dark', label: 'Workbench Dark', appearance: 'dark' },
+] as const satisfies readonly { id: string; label: string; appearance: 'light' | 'dark' }[];
 
-export const DEFAULT_THEME = NATIVE_THEME;
+export type NativeTheme = (typeof NATIVE_THEME_META)[number]['id'];
 
-/** turbo-themes flavors excluding ids reserved by the site-native theme. */
-const siteTurboFlavors = flavors.filter((theme) => theme.id !== NATIVE_THEME);
+export const NATIVE_THEMES: readonly NativeTheme[] = NATIVE_THEME_META.map((theme) => theme.id);
+
+/** Default theme for viewers whose OS prefers a light scheme, or expresses no preference. */
+export const DEFAULT_THEME: NativeTheme = 'workbench';
+
+/** Default theme for viewers whose OS prefers a dark scheme. */
+export const DEFAULT_DARK_THEME: NativeTheme = 'workbench-dark';
+
+const WORKBENCH_SWATCH = '#e9a21b';
+
+/** turbo-themes flavors excluding ids reserved by the site-native themes. */
+const siteTurboFlavors = flavors.filter(
+  (theme) => !(NATIVE_THEMES as readonly string[]).includes(theme.id)
+);
 
 export const turboThemeOptions: ThemeOption[] = siteTurboFlavors.map((theme) => ({
   id: theme.id,
   label: theme.label,
 }));
 
-export const themeOptions: ThemeOption[] = [
-  { id: NATIVE_THEME, label: 'Terminal (default)' },
-  ...turboThemeOptions,
-];
+export const nativeThemeOptions: ThemeOption[] = NATIVE_THEME_META.map(({ id, label }) => ({
+  id,
+  label,
+}));
+
+export const themeOptions: ThemeOption[] = [...nativeThemeOptions, ...turboThemeOptions];
 
 export const validThemeIds = themeOptions.map((t) => t.id);
 export const turboThemeIds = turboThemeOptions.map((t) => t.id);
+export const nativeThemeIds: readonly string[] = NATIVE_THEMES;
 
-export function isNativeTheme(id: string): boolean {
-  return id === NATIVE_THEME;
+export function isNativeTheme(id: string): id is NativeTheme {
+  return (NATIVE_THEMES as readonly string[]).includes(id);
 }
 
 export const themeAppearances: Record<string, 'light' | 'dark'> = {
-  [NATIVE_THEME]: 'dark',
+  ...Object.fromEntries(NATIVE_THEME_META.map((theme) => [theme.id, theme.appearance])),
   ...Object.fromEntries(siteTurboFlavors.map((theme) => [theme.id, theme.appearance])),
 };
 
@@ -47,8 +65,6 @@ export interface ThemeMenuGroup {
   label: string;
   themes: ThemeMenuItem[];
 }
-
-const TERMINAL_SWATCH = '#39ff14';
 
 const VENDOR_LABELS: Record<string, string> = {
   bulma: 'Bulma',
@@ -101,14 +117,7 @@ export function buildThemeMenuGroups(): ThemeMenuGroup[] {
   const siteGroup: ThemeMenuGroup = {
     id: 'site',
     label: 'Lintro',
-    themes: [
-      {
-        id: NATIVE_THEME,
-        label: 'Terminal',
-        swatch: TERMINAL_SWATCH,
-        appearance: 'dark',
-      },
-    ],
+    themes: NATIVE_THEME_META.map((theme) => ({ ...theme, swatch: WORKBENCH_SWATCH })),
   };
 
   const vendorOrderSet = new Set<string>(VENDOR_ORDER);

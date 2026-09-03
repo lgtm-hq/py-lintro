@@ -23,7 +23,13 @@ const menuId = `nav-menu-${label.toLowerCase().replace(/\s+/g, "-")}`;
           {
             groups.map((group) => (
               <div class="nav-dropdown-group">
-                <p class="nav-dropdown-group-label">{group.label}</p>
+                {group.href ? (
+                  <a href={group.href} class="nav-dropdown-group-label nav-dropdown-group-link">
+                    {group.label}
+                  </a>
+                ) : (
+                  <p class="nav-dropdown-group-label">{group.label}</p>
+                )}
                 {
                   group.items.map((item) => (
                     <a href={item.href} class="nav-dropdown-item">
@@ -122,8 +128,8 @@ const menuId = `nav-menu-${label.toLowerCase().replace(/\s+/g, "-")}`;
     top: 100%;
     left: 0;
     z-index: 200;
-    min-width: 14rem;
-    max-width: 20rem;
+    min-width: 16rem;
+    max-width: 40rem;
     padding-top: 0.45rem;
     opacity: 0;
     visibility: hidden;
@@ -152,15 +158,15 @@ const menuId = `nav-menu-${label.toLowerCase().replace(/\s+/g, "-")}`;
     overflow-y: auto;
     padding: 0.5rem;
     border-radius: var(--radius-lg);
-    border: 1px solid var(--turbo-dropdown-border, var(--turbo-border-default));
-    background: var(--turbo-dropdown-bg, var(--turbo-bg-surface));
-    box-shadow: var(--shadow-md, var(--rust-warm-shadow));
+    border: 1px solid var(--wb-hair);
+    background: var(--wb-surface);
+    box-shadow: var(--wb-shadow);
   }
 
   .nav-dropdown.is-open .nav-dropdown-trigger,
   .nav-dropdown:focus-within .nav-dropdown-trigger {
-    color: var(--site-accent, var(--rust-forge));
-    background: var(--turbo-dropdown-item-hover, var(--turbo-bg-overlay));
+    color: var(--wb-ink);
+    background: var(--wb-surface-2);
   }
 
   .nav-dropdown.is-open .nav-dropdown-chevron,
@@ -171,17 +177,28 @@ const menuId = `nav-menu-${label.toLowerCase().replace(/\s+/g, "-")}`;
   .nav-dropdown-group + .nav-dropdown-group {
     margin-top: 0.5rem;
     padding-top: 0.5rem;
-    border-top: 1px solid var(--turbo-dropdown-border, var(--turbo-border-default));
+    border-top: 1px solid var(--wb-hair);
   }
 
   .nav-dropdown-group-label {
     margin: 0 0 0.35rem;
     padding: 0 0.5rem;
-    font-family: var(--font-mono, var(--turbo-font-mono));
-    font-size: 0.62rem;
-    letter-spacing: 0.12em;
+    font-family: var(--font-display);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--site-accent-light, var(--rust-brass));
+    color: var(--wb-muted);
+  }
+
+  .nav-dropdown-group-link {
+    display: block;
+    text-decoration: none;
+  }
+
+  .nav-dropdown-group-link:hover {
+    color: var(--wb-ink);
+    text-decoration: underline;
   }
 
   .nav-dropdown-item {
@@ -189,14 +206,14 @@ const menuId = `nav-menu-${label.toLowerCase().replace(/\s+/g, "-")}`;
     padding: 0.45rem 0.65rem;
     border-radius: var(--radius);
     font-size: 0.88rem;
-    color: var(--turbo-body-primary, var(--turbo-text-primary));
+    color: var(--wb-ink);
     text-decoration: none;
     line-height: 1.35;
   }
 
   .nav-dropdown-item:hover {
-    background: var(--turbo-dropdown-item-hover, var(--turbo-bg-overlay));
-    color: var(--site-accent-light, var(--rust-brass-light));
+    background: var(--wb-surface-2);
+    color: var(--wb-ink);
     text-decoration: none;
   }
 </style>

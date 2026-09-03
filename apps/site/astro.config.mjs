@@ -1,16 +1,63 @@
 // @ts-check
+import { existsSync } from 'node:fs';
 import { defineConfig } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import sitemap from '@astrojs/sitemap';
 import { rehypeSiteImages } from './src/lib/rehype-site-images.mjs';
-import { remarkUnwrapCrossPageLinks } from './src/lib/remark-unwrap-cross-page-links.mjs';
-import {
-  rehypeDocLinks,
-  rehypeUnwrapCrossPageLinks,
-  rehypeUnwrapHeadingLinks,
-} from './src/lib/rehype-doc-links.mjs';
+import { rehypeTableScroll } from './src/lib/rehype-table-scroll.mjs';
 
 const base = process.env.ASTRO_BASE || '/';
+
+/*
+ * The doc-link rehype plugins resolve authored cross-links through
+ * src/generated/docs-route-map.ts, which scripts/ci/site/migrate-docs-content.py
+ * emits (chained into the dev/build/check/test scripts) and git ignores. A bare
+ * `astro check` — as run by lintro's astro-check tool in the lint container —
+ * has no generated map, and importing it there would fail before any checking
+ * starts. Register those plugins only when the map exists; the committed .d.ts
+ * shim keeps type-checking whole either way.
+ */
+const routeMapReady = existsSync(new URL('./src/generated/docs-route-map.ts', import.meta.url));
+const docLinkPlugins = routeMapReady
+  ? await import('./src/lib/rehype-doc-links.mjs').then((m) => [
+      m.rehypeUnwrapHeadingLinks,
+      [m.rehypeDocLinks, base],
+    ])
+  : [];
+/** `base` with a leading slash and no trailing slash, for building absolute site paths. */
+const basePath = `/${base.replace(/^\/+|\/+$/g, '')}`.replace(/^\/$/, '');
+
+/**
+ * Routes published by the previous site layout, mapped to their new homes so
+ * bookmarks and inbound links keep resolving. Tool pages kept their paths.
+ */
+const retiredDocRoutes = {
+  '/docs/getting-started/hub/': '/docs/start/overview/',
+  '/docs/getting-started/getting-started/': '/docs/start/getting-started/',
+  '/docs/usage/': '/docs/guides/',
+  '/docs/usage/configuration/': '/docs/guides/configuration/',
+  '/docs/usage/watch-mode/': '/docs/guides/watch-mode/',
+  '/docs/usage/docker/': '/docs/guides/docker/',
+  '/docs/usage/github-integration/': '/docs/guides/github-integration/',
+  '/docs/usage/library-api/': '/docs/guides/library-api/',
+  '/docs/usage/troubleshooting/': '/docs/guides/troubleshooting/',
+  '/docs/usage/debugging/': '/docs/guides/debugging/',
+  '/docs/usage/ai-features/': '/docs/ai/ai-features/',
+  '/docs/usage/ai-review-transports/': '/docs/ai/review-transports/',
+  '/docs/usage/plugins/': '/docs/contribute/plugins/',
+  '/docs/contributing/contributing/': '/docs/contribute/',
+  '/docs/contributing/style-guide/': '/docs/contribute/style-guide/',
+  '/docs/contributing/shell-script-style-guide/': '/docs/contribute/shell-script-style-guide/',
+  '/docs/contributing/lintro-self-use/': '/docs/contribute/self-use/',
+  '/docs/architecture/overview/': '/docs/project/',
+  '/docs/architecture/architecture/': '/docs/project/architecture/',
+  '/docs/architecture/vision/': '/docs/project/vision/',
+  '/docs/architecture/roadmap/': '/docs/project/roadmap/',
+  '/docs/architecture/ai-review-execution/': '/docs/ai/review-execution/',
+  '/docs/security/': '/docs/project/security/',
+  '/docs/security/assurance/': '/docs/project/security/assurance/',
+  '/docs/security/requirements/': '/docs/project/security/requirements/',
+};
 
 /** @type {import('astro').AstroUserConfig} */
 export default defineConfig({
@@ -18,15 +65,12 @@ export default defineConfig({
   base,
   output: 'static',
   integrations: [sitemap()],
+  redirects: Object.fromEntries(
+    Object.entries(retiredDocRoutes).map(([from, to]) => [from, `${basePath}${to}`])
+  ),
   markdown: {
     processor: unified({
-      remarkPlugins: [remarkUnwrapCrossPageLinks],
-      rehypePlugins: [
-        [rehypeSiteImages, base],
-        rehypeUnwrapHeadingLinks,
-        rehypeUnwrapCrossPageLinks,
-        [rehypeDocLinks, base],
-      ],
+      rehypePlugins: [[rehypeSiteImages, base], ...docLinkPlugins, rehypeTableScroll],
     }),
     shikiConfig: { theme: 'css-variables', wrap: true },
   },

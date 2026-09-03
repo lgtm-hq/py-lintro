@@ -1,68 +1,59 @@
-/** Shared docs navigation — categories, sidebar groups, and navbar links. */
+/** Shared docs navigation — sections, section landing pages, and navbar links. */
 
-export const DOC_CATEGORIES = [
-  'getting-started',
-  'usage',
-  'tools',
-  'architecture',
-  'security',
-  'contributing',
-] as const;
+export const DOC_CATEGORIES = ['start', 'guides', 'ai', 'tools', 'contribute', 'project'] as const;
 
 export type DocCategory = (typeof DOC_CATEGORIES)[number];
 
-export const STANDALONE_DOC_CATEGORIES: readonly DocCategory[] = [] as const;
-
-export const CORE_DOC_CATEGORIES = DOC_CATEGORIES.filter(
-  (c) => !STANDALONE_DOC_CATEGORIES.includes(c)
-);
-
 export const CATEGORY_LABELS: Record<DocCategory, string> = {
-  'getting-started': 'Getting Started',
-  usage: 'Usage',
+  start: 'Start',
+  guides: 'Guides',
+  ai: 'AI',
   tools: 'Tools',
-  architecture: 'Architecture',
-  security: 'Security',
-  contributing: 'Contributing',
+  contribute: 'Contribute',
+  project: 'Project',
 };
 
-export function isStandaloneCategory(category: DocCategory): boolean {
-  return STANDALONE_DOC_CATEGORIES.includes(category);
+/** One-line blurbs for the docs hub and section landing pages. */
+export const CATEGORY_BLURBS: Record<DocCategory, string> = {
+  start: 'Install lintro, run your first check, and see how it compares to the alternatives.',
+  guides: 'Configure tools, run in watch mode, Docker, pre-commit and GitHub Actions.',
+  ai: 'Bring-your-own-key summaries, interactive fixes, diff review, and the MCP server.',
+  tools: 'Every linter, formatter, type checker and scanner lintro runs, one page each.',
+  contribute: 'Add a tool, run the test suite, and follow the style guides.',
+  project: 'Architecture, vision, roadmap, decision records, design notes, and security.',
+};
+
+/** Landing page id for each section (Astro flattens `<section>/index` to `<section>`). */
+export const SECTION_OVERVIEW_ID: Record<DocCategory, string> = {
+  start: 'start/overview',
+  guides: 'guides',
+  ai: 'ai',
+  tools: 'tools',
+  contribute: 'contribute',
+  project: 'project',
+};
+
+export function isDocCategory(value: string): value is DocCategory {
+  return (DOC_CATEGORIES as readonly string[]).includes(value);
 }
 
-/** Short labels for compact section tabs (dual-rail style). */
-export const CATEGORY_TAB_LABELS: Record<DocCategory, string> = {
-  'getting-started': 'start',
-  usage: 'usage',
-  tools: 'tools',
-  architecture: 'arch',
-  security: 'sec',
-  contributing: 'contrib',
-};
+export interface DocNavEntry {
+  id: string;
+  data: {
+    title: string;
+    navTitle?: string;
+    category: DocCategory;
+    order: number;
+    sidebar?: boolean;
+  };
+}
 
-/** Default landing page when a section tab is selected. */
-export const SECTION_OVERVIEW_ID: Record<DocCategory, string> = {
-  'getting-started': 'getting-started/hub',
-  usage: 'usage',
-  tools: 'tools',
-  architecture: 'architecture/overview',
-  security: 'security',
-  contributing: 'contributing/contributing',
-};
-
-/** Resolve a section overview doc (Astro uses `usage` not `usage/index` for index.md). */
+/** Resolve a section landing doc, tolerating `guides`, `guides/index` and `start/overview` style ids. */
 export function findSectionOverviewDoc<C extends DocNavEntry>(
   docs: C[],
   category: DocCategory
 ): C | undefined {
-  const candidates = [SECTION_OVERVIEW_ID[category], `${category}/index`, category];
-  const seen = new Set<string>();
-
-  for (const id of candidates) {
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
+  for (const id of sectionOverviewIds(category)) {
     const doc = docs.find((d) => d.id === id);
     if (doc) {
       return doc;
@@ -72,7 +63,13 @@ export function findSectionOverviewDoc<C extends DocNavEntry>(
   return undefined;
 }
 
-/** Landing page for a category tab — uses each section's overview page. */
+/** Site route for a doc id (index ids are served at their parent path). */
+export function docRoute(base: string, docId: string): string {
+  const routeId = docId.endsWith('/index') ? docId.slice(0, -'/index'.length) : docId;
+  return `${base}docs/${routeId}/`;
+}
+
+/** Landing page for a section tab — the section overview, else its first page. */
 export function categoryLandingHref(
   docs: DocNavEntry[],
   category: DocCategory,
@@ -80,7 +77,7 @@ export function categoryLandingHref(
 ): string {
   const overview = findSectionOverviewDoc(docs, category);
   if (overview) {
-    return `${base}docs/${overview.id}/`;
+    return docRoute(base, overview.id);
   }
 
   const inCategory = docs
@@ -90,11 +87,20 @@ export function categoryLandingHref(
     return `${base}docs/`;
   }
 
-  return `${base}docs/${inCategory[0]!.id}/`;
+  return docRoute(base, inCategory[0]!.id);
 }
 
 export function sectionDocCount(docs: DocNavEntry[], category: DocCategory): number {
   return docs.filter((d) => d.data.category === category && d.data.sidebar !== false).length;
+}
+
+/** Every id that may serve as a section's landing page, most specific first. */
+export function sectionOverviewIds(category: DocCategory): string[] {
+  return [...new Set([SECTION_OVERVIEW_ID[category], `${category}/index`, category])];
+}
+
+export function isSectionOverview(docId: string, category: DocCategory): boolean {
+  return sectionOverviewIds(category).includes(docId);
 }
 
 export interface NavDropdownItem {
@@ -104,6 +110,7 @@ export interface NavDropdownItem {
 
 export interface NavDropdownGroup {
   label: string;
+  href?: string;
   items: NavDropdownItem[];
 }
 
@@ -113,14 +120,9 @@ export interface MainNavItem {
   groups: NavDropdownGroup[];
 }
 
-export interface DocNavEntry {
-  id: string;
-  data: {
-    title: string;
-    category: DocCategory;
-    order: number;
-    sidebar?: boolean;
-  };
+/** Sidebar label: the short nav title when the migration provided one. */
+export function navLabel(doc: DocNavEntry): string {
+  return doc.data.navTitle ?? doc.data.title;
 }
 
 function docsInCategory(
@@ -129,25 +131,26 @@ function docsInCategory(
   base: string
 ): NavDropdownItem[] {
   return docs
-    .filter((d) => d.data.category === category && d.data.sidebar !== false)
+    .filter(
+      (d) =>
+        d.data.category === category &&
+        d.data.sidebar !== false &&
+        !isSectionOverview(d.id, category)
+    )
     .sort((a, b) => a.data.order - b.data.order)
     .map((d) => ({
-      label: d.data.title,
-      href: `${base}docs/${d.id}/`,
+      label: navLabel(d),
+      href: docRoute(base, d.id),
     }));
 }
 
-function groupsForCategories(
-  docs: DocNavEntry[],
-  categories: readonly DocCategory[],
-  base: string
-): NavDropdownGroup[] {
-  return categories
-    .map((key) => ({
-      label: CATEGORY_LABELS[key],
-      items: docsInCategory(docs, key, base),
-    }))
-    .filter((g) => g.items.length > 0);
+/** Dropdown groups for the "Docs" navbar item: one group per section. */
+export function docsNavGroups(docs: DocNavEntry[], base: string): NavDropdownGroup[] {
+  return DOC_CATEGORIES.map((key) => ({
+    label: CATEGORY_LABELS[key],
+    href: categoryLandingHref(docs, key, base),
+    items: docsInCategory(docs, key, base),
+  })).filter((g) => g.items.length > 0);
 }
 
 /** Build navbar items with dropdown groups from the docs collection. */
@@ -156,22 +159,17 @@ export function buildMainNav(base: string, docs: DocNavEntry[]): MainNavItem[] {
     {
       label: 'Docs',
       href: `${base}docs/`,
-      groups: groupsForCategories(docs, CORE_DOC_CATEGORIES, base),
+      groups: docsNavGroups(docs, base),
     },
     {
-      label: 'Coverage',
-      href: `${base}coverage/`,
-      groups: [
-        {
-          label: 'Reports',
-          items: [{ label: 'Python coverage', href: `${base}coverage/` }],
-        },
-      ],
+      label: 'Tools',
+      href: categoryLandingHref(docs, 'tools', base),
+      groups: [],
+    },
+    {
+      label: 'AI',
+      href: categoryLandingHref(docs, 'ai', base),
+      groups: [],
     },
   ];
-}
-
-/** @deprecated Use buildMainNav — kept for tests that only need labels. */
-export function mainNavLinks(base: string): { label: string; href: string }[] {
-  return buildMainNav(base, []).map(({ label, href }) => ({ label, href }));
 }

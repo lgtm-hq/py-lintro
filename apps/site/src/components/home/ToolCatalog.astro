@@ -1,0 +1,340 @@
+---
+import { docHref, docs } from '../../data/site-links';
+import {
+  FIXER_COUNT,
+  TOOL_CATEGORIES,
+  TOOL_CATEGORY_LABELS,
+  TOOL_COUNT,
+  TOOLS,
+} from '../../data/tools-catalog';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<header class="section-header">
+  <span class="eyebrow">Tool catalog</span>
+  <h2>{TOOL_COUNT} tools. {FIXER_COUNT} write fixes. Your native configs are used as-is.</h2>
+  <p class="lede">
+    A <code>.prettierrc</code>, <code>[tool.ruff]</code> or <code>.yamllint</code> is detected
+    automatically. Set <code>enforce: line_length: 88</code> once and every tool gets it. Defaults
+    only apply when a tool has no config of its own. Each tool has its own page in the
+    <a href={docHref(base, docs.toolsIndex)}>tool reference</a>.
+  </p>
+</header>
+
+<div class="catalog" id="tool-catalog">
+  <div class="chips" role="group" aria-label="Filter tools by category">
+    <button type="button" class="chip" data-cat="all" aria-pressed="true">All</button>
+    {
+      TOOL_CATEGORIES.map((c) => (
+        <button type="button" class="chip" data-cat={c} aria-pressed="false">
+          {TOOL_CATEGORY_LABELS[c]}
+        </button>
+      ))
+    }
+    <label class="toggle"><input type="checkbox" id="fix-only" /> Auto-fix only</label>
+  </div>
+  <p class="tool-count tabular" id="tool-count">Showing {TOOL_COUNT} of {TOOL_COUNT} tools</p>
+  <div class="tool-grid" id="tool-grid">
+    {
+      TOOLS.map((t) => (
+        <div class="tool" data-cat={t.category} data-fix={t.fixes ? '1' : '0'} data-name={t.name}>
+          <span class="name">
+            <span>{t.name}</span>
+            {t.fixes && <span class="fix">fix</span>}
+          </span>
+          <span class="target">{t.target}</span>
+        </div>
+      ))
+    }
+  </div>
+  <div class="plugin-note">
+    <div>
+      <h3>Bring your own tool</h3>
+      <p class="muted">
+        Any PyPI package that registers an entry point in the <code>lintro.tools</code> group is
+        discovered at startup and gets the full lifecycle: config injection, file discovery,
+        isolated execution, normalized output. The plugin API is versioned, and a broken plugin is
+        logged and skipped rather than crashing the run.
+        <a href={docHref(base, docs.plugins)}>Plugin guide</a>.
+      </p>
+    </div>
+    <pre tabindex="0"><code>[project.entry-points."lintro.tools"]
+my-tool = "my_package.plugin:MyToolPlugin"</code></pre>
+  </div>
+</div>
+
+<style>
+  .section-header {
+    display: grid;
+    gap: 10px;
+    max-width: 70ch;
+    margin-bottom: 36px;
+  }
+
+  .section-header a,
+  .plugin-note a {
+    color: var(--turbo-link-default, var(--wb-ink));
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 22px;
+  }
+
+  .chip {
+    padding: 6px 14px;
+    border: 1px solid var(--wb-hair);
+    border-radius: 999px;
+    background: var(--wb-surface);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--wb-muted);
+  }
+
+  .chip:hover {
+    color: var(--wb-ink);
+  }
+
+  .chip[aria-pressed='true'] {
+    background: var(--wb-navy);
+    border-color: var(--wb-navy);
+    color: var(--wb-chrome-ink);
+  }
+
+  :global([data-theme='workbench-dark']) .chip[aria-pressed='true'] {
+    background: var(--wb-accent);
+    border-color: var(--wb-accent);
+    color: var(--wb-accent-ink);
+  }
+
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    font-size: 0.85rem;
+    color: var(--wb-muted);
+  }
+
+  .toggle input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--wb-accent);
+  }
+
+  .tool-count {
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    color: var(--wb-muted);
+  }
+
+  .tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+
+  .tool {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: 8px;
+    transition:
+      border-color 0.12s ease,
+      transform 0.12s ease;
+    will-change: transform;
+  }
+
+  .tool:hover {
+    border-color: var(--wb-accent);
+    transform: translateY(-1px);
+  }
+
+  .tool[hidden] {
+    display: none;
+  }
+
+  .tool.moving {
+    transition:
+      transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 0.25s ease;
+  }
+
+  .tool .name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-family: var(--wb-font-mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .tool .target {
+    font-size: 0.8rem;
+    color: var(--wb-muted);
+  }
+
+  .tool .fix {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--wb-pass-soft);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wb-pass-text);
+  }
+
+  .plugin-note {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+    margin-top: 22px;
+    padding: 16px 20px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-hair);
+    border-radius: var(--wb-radius);
+  }
+
+  .plugin-note p {
+    font-size: 0.9rem;
+  }
+
+  .plugin-note pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  .plugin-note pre {
+    margin: 0;
+    padding: 12px 14px;
+    border-radius: var(--wb-radius-sm);
+    background: var(--wb-surface-2);
+    overflow-x: auto;
+    font-family: var(--wb-font-mono);
+    font-size: 0.85rem;
+    color: var(--wb-ink);
+  }
+
+  @media (max-width: 700px) {
+    .plugin-note {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tool,
+    .tool.moving {
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  import type { ToolCategory } from '../../data/tools-catalog';
+
+  const REDUCE = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const CAT_SCORE: Record<ToolCategory | 'all', number> = {
+    all: 91,
+    lint: 88,
+    fmt: 97,
+    both: 93,
+    type: 85,
+    sec: 94,
+    test: 99,
+    ai: 100,
+  };
+
+  function initToolCatalog(): void {
+    const root = document.getElementById('tool-catalog');
+    const grid = document.getElementById('tool-grid');
+    const count = document.getElementById('tool-count');
+    const fixOnly = document.getElementById('fix-only') as HTMLInputElement | null;
+    if (!root || !grid || !count || !fixOnly || root.dataset.bound === 'true') return;
+    root.dataset.bound = 'true';
+
+    const chips = Array.from(root.querySelectorAll<HTMLButtonElement>('.chip[data-cat]'));
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>('.tool'));
+    let cat = 'all';
+    let ready = false;
+
+    const render = (): void => {
+      const first = new Map<string, DOMRect>();
+      if (!REDUCE) {
+        for (const el of cards) {
+          if (!el.hidden) first.set(el.dataset.name ?? '', el.getBoundingClientRect());
+        }
+      }
+      let shown = 0;
+      for (const el of cards) {
+        const ok =
+          (cat === 'all' || el.dataset.cat === cat) && (!fixOnly.checked || el.dataset.fix === '1');
+        el.classList.remove('moving');
+        el.style.transform = '';
+        el.style.opacity = '';
+        el.hidden = !ok;
+        if (ok) shown++;
+      }
+      if (!REDUCE) {
+        for (const el of cards) {
+          if (el.hidden) continue;
+          const was = first.get(el.dataset.name ?? '');
+          const now = el.getBoundingClientRect();
+          if (!was) {
+            el.style.opacity = '0';
+            el.style.transform = 'scale(0.92)';
+            continue;
+          }
+          const dx = was.left - now.left;
+          const dy = was.top - now.top;
+          if (dx || dy) el.style.transform = `translate(${dx}px, ${dy}px)`;
+        }
+        requestAnimationFrame(() => {
+          for (const el of cards) {
+            if (el.hidden) continue;
+            el.classList.add('moving');
+            el.style.transform = '';
+            el.style.opacity = '';
+          }
+        });
+      }
+      count.textContent = `Showing ${shown} of ${cards.length} tools`;
+
+      const base = cat in CAT_SCORE ? CAT_SCORE[cat as ToolCategory | 'all'] : CAT_SCORE.all;
+      const score = Math.min(100, base + (fixOnly.checked ? 3 : 0));
+      const active = chips.find((c) => c.dataset.cat === cat);
+      const label = cat === 'all' ? 'all tools' : `only ${(active?.textContent ?? '').trim().toLowerCase()}`;
+      const note = `Example score with ${label}${fixOnly.checked ? ', auto-fixable tools only' : ''}. Weights live in the score config section.`;
+      if (ready) {
+        document.dispatchEvent(new CustomEvent('lintro:score', { detail: { score, note } }));
+      }
+      ready = true;
+    };
+
+    for (const chip of chips) {
+      chip.addEventListener('click', () => {
+        cat = chip.dataset.cat ?? 'all';
+        for (const other of chips) {
+          other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+        }
+        render();
+      });
+    }
+    fixOnly.addEventListener('change', render);
+    render();
+  }
+
+  initToolCatalog();
+  document.addEventListener('astro:page-load', initToolCatalog);
+</script>

@@ -758,7 +758,7 @@ but trails the recommended pin (`below_recommended`). JSON `version_check_passed
 `true` in that case; only the table status string changed from PASS. The process still
 exits 0.
 
-### Node.js Package Manager Policy {#node-package-manager-policy}
+### Node.js Package Manager Policy
 
 `lintro install` used to pick bun whenever bun happened to be on `PATH`, and to install
 **globally** regardless of what the project said. In an npm-first repository that
@@ -1031,7 +1031,7 @@ Rationale:
 - Black’s safe wrapping is preferred for long lines; Ruff continues to enforce lint
   limits during checks.
 
-### Node.js Tool Resolution {#nodejs-tool-resolution}
+### Node.js Tool Resolution
 
 **Every Node.js tool resolves the same way.** There is one chain, implemented once in
 `NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
@@ -2263,7 +2263,7 @@ spaces = 2
 
 ### Markdown Tools
 
-#### Markdownlint-cli2 Configuration {#markdownlint-cli2-configuration}
+#### Markdownlint-cli2 Configuration
 
 Markdownlint-cli2 supports configuration via JSON, JSONC, YAML, or TOML files. Lintro
 defers to markdownlint-cli2's native configuration discovery, which searches upward from
@@ -2311,7 +2311,7 @@ MD041: false
 
 ### Prose / Documentation Tools
 
-#### Vale Configuration {#vale-configuration}
+#### Vale Configuration
 
 [Vale](https://vale.sh/) is a syntax-aware prose linter. Lintro defers to Vale's native
 configuration discovery, which walks upward from each linted file to find a `.vale.ini`.
