@@ -121,20 +121,24 @@ def should_delete(
     merged_at: str | None = None,
     min_age_days: int,
 ) -> bool:
-    """Return whether age or closed-unmerged state makes a version deletable."""
-    if now - candidate.updated_at >= timedelta(days=min_age_days):
-        return True
+    """Return whether age or closed-unmerged state makes a version deletable.
+
+    Both rules require every owning PR to be known. A missing or unparseable
+    PR (state ``None``) leaves the candidate alone even once it is older than
+    ``min_age_days``: an orphaned tag is a signal for a human, not a delete.
+    """
     if pr_states is None:
         if pr_state is None:
             return False
         pr_states = dict.fromkeys(candidate.pr_numbers, (pr_state, merged_at))
-    return (
-        bool(pr_states)
-        and all(
-            state == "closed" and not merged for state, merged in pr_states.values()
-        )
-        and all(number in pr_states for number in candidate.pr_numbers)
-    )
+    if not pr_states or any(
+        number not in pr_states or pr_states[number][0] is None
+        for number in candidate.pr_numbers
+    ):
+        return False
+    if now - candidate.updated_at >= timedelta(days=min_age_days):
+        return True
+    return all(state == "closed" and not merged for state, merged in pr_states.values())
 
 
 def _package_versions(*, owner: str) -> list[dict[str, Any]]:

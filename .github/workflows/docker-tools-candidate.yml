@@ -208,7 +208,9 @@ jobs:
           DIGEST_TOKEN: ${{ steps.digest-app.outputs.token }}
           REPOSITORY: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
+        # The token travels in an Authorization header only, never in the
+        # remote URL, so a failed push cannot echo it in the printed remote.
         run: |
-          git remote set-url origin \
-            "https://x-access-token:${DIGEST_TOKEN}@github.com/${REPOSITORY}.git"
-          git push origin "HEAD:${BRANCH}"
+          auth="$(printf 'x-access-token:%s' "${DIGEST_TOKEN}" | base64 | tr -d '\n')"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+            push "https://github.com/${REPOSITORY}.git" "HEAD:${BRANCH}"

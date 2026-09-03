@@ -170,6 +170,10 @@ def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
             "BRANCH": "${{ github.ref_name }}",
         },
     )
+    push_script = str(push_step["run"])
+    assert_that(push_script).does_not_contain("x-access-token:${DIGEST_TOKEN}@")
+    assert_that(push_script).does_not_contain("set-url")
+    assert_that(push_script).contains("http.extraheader=AUTHORIZATION: basic")
 
 
 def test_resolve_pr_retries_until_renovate_creates_pr(
@@ -669,6 +673,58 @@ def test_cleanup_deletes_closed_unmerged_pr_before_age_limit(
             now=datetime.now(UTC),
             pr_state="closed",
             merged_at=None,
+            min_age_days=14,
+        ),
+    ).is_true()
+
+
+def test_cleanup_keeps_aged_candidate_with_unknown_pr_state(
+    *,
+    cleanup_module: ModuleType,
+) -> None:
+    """An unknown owning PR never satisfies the age rule either."""
+    candidate = cleanup_module.CandidateVersion(
+        version_id="7",
+        tags=("tools-candidate-pr42-abcdef1",),
+        updated_at=datetime.now(UTC) - timedelta(days=20),
+        pr_number=42,
+    )
+
+    assert_that(
+        cleanup_module.should_delete(
+            candidate,
+            now=datetime.now(UTC),
+            pr_states={42: (None, None)},
+            min_age_days=14,
+        ),
+    ).is_false()
+    assert_that(
+        cleanup_module.should_delete(
+            candidate,
+            now=datetime.now(UTC),
+            pr_states={},
+            min_age_days=14,
+        ),
+    ).is_false()
+
+
+def test_cleanup_deletes_aged_candidate_with_known_pr_state(
+    *,
+    cleanup_module: ModuleType,
+) -> None:
+    """Age still reaps a candidate once every owning PR is known."""
+    candidate = cleanup_module.CandidateVersion(
+        version_id="7",
+        tags=("tools-candidate-pr42-abcdef1",),
+        updated_at=datetime.now(UTC) - timedelta(days=20),
+        pr_number=42,
+    )
+
+    assert_that(
+        cleanup_module.should_delete(
+            candidate,
+            now=datetime.now(UTC),
+            pr_states={42: ("open", None)},
             min_age_days=14,
         ),
     ).is_true()
