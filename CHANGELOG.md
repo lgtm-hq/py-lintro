@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.141.2] - 2026-09-03
+
+### Fixed
+
+- **ai**: report the real inline-post failure instead of a line-mapping guess (#2273)
+  (c6b193d)
+
 ## [0.141.1] - 2026-09-03
 
 ### Fixed
