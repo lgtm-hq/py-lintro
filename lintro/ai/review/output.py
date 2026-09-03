@@ -50,6 +50,7 @@ CONVERGED_OUTCOME = "converged"
 def convergence_outcome_to_dict(
     *,
     decision: ConvergenceDecision,
+    open_p1: int = 0,
 ) -> dict[str, Any]:
     """Build the machine-readable envelope for a short-circuited round.
 
@@ -61,28 +62,36 @@ def convergence_outcome_to_dict(
 
     Args:
         decision: The converged decision that skipped the round.
+        open_p1: Open P1 findings the last real round left in force. When
+            non-zero the skip exits 1, and the count is reported so consumers
+            can see why a converged round still failed.
 
     Returns:
         JSON-serializable mapping describing why the round was skipped.
     """
     return {
         "outcome": CONVERGED_OUTCOME,
-        CONVERGED_ENVELOPE_KEY: decision.to_dict(),
+        CONVERGED_ENVELOPE_KEY: {**decision.to_dict(), "open_p1": open_p1},
         "detail": format_convergence_stamp(decision=decision),
     }
 
 
-def render_convergence_outcome_json(*, decision: ConvergenceDecision) -> str:
+def render_convergence_outcome_json(
+    *,
+    decision: ConvergenceDecision,
+    open_p1: int = 0,
+) -> str:
     """Serialize the skipped-round envelope to pretty-printed JSON.
 
     Args:
         decision: The converged decision that skipped the round.
+        open_p1: Open P1 findings the last real round left in force.
 
     Returns:
         JSON string with two-space indentation.
     """
     return json.dumps(
-        convergence_outcome_to_dict(decision=decision),
+        convergence_outcome_to_dict(decision=decision, open_p1=open_p1),
         indent=2,
     )
 

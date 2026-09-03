@@ -621,3 +621,21 @@ def test_an_unknown_evidence_style_reads_as_the_highest_likelihood() -> None:
     assert_that(record).is_not_none()
     assert record is not None
     assert_that(record.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
+
+
+def test_decode_state_never_fabricates_a_score_from_a_corrupt_blob() -> None:
+    """A sticky blob carrying an unusable score decodes to "not measured"."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": "NaN"}],
+                "findings": [{"fingerprint": "fp", "evidence_style": "hunch"}],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].convergence_score).is_none()
+    assert_that(decoded.findings[0].evidence_style).is_equal_to(
+        EvidenceStyle.DIFF_LOCAL,
+    )

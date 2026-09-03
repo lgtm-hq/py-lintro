@@ -20,8 +20,11 @@ class ConvergenceDecision:
         converged: True when the stop rule fired and no provider call should
             be made this round.
         round_number: Round that was skipped. Zero when nothing was skipped.
-        score: Most recent recorded convergence score.
-        threshold: Configured threshold, or ``0.0`` when the rule is disabled.
+        score: Most recent recorded convergence score, or ``None`` when the
+            latest window round was never measured or the rule did not run.
+            Never a fabricated zero.
+        threshold: Configured threshold, or ``None`` when the rule is
+            disabled.
         stable_rounds: How many consecutive quiet rounds were required.
         trajectory: Every recorded score, oldest first. Carried even on a
             non-converged decision so surfaces can render the stability signal
@@ -30,8 +33,8 @@ class ConvergenceDecision:
 
     converged: bool = False
     round_number: int = 0
-    score: float = 0.0
-    threshold: float = 0.0
+    score: float | None = None
+    threshold: float | None = None
     stable_rounds: int = 0
     trajectory: tuple[float, ...] = field(default_factory=tuple)
 

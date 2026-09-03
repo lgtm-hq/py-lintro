@@ -456,3 +456,30 @@ def test_convergence_rejects_unknown_keys() -> None:
     """A near-miss key name never silently takes effect."""
     with pytest.raises(ValidationError):
         ReviewConfig.model_validate({"convergence": {"stable_round": 2}})
+
+
+def test_convergence_accepts_the_documented_minima() -> None:
+    """A one-round streak and any positive threshold are valid."""
+    config = ReviewConfig.model_validate(
+        {"convergence": {"threshold": 0.01, "stable_rounds": 1}},
+    )
+
+    assert_that(config.convergence.threshold).is_equal_to(0.01)
+    assert_that(config.convergence.stable_rounds).is_equal_to(1)
+
+
+def test_convergence_rejects_a_zero_threshold() -> None:
+    """Scores are non-negative, so a zero threshold could never be quiet."""
+    with pytest.raises(ValidationError, match="threshold"):
+        ReviewConfig.model_validate({"convergence": {"threshold": 0.0}})
+
+
+@pytest.mark.parametrize("field", ["threshold", "stable_rounds"])
+def test_convergence_rejects_yaml_booleans(field: str) -> None:
+    """A YAML ``true`` must not coerce into a number that arms the rule.
+
+    Args:
+        field: Nested convergence key under test.
+    """
+    with pytest.raises(ValidationError, match=field):
+        ReviewConfig.model_validate({"convergence": {field: True}})

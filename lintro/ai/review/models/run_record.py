@@ -101,7 +101,7 @@ class RunRecord:
         convergence_score: Aggregate convergence score over the findings still
             open after this round (#2099), or ``None`` on a record persisted
             before scoring existed. Serialized only when present, so a legacy
-            record round-trips byte-identically and a missing score reads as
+            record re-encodes with no new keys and a missing score reads as
             "not measured" rather than as a fabricated ``0.0`` — which would
             claim the round was quiet.
     """

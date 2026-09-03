@@ -16,7 +16,7 @@ STATE_MARKER_SUFFIX = "-->"
 # per-finding identity records on top of v1's run aggregates (issue #1906);
 # v3 adds the per-round convergence score and the per-finding evidence style
 # it is computed from (issue #2099). Both v3 additions are written only when
-# present, so a v2 blob re-encodes byte-identically.
+# present, so a v2 blob re-encodes with only the version restamped.
 STATE_VERSION = 3
 STATE_VERSION_V1 = 1
 STATE_VERSION_V2 = 2

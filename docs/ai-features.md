@@ -626,6 +626,11 @@ provider is constructed, so a converged round costs nothing:
 - A `partial` or coverage-limited round can never count toward the streak: a low score
   from a round that never looked properly is not evidence of stability. Rounds persisted
   before scoring existed carry no score and are likewise not evidence.
+- A converged skip exits 0 unless the last real round left an open P1, in which case it
+  exits 1 exactly as that round did: skipping never relaxes the readiness gate. The JSON
+  envelope reports the count as `converged.open_p1`.
+- `review.convergence.threshold` must be greater than zero; scores are non-negative, so
+  a zero threshold could never be met and is rejected by config validation.
 - `lintro review --full` always forces a round, so a manual dispatch or ChatOps
   re-review is never blocked by the rule.
 

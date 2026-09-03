@@ -283,10 +283,12 @@ def format_convergence_stamp(*, decision: ConvergenceDecision) -> str:
     Returns:
         For example ``converged at round 5 (score 1.20 < threshold 3.00)``.
     """
+    score = decision.score if decision.score is not None else 0.0
+    threshold = decision.threshold if decision.threshold is not None else 0.0
     return (
         f"converged at round {decision.round_number} "
-        f"(score {format_score(score=decision.score)} < threshold "
-        f"{format_score(score=decision.threshold)})"
+        f"(score {format_score(score=score)} < threshold "
+        f"{format_score(score=threshold)})"
     )
 
 
@@ -330,7 +332,10 @@ def _readable_threshold(*, threshold: object) -> float | None:
     if not isinstance(threshold, int | float):
         return None
     value = float(threshold)
-    if not math.isfinite(value) or value < 0:
+    # Scores are non-negative and "quiet" means strictly below the threshold,
+    # so a zero threshold can never be met: treat it as disabled rather than
+    # as a rule that silently never fires.
+    if not math.isfinite(value) or value <= 0:
         return None
     return value
 
@@ -359,7 +364,14 @@ def evaluate_convergence(
     """
     trajectory = score_trajectory(runs=runs)
     threshold = _readable_threshold(threshold=threshold)
-    if threshold is None or not isinstance(stable_rounds, int) or stable_rounds < 1:
+    # ``bool`` is an ``int`` subclass; ``True`` must not read as a one-round
+    # streak any more than it may read as a threshold of one.
+    if (
+        threshold is None
+        or isinstance(stable_rounds, bool)
+        or not isinstance(stable_rounds, int)
+        or stable_rounds < 1
+    ):
         return ConvergenceDecision(trajectory=trajectory)
     window = _stability_window(runs=runs, stable_rounds=stable_rounds)
     if not window:
@@ -367,11 +379,12 @@ def evaluate_convergence(
     scores = [run.convergence_score for run in window]
     degraded = any(run.partial or run.coverage_limited for run in window)
     quiet = all(score is not None and score < threshold for score in scores)
-    latest = scores[-1]
+    # ``score`` stays unset when the latest window run was never measured:
+    # a fabricated zero would read as the quietest possible round.
     return ConvergenceDecision(
         converged=quiet and not degraded,
         round_number=window[-1].round + 1,
-        score=latest if latest is not None else 0.0,
+        score=scores[-1],
         threshold=threshold,
         stable_rounds=stable_rounds,
         trajectory=trajectory,

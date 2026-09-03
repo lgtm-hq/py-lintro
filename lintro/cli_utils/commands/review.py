@@ -66,10 +66,13 @@ from lintro.ai.review.custom_agents import (
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
+from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import (
@@ -210,7 +213,8 @@ def _finish_converged_review(
             the board the banner is stamped onto.
 
     Raises:
-        SystemExit: Always, with ``0`` — a converged round is a clean run.
+        SystemExit: Always. ``0`` for a clean skip; ``1`` when the last real
+            round left an open P1, so the skip never relaxes that gate.
     """
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_converged_to_github
@@ -222,16 +226,45 @@ def _finish_converged_review(
                 repo=effective_repo,
                 prior_state=prior_state,
             )
+    # A skipped round changes nothing about what is open, so it must not
+    # relax the readiness gate either: an open P1 left by the last real round
+    # still fails the process exactly as that round did.
+    open_p1 = _open_blocking_findings(prior_state=prior_state)
     if output_format == "json":
-        click.echo(render_convergence_outcome_json(decision=decision))
+        click.echo(
+            render_convergence_outcome_json(decision=decision, open_p1=open_p1),
+        )
     else:
         click.echo(f"🔁 Review skipped — {format_convergence_stamp(decision=decision)}")
         if decision.trajectory:
             click.echo(
                 f"   Score trajectory: {format_trajectory(scores=decision.trajectory)}",
             )
+        if open_p1:
+            click.echo(
+                f"   {open_p1} open P1 finding(s) from the last round still "
+                "block: exiting 1.",
+            )
         click.echo("   Re-run with --full to force another round.")
-    raise SystemExit(0)
+    raise SystemExit(1 if open_p1 else 0)
+
+
+def _open_blocking_findings(*, prior_state: ReviewState) -> int:
+    """Count the open P1 findings a skipped round leaves in force.
+
+    Args:
+        prior_state: Persisted state from the last real round.
+
+    Returns:
+        Number of open, non-question P1 findings.
+    """
+    return sum(
+        1
+        for record in prior_state.findings
+        if record.status is FindingStatus.OPEN
+        and record.kind is not FindingKind.QUESTION
+        and record.severity is Severity.P1
+    )
 
 
 def _advisory_failure_error(results: list[ToolResult]) -> AIError:

@@ -17,13 +17,14 @@ from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 
+# One real round persisted, so the skipped round is round 2.
 _DECISION = ConvergenceDecision(
     converged=True,
-    round_number=3,
+    round_number=2,
     score=0.5,
     threshold=3.0,
-    stable_rounds=2,
-    trajectory=(1.0, 0.5),
+    stable_rounds=1,
+    trajectory=(0.5,),
 )
 
 
@@ -88,8 +89,12 @@ def test_converged_stamp_updates_the_sticky_in_place(
     assert_that(posted).is_true()
     assert_that(kwargs["comment_id"]).is_equal_to(9)
     assert_that(body).contains("🔁 **Converged**")
-    assert_that(body).contains("converged at round 3 (score 0.50 < threshold 3.00)")
+    assert_that(body).contains("converged at round 2 (score 0.50 < threshold 3.00)")
     assert_that(body).contains("### Findings ·")
+    # The board is the last real round's, not a blank one: every tracked
+    # finding title from persisted state is still on it.
+    for record in prior_state.findings:
+        assert_that(body).contains(record.title)
     # Like a failed round, a skipped round writes no state of its own.
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
     assert_that(prior_state.next_round).is_equal_to(2)

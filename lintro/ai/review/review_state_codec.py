@@ -8,10 +8,10 @@ style it is derived from (#2099). v1 and v2 blobs are migrated on read and
 unknown versions start fresh rather than crashing a review run.
 
 Both v2 -> v3 additions are optional keys that the record serializers omit
-when unset, so migrating a v2 blob is a pure re-stamp of the version: every
-run and finding parses with its new field defaulted, and re-encoding a blob
-that carries no scores produces the same bytes v2 wrote apart from the
-version number itself. The migrated state is simply unscored history, which
+when unset, so migrating a v2 blob adds no keys: every run and finding parses
+with its new field defaulted, and re-encoding a blob that carries no scores
+writes the same record fields v2 wrote, with only the version restamped. The
+migrated state is simply unscored history, which
 :mod:`lintro.ai.review.convergence` treats as "not measured" rather than as
 evidence of a quiet round.
 """

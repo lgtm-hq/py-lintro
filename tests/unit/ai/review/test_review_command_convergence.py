@@ -266,6 +266,8 @@ def test_json_output_emits_the_converged_envelope(
     assert_that(payload["converged"]["score"]).is_equal_to(0.5)
     assert_that(payload["converged"]["threshold"]).is_equal_to(3.0)
     assert_that(payload["converged"]["trajectory"]).is_equal_to([1.0, 0.5])
+    assert_that(payload["converged"]["stable_rounds"]).is_equal_to(2)
+    assert_that(payload["converged"]["open_p1"]).is_equal_to(0)
     # A round that never ran must not look like one that reviewed and found
     # nothing, nor like a run that stopped early with work left undone.
     assert_that(payload).does_not_contain_key("readiness_verdict")
@@ -336,3 +338,90 @@ def test_post_loads_state_for_the_pr_detected_from_ci(
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(seen["pr_number"]).is_equal_to(42)
+
+
+def test_a_coverage_limited_prior_round_still_reviews(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capped round cannot attest stability, so the provider still runs.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    del patched_review
+    state = ReviewState(
+        runs=(
+            RunRecord(round=1, convergence_score=0.5),
+            RunRecord(round=2, convergence_score=0.5, coverage_limited=True),
+        ),
+    )
+    _with_prior_state(monkeypatch=monkeypatch, state=state)
+
+    CliRunner().invoke(review_command, [])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(1)
+
+
+def test_a_score_equal_to_the_threshold_still_reviews(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Quiet is strictly below the threshold.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    threshold = patched_review.threshold
+    assert threshold is not None
+    _with_prior_state(
+        monkeypatch=monkeypatch,
+        state=_quiet_state(scores=(threshold, threshold)),
+    )
+
+    CliRunner().invoke(review_command, [])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(1)
+
+
+def test_a_converged_skip_keeps_an_open_p1_blocking(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipping a round never relaxes the readiness gate the last round set.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.enums.finding_status import FindingStatus
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_finding import Severity
+
+    del patched_review
+    quiet = _quiet_state(scores=(1.0, 0.5))
+    state = ReviewState(
+        runs=quiet.runs,
+        findings=(
+            FindingRecord(
+                fingerprint="p1",
+                severity=Severity.P1,
+                status=FindingStatus.OPEN,
+            ),
+        ),
+    )
+    _with_prior_state(monkeypatch=monkeypatch, state=state)
+
+    result = CliRunner().invoke(review_command, ["--output", "json"])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(0)
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(json.loads(result.output)["converged"]["open_p1"]).is_equal_to(1)

@@ -1000,3 +1000,51 @@ def test_a_normal_review_is_still_classified_as_reviewed(
 
     assert_that(str(report.outcome)).is_equal_to("reviewed")
     assert_that(report.exit_code).is_equal_to(0)
+
+
+def test_converged_report_annotates_as_notice_and_main_exits_zero(
+    classifier: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A skipped-because-converged round is green end to end.
+
+    Args:
+        classifier: Loaded classifier module.
+        tmp_path: Directory holding the captured-output file.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Captured stdout/stderr.
+    """
+    output_file = tmp_path / "review.log"
+    output_file.write_text(
+        json.dumps(
+            {
+                "outcome": "converged",
+                "converged": {
+                    "round": 3,
+                    "score": 0.5,
+                    "threshold": 3.0,
+                    "stable_rounds": 2,
+                    "trajectory": [1.0, 0.5],
+                    "open_p1": 0,
+                },
+                "detail": "converged at round 3 (score 0.50 < threshold 3.00)",
+            },
+        ),
+        encoding="utf-8",
+    )
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+
+    code = classifier.main(
+        argv=["--status", "0", "--output-file", str(output_file), "--transport", "cli"],
+    )
+    out = capsys.readouterr().out
+
+    assert_that(code).is_equal_to(0)
+    assert_that(out).contains("::notice")
+    assert_that(out).does_not_contain("::error")
+    summary = summary_file.read_text(encoding="utf-8")
+    assert_that(summary).contains("🔁")
+    assert_that(summary).does_not_contain("CodeRabbit")

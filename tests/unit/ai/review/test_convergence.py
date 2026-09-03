@@ -528,3 +528,107 @@ def test_config_rejects_boolean_values(field: str) -> None:
 
     with pytest.raises(ValidationError):
         ReviewConvergenceConfig(**{field: True})
+
+
+@pytest.mark.parametrize("threshold", [True, False, "3.0", 0, 0.0])
+def test_unusable_or_zero_thresholds_disable_the_rule(threshold: object) -> None:
+    """Booleans, strings, and zero never arm the stop rule.
+
+    Args:
+        threshold: Raw threshold value under test.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=0.0),
+        RunRecord(round=2, convergence_score=0.0),
+    )
+
+    decision = evaluate_convergence(
+        runs=runs,
+        threshold=threshold,  # type: ignore[arg-type]
+        stable_rounds=2,
+    )
+
+    assert_that(decision.converged).is_false()
+    assert_that(decision.threshold).is_none()
+
+
+@pytest.mark.parametrize("stable_rounds", [0, -1, True, "2"])
+def test_unusable_stable_rounds_never_converge(stable_rounds: object) -> None:
+    """A streak length that is not a positive int disables the rule.
+
+    ``True`` is an ``int`` subclass and must not read as a one-round streak.
+
+    Args:
+        stable_rounds: Raw streak length under test.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=0.0),
+        RunRecord(round=2, convergence_score=0.0),
+    )
+
+    decision = evaluate_convergence(
+        runs=runs,
+        threshold=3.0,
+        stable_rounds=stable_rounds,  # type: ignore[arg-type]
+    )
+
+    assert_that(decision.converged).is_false()
+
+
+def test_unmeasured_latest_round_leaves_the_score_unset() -> None:
+    """A window whose latest round was never scored reports no score at all."""
+    runs = (
+        RunRecord(round=1, convergence_score=0.5),
+        RunRecord(round=2, convergence_score=None),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_false()
+    assert_that(decision.score).is_none()
+    assert_that(decision.to_dict()["score"]).is_none()
+
+
+def test_default_decision_serializes_without_fabricated_numbers() -> None:
+    """A decision that never ran carries nulls, not zeros, on the wire."""
+    from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+
+    payload = ConvergenceDecision().to_dict()
+
+    assert_that(payload["score"]).is_none()
+    assert_that(payload["threshold"]).is_none()
+    assert_that(payload["trajectory"]).is_empty()
+
+
+def test_score_at_the_threshold_is_not_quiet() -> None:
+    """Quiet means strictly below: a score equal to the threshold still reviews."""
+    runs = (
+        RunRecord(round=1, convergence_score=3.0),
+        RunRecord(round=2, convergence_score=3.0),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_false()
+
+
+def test_carried_finding_scores_on_its_original_likelihood() -> None:
+    """The matcher's carry rule keeps the score a finding was first given."""
+    from dataclasses import replace
+
+    from lintro.ai.review.finding_matcher import _merge_pair
+
+    prior = FindingRecord(
+        fingerprint="fp",
+        severity=Severity.P2,
+        category="logic-bug",
+        confidence="high",
+        evidence_style=EvidenceStyle.DIFF_LOCAL,
+        status=FindingStatus.OPEN,
+    )
+    current = replace(prior, evidence_style=EvidenceStyle.SPECULATIVE)
+    carried, _outcome = _merge_pair(prior=prior, current=current)
+
+    assert_that(score_records(records=(carried,))).is_equal_to(
+        score_records(records=(prior,)),
+    )

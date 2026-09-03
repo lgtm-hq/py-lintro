@@ -199,12 +199,13 @@ class ReviewConvergenceConfig(BaseModel):
 
     threshold: float | None = Field(
         default=None,
-        ge=0.0,
+        gt=0.0,
         description=(
-            "Convergence score strictly below which a round counts as quiet. "
-            "null (the default) disables the stop rule and reviews every "
-            "round. For calibration: one low-confidence P3 scores 1.25, one "
-            "high-confidence P1 scores 10.0."
+            "Convergence score strictly below which a round counts as quiet; "
+            "must be greater than zero, since scores are non-negative and a "
+            "zero threshold could never be met. null (the default) disables "
+            "the stop rule and reviews every round. For calibration: one "
+            "low-confidence P3 scores 1.25, one high-confidence P1 scores 10.0."
         ),
     )
     stable_rounds: int = Field(
