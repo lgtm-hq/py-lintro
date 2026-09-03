@@ -551,7 +551,7 @@ def test_v1_blob_migrates_to_v3_with_no_scores_recorded() -> None:
     )
 
 
-def test_v2_run_payload_round_trips_byte_identically() -> None:
+def test_v2_run_payload_round_trips_without_v3_keys() -> None:
     """Re-encoding an unscored run adds no keys a v2 reader would choke on."""
     payload = {"round": 3, "model": "claude", "total": 42}
 
@@ -560,7 +560,7 @@ def test_v2_run_payload_round_trips_byte_identically() -> None:
     assert_that(reserialized).does_not_contain_key("convergence_score")
 
 
-def test_v2_finding_payload_round_trips_byte_identically() -> None:
+def test_v2_finding_payload_round_trips_without_v3_keys() -> None:
     """A v2 finding gains no evidence_style key on the way back out."""
     payload = {
         "fingerprint": "d" * 16,
@@ -639,3 +639,34 @@ def test_decode_state_never_fabricates_a_score_from_a_corrupt_blob() -> None:
     assert_that(decoded.findings[0].evidence_style).is_equal_to(
         EvidenceStyle.DIFF_LOCAL,
     )
+
+
+def test_a_measured_zero_score_survives_decode() -> None:
+    """A clean round's 0.0 is a measurement, not "not measured"."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": 0.0}],
+                "findings": [],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].convergence_score).is_equal_to(0.0)
+    assert_that(decoded.runs[0].convergence_score).is_not_none()
+
+
+def test_an_overflowing_score_decodes_as_not_measured() -> None:
+    """A value float() cannot represent degrades to None instead of aborting."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": 10**400}],
+                "findings": [],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].convergence_score).is_none()

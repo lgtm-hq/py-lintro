@@ -626,6 +626,9 @@ provider is constructed, so a converged round costs nothing:
 - A `partial` or coverage-limited round can never count toward the streak: a low score
   from a round that never looked properly is not evidence of stability. Rounds persisted
   before scoring existed carry no score and are likewise not evidence.
+- A converged skip runs no provider call and no advisory tools, so `--fail-on-findings`
+  has nothing to evaluate on that invocation; the last real round's advisory result
+  stands.
 - A converged skip exits 0 unless the last real round left an open P1, in which case it
   exits 1 exactly as that round did: skipping never relaxes the readiness gate. The JSON
   envelope reports the count as `converged.open_p1`.
@@ -641,7 +644,7 @@ a build without the feature: every round reviews.
 # .lintro-config.yaml
 review:
   convergence:
-    threshold: null # float ≥ 0; null (default) disables the stop rule
+    threshold: null # float > 0; null (default) disables the stop rule
     stable_rounds: 2 # consecutive sub-threshold rounds required (int ≥ 1)
 ```
 

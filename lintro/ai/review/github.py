@@ -799,7 +799,8 @@ def post_review_converged_to_github(
             sticky's own decoded state is used instead.
 
     Returns:
-        True when posting succeeded; False otherwise.
+        True when posting succeeded; False when there is no PR context or no
+        recoverable prior state to re-render the board from.
     """
     gh_reporter = reporter or GitHubPRReporter(pr_number=pr_number, repo=repo)
     if not gh_reporter.is_available():
@@ -810,6 +811,15 @@ def post_review_converged_to_github(
         prior_state.coverage or prior_state.runs or prior_state.findings
     ):
         prior_state = sticky_state
+    if not prior_state.runs:
+        # Nothing recoverable to re-render: overwriting the live board with
+        # the empty-state page would erase the findings a reviewer is still
+        # working from, so leave the sticky untouched and say so.
+        logger.warning(
+            "No prior review state is recoverable — leaving the sticky "
+            "untouched instead of stamping a converged round over it",
+        )
+        return False
     body = render_state_sticky(
         state=prior_state,
         banner=format_convergence_banner(decision=decision),

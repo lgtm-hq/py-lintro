@@ -341,17 +341,24 @@ def _converged_report(
     """
     round_number = converged.get("round", 0)
     stable_rounds = converged.get("stable_rounds", 0)
+    open_p1 = converged.get("open_p1", 0)
+    open_p1 = (
+        open_p1 if isinstance(open_p1, int) and not isinstance(open_p1, bool) else 0
+    )
+    blocking = f"; {open_p1} open P1 still blocking" if open_p1 > 0 else ""
     return OutcomeReport(
         outcome=ReviewOutcome.CONVERGED,
         headline=_with_transport(
             transport=transport,
             headline=(
                 f"converged — round {round_number} skipped after "
-                f"{stable_rounds} stable rounds"
+                f"{stable_rounds} stable rounds{blocking}"
             ),
         ),
         detail=str(converged.get("detail") or ""),
-        exit_code=0,
+        # A skip never relaxes the readiness gate: the CLI exits 1 when the
+        # last real round left an open P1, and the check mirrors that.
+        exit_code=1 if open_p1 > 0 else 0,
         transport=transport,
     )
 

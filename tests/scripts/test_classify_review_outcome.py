@@ -1002,6 +1002,29 @@ def test_a_normal_review_is_still_classified_as_reviewed(
     assert_that(report.exit_code).is_equal_to(0)
 
 
+def _converged_envelope(*, open_p1: int = 0) -> str:
+    """Render the envelope exactly as ``lintro review`` emits it.
+
+    Args:
+        open_p1: Open P1 findings the last real round left in force.
+
+    Returns:
+        The JSON text the producer writes on a converged skip.
+    """
+    from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+    from lintro.ai.review.output import render_convergence_outcome_json
+
+    decision = ConvergenceDecision(
+        converged=True,
+        round_number=3,
+        score=0.5,
+        threshold=3.0,
+        stable_rounds=2,
+        trajectory=(1.0, 0.5),
+    )
+    return render_convergence_outcome_json(decision=decision, open_p1=open_p1)
+
+
 def test_converged_report_annotates_as_notice_and_main_exits_zero(
     classifier: ModuleType,
     tmp_path: Path,
@@ -1017,23 +1040,7 @@ def test_converged_report_annotates_as_notice_and_main_exits_zero(
         capsys: Captured stdout/stderr.
     """
     output_file = tmp_path / "review.log"
-    output_file.write_text(
-        json.dumps(
-            {
-                "outcome": "converged",
-                "converged": {
-                    "round": 3,
-                    "score": 0.5,
-                    "threshold": 3.0,
-                    "stable_rounds": 2,
-                    "trajectory": [1.0, 0.5],
-                    "open_p1": 0,
-                },
-                "detail": "converged at round 3 (score 0.50 < threshold 3.00)",
-            },
-        ),
-        encoding="utf-8",
-    )
+    output_file.write_text(_converged_envelope(), encoding="utf-8")
     summary_file = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
 
@@ -1048,3 +1055,23 @@ def test_converged_report_annotates_as_notice_and_main_exits_zero(
     summary = summary_file.read_text(encoding="utf-8")
     assert_that(summary).contains("🔁")
     assert_that(summary).does_not_contain("CodeRabbit")
+
+
+def test_converged_skip_with_an_open_p1_keeps_the_check_red(
+    classifier: ModuleType,
+) -> None:
+    """The classifier mirrors the CLI: an open P1 left in force still exits 1.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_converged_envelope(open_p1=2),
+        transport="cli",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONVERGED)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("2 open P1 still blocking")
+    assert_that(report.outcome.review_unavailable).is_false()

@@ -282,13 +282,18 @@ def format_convergence_stamp(*, decision: ConvergenceDecision) -> str:
 
     Returns:
         For example ``converged at round 5 (score 1.20 < threshold 3.00)``.
+
+    Raises:
+        ValueError: When the decision carries no measured score or threshold,
+            so a fabricated ``0.00`` can never be rendered.
     """
-    score = decision.score if decision.score is not None else 0.0
-    threshold = decision.threshold if decision.threshold is not None else 0.0
+    if decision.score is None or decision.threshold is None:
+        msg = "only a converged decision with a measured score can be stamped"
+        raise ValueError(msg)
     return (
         f"converged at round {decision.round_number} "
-        f"(score {format_score(score=score)} < threshold "
-        f"{format_score(score=threshold)})"
+        f"(score {format_score(score=decision.score)} < threshold "
+        f"{format_score(score=decision.threshold)})"
     )
 
 
@@ -378,7 +383,10 @@ def evaluate_convergence(
         return ConvergenceDecision(threshold=threshold, trajectory=trajectory)
     scores = [run.convergence_score for run in window]
     degraded = any(run.partial or run.coverage_limited for run in window)
-    quiet = all(score is not None and score < threshold for score in scores)
+    quiet = all(
+        score is not None and math.isfinite(score) and 0.0 <= score < threshold
+        for score in scores
+    )
     # ``score`` stays unset when the latest window run was never measured:
     # a fabricated zero would read as the quietest possible round.
     return ConvergenceDecision(

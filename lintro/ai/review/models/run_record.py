@@ -319,7 +319,7 @@ def _optional_score(value: Any) -> float | None:
     if isinstance(value, int | float | str):
         try:
             parsed = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         if not math.isfinite(parsed) or parsed < 0:
             return None

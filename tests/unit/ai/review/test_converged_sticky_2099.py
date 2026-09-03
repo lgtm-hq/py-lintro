@@ -100,14 +100,14 @@ def test_converged_stamp_updates_the_sticky_in_place(
     assert_that(prior_state.next_round).is_equal_to(2)
 
 
-def test_converged_stamp_falls_back_to_the_sticky_state(
+def test_converged_stamp_leaves_the_sticky_alone_without_recoverable_state(
     prior_body: str,
 ) -> None:
-    """With no artifact state, the stamp still lands on the existing sticky.
+    """With no artifact state and no decodable blob, nothing is overwritten.
 
-    The primary sticky carries no hidden state of its own (state lives in the
-    CI artifact or local ledger), so the fallback renders the empty-state
-    board under the banner rather than inventing history.
+    The primary sticky carries no hidden state of its own, so a fallback that
+    rendered the empty-state page would erase the last board. The stamp
+    refuses instead and reports False.
     """
     reporter = _reporter(prior_body=prior_body)
 
@@ -116,11 +116,10 @@ def test_converged_stamp_falls_back_to_the_sticky_state(
         reporter=reporter,
         prior_state=ReviewState(),
     )
-    kwargs = reporter.update_issue_comment.call_args.kwargs
 
-    assert_that(posted).is_true()
-    assert_that(kwargs["comment_id"]).is_equal_to(9)
-    assert_that(kwargs["body"]).contains("🔁 **Converged**")
+    assert_that(posted).is_false()
+    reporter.update_issue_comment.assert_not_called()
+    reporter.post_issue_comment.assert_not_called()
 
 
 def test_converged_stamp_skips_when_no_pr_context(prior_body: str) -> None:

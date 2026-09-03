@@ -442,13 +442,13 @@ def test_convergence_reads_the_threshold_and_streak(
 
 def test_convergence_rejects_a_negative_threshold() -> None:
     """A score can never be negative, so neither can the threshold."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="threshold"):
         ReviewConfig.model_validate({"convergence": {"threshold": -1.0}})
 
 
 def test_convergence_rejects_a_streak_shorter_than_one_round() -> None:
     """Zero stable rounds would mean stopping on no evidence at all."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="stable_rounds"):
         ReviewConfig.model_validate({"convergence": {"stable_rounds": 0}})
 
 

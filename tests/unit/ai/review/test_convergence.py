@@ -618,17 +618,47 @@ def test_carried_finding_scores_on_its_original_likelihood() -> None:
 
     from lintro.ai.review.finding_matcher import _merge_pair
 
+    # The prior is deliberately *not* the default style, so a merge that
+    # dropped the field (falling back to DIFF_LOCAL) would change the score.
     prior = FindingRecord(
         fingerprint="fp",
         severity=Severity.P2,
         category="logic-bug",
         confidence="high",
-        evidence_style=EvidenceStyle.DIFF_LOCAL,
+        evidence_style=EvidenceStyle.SPECULATIVE,
         status=FindingStatus.OPEN,
     )
-    current = replace(prior, evidence_style=EvidenceStyle.SPECULATIVE)
+    current = replace(prior, evidence_style=EvidenceStyle.DIFF_LOCAL)
     carried, _outcome = _merge_pair(prior=prior, current=current)
 
     assert_that(score_records(records=(carried,))).is_equal_to(
         score_records(records=(prior,)),
     )
+    assert_that(score_records(records=(carried,))).is_not_equal_to(
+        score_records(records=(current,)),
+    )
+
+
+def test_stamp_refuses_a_decision_without_a_measured_score() -> None:
+    """The stamp never renders a fabricated 0.00 for an unset value."""
+    from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+
+    with pytest.raises(ValueError, match="measured score"):
+        format_convergence_stamp(decision=ConvergenceDecision(converged=True))
+
+
+@pytest.mark.parametrize("bad", [float("-inf"), float("nan"), -1.0])
+def test_non_finite_or_negative_stored_scores_are_not_quiet(bad: float) -> None:
+    """A corrupt in-memory score can never attest a quiet round.
+
+    Args:
+        bad: Stored score that must not count as below the threshold.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=0.5),
+        RunRecord(round=2, convergence_score=bad),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_false()
