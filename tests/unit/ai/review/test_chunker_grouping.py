@@ -6,6 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.chunker.grouping import _group_source_test_pairs
 from lintro.ai.review.classifier import classify_changed_files
 from lintro.ai.review.group_labels import REL_SOURCE_TEST, REL_WORKFLOW_SCRIPT_TEST
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -351,3 +352,111 @@ def test_matches_test_for_source_supports_extended_extensions(
     assert_that(
         matches_test_for_source(test_path=test_path, source_stem=source_stem),
     ).is_true()
+
+
+def test_chunker_groups_hyphenated_script_with_non_mirrored_test() -> None:
+    """A hyphenated script and its non-mirrored test share one chunk (#2264)."""
+    context = make_review_context(
+        unified_diff=load_review_fixture("chunk_hyphenated_script_source.diff")
+        + load_review_fixture("chunk_hyphenated_script_test.diff"),
+        changed_files=[
+            ChangedFile(
+                path="scripts/ci/site/migrate-docs-content.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+            ChangedFile(
+                path="tests/scripts/ci/test_migrate_docs_content.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+    )
+    classifications = classify_changed_files(files=context.changed_files)
+
+    result = chunk_review_context(
+        context=context,
+        max_tokens=10_000,
+        classifications=classifications,
+    )
+
+    paired_chunk = next(
+        chunk
+        for chunk in result.chunks
+        if "scripts/ci/site/migrate-docs-content.py" in chunk.files
+    )
+    assert_that(paired_chunk.files).contains(
+        "scripts/ci/site/migrate-docs-content.py",
+        "tests/scripts/ci/test_migrate_docs_content.py",
+    )
+    assert_that(paired_chunk.relationship).is_equal_to(REL_SOURCE_TEST)
+
+
+def test_group_source_test_pairs_falls_back_to_unique_stems() -> None:
+    """A unique stem pairs across unrelated trees; a duplicated stem does not."""
+    unique = _group_source_test_pairs(
+        file_paths=["lintro/ai/review/x.py", "tests/scripts/test_x.py"],
+        assigned=set(),
+    )
+    assert_that(unique).is_equal_to(
+        [["lintro/ai/review/x.py", "tests/scripts/test_x.py"]],
+    )
+
+    # Two sources share the stem, so neither the unique-stem fallback nor the
+    # prefix projection may guess; the test stays unpaired rather than being
+    # reserved by whichever source sorts first.
+    ambiguous = _group_source_test_pairs(
+        file_paths=[
+            "lintro/ai/review/x.py",
+            "scripts/ci/x.py",
+            "tests/scripts/test_x.py",
+        ],
+        assigned=set(),
+    )
+    assert_that(ambiguous).is_empty()
+
+    same_tree = _group_source_test_pairs(
+        file_paths=[
+            "scripts/a/x.py",
+            "scripts/b/x.py",
+            "tests/scripts/test_x.py",
+        ],
+        assigned=set(),
+    )
+    assert_that(same_tree).is_empty()
+
+
+def test_stem_uniqueness_counts_sources_already_assigned() -> None:
+    """A same-stem source claimed by an earlier pass still blocks the fallback."""
+    from lintro.ai.review.chunker.grouping import _group_source_test_pairs
+
+    groups = _group_source_test_pairs(
+        file_paths=[
+            "lintro/ai/review/x.py",
+            "scripts/ci/x.py",
+            "tests/scripts/test_x.py",
+        ],
+        assigned={"scripts/ci/x.py"},
+    )
+
+    assert_that(groups).is_empty()
+
+
+def test_workflow_pairing_uses_the_unique_stem_fallback() -> None:
+    """The workflow-first pass pairs a non-mirrored test with its unique script."""
+    from lintro.ai.review.chunker.grouping import _is_test_for_any
+
+    paired = _is_test_for_any(
+        path="tests/scripts/ci/test_migrate_docs_content.py",
+        sources=["scripts/ci/site/migrate-docs-content.py"],
+        unique_stems={"migrate_docs_content"},
+    )
+    unpaired = _is_test_for_any(
+        path="tests/scripts/ci/test_migrate_docs_content.py",
+        sources=["scripts/ci/site/migrate-docs-content.py"],
+    )
+
+    assert_that(paired).is_true()
+    assert_that(unpaired).is_false()

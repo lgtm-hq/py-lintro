@@ -8,6 +8,7 @@ from lintro.ai.review.path_utils import (
     is_e2e_test_path,
     is_test_path,
     matches_test_for_source,
+    normalize_stem,
 )
 
 
@@ -384,5 +385,169 @@ def test_matches_test_for_source_pairs_nested_src___tests___layout() -> None:
             test_path="src/components/__tests__/foo.test.ts",
             source_stem="foo",
             source_path="src/components/foo.ts",
+        ),
+    ).is_true()
+
+
+def test_matches_test_for_source_pairs_hyphenated_script_stems() -> None:
+    """Hyphenated script stems pair with underscored test filenames (#2264)."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/ci/test_migrate_docs_content.py",
+            source_stem="migrate-docs-content",
+            source_path="scripts/ci/site/migrate-docs-content.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/test_build_site.py",
+            source_stem="build-site",
+            source_path="scripts/ci/build-site.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/build-site.test.ts",
+            source_stem="build_site",
+            source_path="scripts/build_site.ts",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+
+
+def test_matches_test_for_source_keeps_rejecting_unrelated_hyphenated_stems() -> None:
+    """Separator folding does not turn substring matches into pairs."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/test_migrate_docs.py",
+            source_stem="migrate-docs-content",
+            source_path="scripts/ci/site/migrate-docs-content.py",
+            stem_is_unique=True,
+        ),
+    ).is_false()
+
+
+def test_matches_test_for_source_pairs_non_mirrored_test_directories() -> None:
+    """Test chains that prefix the source chain pair without an exact mirror."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/ci/test_x.py",
+            source_stem="x",
+            source_path="scripts/ci/site/x.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/test_x.py",
+            source_stem="x",
+            source_path="scripts/ci/site/x.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+
+
+def test_matches_test_for_source_keeps_exact_mirror_pairing() -> None:
+    """Exact mirror layouts keep pairing exactly as before."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/ci/site/test_x.py",
+            source_stem="x",
+            source_path="scripts/ci/site/x.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/unit/ai/review/test_path_utils.py",
+            source_stem="path_utils",
+            source_path="lintro/ai/review/path_utils.py",
+        ),
+    ).is_true()
+
+
+def test_matches_test_for_source_rejects_unrelated_top_level_trees() -> None:
+    """A tests/scripts test does not pair with a lintro/ source by default."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/test_x.py",
+            source_stem="x",
+            source_path="lintro/ai/review/x.py",
+        ),
+    ).is_false()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/ci/test_x.py",
+            source_stem="x",
+            source_path="lintro/scripts/x.py",
+        ),
+    ).is_false()
+
+
+def test_matches_test_for_source_unique_stem_crosses_unrelated_trees() -> None:
+    """A unique stem is the only case where unrelated trees pair."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/scripts/test_x.py",
+            source_stem="x",
+            source_path="lintro/ai/review/x.py",
+            stem_is_unique=True,
+        ),
+    ).is_true()
+    assert_that(
+        matches_test_for_source(
+            test_path="scripts/test_x.py",
+            source_stem="x",
+            source_path="lintro/ai/review/x.py",
+            stem_is_unique=True,
+        ),
+    ).is_false()
+
+
+def test_normalize_stem_folds_case_and_separators() -> None:
+    """Stem normalisation lower-cases and folds hyphens to underscores."""
+    assert_that(normalize_stem(stem="Migrate-Docs-Content")).is_equal_to(
+        "migrate_docs_content",
+    )
+    assert_that(normalize_stem(stem="migrate_docs_content")).is_equal_to(
+        "migrate_docs_content",
+    )
+
+
+def test_prefix_projection_requires_a_unique_stem() -> None:
+    """A non-mirrored tests/ layout only pairs when no other source shares the stem."""
+    from lintro.ai.review.path_utils import matches_test_for_source
+
+    test_path = "tests/scripts/test_x.py"
+    source_path = "scripts/ci/site/x.py"
+
+    assert_that(
+        matches_test_for_source(
+            test_path=test_path,
+            source_stem="x",
+            source_path=source_path,
+        ),
+    ).is_false()
+    assert_that(
+        matches_test_for_source(
+            test_path=test_path,
+            source_stem="x",
+            source_path=source_path,
+            stem_is_unique=True,
+        ),
+    ).is_true()
+
+
+def test_exact_mirror_still_pairs_without_a_unique_stem() -> None:
+    """The mirror projection does not depend on stem uniqueness."""
+    from lintro.ai.review.path_utils import matches_test_for_source
+
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/unit/ai/review/test_chunker.py",
+            source_stem="chunker",
+            source_path="lintro/ai/review/chunker.py",
         ),
     ).is_true()

@@ -1,0 +1,5 @@
+diff --git a/tests/scripts/ci/test_migrate_docs_content.py b/tests/scripts/ci/test_migrate_docs_content.py
+--- a/tests/scripts/ci/test_migrate_docs_content.py
++++ b/tests/scripts/ci/test_migrate_docs_content.py
+@@ -0,0 +1 @@
++assert DOC_SPECS == ()
