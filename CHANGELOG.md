@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.141.0] - 2026-09-03
+
+### Added
+
+- **ci**: consume authoritative timeout-flake in the code quality gate (#2267) (266e216)
+
 ## [0.140.1] - 2026-09-03
 
 ### Changed
