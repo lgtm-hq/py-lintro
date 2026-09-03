@@ -28,6 +28,7 @@ from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
     format_badge_tables,
+    format_coverage_limited_warning,
     format_timings_note,
     run_stats_primary_cells,
     sanitize_comment_text,
@@ -286,6 +287,11 @@ def _run_stats_section(
 
     lines = ["**📊 Run stats**", ""]
     lines.extend(format_badge_tables(rows=[primary, secondary]))
+    coverage_warning = format_coverage_limited_warning(metadata=metadata)
+    if coverage_warning:
+        # Parity with the cost-cap partial warning: a findings-cap run says so
+        # in the run-stats block, where the reader looks for run mechanics.
+        lines.extend(["", coverage_warning])
     timings_note = format_timings_note(metadata=metadata)
     if timings_note:
         lines.extend(["", timings_note])

@@ -73,6 +73,7 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_coverage_limited_warning,
     format_timings_note,
     sanitize_comment_text,
 )
@@ -923,6 +924,7 @@ def _assemble_body(
         _reasoning_section(result=result, verdict=verdict),
         _degraded_row(failure=inline_failure),
         _suggestion_drops_row(result=result),
+        _coverage_limited_row(result=result),
         _findings_round_section(
             match=match,
             result=result,
@@ -1386,6 +1388,23 @@ def _suggestion_drops_row(*, result: ReviewResult) -> str:
     )
 
 
+def _coverage_limited_row(*, result: ReviewResult) -> str:
+    """Render the warning row shown when a findings cap limited this round.
+
+    Sits with the other no-silent-caps notices (``_degraded_row``,
+    ``_suggestion_drops_row``) and shares its text with the per-review body
+    through :func:`format_coverage_limited_warning`, so the sticky can never
+    present a capped round as an unmarked complete one (#2003).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote warning, or an empty string when coverage was complete.
+    """
+    return format_coverage_limited_warning(metadata=result.metadata)
+
+
 def _degraded_row(*, failure: InlinePostFailure | None) -> str:
     """Render the warning row shown when inline posting failed.
 
@@ -1792,12 +1811,15 @@ def _round_expander(
     )
     fixed = 0 if run.resolved is None else run.resolved
     prefix = "~" if run.estimated else ""
+    # A capped round stays marked in history (#2003) so a later reader can
+    # tell a genuinely clean round from one that reported fewer findings.
+    limited = " · ⚠️ coverage limited" if run.coverage_limited else ""
     summary = (
         f"<b>Round {run.round}</b>{sha_bit} · "
         f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} · "
         f"{fixed} fixed, {open_after} left open · "
         f"{_fmt_cost(run.cost, estimated=run.estimated)} · "
-        f"{run.duration:.0f}s"
+        f"{run.duration:.0f}s{limited}"
     )
     narrative = _DETAILS_TAG_RE.sub(
         r"&lt;\1\2",
@@ -2267,6 +2289,7 @@ def _run_record(
         questions=sum(1 for finding in result.findings if finding.is_question),
         downgraded=count_downgrades(findings=result.findings),
         partial=bool(metadata.partial),
+        coverage_limited=not metadata.findings_coverage_complete,
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,
         resolved=resolved,

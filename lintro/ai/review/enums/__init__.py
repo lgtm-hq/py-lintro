@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
@@ -19,6 +22,7 @@ from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 __all__ = [
     "AgentPromptScopeKind",
     "ChangedFileStatus",
+    "CoverageDegradationReason",
     "EvidenceStyle",
     "FileDomain",
     "FileSkipReason",
