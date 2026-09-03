@@ -570,15 +570,23 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # No-silent-skip gate (#1510, epic #1508): the dogfooding jobs above run an
-  # external reusable workflow (no place to add a post-lint step), so this
-  # dedicated job re-derives the structured skip state from the same image and
-  # fails when an enabled tool silently skips for a reason not in the committed
-  # allowlist. Runs whenever a CI image exists (not docs-only) so both the
-  # full-repo and changed-files PR paths are covered.
+  # No-silent-skip gate (#1510, #2240): the dogfooding jobs above run an
+  # external reusable workflow (no place to add a post-lint step). For a
+  # full-repo run, consume its authoritative JSON artifact instead of running
+  # lintro a second time. Changed-files runs publish no JSON, so that path
+  # retains the gate's existing full-repo derivation. Runs whenever a CI image
+  # exists (not docs-only) so both PR paths are covered.
   dogfood-skip-gate:
     name: 🚦 Dogfood No-Silent-Skip Gate
-    needs: [changes, docker-build, dogfooding-lint, dogfooding-lint-changed]
+    needs:
+      - changes
+      - docker-build
+      - dogfooding-lint
+      - dogfooding-lint-changed
+      # The reusable workflow uploads a fixed artifact name with overwrite:
+      # true. Waiting for the retry makes its latest (authoritative) upload
+      # deterministic when the primary full-repo lint failed.
+      - dogfooding_lint_retry
     if: >-
       always() &&
       !cancelled() &&
@@ -644,6 +652,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download authoritative lint JSON report
+        if: needs.changes.outputs.lint-scope != 'changed'
+        # The reusable lint workflow publishes this fixed artifact name for
+        # both the primary and retry jobs; the retry's overwrite wins because
+        # this gate waits for its terminal state above.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: linting-json-report
+          path: .lintro/artifacts/json
       - name: Log in to GitHub Container Registry
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
@@ -666,11 +683,17 @@ jobs:
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
             'ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+          # Full-repo runs download the reusable workflow's report. Changed
+          # scope deliberately leaves this unset: that job publishes only the
+          # human-readable report, and the gate keeps its existing full-repo
+          # derivation so scope-dependent skips are not misclassified.
+          REPORT_JSON: >-
+            ${{ needs.changes.outputs.lint-scope != 'changed' &&
+            '.lintro/artifacts/json/results.json' || '' }}
           # Memory trace (#1761): this job is repeatedly killed mid-lint with
-          # "runner has received a shutdown signal" + container EOF, and
-          # memory pressure is the leading hypothesis. Samples stream into
-          # this step's log rather than an artifact, because a runner death
-          # skips later steps and would discard the evidence.
+          # "runner has received a shutdown signal" + container EOF. Samples
+          # stream into this step's log rather than an artifact, because a
+          # runner death skips later steps and would discard the evidence.
         run: >-
           scripts/ci/run-with-memory-trace.sh
           scripts/ci/dogfood-skip-gate.sh
