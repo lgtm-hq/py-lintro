@@ -29,10 +29,14 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.finding_matcher import (
+    match_findings,
+    review_findings_from_unposted,
+)
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -1024,3 +1028,76 @@ def test_still_uses_phrasing_alone_does_not_fire() -> None:
     )
 
     assert_that(guarded[0].cross_chunk_contradiction).is_none()
+
+
+# --- persistence across rounds ------------------------------------------------
+
+
+def test_the_tag_is_persisted_on_the_record_only_when_set() -> None:
+    """A tagged record round-trips its tag; an untagged one serializes as before."""
+    tagged = _guard(description="tests/unit/test_migrate_docs.py was never updated.")
+    (record,) = match_findings(
+        previous=None,
+        findings=(tagged,),
+        round_number=1,
+    ).records
+
+    payload = record.to_dict()
+    restored = FindingRecord.from_dict(payload)
+
+    assert_that(payload["cross_chunk_contradiction"]).is_equal_to(
+        CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED.value,
+    )
+    assert_that(restored).is_not_none()
+    assert restored is not None
+    assert_that(restored.cross_chunk_contradiction).is_equal_to(
+        CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED,
+    )
+    plain = match_findings(
+        previous=None,
+        findings=(_finding(description="An ordinary finding."),),
+        round_number=1,
+    ).records[0]
+    assert_that(plain.to_dict()).does_not_contain_key("cross_chunk_contradiction")
+    assert_that(
+        FindingRecord.from_dict(
+            {**plain.to_dict(), "cross_chunk_contradiction": "bogus"},
+        ),
+    ).is_not_none()
+
+
+def test_a_replayed_finding_keeps_its_tag_and_its_band() -> None:
+    """Replay restores the tag, so the notice counts it and no guard re-fires.
+
+    A downgraded P2 replayed without its tag looked like an untagged P2 with
+    the same claim: the notice omitted it and a second guard pass could have
+    moved it to P3 (#2268 review).
+    """
+    tagged = _guard(
+        severity=Severity.P1,
+        description="tests/unit/test_migrate_docs.py was never updated.",
+    )
+    prior = ReviewState(
+        findings=match_findings(
+            previous=None,
+            findings=(tagged,),
+            round_number=1,
+        ).records,
+    )
+
+    (replayed,) = review_findings_from_unposted(
+        prior=prior,
+        current=(),
+        reviewed_paths=frozenset(),
+    )
+    (guarded_again,) = apply_cross_chunk_guard(
+        findings=(replayed,),
+        changed_paths=_CHANGED,
+    )
+
+    assert_that(replayed.severity).is_equal_to(Severity.P2)
+    assert_that(replayed.cross_chunk_contradiction).is_equal_to(
+        CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED,
+    )
+    assert_that(guarded_again).is_equal_to(replayed)
+    assert_that(count_cross_chunk_contradictions(findings=(replayed,))).is_equal_to(1)
