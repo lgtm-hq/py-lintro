@@ -11,6 +11,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
+from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.finding_matcher import fingerprint_for
@@ -586,7 +587,7 @@ def _posting_reporter(
     reporter.update_review_comment.return_value = True
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
-    reporter.api_request.return_value = True
+    reporter.api_response.return_value = GitHubApiResponse(status=200)
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -602,7 +603,7 @@ def _posted_comments(*, reporter: MagicMock) -> list[dict[str, Any]]:
     Returns:
         The ``comments`` array.
     """
-    payload = reporter.api_request.call_args.args[2]
+    payload = reporter.api_response.call_args.args[2]
     comments: list[dict[str, Any]] = payload["comments"]
     return comments
 
@@ -862,7 +863,11 @@ def test_update_review_comment_patches_the_pulls_comments_endpoint() -> None:
     """An inline comment lives under /pulls/comments, not /issues/comments."""
     reporter = _api_reporter()
 
-    with patch.object(reporter, "api_request", return_value=True) as request:
+    with patch.object(
+        reporter,
+        "api_response",
+        return_value=GitHubApiResponse(status=200),
+    ) as request:
         reporter.update_review_comment(comment_id=_COMMENT_ID, body="new")
 
     method, url, payload = request.call_args.args

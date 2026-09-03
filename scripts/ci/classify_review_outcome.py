@@ -76,6 +76,11 @@ NOT_INVOKED_STATUS: Final[int] = -2
 # exited 0. Treat that envelope as the outcome, not "unexpected status 143".
 SIGTERM_STATUS: Final[int] = 143
 
+# Key lintro logs the inline-post failure envelope under. Kept in sync with
+# lintro.ai.review.output.INLINE_POST_FAILURE_KEY; this script runs from a
+# bare python3 on the runner and cannot import lintro.
+INLINE_POST_FAILURE_KEY: Final[str] = "inline_post_failure"
+
 DEFAULT_TRANSPORT: Final[str] = "cli"
 
 # Kind labels refined for the active transport. Shared kinds stay as-is;
@@ -223,6 +228,36 @@ def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
+def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
+    """Extract the inline-post failure envelope from captured review output.
+
+    ``lintro review --post`` logs this envelope when GitHub refused the
+    inline review batch, which means the round's findings reached the sticky
+    comment only. Without it the summary claimed the findings were posted
+    (#2266).
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The failure mapping, or ``None`` when inline posting was fine.
+    """
+    decoder = json.JSONDecoder()
+    index = text.find("{")
+    while index != -1:
+        try:
+            payload, _end = decoder.raw_decode(text[index:])
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        if isinstance(payload, dict):
+            failure = payload.get(INLINE_POST_FAILURE_KEY)
+            if isinstance(failure, dict):
+                return failure
+        index = text.find("{", index + 1)
+    return None
+
+
 def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the ``error`` object from captured review output.
 
@@ -310,27 +345,43 @@ def _incomplete_report(
     )
 
 
-def _reviewed_report(*, findings: bool, transport: str) -> OutcomeReport:
+def _reviewed_report(
+    *,
+    findings: bool,
+    transport: str,
+    inline_failure: Mapping[str, Any] | None = None,
+) -> OutcomeReport:
     """Build the REVIEWED outcome for a finished envelope.
+
+    A round GitHub refused the inline comments for still produced a review, so
+    it stays green with an unchanged exit code — but it must not claim the
+    findings were posted inline when they only reached the sticky comment
+    (#2266).
 
     Args:
         findings: True when the review posted P1 findings.
         transport: Active transport named on the headline.
+        inline_failure: Inline-post failure envelope, or ``None`` when the
+            inline comments went up normally.
 
     Returns:
         Green report; the review itself produced a result.
     """
+    if inline_failure is not None:
+        kind = str(inline_failure.get("kind") or "unknown")
+        headline = f"reviewed — findings posted to the sticky comment only ({kind})"
+    elif findings:
+        headline = "reviewed — P1 findings posted"
+    else:
+        headline = "reviewed — no P1 findings"
     return OutcomeReport(
         outcome=ReviewOutcome.REVIEWED,
-        headline=_with_transport(
-            transport=transport,
-            headline=(
-                "reviewed — P1 findings posted"
-                if findings
-                else "reviewed — no P1 findings"
-            ),
+        headline=_with_transport(transport=transport, headline=headline),
+        detail=(
+            str(inline_failure.get("reason") or "")
+            if inline_failure is not None
+            else ""
         ),
-        detail="",
         exit_code=0,
         transport=transport,
     )
@@ -447,6 +498,7 @@ def classify(
         return _reviewed_report(
             findings=status == REVIEW_STATUS_FINDINGS,
             transport=transport,
+            inline_failure=_parse_inline_post_failure(text=output),
         )
 
     error = _parse_error_envelope(text=output) or {}

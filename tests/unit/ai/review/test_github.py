@@ -13,6 +13,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import (
     GITHUB_COMMENT_HARD_LIMIT,
@@ -50,7 +51,7 @@ def _fresh_reporter() -> MagicMock:
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
     reporter.delete_issue_comment.return_value = True
-    reporter.api_request.return_value = True
+    reporter.api_response.return_value = GitHubApiResponse(status=200)
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -315,8 +316,11 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     inline comments were rejected and the sticky only indexes titles.
     """
     reporter = _fresh_reporter()
-    # The inline review batch is the only call routed through api_request.
-    reporter.api_request.return_value = False
+    # The inline review batch is the only call routed through api_response.
+    reporter.api_response.return_value = GitHubApiResponse(
+        status=500,
+        message="Server Error",
+    )
     reporter.find_issue_comment.return_value = (77, "")
 
     posted = post_review_to_github(
@@ -375,7 +379,10 @@ def test_failed_inline_post_never_posts_a_second_sticky(
 ) -> None:
     """A sticky that cannot be located is skipped, not duplicated on the PR."""
     reporter = _fresh_reporter()
-    reporter.api_request.return_value = False
+    reporter.api_response.return_value = GitHubApiResponse(
+        status=500,
+        message="Server Error",
+    )
     # No sticky exists beforehand, and the lookup after creation still misses.
     reporter.find_issue_comment.return_value = None
 
@@ -609,7 +616,10 @@ def test_refresh_uses_replacement_id_after_cross_actor_recreate(
         (99, "replacement"),
     ]
     reporter.update_issue_comment.side_effect = [False, True]
-    reporter.api_request.return_value = False
+    reporter.api_response.return_value = GitHubApiResponse(
+        status=500,
+        message="Server Error",
+    )
 
     posted = post_review_to_github(
         result=sample_review_result,
@@ -636,7 +646,7 @@ def test_post_review_posts_inline_findings(
 
     assert_that(posted).is_true()
     # One finding maps to src/main.py:10 which is in the diff.
-    assert_that(reporter.api_request.called).is_true()
+    assert_that(reporter.api_response.called).is_true()
 
 
 def test_post_review_returns_false_when_unavailable(
@@ -894,7 +904,7 @@ def test_post_review_uses_the_rich_review_body(
     )
 
     assert_that(posted).is_true()
-    payload = reporter.api_request.call_args.args[2]
+    payload = reporter.api_response.call_args.args[2]
     assert_that(payload["body"]).contains("🔎 **Lintro review —")
     assert_that(payload["body"]).contains("**📊 Run stats**")
     assert_that(payload["body"]).contains("Config source: `.lintro-config.yaml`")
@@ -914,7 +924,7 @@ def test_post_review_body_carries_the_fix_prompt_inline(
 
     post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    payload = reporter.api_request.call_args.args[2]
+    payload = reporter.api_response.call_args.args[2]
     assert_that(payload["body"]).contains("Fix prompt — this round's")
     assert_that(payload["body"]).contains("<details><summary>Show prompt</summary>")
     assert_that(payload["body"]).does_not_contain("identical to the")
@@ -981,7 +991,10 @@ def test_review_body_and_degraded_sticky_coexist(
     """
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.api_request.return_value = False
+    reporter.api_response.return_value = GitHubApiResponse(
+        status=500,
+        message="Server Error",
+    )
     reporter.find_issue_comment.side_effect = [
         None,
         (77, build_sticky_comment(result=sample_review_result)),
@@ -992,7 +1005,7 @@ def test_review_body_and_degraded_sticky_coexist(
 
     assert_that(posted).is_false()
     # The review body still reached the (rejected) review call…
-    assert_that(reporter.api_request.call_args.args[2]["body"]).contains(
+    assert_that(reporter.api_response.call_args.args[2]["body"]).contains(
         "🔎 **Lintro review —",
     )
     # …and the sticky was re-rendered with the unpostable findings folded in.

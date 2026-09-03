@@ -24,6 +24,7 @@ from loguru import logger
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.finding_matcher import (
     fingerprint_for,
     match_findings,
@@ -48,6 +49,7 @@ from lintro.ai.review.github_render import (
     REGRESSED_TITLE_SUFFIX,
     _partition_findings,
     format_finding_comment,
+    format_inline_post_cause,
     format_run_mechanics,
     sanitize_comment_text,
 )
@@ -70,10 +72,12 @@ from lintro.ai.review.inline_fix import (
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.inline_post_result import InlinePostResult
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.output import render_inline_post_failure_json
 
 __all__ = [
     "GITHUB_COMMENT_HARD_LIMIT",
@@ -207,7 +211,7 @@ def post_review_to_github(
     # rather than leaving it as a title in a table (#1909). The sticky is also
     # posted before the inline comments so an inline failure still leaves a
     # status comment on the PR.
-    failure = _inline_failure(unmappable=fallback, rejected=[])
+    failure = _inline_failure(unmappable=fallback, rejected=[], outcome=None)
     # "Nothing to post" is not a failure, but it is also not a posted comment:
     # id capture has nothing to look for, while the lifecycle pass still runs
     # — a round that fixed everything posts no inline comment and yet has the
@@ -240,7 +244,7 @@ def post_review_to_github(
                 prior_state=prior_state,
             ),
         )
-        inline_posted = _post_inline_findings(
+        outcome = _post_inline_findings(
             reporter=gh_reporter,
             findings=inline_findings,
             checklist_display=checklist_display,
@@ -258,6 +262,7 @@ def post_review_to_github(
             finding_keys=_record_keys(findings=inline_findings, match=match),
             provenance=_regression_provenance(reporter=gh_reporter, match=match),
         )
+        inline_posted = outcome.ok
         if not inline_posted:
             success = False
             # Degraded path (#1909): the rejected findings now have no surface
@@ -267,7 +272,17 @@ def post_review_to_github(
             failure = _inline_failure(
                 unmappable=fallback,
                 rejected=inline_findings,
+                outcome=outcome,
             )
+            if failure is not None:
+                # The CI classifier reads this envelope out of the captured
+                # log to report a sticky-only round honestly, instead of
+                # claiming the findings were posted inline (#2266).
+                logger.warning(
+                    "Inline review comments were not posted; this round's "
+                    "findings reached the sticky comment only: {}",
+                    render_inline_post_failure_json(failure=failure),
+                )
 
     comment_ids = _run_lifecycle(
         reporter=gh_reporter,
@@ -304,16 +319,21 @@ def _inline_failure(
     *,
     unmappable: list[ReviewFinding],
     rejected: list[ReviewFinding],
+    outcome: InlinePostResult | None,
 ) -> InlinePostFailure | None:
     """Describe the findings that have no inline comment to live on.
 
     Two different things put a finding here, and the reason says which: it
     anchors to no line in the PR's diff, or GitHub rejected the review batch
-    that carried it.
+    that carried it. A rejection is classified from what GitHub actually
+    answered, so a throttled token is never reported as a line-mapping
+    problem (#2266).
 
     Args:
         unmappable: Findings that map to no line in the diff.
         rejected: Findings whose inline review batch the API rejected.
+        outcome: Result of the rejected POST, or ``None`` when nothing was
+            submitted.
 
     Returns:
         The failure descriptor, or ``None`` when every finding has an inline
@@ -322,15 +342,31 @@ def _inline_failure(
     findings = [*rejected, *unmappable]
     if not findings:
         return None
-    reasons = []
+    kind = InlinePostFailureKind.LINE_MAPPING
+    status: int | None = None
+    reasons: list[str] = []
     if rejected:
-        # ``_post_inline_findings`` only reports a boolean, so a 422, a 5xx, a
-        # timeout and a network error all arrive here identically. The wording
-        # must not name a cause the code never observed.
-        reasons.append("the inline review comments could not be posted")
-    if unmappable:
-        reasons.append("some findings map to no line in this PR's diff")
-    return InlinePostFailure(reason="; ".join(reasons), findings=tuple(findings))
+        answered = outcome or InlinePostResult(ok=False)
+        status = answered.status
+        kind = InlinePostFailureKind.from_response(
+            status=status,
+            message=answered.message,
+        )
+        reasons.append(format_inline_post_cause(kind=kind, status=status))
+    # Unmappable findings were never submitted, so they carry no status of
+    # their own — and a rejection that was itself a line-mapping one already
+    # said this, so the reason says it once rather than twice.
+    said_already = bool(rejected) and kind is InlinePostFailureKind.LINE_MAPPING
+    if unmappable and not said_already:
+        reasons.append(
+            format_inline_post_cause(kind=InlinePostFailureKind.LINE_MAPPING),
+        )
+    return InlinePostFailure(
+        reason="; ".join(reasons),
+        findings=tuple(findings),
+        kind=kind,
+        status=status,
+    )
 
 
 class _StickyRenderer(Protocol):
@@ -958,7 +994,7 @@ def _post_inline_findings(
     carried_fingerprints: frozenset[str] = frozenset(),
     finding_keys: Sequence[str] = (),
     provenance: Mapping[str, str] | None = None,
-) -> bool:
+) -> InlinePostResult:
     """Post inline PR review comments for mappable findings.
 
     Each comment's fix slot is chosen by :func:`plan_inline_fix`. A comment in
@@ -985,7 +1021,9 @@ def _post_inline_findings(
             keeps it from reading as a brand-new finding.
 
     Returns:
-        True when the review was submitted successfully.
+        The submission outcome: whether GitHub accepted the review, and the
+        status and message it answered with so the caller can say *why* a
+        rejection happened (#2266).
     """
     notes = provenance or {}
     comments: list[dict[str, Any]] = []
@@ -1037,8 +1075,9 @@ def _post_inline_findings(
             )
         comments.append(comment)
 
+    attempted = tuple(finding_keys)
     if not comments:
-        return True
+        return InlinePostResult(ok=True, attempted_ids=attempted)
 
     payload = {
         "event": "COMMENT",
@@ -1048,4 +1087,10 @@ def _post_inline_findings(
     url = (
         f"{reporter.api_base}/repos/{reporter.repo}/pulls/{reporter.pr_number}/reviews"
     )
-    return reporter.api_request("POST", url, payload)
+    response = reporter.api_response("POST", url, payload)
+    return InlinePostResult(
+        ok=response.ok,
+        status=response.status,
+        message=response.message,
+        attempted_ids=attempted,
+    )

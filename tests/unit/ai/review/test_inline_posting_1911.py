@@ -14,6 +14,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
+from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.github import post_review_to_github
 from lintro.ai.review.github_constants import STICKY_MARKER
 from lintro.ai.review.github_sticky import advance_review_state
@@ -40,7 +41,7 @@ def _reporter() -> MagicMock:
     reporter.fetch_pr_commit_shas.return_value = []
     reporter.post_issue_comment.return_value = True
     reporter.update_issue_comment.return_value = True
-    reporter.api_request.return_value = True
+    reporter.api_response.return_value = GitHubApiResponse(status=200)
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -80,7 +81,7 @@ def _inline_comments(*, reporter: MagicMock) -> list[dict[str, Any]]:
     Returns:
         The ``comments`` array of the review payload.
     """
-    payload = reporter.api_request.call_args.args[2]
+    payload = reporter.api_response.call_args.args[2]
     # Guard the positional index: if the production call ever stops passing the
     # payload third, this fails naming the cause instead of a bare KeyError.
     assert_that(payload).is_instance_of(dict)

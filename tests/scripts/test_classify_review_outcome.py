@@ -23,6 +23,7 @@ from lintro.ai.review.error_contract import (
     render_error_contract_json,
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.output import INLINE_POST_FAILURE_KEY
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "classify_review_outcome.py"
@@ -225,6 +226,78 @@ def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
     assert_that(report.outcome.produced_review).is_true()
     assert_that(report.exit_code).is_equal_to(0)
     assert_that(report.headline).contains("P1 findings")
+
+
+def _inline_failure_log(*, kind: str, status: int) -> str:
+    """Render the inline-post failure envelope as lintro logs it.
+
+    Args:
+        kind: Classified failure kind.
+        status: HTTP status GitHub answered the review POST with.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    payload = {
+        "inline_post_failure": {
+            "kind": kind,
+            "count": 94,
+            "reason": "GitHub secondary rate limit (HTTP 403)",
+            "status": status,
+        },
+    }
+    return f"log line\ninline comments were not posted: {json.dumps(payload)}\n"
+
+
+def test_rejected_inline_batch_is_reported_as_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """A round GitHub throttled must not claim its findings went up inline.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_inline_failure_log(kind="rate_limited", status=403),
+    )
+
+    assert_that(report.outcome.produced_review).is_true()
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only")
+    assert_that(report.headline).contains("rate_limited")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("secondary rate limit")
+
+
+def test_clean_round_with_a_rejected_inline_batch_is_still_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """The fallback is named even when no P1 finding was raised.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_inline_failure_log(kind="line_mapping", status=422),
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only (line_mapping)")
+
+
+def test_inline_post_failure_key_matches_the_lintro_payload(
+    classifier: ModuleType,
+) -> None:
+    """The classifier's copy of the envelope key cannot drift from lintro's.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    assert_that(classifier.INLINE_POST_FAILURE_KEY).is_equal_to(
+        INLINE_POST_FAILURE_KEY,
+    )
 
 
 def test_depleted_balance_never_reports_success(classifier: ModuleType) -> None:

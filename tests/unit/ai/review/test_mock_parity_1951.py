@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.file_skip_reason import (
     FileSkipReason,
     describe_skip_reason,
@@ -400,7 +401,7 @@ def test_regressed_thread_titles_say_regressed(
     reporter.fetch_pr_commit_shas.return_value = []
     reporter.fetch_review_comments.return_value = []
     reporter.update_issue_comment.return_value = True
-    reporter.api_request.return_value = True
+    reporter.api_response.return_value = GitHubApiResponse(status=200)
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -412,7 +413,7 @@ def test_regressed_thread_titles_say_regressed(
 
     review_calls = [
         call
-        for call in reporter.api_request.call_args_list
+        for call in reporter.api_response.call_args_list
         if len(call.args) == 3 and str(call.args[1]).endswith("/reviews")
     ]
     assert_that(posted).is_true()

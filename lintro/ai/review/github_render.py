@@ -18,8 +18,10 @@ from lintro.ai.review.coverage_degradation import (
     describe_coverage_degradations,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
+from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -29,6 +31,8 @@ from lintro.ai.review.timings import format_timing_summary
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
     "format_coverage_limited_warning",
+    "format_inline_post_cause",
+    "format_inline_post_note",
     "format_timings_note",
     "sanitized_timing_summary",
     "format_badge_table",
@@ -239,6 +243,68 @@ def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
     return (
         f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}** — "
         f"{sanitize_comment_text(detail, limit=400)}"
+    )
+
+
+#: Human wording per inline-post failure kind. Only ``LINE_MAPPING`` may say a
+#: finding anchors outside the diff: attributing that to a throttled token is
+#: exactly the misreport #2266 fixes.
+_INLINE_POST_CAUSES: dict[InlinePostFailureKind, str] = {
+    InlinePostFailureKind.RATE_LIMITED: "GitHub secondary rate limit",
+    InlinePostFailureKind.LINE_MAPPING: (
+        "some findings map to no line in this PR's diff"
+    ),
+    InlinePostFailureKind.PERMISSION: (
+        "this token is not permitted to post reviews on this PR"
+    ),
+    InlinePostFailureKind.OTHER: "the inline review comments could not be posted",
+}
+
+
+def format_inline_post_cause(
+    *,
+    kind: InlinePostFailureKind,
+    status: int | None = None,
+) -> str:
+    """Render the human cause for a failed or skipped inline post.
+
+    The single source of the wording for every surface that explains why a
+    finding has no inline comment: the sticky's degraded row, the reason
+    stored on :class:`~lintro.ai.review.models.inline_post_failure.InlinePostFailure`,
+    and the JSON payload the CI classifier reads (#2266).
+
+    Args:
+        kind: Classified cause of the failure.
+        status: HTTP status GitHub answered with, named in the text when
+            known.
+
+    Returns:
+        A short lowercase phrase, with ``(HTTP <status>)`` appended when a
+        status is known.
+    """
+    cause = _INLINE_POST_CAUSES[kind]
+    return f"{cause} (HTTP {status})" if status is not None else cause
+
+
+def format_inline_post_note(*, failure: InlinePostFailure | None) -> str:
+    """Render the warning row shown when findings have no inline comment.
+
+    Args:
+        failure: Findings whose inline comments could not be posted.
+
+    Returns:
+        A blockquote warning naming the count and the cause, or an empty
+        string when every finding reached an inline comment.
+    """
+    if failure is None or failure.is_empty:
+        return ""
+    noun = "finding" if failure.count == 1 else "findings"
+    surface = "an inline comment" if failure.count == 1 else "inline comments"
+    reason = sanitize_comment_text(failure.reason, limit=200).strip()
+    cause = f" ({reason})" if reason else ""
+    return (
+        f"> ⚠️ **{failure.count} {noun} could not be posted as {surface}**"
+        f"{cause}. Full details are folded in below instead."
     )
 
 
