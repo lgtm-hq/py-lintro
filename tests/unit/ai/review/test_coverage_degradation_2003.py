@@ -294,6 +294,10 @@ def test_review_body_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
+    # Production-independent copy: the detail sentence, not just the headline.
+    assert_that(clean).does_not_contain("may go unreported")
+    assert_that(capped).contains("retried at a tighter 6-finding cap")
+    assert_that(capped).contains("may go unreported")
 
 
 def test_sticky_carries_the_warning_only_when_capped(
@@ -314,6 +318,10 @@ def test_sticky_carries_the_warning_only_when_capped(
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
+    # Production-independent copy: the detail sentence, not just the headline.
+    assert_that(clean).does_not_contain("may go unreported")
+    assert_that(capped).contains("retried at a tighter 6-finding cap")
+    assert_that(capped).contains("may go unreported")
 
 
 def test_uncapped_run_renders_identically_on_every_surface(
