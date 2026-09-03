@@ -42,6 +42,7 @@ from lintro.ai.prompts.review import (
     format_changed_files_for_prompt,
     format_lint_results_section,
     format_output_rules,
+    format_pr_changed_files_for_prompt,
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
@@ -1663,6 +1664,13 @@ def build_review_prompt(
             text=format_changed_files_for_prompt(files=changed_files),
             source="changed files",
         ),
+        pr_changed_files=redact_prompt_text(
+            text=format_pr_changed_files_for_prompt(
+                files=context.changed_files,
+                chunk_paths=set(chunk.files),
+            ),
+            source="changed files",
+        ),
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
@@ -1768,6 +1776,13 @@ def build_git_native_review_prompt(
         changed_file_count=len(changed_files),
         changed_files=redact_prompt_text(
             text=format_changed_files_for_prompt(files=changed_files),
+            source="changed files",
+        ),
+        pr_changed_files=redact_prompt_text(
+            text=format_pr_changed_files_for_prompt(
+                files=context.changed_files,
+                chunk_paths=set(chunk.files),
+            ),
             source="changed files",
         ),
         interaction_paths=interaction_paths,

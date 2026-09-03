@@ -35,6 +35,7 @@ _USER_PROMPT_KWARGS = {
     "external_review_section": "",
     "changed_file_count": 1,
     "changed_files": "- `src/main.py` (modified, +1/-0)",
+    "pr_changed_files": "- `src/main.py` (modified, +1/-0)",
     "interaction_paths": "**Path A:** trace wiring",
     "checklist_count": 1,
     "checklist": "1. [logic-bug] Example question?",

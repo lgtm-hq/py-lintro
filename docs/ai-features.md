@@ -440,6 +440,15 @@ per-finding `cross_chunk_contradiction` tag, and the GitHub review body (in **ðŸ
 stats**) and the sticky comment share one note. A run the guard did not touch renders
 exactly as before.
 
+Prevention runs ahead of that downgrade. Every chunk prompt now carries the **whole**
+PR's changed-file list, not just the chunk's own slice, with the chunk's files marked
+`â€” **(this chunk)**` and a note that the unmarked files are on disk at the base commit
+and must never be read as this PR's state. CI checks the base out shallow, so a chunk
+that opened one of those files previously saw the pre-PR version and reported it as
+never updated; with the full list in the prompt, the contradiction that the guard
+downgrades mostly stops being written in the first place, for a few hundred extra tokens
+per chunk.
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked

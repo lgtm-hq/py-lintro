@@ -695,7 +695,9 @@ def test_incremental_checkpoint_keeps_this_run_findings(
         user_prompt,
         **kwargs,
     ):  # noqa: ANN001, ANN003, ANN202
-        if "b.py" in user_prompt or "+y" in user_prompt:
+        # Key on the chunk's own diff line: every chunk prompt now lists all
+        # changed files, so a file name alone no longer identifies the chunk.
+        if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
             raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
         return provider.complete(
             user_prompt,
@@ -923,7 +925,9 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
         user_prompt,
         **kwargs,
     ):  # noqa: ANN001, ANN003, ANN202
-        if "b.py" in user_prompt or "+y" in user_prompt:
+        # Key on the chunk's own diff line: every chunk prompt now lists all
+        # changed files, so a file name alone no longer identifies the chunk.
+        if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
             raise AIProviderError("agent CLI timed out after 1800s") from TimeoutError()
         return provider.complete(
             user_prompt,
