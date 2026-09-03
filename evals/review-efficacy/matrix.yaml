@@ -19,9 +19,12 @@ repeats: 3
 depth: 1
 timeout_seconds: 900
 
-# Model ids are the ones lintro/ai/model_pricing.py knows (or, for cursor,
-# the id the Cursor CLI exposes), so cost accounting is real rather than the
-# unknown-model fallback.
+# Every model id must be one its own provider accepts. The anthropic and
+# openai ids are registered under those providers in lintro/ai/registry.py, so
+# cost accounting is real rather than the unknown-model fallback. The cursor
+# id is not in the registry (cursor's registered models are priced at zero
+# anyway); it is the id the Cursor CLI exposes, as documented in
+# docs/ai-features.md. tests/evals/test_matrix_models.py enforces this.
 configs:
   - id: anthropic-opus-api
     provider: anthropic
@@ -37,9 +40,9 @@ configs:
     max_cost_usd: 1.5
     projected_cost_usd: 0.4
 
-  - id: openai-codex-api
+  - id: openai-gpt4o-api
     provider: openai
-    model: gpt-5.3-codex-fast
+    model: gpt-4o
     transport: api
     max_cost_usd: 2.0
     projected_cost_usd: 0.8

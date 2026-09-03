@@ -7,9 +7,14 @@
 # not a competitor bot's comment.
 #
 # A label carries exactly the three fields that form a finding fingerprint
-# (file, category, title) plus its severity, because that is what
-# lintro/ai/review/finding_matcher.py hashes. Labels therefore survive line
-# drift and reworded prose the same way a tracked finding does.
+# (file, category, title), because that is what
+# lintro/ai/review/finding_matcher.py hashes. The matcher normalizes a title's
+# case, punctuation and whitespace before hashing it -- it does not match
+# rewritten wording -- so a label survives line drift and cosmetic title
+# differences, not a freely reworded title.
+#
+# Severity is carried alongside, not hashed: it is what the expected verdict is
+# derived from, and it never affects whether a label matches a finding.
 version: 1
 repo: lgtm-hq/py-lintro
 

@@ -14,8 +14,11 @@ from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import (
     derive_verdict,
-    fingerprint_for,
     match_findings,
+)
+from lintro.ai.review.finding_parser import (
+    normalize_finding_kind,
+    normalize_severity,
 )
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -105,23 +108,24 @@ def verdict_for(*, findings: Sequence[ReviewFinding]) -> ReviewVerdict:
 
 
 def fingerprints_for(*, findings: Sequence[ReviewFinding]) -> frozenset[str]:
-    """Return the fingerprint set of a finding set.
+    """Return the identity set of a finding set.
+
+    Each element is the production identity of one finding: its fingerprint
+    plus the ordinal the matcher assigned it. Keying on the fingerprint alone
+    would collapse duplicates, so a run reporting the same finding twice would
+    score a perfect Jaccard against a run reporting it once. Carrying the
+    ordinal keeps duplicate cardinality visible, and still agrees with a
+    matcher pairing on what "the same finding" means.
 
     Args:
-        findings: Findings to fingerprint.
+        findings: Findings to identify.
 
     Returns:
-        Frozen set of fingerprints, computed with the production hash so a
-        Jaccard index and a matcher pairing agree on what "the same finding"
-        means.
+        Frozen set of ``"<fingerprint>#<ordinal>"`` identities.
     """
     return frozenset(
-        fingerprint_for(
-            file=finding.file,
-            category=finding.category,
-            title=finding.title,
-        )
-        for finding in findings
+        f"{record.fingerprint}#{record.ordinal}"
+        for record in records_for(findings=findings)
     )
 
 
@@ -176,13 +180,11 @@ def _parse_severity(value: Any) -> Severity:
         value: Raw severity value.
 
     Returns:
-        The parsed severity, defaulting to P1 for unrecognized input so a
-        corrupted payload can never fabricate a clean verdict.
+        The parsed severity from the production normalizer, which maps common
+        synonyms and fails closed to P1 for unrecognized input so a corrupted
+        payload can never fabricate a clean verdict.
     """
-    try:
-        return Severity(str(value).upper())
-    except ValueError:
-        return Severity.P1
+    return normalize_severity(raw=value)
 
 
 def _parse_kind(value: Any) -> FindingKind:
@@ -192,12 +194,10 @@ def _parse_kind(value: Any) -> FindingKind:
         value: Raw kind value.
 
     Returns:
-        The parsed kind, defaulting to ``FINDING``.
+        The parsed kind from the production normalizer, which defaults to
+        ``FINDING`` for absent or unrecognized values.
     """
-    try:
-        return FindingKind(str(value).lower())
-    except ValueError:
-        return FindingKind.FINDING
+    return normalize_finding_kind(raw=value)
 
 
 def _parse_int(value: Any) -> int:

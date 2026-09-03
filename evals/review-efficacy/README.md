@@ -70,9 +70,12 @@ Each run writes `runs/<stamp>/`:
 - `report.json` — every run plus all three metric blocks
 - `report.md` — the same numbers as markdown tables
 
-Pass `--stamp` to name the run directory yourself; otherwise it is a UTC timestamp.
-Nothing else in a report depends on the clock: the only non-deterministic value recorded
-is each run's elapsed time.
+Pass `--stamp` to name the run directory yourself; otherwise it is a UTC timestamp. An
+existing run directory is never written into twice: the command exits 2 unless
+`--overwrite` is passed, which clears the reports and this matrix's own run payloads
+first. A confirmed run exits 1 if none of its runs produced comparable findings. Nothing
+in a report depends on the clock, but two identical runs still differ in the elapsed
+time and the cost each one records.
 
 ## Adding labels
 
@@ -95,3 +98,14 @@ are candidates for adjudication, never ground truth.
 
 `tests/evals/` covers the metric functions on synthetic finding sets and the runner
 against a mocked invoker. No test in that directory touches a provider or the network.
+
+Those tests only run from a repository checkout: `evals/` is pruned from the wheel and
+sdist, so an installed copy of lintro has no harness for them to import.
+
+The harness root is spelled in exactly three places, and all three must agree when the
+directory moves:
+
+- `pyproject.toml` — `mypy_path = ["evals/review-efficacy"]`
+- `tests/evals/conftest.py` — puts the root on `sys.path` before the tests import
+  `review_matrix`
+- `evals/review-efficacy/run_matrix.py` — the same bootstrap for the entry point

@@ -142,7 +142,7 @@ def _stability_table(report: MatrixReport) -> list[str]:
     lines = [
         "## Stability (noise floor)",
         "",
-        "| config | pairs | verdict flip rate | mean Jaccard | failed runs |",
+        "| config | pairs | verdict flip rate | mean Jaccard | non-comparable runs |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
     lines.extend(

@@ -25,9 +25,11 @@ class EvalRun:
             label the model wrote. ``None`` when the run produced no findings
             payload at all.
         findings: Findings reported by the run, in payload order.
-        elapsed_seconds: Wall-clock duration of the invocation. This is the
-            only non-deterministic value in a report.
-        cost_usd: ``metadata.cost_estimate_usd`` from the review payload.
+        elapsed_seconds: Wall-clock duration of the invocation. Along with
+            ``cost_usd``, this varies between otherwise identical runs.
+        cost_usd: ``metadata.cost_estimate_usd`` from the review payload. Like
+            ``elapsed_seconds``, it is not reproducible run to run: token
+            usage differs between identical invocations.
         exit_code: Process exit code, or ``-1`` when the invocation never ran.
         error: Diagnostic for a failed or unparseable run; empty when ``OK``.
         output_path: Path of the persisted raw payload, relative to the run

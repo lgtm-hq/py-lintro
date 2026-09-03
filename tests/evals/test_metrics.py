@@ -83,12 +83,26 @@ def test_jaccard_index_of_partial_overlap() -> None:
     assert_that(jaccard_index(left=left, right=right)).is_equal_to(0.5)
 
 
-def test_fingerprints_ignore_line_drift() -> None:
-    """The same finding at a different line keeps one fingerprint."""
-    early = make_finding(title="Off by one", line=4)
-    late = make_finding(title="Off by one", line=91)
+def test_duplicate_findings_are_not_collapsed() -> None:
+    """Reporting one finding twice does not agree perfectly with reporting it once."""
+    once = fingerprints_for(findings=(make_finding(title="Off by one"),))
+    twice = fingerprints_for(
+        findings=(
+            make_finding(title="Off by one"),
+            make_finding(title="Off by one"),
+        ),
+    )
 
-    assert_that(fingerprints_for(findings=(early, late))).is_length(1)
+    assert_that(twice).is_length(2)
+    assert_that(jaccard_index(left=once, right=twice)).is_equal_to(0.5)
+
+
+def test_fingerprints_ignore_line_drift() -> None:
+    """The same finding at a different line keeps the same identity."""
+    early = fingerprints_for(findings=(make_finding(title="Off by one", line=4),))
+    late = fingerprints_for(findings=(make_finding(title="Off by one", line=91),))
+
+    assert_that(early).is_equal_to(late)
 
 
 def test_finding_match_rate_uses_the_production_matcher() -> None:

@@ -7,14 +7,19 @@ starts a subprocess, reaches a provider, or touches the network.
 from __future__ import annotations
 
 import json
+
+# Imported only for its TimeoutExpired type; no test here starts a process.
+import subprocess  # nosec B404
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 from review_matrix.enums.run_status import RunStatus
 from review_matrix.invoker import (
     InvocationResult,
     build_command,
     build_env,
+    run_review_cli,
 )
 from review_matrix.models.corpus import Corpus, CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
@@ -304,3 +309,297 @@ def test_execute_matrix_marks_unparseable_output(tmp_path: Path) -> None:
 
     assert_that(runs[0].status).is_equal_to(RunStatus.INVALID_OUTPUT)
     assert_that(runs[0].is_comparable).is_false()
+
+
+def test_execute_matrix_marks_a_partial_review_incomplete(tmp_path: Path) -> None:
+    """A partial review is never comparable, however many findings it carried.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["partial"] = True
+    payload["stopped_reason"] = "cost cap"
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INCOMPLETE)
+    assert_that(runs[0].is_comparable).is_false()
+    assert_that(runs[0].error).contains("cost cap")
+    assert_that(runs[0].findings).is_length(1)
+
+
+def test_execute_matrix_reads_partial_from_the_metadata_block(
+    tmp_path: Path,
+) -> None:
+    """``metadata.partial`` alone is enough to disqualify a run.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["metadata"]["partial"] = True
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INCOMPLETE)
+    assert_that(runs[0].error).contains("partial")
+
+
+def test_execute_matrix_marks_incomplete_findings_coverage(tmp_path: Path) -> None:
+    """A capped or retried run is not a config that found fewer issues.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["findings_coverage_complete"] = False
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INCOMPLETE)
+    assert_that(runs[0].error).contains("coverage")
+
+
+def test_execute_matrix_marks_an_incomplete_readiness_verdict(
+    tmp_path: Path,
+) -> None:
+    """An ``incomplete`` readiness verdict disqualifies the run.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["readiness_verdict"] = ReviewVerdict.INCOMPLETE.value
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INCOMPLETE)
+    assert_that(runs[0].error).contains("readiness verdict")
+
+
+def test_execute_matrix_keeps_a_complete_review_comparable(tmp_path: Path) -> None:
+    """A payload carrying the completeness keys as-shipped still scores OK.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["partial"] = False
+    payload["findings_coverage_complete"] = True
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].is_comparable).is_true()
+
+
+def test_execute_matrix_rejects_a_findings_list_of_junk(tmp_path: Path) -> None:
+    """A findings list whose entries all fail to parse is not zero findings.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(
+        stdout=json.dumps({"metadata": {}, "findings": ["nope", 3, None]}),
+    )
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INVALID_OUTPUT)
+    assert_that(runs[0].error).is_equal_to("findings list had no usable entries")
+    assert_that(runs[0].is_comparable).is_false()
+
+
+def test_execute_matrix_treats_a_blocking_exit_code_as_a_clean_run(
+    tmp_path: Path,
+) -> None:
+    """``lintro review`` exits 1 when it blocks; that is a successful review.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(
+        stdout=make_payload(titles=("Cost cap checked too late",), severity="P1"),
+        exit_code=1,
+    )
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].is_comparable).is_true()
+    assert_that(runs[0].verdict).is_equal_to(ReviewVerdict.BLOCKED)
+    assert_that(runs[0].exit_code).is_equal_to(1)
+
+
+def test_persist_refuses_an_id_that_would_escape_the_output_dir(
+    tmp_path: Path,
+) -> None:
+    """A traversing id raises instead of writing outside the run directory.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    escaping = MatrixConfig(
+        config_id="../escape",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        transport="api",
+        max_cost_usd=1.0,
+        projected_cost_usd=1.0,
+    )
+    spec = MatrixSpec(
+        version=1,
+        repeats=1,
+        depth=1,
+        timeout_seconds=900.0,
+        configs=(escaping,),
+    )
+    invoker = _RecordingInvoker(stdout=make_payload(titles=("Off by one",)))
+
+    with pytest.raises(ValueError, match="unsafe config id"):
+        execute_matrix(
+            spec=spec,
+            corpus=CORPUS,
+            output_dir=tmp_path,
+            invoker=invoker,
+        )
+
+    assert_that(list(tmp_path.iterdir())).is_empty()
+
+
+def test_persist_refuses_an_absolute_item_id(tmp_path: Path) -> None:
+    """An absolute corpus item id cannot redirect the payload path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    corpus = Corpus(
+        version=1,
+        items=(CorpusItem(item_id="/etc/passwd", repo="lgtm-hq/py-lintro", pr=1),),
+    )
+    invoker = _RecordingInvoker(stdout=make_payload(titles=("Off by one",)))
+
+    with pytest.raises(ValueError, match="unsafe item id"):
+        execute_matrix(
+            spec=SPEC,
+            corpus=corpus,
+            output_dir=tmp_path,
+            invoker=invoker,
+        )
+
+
+def test_run_review_cli_reports_a_timeout_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wedged invocation becomes exit code -1, never an exception.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        """Stand in for ``subprocess.run`` and time out.
+
+        Args:
+            *args: Ignored positional arguments.
+            **kwargs: Ignored keyword arguments.
+
+        Raises:
+            subprocess.TimeoutExpired: Always.
+        """
+        del args, kwargs
+        raise subprocess.TimeoutExpired(cmd=["lintro"], timeout=1020.0)
+
+    monkeypatch.setattr("review_matrix.invoker.subprocess.run", _raise)
+
+    result = run_review_cli(config=CONFIG_A, item=CORPUS.items[0], spec=SPEC)
+
+    assert_that(result.exit_code).is_equal_to(-1)
+    assert_that(result.stdout).is_empty()
+    assert_that(result.stderr).contains("timed out")
+
+
+def test_execute_matrix_records_a_timed_out_invocation_as_failed(
+    tmp_path: Path,
+) -> None:
+    """The runner turns the timeout sentinel into a FAILED run record.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+
+    def _timed_out(
+        *,
+        config: MatrixConfig,
+        item: CorpusItem,
+        spec: MatrixSpec,
+    ) -> InvocationResult:
+        """Return the result shape ``run_review_cli`` produces on a timeout.
+
+        Args:
+            config: Matrix cell being exercised.
+            item: Corpus item being reviewed.
+            spec: Matrix specification.
+
+        Returns:
+            A timed-out invocation result.
+        """
+        del config, item, spec
+        return InvocationResult(
+            exit_code=-1,
+            stdout="",
+            stderr="timed out after 1020s",
+            elapsed_seconds=1020.0,
+        )
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=_timed_out,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.FAILED)
+    assert_that(runs[0].exit_code).is_equal_to(-1)
+    assert_that(runs[0].error).contains("timed out")

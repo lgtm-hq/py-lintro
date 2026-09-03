@@ -255,3 +255,80 @@ def test_committed_corpus_file_parses() -> None:
     corpus = load_corpus(HARNESS_ROOT / "corpus" / "corpus.yaml")
 
     assert_that(corpus.items).is_not_empty()
+
+
+@pytest.mark.parametrize(
+    "config_id",
+    ["../escape", "nested/id", "back\\slash", "/absolute", "..", ".hidden", ""],
+)
+def test_parse_matrix_rejects_an_unsafe_config_id(config_id: str) -> None:
+    """Ids become output path segments, so traversal and separators are refused.
+
+    Args:
+        config_id: Candidate id that must not be accepted.
+    """
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["configs"][0]["id"] = config_id
+
+    with pytest.raises(SpecError):
+        parse_matrix(document)
+
+
+@pytest.mark.parametrize(
+    "item_id",
+    ["../escape", "nested/id", "back\\slash", "/absolute", "..", ".hidden"],
+)
+def test_parse_corpus_rejects_an_unsafe_item_id(item_id: str) -> None:
+    """A corpus item id cannot redirect where its payloads are written.
+
+    Args:
+        item_id: Candidate id that must not be accepted.
+    """
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["id"] = item_id
+
+    with pytest.raises(SpecError):
+        parse_corpus(document)
+
+
+@pytest.mark.parametrize("item_id", ["pr-1", "pr_1.2", "PR1"])
+def test_parse_corpus_accepts_a_safe_item_id(item_id: str) -> None:
+    """Ordinary ids keep working.
+
+    Args:
+        item_id: Candidate id that must be accepted.
+    """
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["id"] = item_id
+
+    corpus = parse_corpus(document)
+
+    assert_that(corpus.items[0].item_id).is_equal_to(item_id)
+
+
+@pytest.mark.parametrize("repeats", [True, False, 2.5, float("nan"), float("inf")])
+def test_parse_matrix_rejects_a_non_integral_repeat_count(repeats: object) -> None:
+    """Booleans, fractional floats and non-finite values are not repeat counts.
+
+    Args:
+        repeats: Candidate value that must not be accepted.
+    """
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["repeats"] = repeats
+
+    with pytest.raises(SpecError, match="must be an integer"):
+        parse_matrix(document)
+
+
+@pytest.mark.parametrize("cost", [True, float("nan"), float("inf"), float("-inf")])
+def test_parse_matrix_rejects_a_non_finite_cost_cap(cost: object) -> None:
+    """A cost cap must be a real, finite, positive number.
+
+    Args:
+        cost: Candidate value that must not be accepted.
+    """
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["configs"][0]["max_cost_usd"] = cost
+
+    with pytest.raises(SpecError, match="must be a (number|positive)"):
+        parse_matrix(document)

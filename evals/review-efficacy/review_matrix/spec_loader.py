@@ -6,6 +6,8 @@ parser reads either and the extension only decides nothing.
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -17,12 +19,18 @@ from review_matrix.models.corpus import Corpus, CorpusItem, LabeledFinding
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 
 __all__ = [
+    "SAFE_ID_PATTERN",
     "SpecError",
     "load_corpus",
     "load_matrix",
     "parse_corpus",
     "parse_matrix",
 ]
+
+#: Config and corpus ids become path segments under the run directory, so
+#: they must be a single safe segment: no separator, no traversal, not
+#: absolute, and never a leading dot.
+SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 DEFAULT_DEPTH = 1
 DEFAULT_TIMEOUT_SECONDS = 900.0
@@ -78,6 +86,27 @@ def _require_str(mapping: Mapping[str, Any], key: str, *, where: str) -> str:
     return value
 
 
+def _require_safe_id(value: str, *, where: str) -> str:
+    """Validate an id that will be used as an output path segment.
+
+    Args:
+        value: Candidate id.
+        where: Human-readable location used in the error message.
+
+    Returns:
+        The id unchanged.
+
+    Raises:
+        SpecError: When the id is not a single safe path segment.
+    """
+    if not SAFE_ID_PATTERN.fullmatch(value):
+        raise SpecError(
+            f"{where}: 'id' must be a single path segment matching "
+            f"{SAFE_ID_PATTERN.pattern} (got {value!r})",
+        )
+    return value
+
+
 def parse_matrix(document: Mapping[str, Any]) -> MatrixSpec:
     """Build a matrix specification from a decoded document.
 
@@ -99,7 +128,10 @@ def parse_matrix(document: Mapping[str, Any]) -> MatrixSpec:
         if not isinstance(raw, dict):
             raise SpecError(f"matrix: config #{index + 1} must be a mapping")
         where = f"matrix config #{index + 1}"
-        config_id = _require_str(raw, "id", where=where)
+        config_id = _require_safe_id(
+            _require_str(raw, "id", where=where),
+            where=where,
+        )
         if config_id in seen:
             raise SpecError(f"matrix: duplicate config id '{config_id}'")
         seen.add(config_id)
@@ -172,7 +204,10 @@ def parse_corpus(document: Mapping[str, Any]) -> Corpus:
         if not isinstance(raw, dict):
             raise SpecError(f"corpus: item #{index + 1} must be a mapping")
         where = f"corpus item #{index + 1}"
-        item_id = _require_str(raw, "id", where=where)
+        item_id = _require_safe_id(
+            _require_str(raw, "id", where=where),
+            where=where,
+        )
         if item_id in seen:
             raise SpecError(f"corpus: duplicate item id '{item_id}'")
         seen.add(item_id)
@@ -253,12 +288,20 @@ def _positive_int(value: Any, *, where: str, key: str) -> int:
         The parsed integer.
 
     Raises:
-        SpecError: When the value is not a positive integer.
+        SpecError: When the value is not a positive integer. Booleans, NaN,
+            infinities and non-integral floats are rejected rather than
+            silently coerced.
     """
+    if isinstance(value, bool):
+        raise SpecError(f"{where}: '{key}' must be an integer")
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        raise SpecError(f"{where}: '{key}' must be an integer")
     try:
         parsed = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise SpecError(f"{where}: '{key}' must be an integer") from exc
+    if isinstance(value, float) and parsed != value:
+        raise SpecError(f"{where}: '{key}' must be an integer")
     if parsed <= 0:
         raise SpecError(f"{where}: '{key}' must be positive")
     return parsed
@@ -276,12 +319,17 @@ def _positive_float(value: Any, *, where: str, key: str) -> float:
         The parsed float.
 
     Raises:
-        SpecError: When the value is not a positive number.
+        SpecError: When the value is not a positive number. Booleans, NaN and
+            infinities are rejected rather than silently accepted.
     """
+    if isinstance(value, bool):
+        raise SpecError(f"{where}: '{key}' must be a number")
     try:
         parsed = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise SpecError(f"{where}: '{key}' must be a number") from exc
+    if math.isnan(parsed) or math.isinf(parsed):
+        raise SpecError(f"{where}: '{key}' must be a number")
     if parsed <= 0:
         raise SpecError(f"{where}: '{key}' must be positive")
     return parsed

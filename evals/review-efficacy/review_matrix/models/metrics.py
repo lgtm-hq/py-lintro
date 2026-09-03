@@ -30,7 +30,8 @@ class StabilityMetrics:
         mean_jaccard: Mean finding-set Jaccard across repeat pairs, averaged
             per item then across items. ``None`` when nothing was comparable.
         verdicts: Every derived verdict observed, sorted, for the report.
-        failed_runs: Number of runs that never became comparable.
+        failed_runs: Number of runs that never became comparable — failed,
+            unparseable, or incomplete.
     """
 
     config_id: str
@@ -79,7 +80,10 @@ class EfficacyMetrics:
         labeled_runs: Number of comparable runs over labeled corpus items.
         true_positives: Reported findings that matched a label.
         false_positives: Reported findings with no matching label.
-        false_negatives: Labels no run reported.
+        false_negatives: Labels a comparable run did not report, pooled over
+            every comparable run of every labeled item. One label missed by
+            three runs counts three times, the same way ``true_positives``
+            counts a label found three times.
         precision: ``tp / (tp + fp)``; ``None`` when nothing was reported.
         recall: ``tp / (tp + fn)``; ``None`` when no labels applied.
         f1: Harmonic mean of precision and recall; ``None`` when either is

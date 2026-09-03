@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from review_matrix.enums.run_status import RunStatus
 from review_matrix.findings import findings_from_payload, verdict_for
 from review_matrix.invoker import InvocationResult, ReviewInvoker, run_review_cli
@@ -16,6 +18,7 @@ from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 from review_matrix.models.run import EvalRun
 
 __all__ = [
+    "SAFE_ID_PATTERN",
     "ConfigSpend",
     "SpendPlan",
     "execute_matrix",
@@ -23,6 +26,12 @@ __all__ = [
     "render_spend_plan",
     "summarize_runs",
 ]
+
+
+#: Ids are used verbatim as output path segments, so they must be a single
+#: safe segment. Mirrors :data:`review_matrix.spec_loader.SAFE_ID_PATTERN`;
+#: re-checked here so a directly constructed dataclass cannot escape either.
+SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +196,59 @@ def _cost_from_payload(payload: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _incomplete_reason(payload: Mapping[str, Any]) -> str | None:
+    """Return why a review payload does not describe a complete review.
+
+    ``lintro review`` reports incompleteness on three separate axes (see
+    :func:`lintro.ai.review.output.review_result_to_dict` and
+    :class:`lintro.ai.review.models.review_metadata.ReviewMetadata`): the
+    ``partial`` flag for a run that stopped before every chunk was reviewed,
+    ``findings_coverage_complete`` for a run whose findings were capped or
+    retried, and an ``incomplete`` readiness verdict for coverage below 100%
+    of the review-eligible files.
+
+    Args:
+        payload: Decoded review payload.
+
+    Returns:
+        A human-readable reason, naming ``stopped_reason`` where the payload
+        carries one, or ``None`` when the review is complete.
+    """
+    metadata = payload.get("metadata")
+    metadata_map: Mapping[str, Any] = metadata if isinstance(metadata, dict) else {}
+    stopped = str(
+        payload.get("stopped_reason") or metadata_map.get("stopped_reason") or "",
+    ).strip()
+    partial = bool(payload.get("partial") or metadata_map.get("partial"))
+    if partial:
+        return f"review was partial: {stopped}" if stopped else "review was partial"
+    coverage_complete = payload.get("findings_coverage_complete")
+    if coverage_complete is None:
+        coverage_complete = metadata_map.get("findings_coverage_complete")
+    if coverage_complete is False:
+        return "findings coverage was incomplete"
+    verdict = str(payload.get("readiness_verdict", "")).strip().lower()
+    if verdict == ReviewVerdict.INCOMPLETE.value:
+        return "readiness verdict was incomplete"
+    return None
+
+
+def _has_usable_findings(payload: Mapping[str, Any]) -> bool:
+    """Return whether a payload's findings list holds any usable entry.
+
+    Args:
+        payload: Decoded review payload, already known to carry a list.
+
+    Returns:
+        ``True`` when the list is empty (a clean review reports nothing) or
+        holds at least one mapping; ``False`` when every entry is junk.
+    """
+    raw = payload.get("findings")
+    if not isinstance(raw, list) or not raw:
+        return True
+    return any(isinstance(item, dict) for item in raw)
+
+
 def _persist(
     *,
     output_dir: Path,
@@ -206,7 +268,16 @@ def _persist(
 
     Returns:
         The payload path, relative to ``output_dir``.
+
+    Raises:
+        ValueError: When either id is not a single safe path segment. The
+            loaders already reject those, but a directly constructed
+            dataclass must not be able to write outside ``output_dir``.
     """
+    for label, value in (("config id", config.config_id), ("item id", item.item_id)):
+        if not SAFE_ID_PATTERN.fullmatch(value):
+            msg = f"unsafe {label} for an output path: {value!r}"
+            raise ValueError(msg)
     relative = Path(config.config_id) / item.item_id / f"run-{repeat}.json"
     payload_path = output_dir / relative
     payload_path.parent.mkdir(parents=True, exist_ok=True)
@@ -238,6 +309,9 @@ def _run_to_record(
 
     Returns:
         The run record, with its verdict derived in code from its findings.
+        Only a complete review with a usable findings list becomes ``OK``; a
+        partial or coverage-incomplete review becomes ``INCOMPLETE`` and is
+        never comparable.
     """
     payload = _decode_payload(result.stdout)
     if result.exit_code != 0 and payload is None:
@@ -277,7 +351,35 @@ def _run_to_record(
             error=error,
             output_path=output_path,
         )
+    if not _has_usable_findings(payload):
+        return EvalRun(
+            config_id=config.config_id,
+            item_id=item.item_id,
+            repeat=repeat,
+            status=RunStatus.INVALID_OUTPUT,
+            elapsed_seconds=result.elapsed_seconds,
+            cost_usd=_cost_from_payload(payload),
+            exit_code=result.exit_code,
+            error="findings list had no usable entries",
+            output_path=output_path,
+        )
     findings = findings_from_payload(payload)
+    incomplete = _incomplete_reason(payload)
+    if incomplete is not None:
+        # A truncated review is not a config that found less. Its findings are
+        # kept for inspection, but the run never enters a metric.
+        return EvalRun(
+            config_id=config.config_id,
+            item_id=item.item_id,
+            repeat=repeat,
+            status=RunStatus.INCOMPLETE,
+            findings=findings,
+            elapsed_seconds=result.elapsed_seconds,
+            cost_usd=_cost_from_payload(payload),
+            exit_code=result.exit_code,
+            error=incomplete,
+            output_path=output_path,
+        )
     return EvalRun(
         config_id=config.config_id,
         item_id=item.item_id,
