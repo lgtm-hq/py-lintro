@@ -18,12 +18,14 @@ from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 from review_matrix.models.run import EvalRun
 
 __all__ = [
+    "RUNS_JSONL_NAME",
     "SAFE_ID_PATTERN",
     "ConfigSpend",
     "SpendPlan",
     "execute_matrix",
     "plan_spend",
     "render_spend_plan",
+    "run_to_dict",
     "summarize_runs",
 ]
 
@@ -32,6 +34,10 @@ __all__ = [
 #: safe segment. Mirrors :data:`review_matrix.spec_loader.SAFE_ID_PATTERN`;
 #: re-checked here so a directly constructed dataclass cannot escape either.
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+#: Append-only journal of run records, written as each cell completes so an
+#: aborted matrix still has every result it already paid for.
+RUNS_JSONL_NAME = "runs.jsonl"
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,6 +400,59 @@ def _run_to_record(
     )
 
 
+def run_to_dict(*, run: EvalRun) -> dict[str, Any]:
+    """Serialize one run record to a JSON-ready mapping.
+
+    Findings are reduced to their identity fields: this is the metric record,
+    and the full payloads already live beside it on disk. The same shape is
+    used by the incremental journal and by
+    :func:`review_matrix.report.report_to_dict`, so a report and a journal can
+    never describe the same run differently.
+
+    Args:
+        run: Run record to serialize.
+
+    Returns:
+        A mapping whose every value is JSON-encodable.
+    """
+    return {
+        "config_id": run.config_id,
+        "item_id": run.item_id,
+        "repeat": run.repeat,
+        "status": str(run.status),
+        "verdict": str(run.verdict) if run.verdict is not None else None,
+        "finding_count": len(run.findings),
+        "findings": [
+            {
+                "severity": str(finding.severity),
+                "category": finding.category,
+                "file": finding.file,
+                "line": finding.line,
+                "title": finding.title,
+                "kind": str(finding.kind),
+            }
+            for finding in run.findings
+        ],
+        "elapsed_seconds": run.elapsed_seconds,
+        "cost_usd": run.cost_usd,
+        "exit_code": run.exit_code,
+        "error": run.error,
+        "output_path": run.output_path,
+    }
+
+
+def _append_run(*, output_dir: Path, run: EvalRun) -> None:
+    """Append one run record to the run journal.
+
+    Args:
+        output_dir: Root run directory.
+        run: Run record to journal.
+    """
+    line = json.dumps(run_to_dict(run=run), sort_keys=True)
+    with (output_dir / RUNS_JSONL_NAME).open("a", encoding="utf-8") as handle:
+        handle.write(f"{line}\n")
+
+
 def execute_matrix(
     *,
     spec: MatrixSpec,
@@ -404,7 +463,9 @@ def execute_matrix(
     """Run every (config, item, repeat) cell and persist each result.
 
     Cells are executed config-major so a matrix aborted part-way still has
-    complete repeat sets for the configs it reached.
+    complete repeat sets for the configs it reached, and each record is
+    appended to ``runs.jsonl`` as it is produced, so an abort keeps every
+    result the matrix already paid for.
 
     Args:
         spec: Matrix specification.
@@ -428,15 +489,15 @@ def execute_matrix(
                     repeat=repeat,
                     result=result,
                 )
-                runs.append(
-                    _run_to_record(
-                        config=config,
-                        item=item,
-                        repeat=repeat,
-                        result=result,
-                        output_path=output_path,
-                    ),
+                run = _run_to_record(
+                    config=config,
+                    item=item,
+                    repeat=repeat,
+                    result=result,
+                    output_path=output_path,
                 )
+                _append_run(output_dir=output_dir, run=run)
+                runs.append(run)
     return tuple(runs)
 
 

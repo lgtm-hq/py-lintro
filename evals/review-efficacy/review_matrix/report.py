@@ -16,7 +16,7 @@ from review_matrix.models.corpus import Corpus
 from review_matrix.models.matrix import MatrixSpec
 from review_matrix.models.metrics import EfficacyMetrics, MatrixReport
 from review_matrix.models.run import EvalRun
-from review_matrix.runner import summarize_runs
+from review_matrix.runner import run_to_dict, summarize_runs
 
 __all__ = ["build_report", "render_markdown", "report_to_dict"]
 
@@ -76,8 +76,9 @@ def build_report(
 def report_to_dict(*, report: MatrixReport) -> dict[str, Any]:
     """Serialize a report to a JSON-ready mapping.
 
-    Findings are reduced to their identity fields: the JSON report is the
-    metric record, and the full payloads already live beside it on disk.
+    Each run is serialized by :func:`review_matrix.runner.run_to_dict`, the
+    same function the incremental ``runs.jsonl`` journal uses, so the two can
+    never describe one run differently.
 
     Args:
         report: Report to serialize.
@@ -86,33 +87,7 @@ def report_to_dict(*, report: MatrixReport) -> dict[str, Any]:
         A mapping whose every value is JSON-encodable.
     """
     payload = asdict(report)
-    payload["runs"] = [
-        {
-            "config_id": run.config_id,
-            "item_id": run.item_id,
-            "repeat": run.repeat,
-            "status": str(run.status),
-            "verdict": str(run.verdict) if run.verdict is not None else None,
-            "finding_count": len(run.findings),
-            "findings": [
-                {
-                    "severity": str(finding.severity),
-                    "category": finding.category,
-                    "file": finding.file,
-                    "line": finding.line,
-                    "title": finding.title,
-                    "kind": str(finding.kind),
-                }
-                for finding in run.findings
-            ],
-            "elapsed_seconds": run.elapsed_seconds,
-            "cost_usd": run.cost_usd,
-            "exit_code": run.exit_code,
-            "error": run.error,
-            "output_path": run.output_path,
-        }
-        for run in report.runs
-    ]
+    payload["runs"] = [run_to_dict(run=run) for run in report.runs]
     for entry, source in zip(payload["stability"], report.stability, strict=True):
         entry["verdicts"] = [str(verdict) for verdict in source.verdicts]
     return payload

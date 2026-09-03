@@ -20,12 +20,19 @@ from review_matrix.models.corpus import CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 
 __all__ = [
+    "ENV_PREFIX",
     "InvocationResult",
     "ReviewInvoker",
     "build_command",
     "build_env",
     "run_review_cli",
 ]
+
+#: Prefix shared by every documented AI override
+#: (:mod:`lintro.ai.config_overrides` names each variable individually but
+#: exports no prefix constant). Every ambient variable carrying it is dropped
+#: before a cell's own overrides are applied.
+ENV_PREFIX = "LINTRO_AI_"
 
 #: Extra wall-clock slack over ``--timeout`` before the harness kills a run.
 #: The CLI owns its own provider timeout; this only catches a wedged process.
@@ -123,15 +130,24 @@ def build_env(
 ) -> dict[str, str]:
     """Build the environment that pins one matrix config.
 
+    Every ambient ``LINTRO_AI_*`` variable is dropped first. A developer shell
+    exporting ``LINTRO_AI_ENABLED``, ``LINTRO_AI_REVIEW`` or
+    ``LINTRO_AI_TRANSCRIPT`` would otherwise silently change what a cell
+    measures, and the config's own four overrides would not overwrite it.
+
     Args:
         config: Matrix cell whose overrides are applied.
         base_env: Environment to overlay; defaults to the current process
             environment.
 
     Returns:
-        A new environment mapping with the ``LINTRO_AI_*`` overlay applied.
+        A new environment mapping carrying exactly this config's
+        ``LINTRO_AI_*`` variables and no other.
     """
-    env = dict(os.environ if base_env is None else base_env)
+    source = os.environ if base_env is None else base_env
+    env = {
+        key: value for key, value in source.items() if not key.startswith(ENV_PREFIX)
+    }
     env.update(config.env_overrides)
     return env
 
@@ -152,8 +168,10 @@ def run_review_cli(
         cwd: Working directory for the invocation; defaults to the caller's.
 
     Returns:
-        The invocation's raw result. A timeout is reported as exit code ``-1``
-        rather than raised, so one hung cell cannot abort the whole matrix.
+        The invocation's raw result. Output is decoded as UTF-8 with
+        undecodable bytes replaced, so a provider emitting stray bytes cannot
+        raise instead of producing a run. A timeout is reported as exit code
+        ``-1`` rather than raised, so one hung cell cannot abort the matrix.
     """
     command: Sequence[str] = build_command(config=config, item=item, spec=spec)
     env = build_env(config=config)
@@ -165,6 +183,8 @@ def run_review_cli(
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=spec.timeout_seconds + _TIMEOUT_GRACE_SECONDS,
         )

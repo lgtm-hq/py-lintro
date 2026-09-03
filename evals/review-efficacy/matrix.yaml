@@ -25,13 +25,18 @@ timeout_seconds: 900
 # id is not in the registry (cursor's registered models are priced at zero
 # anyway); it is the id the Cursor CLI exposes, as documented in
 # docs/ai-features.md. tests/evals/test_matrix_models.py enforces this.
+#
+# The two anthropic cells pair a small model with a mid-size one so the matrix
+# still measures a within-provider difference. They deliberately avoid
+# claude-opus-4-20250514: the registry still prices it, but Anthropic retired
+# it, so a cell naming it would fail at the API rather than produce a run.
 configs:
-  - id: anthropic-opus-api
+  - id: anthropic-haiku-api
     provider: anthropic
-    model: claude-opus-4-20250514
+    model: claude-haiku-4-5-20251001
     transport: api
-    max_cost_usd: 3.0
-    projected_cost_usd: 1.2
+    max_cost_usd: 1.0
+    projected_cost_usd: 0.3
 
   - id: anthropic-sonnet-api
     provider: anthropic

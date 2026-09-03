@@ -67,6 +67,8 @@ Each run writes `runs/<stamp>/`:
 
 - `<config-id>/<item-id>/run-<n>.json` — the raw `--output json` payload (and
   `run-<n>.stderr.txt` when the invocation wrote to stderr)
+- `runs.jsonl` — one JSON record per run, appended as each cell finishes, so an aborted
+  matrix keeps every result it already paid for
 - `report.json` — every run plus all three metric blocks
 - `report.md` — the same numbers as markdown tables
 

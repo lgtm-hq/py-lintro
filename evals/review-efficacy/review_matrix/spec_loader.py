@@ -51,15 +51,18 @@ def _load_document(path: Path) -> Mapping[str, Any]:
         The decoded top-level mapping.
 
     Raises:
-        SpecError: When the file is missing, unparseable, or not a mapping.
+        SpecError: When the file is missing, unreadable, undecodable,
+            unparseable, or not a mapping. Every failure mode is funnelled
+            into one exception type so the CLI can report it as an error and
+            exit 2 rather than traceback.
     """
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise SpecError(f"cannot read {path}: {exc}") from exc
     try:
         data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError) as exc:
         raise SpecError(f"cannot parse {path}: {exc}") from exc
     if not isinstance(data, dict):
         raise SpecError(f"{path} must contain a top-level mapping")
@@ -78,9 +81,16 @@ def _require_str(mapping: Mapping[str, Any], key: str, *, where: str) -> str:
         The stripped field value.
 
     Raises:
-        SpecError: When the field is absent or empty.
+        SpecError: When the field is absent, empty, or not a string. A list or
+            mapping would otherwise be stringified into a nonsense provider or
+            model name that only fails much later, at the provider.
     """
-    value = str(mapping.get(key, "")).strip()
+    raw = mapping.get(key)
+    if raw is None:
+        raise SpecError(f"{where}: '{key}' is required")
+    if not isinstance(raw, str):
+        raise SpecError(f"{where}: '{key}' must be a string")
+    value = raw.strip()
     if not value:
         raise SpecError(f"{where}: '{key}' is required")
     return value
@@ -197,7 +207,11 @@ def parse_corpus(document: Mapping[str, Any]) -> Corpus:
     raw_items = document.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         raise SpecError("corpus: 'items' must be a non-empty list")
-    default_repo = str(document.get("repo", "")).strip()
+    default_repo = (
+        ""
+        if document.get("repo") is None
+        else _require_str(document, "repo", where="corpus")
+    )
     items: list[CorpusItem] = []
     seen: set[str] = set()
     for index, raw in enumerate(raw_items):
@@ -211,7 +225,11 @@ def parse_corpus(document: Mapping[str, Any]) -> Corpus:
         if item_id in seen:
             raise SpecError(f"corpus: duplicate item id '{item_id}'")
         seen.add(item_id)
-        repo = str(raw.get("repo", default_repo)).strip()
+        repo = (
+            default_repo
+            if raw.get("repo") is None
+            else _require_str(raw, "repo", where=where)
+        )
         if not repo:
             raise SpecError(f"{where}: 'repo' is required (no corpus-level default)")
         items.append(
@@ -219,7 +237,11 @@ def parse_corpus(document: Mapping[str, Any]) -> Corpus:
                 item_id=item_id,
                 repo=repo,
                 pr=_positive_int(raw.get("pr"), where=where, key="pr"),
-                title=str(raw.get("title", "")),
+                title=(
+                    ""
+                    if raw.get("title") is None
+                    else _require_str(raw, "title", where=where)
+                ),
                 labeled_findings=_parse_labels(
                     raw.get("expected_findings"),
                     where=where,

@@ -15,6 +15,7 @@ from review_matrix.cli import main
 from review_matrix.invoker import InvocationResult, ReviewInvoker
 from review_matrix.models.corpus import CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
+from review_matrix.runner import RUNS_JSONL_NAME
 
 from tests.evals.helpers import make_payload
 
@@ -207,3 +208,78 @@ def test_cli_exits_one_when_nothing_is_comparable(
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains("comparable")
     assert_that((tmp_path / "runs" / "run-1" / "report.json").exists()).is_true()
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    ["/absolute", "../escape", "nested/stamp", ".", "..", "trailing/"],
+)
+def test_cli_rejects_a_stamp_that_is_not_a_directory_name(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    stamp: str,
+) -> None:
+    """A stamp is joined onto the runs root, so it must be a plain name.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        capsys: Pytest output capture fixture.
+        stamp: Candidate stamp that must be refused.
+    """
+    matrix_path, corpus_path = _write_specs(tmp_path)
+
+    code = main(
+        [
+            "--matrix",
+            str(matrix_path),
+            "--corpus",
+            str(corpus_path),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--stamp",
+            stamp,
+            "--confirm-spend",
+        ],
+        invoker=_fake_invoker(make_payload(titles=("Off by one",))),
+    )
+
+    assert_that(code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("--stamp")
+    assert_that((tmp_path / "runs").exists()).is_false()
+
+
+def test_cli_reports_a_missing_matrix_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A nonexistent spec path is an error message, never a traceback.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        capsys: Pytest output capture fixture.
+    """
+    _, corpus_path = _write_specs(tmp_path)
+    missing = tmp_path / "nope" / "matrix.yaml"
+
+    code = main(["--matrix", str(missing), "--corpus", str(corpus_path)])
+
+    assert_that(code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("cannot read", str(missing))
+
+
+def test_cli_overwrite_clears_the_stale_run_journal(tmp_path: Path) -> None:
+    """--overwrite starts a fresh runs.jsonl instead of appending to the old one.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = make_payload(titles=("Off by one",))
+    _run_cli(tmp_path=tmp_path, stdout=payload)
+    journal = tmp_path / "runs" / "run-1" / RUNS_JSONL_NAME
+    first_lines = journal.read_text(encoding="utf-8").splitlines()
+
+    _run_cli(tmp_path=tmp_path, stdout=payload, extra_args=("--overwrite",))
+
+    assert_that(journal.read_text(encoding="utf-8").splitlines()).is_length(
+        len(first_lines),
+    )

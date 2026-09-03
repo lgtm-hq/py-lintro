@@ -17,17 +17,25 @@ def test_evals_is_not_a_configured_package() -> None:
     )
     packages = data["tool"]["setuptools"]["packages"]
 
-    offenders = [name for name in packages if "eval" in name.split(".")]
+    offenders = [
+        name for name in packages if name == "evals" or name.startswith("evals.")
+    ]
 
     assert_that(offenders).is_empty()
     assert_that(packages).does_not_contain("review_matrix")
 
 
 def test_manifest_prunes_the_evals_directory() -> None:
-    """The sdist manifest prunes evals/ so the harness never ships."""
+    """The sdist manifest prunes evals/ so the harness never ships.
+
+    The directive is matched as a whole line: ``prune evals-something-else``
+    would satisfy a substring check while pruning a different directory.
+    """
     manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
-    assert_that(manifest).contains("prune evals")
+    directives = [line.strip() for line in manifest.splitlines()]
+
+    assert_that(directives).contains("prune evals")
 
 
 def test_harness_lives_outside_the_lintro_package() -> None:

@@ -16,6 +16,7 @@ import pytest
 from assertpy import assert_that
 from review_matrix.enums.run_status import RunStatus
 from review_matrix.invoker import (
+    ENV_PREFIX,
     InvocationResult,
     build_command,
     build_env,
@@ -24,13 +25,19 @@ from review_matrix.invoker import (
 from review_matrix.models.corpus import Corpus, CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 from review_matrix.runner import (
+    RUNS_JSONL_NAME,
     execute_matrix,
     plan_spend,
     render_spend_plan,
     summarize_runs,
 )
 
-from lintro.ai.config_overrides import ENV_MAX_COST_USD, ENV_PROVIDER
+from lintro.ai.config_overrides import (
+    ENV_MAX_COST_USD,
+    ENV_MODEL,
+    ENV_PROVIDER,
+    ENV_TRANSPORT,
+)
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from tests.evals.helpers import make_payload
 
@@ -603,3 +610,153 @@ def test_execute_matrix_records_a_timed_out_invocation_as_failed(
     assert_that(runs[0].status).is_equal_to(RunStatus.FAILED)
     assert_that(runs[0].exit_code).is_equal_to(-1)
     assert_that(runs[0].error).contains("timed out")
+
+
+def test_build_env_strips_ambient_ai_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A developer shell's LINTRO_AI_* variables never leak into a cell.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_AI_TRANSCRIPT", "1")
+    monkeypatch.setenv("LINTRO_AI_ENABLED", "0")
+    monkeypatch.setenv("LINTRO_AI_REVIEW", "0")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = build_env(config=CONFIG_A)
+
+    leaked = [key for key in env if key.startswith(ENV_PREFIX)]
+    assert_that(env).does_not_contain_key("LINTRO_AI_TRANSCRIPT")
+    assert_that(env).does_not_contain_key("LINTRO_AI_ENABLED")
+    assert_that(env).does_not_contain_key("LINTRO_AI_REVIEW")
+    assert_that(sorted(leaked)).is_equal_to(sorted(CONFIG_A.env_overrides))
+    assert_that(env["PATH"]).is_equal_to("/usr/bin")
+
+
+def test_build_env_keeps_the_four_documented_overrides() -> None:
+    """The config's own four overrides survive the ambient strip."""
+    env = build_env(
+        config=CONFIG_A,
+        base_env={"LINTRO_AI_TRANSCRIPT": "1", "HOME": "/home/dev"},
+    )
+
+    assert_that(env[ENV_PROVIDER]).is_equal_to("anthropic")
+    assert_that(env[ENV_MODEL]).is_equal_to(CONFIG_A.model)
+    assert_that(env[ENV_TRANSPORT]).is_equal_to("api")
+    assert_that(env[ENV_MAX_COST_USD]).is_equal_to("3")
+    assert_that(env).does_not_contain_key("LINTRO_AI_TRANSCRIPT")
+    assert_that(env["HOME"]).is_equal_to("/home/dev")
+
+
+def test_run_review_cli_decodes_output_defensively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stray provider bytes are replaced rather than raising mid-matrix.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    seen: dict[str, object] = {}
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        """Record the call's kwargs, then time out.
+
+        Args:
+            *args: Ignored positional arguments.
+            **kwargs: Keyword arguments the runner passed.
+
+        Raises:
+            subprocess.TimeoutExpired: Always.
+        """
+        del args
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd=["lintro"], timeout=1020.0)
+
+    monkeypatch.setattr("review_matrix.invoker.subprocess.run", _raise)
+
+    result = run_review_cli(config=CONFIG_A, item=CORPUS.items[0], spec=SPEC)
+
+    assert_that(result.exit_code).is_equal_to(-1)
+    assert_that(seen["text"]).is_true()
+    assert_that(seen["encoding"]).is_equal_to("utf-8")
+    assert_that(seen["errors"]).is_equal_to("replace")
+    assert_that(seen["check"]).is_false()
+
+
+def test_execute_matrix_journals_every_run(tmp_path: Path) -> None:
+    """Each completed cell is appended to runs.jsonl as it is produced.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(stdout=make_payload(titles=("Off by one",)))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    lines = (tmp_path / RUNS_JSONL_NAME).read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    assert_that(lines).is_length(len(runs))
+    assert_that(records[0]["config_id"]).is_equal_to(runs[0].config_id)
+    assert_that(records[0]["status"]).is_equal_to(str(runs[0].status))
+    assert_that(records[0]["findings"][0]["title"]).is_equal_to("Off by one")
+
+
+def test_execute_matrix_keeps_journalled_runs_when_a_cell_raises(
+    tmp_path: Path,
+) -> None:
+    """An abort leaves the results the matrix already paid for on disk.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    calls = {"count": 0}
+
+    def _fails_on_the_third_call(
+        *,
+        config: MatrixConfig,
+        item: CorpusItem,
+        spec: MatrixSpec,
+    ) -> InvocationResult:
+        """Return two canned results, then raise.
+
+        Args:
+            config: Matrix cell being exercised.
+            item: Corpus item being reviewed.
+            spec: Matrix specification.
+
+        Returns:
+            A canned invocation result for the first two calls.
+
+        Raises:
+            RuntimeError: On the third call, standing in for an abort.
+        """
+        del config, item, spec
+        calls["count"] += 1
+        if calls["count"] > 2:
+            msg = "provider went away"
+            raise RuntimeError(msg)
+        return InvocationResult(
+            exit_code=0,
+            stdout=make_payload(titles=("Off by one",)),
+            stderr="",
+            elapsed_seconds=1.0,
+        )
+
+    with pytest.raises(RuntimeError, match="provider went away"):
+        execute_matrix(
+            spec=SPEC,
+            corpus=CORPUS,
+            output_dir=tmp_path,
+            invoker=_fails_on_the_third_call,
+        )
+
+    lines = (tmp_path / RUNS_JSONL_NAME).read_text(encoding="utf-8").splitlines()
+    assert_that(lines).is_length(2)
+    assert_that(json.loads(lines[1])["repeat"]).is_equal_to(2)

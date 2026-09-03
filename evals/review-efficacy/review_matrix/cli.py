@@ -11,10 +11,15 @@ from pathlib import Path
 from review_matrix.invoker import ReviewInvoker
 from review_matrix.models.matrix import MatrixSpec
 from review_matrix.report import build_report, render_markdown, report_to_dict
-from review_matrix.runner import execute_matrix, plan_spend, render_spend_plan
+from review_matrix.runner import (
+    RUNS_JSONL_NAME,
+    execute_matrix,
+    plan_spend,
+    render_spend_plan,
+)
 from review_matrix.spec_loader import SpecError, load_corpus, load_matrix
 
-__all__ = ["build_parser", "main", "prepare_output_dir"]
+__all__ = ["build_parser", "main", "prepare_output_dir", "validate_stamp"]
 
 HARNESS_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MATRIX = HARNESS_ROOT / "matrix.yaml"
@@ -70,6 +75,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def validate_stamp(stamp: str) -> bool:
+    """Return whether a stamp is usable as a single run-directory name.
+
+    The stamp is joined onto ``--runs-root``, so anything but a plain
+    directory name could redirect the whole run outside the runs root.
+
+    Args:
+        stamp: Candidate directory name.
+
+    Returns:
+        ``True`` when the stamp is a single, non-traversing directory name.
+    """
+    if not stamp or stamp in {".", ".."}:
+        return False
+    candidate = Path(stamp)
+    return not candidate.is_absolute() and candidate.name == stamp
+
+
 def prepare_output_dir(
     *,
     output_dir: Path,
@@ -80,9 +103,9 @@ def prepare_output_dir(
 
     A second run into an existing directory would leave the reports describing
     the new run beside payloads from the old one, so reuse is opt-in. With
-    ``overwrite`` the stale reports and this matrix's own run payloads are
-    removed; nothing outside ``output_dir`` is touched, and unrelated files
-    inside it are left alone.
+    ``overwrite`` the stale reports, the run journal, and this matrix's own
+    run payloads are removed; nothing outside ``output_dir`` is touched, and
+    unrelated files inside it are left alone.
 
     Args:
         output_dir: Directory this run will write to.
@@ -98,7 +121,7 @@ def prepare_output_dir(
     output_dir.mkdir(parents=True, exist_ok=True)
     if not overwrite:
         return True
-    for name in ("report.json", "report.md"):
+    for name in ("report.json", "report.md", RUNS_JSONL_NAME):
         (output_dir / name).unlink(missing_ok=True)
     for config in spec.configs:
         config_dir = output_dir / config.config_id
@@ -127,8 +150,9 @@ def main(
     Returns:
         Process exit code: ``0`` on success (dry run included), ``1`` when the
         matrix executed but produced no comparable run, ``2`` when the matrix
-        or corpus file is malformed or the run directory would be reused
-        without ``--overwrite``.
+        or corpus file is missing or malformed, the stamp is not a plain
+        directory name, or the run directory would be reused without
+        ``--overwrite``.
     """
     args = build_parser().parse_args(argv)
     try:
@@ -144,6 +168,12 @@ def main(
         return 0
 
     stamp = args.stamp or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    if not validate_stamp(stamp):
+        print(
+            f"error: --stamp must be a single directory name (got {stamp!r})",
+            file=sys.stderr,
+        )
+        return 2
     output_dir = Path(args.runs_root) / stamp
     if not prepare_output_dir(
         output_dir=output_dir,

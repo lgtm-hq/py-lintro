@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 
 
@@ -15,6 +16,7 @@ def make_finding(
     category: str = "correctness",
     severity: Severity = Severity.P2,
     line: int = 10,
+    kind: FindingKind = FindingKind.FINDING,
 ) -> ReviewFinding:
     """Build a synthetic finding for metric tests.
 
@@ -24,6 +26,7 @@ def make_finding(
         category: Finding category label.
         severity: Finding severity.
         line: Line number; never part of a fingerprint.
+        kind: Whether the entry is a finding or a question.
 
     Returns:
         A finding carrying only the fields the metrics read.
@@ -38,6 +41,7 @@ def make_finding(
         cause="",
         fix="",
         confidence="high",
+        kind=kind,
     )
 
 

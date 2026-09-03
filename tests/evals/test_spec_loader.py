@@ -332,3 +332,54 @@ def test_parse_matrix_rejects_a_non_finite_cost_cap(cost: object) -> None:
 
     with pytest.raises(SpecError, match="must be a (number|positive)"):
         parse_matrix(document)
+
+
+def test_parse_matrix_rejects_a_list_valued_provider() -> None:
+    """A YAML list must not be stringified into a provider name."""
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["configs"][0]["provider"] = ["anthropic", "openai"]
+
+    with pytest.raises(SpecError, match="'provider' must be a string"):
+        parse_matrix(document)
+
+
+def test_parse_matrix_rejects_a_dict_valued_model() -> None:
+    """A YAML mapping must not be stringified into a model name."""
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["configs"][0]["model"] = {"name": "claude-sonnet-4-6"}
+
+    with pytest.raises(SpecError, match="'model' must be a string"):
+        parse_matrix(document)
+
+
+def test_parse_corpus_rejects_a_non_string_repo() -> None:
+    """A corpus item's repo must be a string, not a coerced structure."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["repo"] = ["lgtm-hq", "py-lintro"]
+
+    with pytest.raises(SpecError, match="'repo' must be a string"):
+        parse_corpus(document)
+
+
+def test_parse_corpus_rejects_a_non_string_title() -> None:
+    """A corpus item's title must be a string."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["title"] = {"text": "a pull request"}
+
+    with pytest.raises(SpecError, match="'title' must be a string"):
+        parse_corpus(document)
+
+
+def test_load_matrix_reports_an_unreadable_path_as_a_spec_error(
+    tmp_path: Path,
+) -> None:
+    """A directory in place of a spec file is a SpecError, not an OSError.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    directory = tmp_path / "matrix.yaml"
+    directory.mkdir()
+
+    with pytest.raises(SpecError, match="cannot read"):
+        load_matrix(directory)

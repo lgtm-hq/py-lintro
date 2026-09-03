@@ -244,7 +244,9 @@ def efficacy_against_labels(
 
     Counts are pooled across every comparable run of every labeled item, so a
     config that only sometimes reports a labeled finding is scored on how often
-    it did, not on its luckiest run.
+    it did, not on its luckiest run. Questions are dropped from the reported
+    side first: a question asks about the diff rather than asserting a defect,
+    so an unlabeled one is not a false positive.
 
     Args:
         config_id: Config whose runs these are.
@@ -269,7 +271,11 @@ def efficacy_against_labels(
             continue
         labeled_runs += 1
         expected = [label.to_finding() for label in item.labeled_findings]
-        result = match_against(baseline=expected, candidate=run.findings)
+        # Questions are not claims about the diff, so an unlabeled question is
+        # not a false positive. ``derive_verdict`` excludes them from the
+        # verdict for the same reason.
+        claimed = [finding for finding in run.findings if not finding.is_question]
+        result = match_against(baseline=expected, candidate=claimed)
         true_positives += matched_count(result)
         false_positives += len(result.new)
         false_negatives += len(result.resolved)

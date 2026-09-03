@@ -16,6 +16,7 @@ from review_matrix.metrics import (
 from review_matrix.models.corpus import Corpus, CorpusItem, LabeledFinding
 from review_matrix.models.run import EvalRun
 
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from tests.evals.helpers import make_finding
@@ -405,3 +406,66 @@ def test_efficacy_skips_unlabeled_items() -> None:
     assert_that(efficacy.precision).is_none()
     assert_that(efficacy.recall).is_none()
     assert_that(efficacy.f1).is_none()
+
+
+def test_efficacy_never_counts_a_question_as_a_false_positive() -> None:
+    """A question asks about the diff; it is not an unlabeled defect claim."""
+    runs = [
+        _run(
+            config_id="a",
+            item_id="pr-1",
+            repeat=1,
+            findings=(
+                make_finding(title="Off by one", severity=Severity.P1),
+                make_finding(
+                    title="Is this lock still needed?",
+                    kind=FindingKind.QUESTION,
+                ),
+            ),
+        ),
+    ]
+
+    efficacy = efficacy_against_labels(
+        config_id="a",
+        runs=runs,
+        corpus=_labeled_corpus(),
+    )
+
+    assert_that(efficacy.true_positives).is_equal_to(1)
+    assert_that(efficacy.false_positives).is_equal_to(0)
+    assert_that(efficacy.precision).is_equal_to(1.0)
+
+
+def test_incomplete_runs_never_enter_a_metric() -> None:
+    """A truncated review's findings are inspectable but never measured."""
+    incomplete = EvalRun(
+        config_id="a",
+        item_id="pr-1",
+        repeat=2,
+        status=RunStatus.INCOMPLETE,
+        findings=(make_finding(title="Off by one", severity=Severity.P1),),
+        error="review was partial: cost cap",
+    )
+    runs = [
+        _run(
+            config_id="a",
+            item_id="pr-1",
+            repeat=1,
+            findings=(make_finding(title="Off by one", severity=Severity.P1),),
+        ),
+        incomplete,
+    ]
+
+    stability = config_stability(config_id="a", runs=runs)
+    efficacy = efficacy_against_labels(
+        config_id="a",
+        runs=runs,
+        corpus=_labeled_corpus(),
+    )
+
+    assert_that(incomplete.is_comparable).is_false()
+    assert_that(stability.compared_pairs).is_equal_to(0)
+    assert_that(stability.failed_runs).is_equal_to(1)
+    assert_that(efficacy.labeled_runs).is_equal_to(1)
+    assert_that(efficacy.true_positives).is_equal_to(1)
+    assert_that(efficacy.false_negatives).is_equal_to(1)
