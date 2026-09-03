@@ -190,6 +190,9 @@ def test_runs_verifier_inside_image(
     assert_that(invocation).contains("--manifest lintro/tools/manifest.json")
     # Default tier selection.
     assert_that(invocation).contains("--tiers tools")
+    assert_that(invocation).contains(
+        "-e LINTRO_IMAGE_REF=ghcr.io/lgtm-hq/py-lintro:ci-test",
+    )
 
 
 def test_semgrep_network_env_is_disabled(

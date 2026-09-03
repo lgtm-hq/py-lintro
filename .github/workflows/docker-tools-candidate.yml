@@ -1,0 +1,216 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Build - Lintro Tools Candidate
+
+# Renovate pushes tool-version changes to an in-repository branch. Build the
+# candidate from that exact branch, then commit its immutable digest back to the
+# same PR so the version and image pin merge atomically.
+#
+# Fork branches cannot match renovate/**. The actor gate below is therefore a
+# second, explicit guard around the write-capable candidate build.
+
+'on':
+  push:
+    branches: ['renovate/**']
+    paths:
+      - 'docker/tools.Dockerfile'
+      - 'lintro/_tool_versions.py'
+      - 'lintro/tools/manifest.src.json'
+      - 'lintro/_tool_packages.py'
+      - 'package.json'
+      - 'pyproject.toml'
+      - 'requirements-semgrep.txt'
+
+permissions: {}
+
+concurrency:
+  group: candidate-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-pr:
+    name: Resolve Renovate PR
+    if: github.actor == 'renovate[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    timeout-minutes: 5
+    outputs:
+      pr-number: ${{ steps.resolve.outputs.pr-number }}
+      candidate-tag: ${{ steps.resolve.outputs.candidate-tag }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve open Renovate PR and candidate tag
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/resolve-renovate-pr.py
+
+  candidate-build:
+    name: Build candidate tools image
+    needs: resolve-pr
+    # Reusable-workflow call jobs can fail startup validation when their if
+    # references needs *outputs*; needs.<job>.result is safe and keeps the
+    # implicit dependency gate explicit, so an empty candidate tag can never
+    # reach the publishing reusable.
+    if: >-
+      github.actor == 'renovate[bot]' &&
+      needs.resolve-pr.result == 'success'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: docker/tools.Dockerfile
+      image-name: lgtm-hq/lintro-tools
+      tags: ${{ needs.resolve-pr.outputs['candidate-tag'] }}
+      # Keep the custom candidate tag; the reusable also adds its sha/ref tags.
+      # The cleanup parser treats all of those tags as ephemeral.
+      exact-tags: false
+      push: true
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: bun --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
+      provenance: true
+      sbom: true
+      cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
+      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      egress-policy: block
+      egress-preset: docker
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        dl.google.com:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
+        get.trivy.dev:443
+        mirror.gcr.io:443
+
+  push-digest:
+    name: Commit candidate digest
+    needs: [resolve-pr, candidate-build]
+    if: >-
+      github.actor == 'renovate[bot]' &&
+      needs.resolve-pr.result == 'success' &&
+      needs.candidate-build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout Renovate branch
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Update both Dockerfile pins
+        id: update
+        env:
+          NEW_DIGEST: ${{ needs.candidate-build.outputs.digest }}
+        run: python3 scripts/ci/update-tools-image-digest.py --digest "$NEW_DIGEST"
+      - name: Show digest diff
+        if: steps.update.outputs.changed == 'true'
+        run: git diff --check
+      - name: Configure commit
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          git config user.name 'lgtm-digest-bump[bot]'
+          git config user.email 'lgtm-digest-bump[bot]@users.noreply.github.com'
+          git add Dockerfile docker/ai-tools.Dockerfile
+          git commit -m "chore(deps): pin tools candidate digest"
+      - name: Mint lgtm-digest-bump token
+        if: steps.update.outputs.changed == 'true'
+        id: digest-app
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DIGEST_APP_ID }}
+          private-key: ${{ secrets.DIGEST_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Push digest commit
+        if: steps.update.outputs.changed == 'true'
+        env:
+          DIGEST_TOKEN: ${{ steps.digest-app.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        # The token travels in an Authorization header only, never in the
+        # remote URL, so a failed push cannot echo it in the printed remote.
+        run: |
+          auth="$(printf 'x-access-token:%s' "${DIGEST_TOKEN}" | base64 | tr -d '\n')"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+            push "https://github.com/${REPOSITORY}.git" "HEAD:${BRANCH}"

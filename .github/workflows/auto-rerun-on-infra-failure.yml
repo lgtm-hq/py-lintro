@@ -54,6 +54,7 @@ name: Auto Rerun on Infra Failure
       - Build - Docker Image & Registry
       - Build - Lintro AI Tools Image
       - Build - Lintro Tools Image
+      - Promote - Lintro Tools Candidate
       - CI - Docker
       - CI - Tests
       - Deploy - GitHub Pages

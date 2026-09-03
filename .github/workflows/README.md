@@ -95,17 +95,36 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
   (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
-- **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
-  (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
-  weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
-  attestations. A follow-up root `Dockerfile` change will consume it via a
-  Renovate-managed digest-pinned `FROM`.
+- **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a
+  tool-version manifest, builds a candidate `lintro-tools` image and commits its digest
+  to both Dockerfile pin sites. The app-token push retriggers PR checks; its
+  `lgtm-digest-bump[bot]` actor fails the candidate job gate, so the commit cannot start
+  a second candidate build. Renovate normally preserves that digest commit as a branch
+  modification; a rebase that discards it simply causes the actor-gated flow to build a
+  fresh candidate.
+- **docker-tools-publish.yml** — Validates tools-image pull requests and runs the weekly
+  no-cache rebuild for CVE freshness. Maintainer `workflow_dispatch` can publish a tools
+  image explicitly. Merged Renovate candidates are promoted by digest, without a
+  rebuild, by `docker-tools-promote.yml`.
+- **docker-tools-promote.yml** — Classifies main pushes: merged Renovate PRs find their
+  candidate and retag its exact digest as `lintro-tools:latest`; ordinary main tools
+  changes (including installer/build-script updates) use a canonical publish fallback.
+  Consumer-only digest pins are skipped. A merged Renovate PR with a missing candidate
+  fails closed rather than rebuilding.
 
 ## Security & maintenance
 
 - **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
-  (`py-lintro`, `py-lintro-base`) plus age-based sweep of ephemeral `ci-*` tags
-  (`sweep-ci-ghcr-tags.sh`, #1138)
+  (`py-lintro`, `py-lintro-base`) plus age-based sweeps of ephemeral `ci-*`, `sha-*`,
+  `renovate-*`, and tools candidate tags. The reusable candidate build emits the custom
+  candidate tag plus `sha-*`/`renovate-*` companion tags; candidates are removed when
+  their PR is closed without merge or they are at least 14 days old. Versions with any
+  persistent tag (such as promoted `latest`) are retained because GHCR deletes a whole
+  package version, not one tag.
+- **Digest-lag diagnostics** — `verify-manifest-tools.py` reports the tool, expected
+  version, and lagging image tag/digest with the actionable `digest-bump required`
+  message. It deliberately does not invent a PR number: the verifier runs inside an
+  image and has no reliable pull-request API context.
 - **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
   `reusable-vuln-suppression-check.yml`
 - **dependency-vuln-gate.yml** — Pre-merge mirror of the release SBOM vulnerability gate
@@ -127,6 +146,10 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
 - **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
 - **`secrets.RELEASE_APP_*`** — Release PR and auto-tag (GitHub App installation token
   via lgtm-ci release workflows)
+- **`secrets.DIGEST_APP_ID` / `secrets.DIGEST_APP_PRIVATE_KEY`** — The dedicated
+  `lgtm-digest-bump` GitHub App (Contents read/write only), minted immediately before
+  the candidate digest commit with explicit `permission-contents: write`. It is
+  installed only on `py-lintro`; do not substitute `RELEASE_APP_*`.
 - **`secrets.MIRROR_REPO_TOKEN`** — Cross-repo write to `lgtm-hq/lintro-pre-commit`
   (fine-grained PAT or GitHub App token with contents + pull-requests write on that
   repo) used by `mirror-release.yml`

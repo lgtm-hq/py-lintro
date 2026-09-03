@@ -36,9 +36,16 @@ name: Maintenance - GHCR Registry Cleanup
         required: false
         default: 91
         type: number
+      candidate_min_age_days:
+        description: >-
+          Minimum age in days before sweeping tools-candidate-pr<n>-<sha> tags
+          whose Renovate PR is still open. Scheduled runs always use 14.
+        required: false
+        default: 14
+        type: number
 
 concurrency:
-  group: ghcr-cleanup
+  group: lintro-tools-registry
   cancel-in-progress: false
 
 permissions: {}
@@ -158,6 +165,42 @@ jobs:
           MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
+
+  sweep-tools-candidates:
+    name: 🧹 Sweep tools candidate tags
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sweep stale candidate versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # yamllint disable-line rule:line-length
+          MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 14 || inputs.candidate_min_age_days }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: python3 scripts/ci/maintenance/sweep-tools-candidate-tags.py
 
   prune-untagged-base:
     # yamllint disable-line rule:line-length

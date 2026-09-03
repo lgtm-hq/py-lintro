@@ -240,6 +240,44 @@ def _is_image_older_than_manifest(*, expected: str, actual: str) -> bool:
     return actual_padded < expected_padded
 
 
+def _is_image_newer_than_manifest(*, expected: str, actual: str) -> bool:
+    """Return True when the installed version is strictly newer than expected.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when ``actual > expected`` under numeric segment comparison.
+        False when equal, older, or either side cannot be parsed.
+    """
+    return _is_image_older_than_manifest(expected=actual, actual=expected)
+
+
+def _versions_compare_equal(*, expected: str, actual: str) -> bool:
+    """Return True when two unequal version strings compare numerically equal.
+
+    ``7.1`` and ``7.1.0`` are the same release written two ways. Neither the
+    older nor the newer check fires for such a pair, so report the mismatch as
+    a manifest-string alignment rather than as unorderable versions.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when both sides parse and compare equal under numeric padding.
+    """
+    expected_parts = _version_tuple(expected)
+    actual_parts = _version_tuple(actual)
+    if not expected_parts or not actual_parts:
+        return False
+    width = max(len(expected_parts), len(actual_parts))
+    return expected_parts + (0,) * (width - len(expected_parts)) == actual_parts + (
+        0,
+    ) * (width - len(actual_parts))
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -280,6 +318,7 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    image_ref = os.environ.get("LINTRO_IMAGE_REF", "<image>")
 
     tiers = [t.strip() for t in args.tiers.split(",")]
     allow_missing = _parse_allow_missing(args.allow_missing)
@@ -369,8 +408,25 @@ def main() -> int:
                     f"digest-pinned base image has not republished yet",
                 )
                 continue
+            if _is_image_older_than_manifest(expected=expected, actual=actual):
+                guidance = f"digest-bump required: image {image_ref} lags the manifest"
+            elif _is_image_newer_than_manifest(expected=expected, actual=actual):
+                guidance = (
+                    f"manifest bump required: image {image_ref} is newer than "
+                    f"the manifest; update the manifest to {actual}"
+                )
+            elif _versions_compare_equal(expected=expected, actual=actual):
+                guidance = (
+                    f"align the manifest string to the installed version {actual}"
+                )
+            else:
+                guidance = (
+                    "version ordering unavailable; inspect the manifest and "
+                    "image versions for a mismatch"
+                )
             failures.append(
-                f"{name}: version mismatch (expected {expected}, got {actual})",
+                f"{name}: version mismatch (expected {expected}, got {actual}); "
+                f"{guidance}",
             )
 
     if notices:

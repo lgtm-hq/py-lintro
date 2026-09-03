@@ -4,8 +4,8 @@
 # =============================================================================
 # Pre-built external linting toolchains (Rust, Node/bun, ~40 linter binaries).
 # Published as ghcr.io/lgtm-hq/lintro-tools by
-# .github/workflows/docker-tools-publish.yml (weekly + on changes to this file
-# or the pinned tool versions).
+# .github/workflows/docker-tools-publish.yml (weekly maintenance rebuilds) and
+# .github/workflows/docker-tools-candidate.yml (Renovate tool-version bumps).
 #
 # Once the first image is published, the root Dockerfile will consume it via
 # a digest-pinned FROM so the slow, rarely-changing tools layer stays off the
