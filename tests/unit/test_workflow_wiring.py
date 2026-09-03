@@ -3218,17 +3218,17 @@ def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
     assert_that(step_ids).contains("skips")
 
 
-def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
-    """The timeout verdict must stay diagnostic, never a gate input.
+def test_code_quality_gate_ignores_the_skip_gate_diagnostic_verdict() -> None:
+    """The skip gate's own timeout verdict must never reach the gate.
 
     ``dogfood-skip-gate`` always lints the full repo, so its verdict is not
-    evidence about the authoritative lint run: under ``lint-scope == 'changed'``
-    that run lints only changed files, and a tool that times out reports zero
-    findings precisely because it did not finish. Wiring the verdict into the
-    gate lets a genuine finding be absorbed and the required check turn green.
+    evidence about the authoritative lint run: under ``lint-scope ==
+    'changed'`` that run lints only changed files, and a tool that times out
+    reports zero findings precisely because it did not finish. Wiring that
+    verdict into the gate lets a genuine finding be absorbed.
 
-    A sound implementation needs the authoritative run's own structured report,
-    which the upstream reusable lint workflow does not publish (lgtm-ci#746).
+    The gate consumes the reusable lint workflow's outputs instead, which are
+    computed from the authoritative run's own report (#2242, lgtm-ci#746).
     """
     docker_ci = _load_workflow(name="docker-ci.yml")
     gate_job = docker_ci["jobs"]["code-quality-gate"]
@@ -3236,7 +3236,85 @@ def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
     assert_that(gate_job["needs"]).does_not_contain("dogfood-skip-gate")
 
     gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
-    assert_that(gate_step.get("env") or {}).does_not_contain_key("TIMEOUT_FLAKE")
+    env = gate_step.get("env") or {}
+    for value in env.values():
+        assert_that(_normalize_github_expr(str(value))).does_not_contain(
+            "dogfood-skip-gate",
+        )
+
+
+def test_code_quality_gate_consumes_authoritative_timeout_outputs() -> None:
+    """The gate reads timeout evidence from the authoritative lint attempts.
+
+    Both attempts that call ``reusable-quality-lint.yml`` expose
+    ``timeout-flake`` / ``timed-out-tools`` from their own JSON report, and
+    the gate script pairs each with the verdict of the same attempt (#2242).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_step = next(
+        step
+        for step in docker_ci["jobs"]["code-quality-gate"]["steps"]
+        if step.get("id") == "gate"
+    )
+    env = gate_step["env"]
+
+    for key in (
+        "PRIMARY_LINT_TIMEOUT_FLAKE",
+        "PRIMARY_LINT_TIMED_OUT_TOOLS",
+        "RETRY_LINT_TIMEOUT_FLAKE",
+        "RETRY_LINT_TIMED_OUT_TOOLS",
+    ):
+        assert_that(env).contains_key(key)
+
+    assert_that(_normalize_github_expr(env["PRIMARY_LINT_TIMEOUT_FLAKE"])).contains(
+        "needs.dogfooding-lint.outputs.timeout-flake",
+    )
+    assert_that(_normalize_github_expr(env["RETRY_LINT_TIMEOUT_FLAKE"])).contains(
+        "needs.dogfooding_lint_retry.outputs.timeout-flake",
+    )
+
+
+def test_code_quality_gate_leaves_changed_scope_timeout_fail_closed() -> None:
+    """Changed scope must resolve the timeout flag to the empty string.
+
+    ``dogfooding-lint-changed`` is a local job with no JSON report and no
+    timeout verdict, so the expression is inverted relative to the
+    status/exit-code pairs: ``''`` is falsy in a GitHub ternary and a
+    ``scope == 'changed' && '' || <full>`` form would leak the full run's
+    value into changed scope.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_step = next(
+        step
+        for step in docker_ci["jobs"]["code-quality-gate"]["steps"]
+        if step.get("id") == "gate"
+    )
+    changed_job_outputs = docker_ci["jobs"]["dogfooding-lint-changed"]["outputs"]
+    assert_that(changed_job_outputs).does_not_contain_key("timeout-flake")
+
+    for key in ("PRIMARY_LINT_TIMEOUT_FLAKE", "PRIMARY_LINT_TIMED_OUT_TOOLS"):
+        expression = _normalize_github_expr(gate_step["env"][key])
+        assert_that(expression).contains(
+            "needs.changes.outputs.lint-scope != 'changed'",
+        )
+        assert_that(expression).does_not_contain("dogfooding-lint-changed")
+        assert_that(expression).ends_with("|| '' }}")
+
+
+def test_lint_timeout_classifier_note_matches_the_wired_gate() -> None:
+    """The classifier's scope warning must not claim the gate ignores it.
+
+    The lgtm-ci#746 precondition is met at the pinned ``v0.63.7``, so the
+    stale "the code-quality gate therefore does not consume it" note was
+    replaced by the narrower, still-true statement about the skip gate.
+    """
+    classifier = (_REPO_ROOT / "scripts" / "ci" / "classify-lint-timeout.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(classifier).does_not_contain(
+        "The code-quality gate therefore does not consume it",
+    )
+    assert_that(classifier).contains("reusable lint workflow")
 
 
 def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:

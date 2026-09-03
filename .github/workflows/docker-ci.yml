@@ -601,11 +601,13 @@ jobs:
     outputs:
       # Diagnostic only (#1653): 'true' when THIS job's report shows the only
       # failures were tool-execution timeouts with zero findings anywhere.
-      # Deliberately NOT wired into code-quality-gate: this job always lints the
-      # full repo, so its verdict is not evidence about the authoritative lint
-      # run (which may be changed-files scoped, and is a separate run subject to
-      # its own timing). Absorbing on it can green a genuine finding — see the
-      # PR discussion and lgtm-ci#746.
+      # Still deliberately NOT wired into code-quality-gate: this job always
+      # lints the full repo, so its verdict is not evidence about the
+      # authoritative lint run (which may be changed-files scoped, and is a
+      # separate run subject to its own timing). Absorbing on it can green a
+      # genuine finding. The gate instead consumes the same verdict computed by
+      # the reusable lint workflow from the authoritative run's own report
+      # (lgtm-ci#746, exposed since v0.63.7) — see code-quality-gate below.
       timeout-flake: ${{ steps.skips.outputs.timeout-flake }}
       timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
@@ -737,6 +739,10 @@ jobs:
   # otherwise the full run — and treats runner infra-flake failures as
   # non-blocking (scripts/ci/run-code-quality-gate.sh). Docs-only PRs
   # (pipeline == 'false') report success without a lint run.
+  #
+  # Since #2242 that absorption also covers a tool-execution timeout in the
+  # authoritative attempt (#1653), on that attempt's own timeout-flake output —
+  # never on dogfood-skip-gate's full-repo diagnostic verdict.
   code-quality-gate:
     name: 🚦 Code Quality Gate
     needs:
@@ -800,6 +806,30 @@ jobs:
             || needs.dogfooding-lint.outputs.exit-code }}
           RETRY_LINT_STATUS: ${{ needs.dogfooding_lint_retry.outputs.status }}
           RETRY_LINT_EXIT_CODE: ${{ needs.dogfooding_lint_retry.outputs.exit-code }}
+          # Tool-execution timeout evidence (#1653, lgtm-ci#746). These come
+          # from the reusable lint workflow, which computes them from the
+          # authoritative run's OWN JSON report, so the verdict belongs to the
+          # attempt it describes. The gate never reads dogfood-skip-gate's
+          # diagnostic verdict: that job always lints the full repo, so its
+          # report is not evidence about a changed-scope authoritative run.
+          #
+          # Changed scope resolves to '' on purpose: dogfooding-lint-changed
+          # publishes no JSON report and therefore no timeout verdict, and a
+          # timeout while linting a handful of files stays red for a human
+          # (decided in #2242, documented in evaluate-code-quality-gate.sh).
+          # The condition is inverted relative to the STATUS/EXIT_CODE pairs
+          # above because '' is falsy in a GitHub ternary and would otherwise
+          # fall through to the full-run value in changed scope.
+          PRIMARY_LINT_TIMEOUT_FLAKE: >-
+            ${{ needs.changes.outputs.lint-scope != 'changed'
+            && needs.dogfooding-lint.outputs.timeout-flake || '' }}
+          PRIMARY_LINT_TIMED_OUT_TOOLS: >-
+            ${{ needs.changes.outputs.lint-scope != 'changed'
+            && needs.dogfooding-lint.outputs.timed-out-tools || '' }}
+          RETRY_LINT_TIMEOUT_FLAKE: >-
+            ${{ needs.dogfooding_lint_retry.outputs.timeout-flake }}
+          RETRY_LINT_TIMED_OUT_TOOLS: >-
+            ${{ needs.dogfooding_lint_retry.outputs.timed-out-tools }}
         run: scripts/ci/run-code-quality-gate.sh
 
   dogfooding-pr-comment:
