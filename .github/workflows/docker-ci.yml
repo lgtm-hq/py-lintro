@@ -117,7 +117,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
         with:
           # Pipeline relevance is NOT decided here (#1369): the resolve
           # step below computes it deny-by-default from the changed-file
@@ -438,12 +438,12 @@ jobs:
       needs.changes.outputs.lint-scope != 'changed' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
@@ -713,12 +713,12 @@ jobs:
       needs.dogfooding-lint.result == 'failure' &&
       needs.docker-build.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       job-name: '🛠️ Dogfooding Lint (retry)'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
@@ -867,7 +867,7 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
@@ -881,7 +881,7 @@ jobs:
           needs.dogfooding_lint_retry.outputs.exit-code
         )
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -901,11 +901,11 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
     permissions:
       contents: read
     with:
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'eb01982e334eaa7599709a0f767d97afbb015303' # v0.69.1
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors
@@ -997,7 +997,7 @@ jobs:
           github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
