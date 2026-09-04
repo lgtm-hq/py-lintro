@@ -298,10 +298,14 @@ def _contradicted_paths(
     if not tokens:
         return ()
     own = _normalize_path_token(token=own_file)
+    # The finding's own file is a real, diff-normalized path, not prose: it is
+    # excluded by exact identity, never by the fuzzy rules prose tokens get.
+    # A finding on ``pkg/src/helpers.py`` must still be checked against a
+    # changed ``src/helpers.py``.
     candidates = [
         (path, _normalize_path_token(token=path))
         for path in changed_paths
-        if not (own and _paths_match(token=own, path=_normalize_path_token(token=path)))
+        if _normalize_path_token(token=path) != own
     ]
     qualified = sorted(token for token in tokens if "/" in token)
     bare = {token for token in tokens if "/" not in token}

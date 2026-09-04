@@ -1123,3 +1123,56 @@ def test_a_replayed_finding_keeps_its_tag_and_its_band() -> None:
     )
     assert_that(guarded_again).is_equal_to(replayed)
     assert_that(count_cross_chunk_contradictions(findings=(replayed,))).is_equal_to(1)
+
+
+def test_a_replayed_unguarded_phantom_is_guarded_once_on_replay() -> None:
+    """A checkpointed, never-guarded P1 comes back guarded exactly once.
+
+    A SIGTERM checkpoint persists raw chunk findings before finalize, so the
+    resumed round replays them without a tag; the CLI guards only the
+    replayed rows, and the tag it stamps makes any later pass a no-op.
+    """
+    raw = _finding(
+        severity=Severity.P1,
+        description="tests/unit/test_migrate_docs.py was never updated.",
+    )
+    prior = ReviewState(
+        findings=match_findings(previous=None, findings=(raw,), round_number=1).records,
+    )
+    (replayed,) = review_findings_from_unposted(
+        prior=prior,
+        current=(),
+        reviewed_paths=frozenset(),
+    )
+    assert_that(replayed.cross_chunk_contradiction).is_none()
+
+    (once,) = apply_cross_chunk_guard(findings=(replayed,), changed_paths=_CHANGED)
+    (twice,) = apply_cross_chunk_guard(findings=(once,), changed_paths=_CHANGED)
+
+    assert_that(once.severity).is_equal_to(Severity.P2)
+    assert_that(once.cross_chunk_contradiction).is_not_none()
+    assert_that(twice).is_equal_to(once)
+
+
+def test_own_file_exclusion_is_by_identity_not_prose_matching() -> None:
+    """A finding on pkg/src/helpers.py is still checked against src/helpers.py."""
+    finding = _finding(
+        severity=Severity.P1,
+        file="pkg/src/helpers.py",
+        description="src/helpers.py is untouched by this PR.",
+    )
+
+    (guarded,) = apply_cross_chunk_guard(
+        findings=(finding,),
+        changed_paths=("pkg/src/helpers.py", "src/helpers.py"),
+    )
+    (same,) = apply_cross_chunk_guard(
+        findings=(
+            _finding(file="src/helpers.py", description="src/helpers.py is untouched."),
+        ),
+        changed_paths=("src/helpers.py",),
+    )
+
+    assert_that(guarded.severity).is_equal_to(Severity.P2)
+    assert_that(guarded.cross_chunk_contradiction).is_not_none()
+    assert_that(same.cross_chunk_contradiction).is_none()
