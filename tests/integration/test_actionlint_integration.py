@@ -10,38 +10,12 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_tool
 
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), level="INFO")
 
-
-def actionlint_available() -> bool:
-    """Return True if the `actionlint` binary is available on PATH.
-
-    Returns:
-        bool: True when `actionlint -version` succeeds, False otherwise.
-    """
-    try:
-        proc = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["actionlint", "-version"],
-            capture_output=True,
-            text=True,
-        )
-        return proc.returncode == 0
-    except FileNotFoundError:
-        return False
-
-
-@pytest.mark.actionlint
-def test_actionlint_available() -> None:
-    """Skip the suite if actionlint is not present locally.
-
-    Ensures local runs behave like CI (which always has actionlint in Docker),
-    but do not fail when developers don't have actionlint installed.
-    """
-    if not actionlint_available():
-        pytest.skip("actionlint not available")
-
+pytestmark = require_tool("actionlint")
 
 SAMPLE_BAD = Path("test_samples/tools/config/github_actions/actionlint_violations.yml")
 
@@ -53,8 +27,6 @@ def test_actionlint_reports_violations(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
-    if not actionlint_available():
-        pytest.skip("actionlint not available")
     wf_dir = tmp_path / ".github" / "workflows"
     wf_dir.mkdir(parents=True, exist_ok=True)
     wf = wf_dir / "workflow_bad.yml"
@@ -83,8 +55,6 @@ def test_actionlint_no_files(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory provided by pytest.
     """
-    if not actionlint_available():
-        pytest.skip("actionlint not available")
     empty = tmp_path / "empty"
     empty.mkdir()
     tool = ToolRegistry.get("actionlint")

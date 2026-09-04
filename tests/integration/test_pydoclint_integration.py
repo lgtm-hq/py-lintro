@@ -13,6 +13,9 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_tool
+
+pytestmark = require_tool("pydoclint")
 
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), level="INFO")
@@ -47,32 +50,12 @@ def run_pydoclint_directly(file_path: Path) -> tuple[bool, str, int]:
     return success, output, issues_count
 
 
-def _ensure_pydoclint_available() -> None:
-    """Skip test if pydoclint CLI is not runnable.
-
-    Attempts to execute `pydoclint --version` to verify that the CLI exists
-    and is runnable in the current environment.
-    """
-    try:
-        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["pydoclint", "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            pytest.skip("pydoclint CLI not working; skipping direct CLI test")
-    except FileNotFoundError:
-        pytest.skip("pydoclint CLI not installed; skipping direct CLI test")
-
-
 def test_pydoclint_reports_violations_direct(tmp_path: Path) -> None:
     """Pydoclint CLI: Should detect and report violations in a sample file.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    _ensure_pydoclint_available()
     sample_file = tmp_path / "pydoclint_violations.py"
     shutil.copy(SAMPLE_FILE, sample_file)
     logger.info("[TEST] Running pydoclint directly on sample file...")
@@ -95,7 +78,6 @@ def test_pydoclint_reports_violations_through_lintro(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    _ensure_pydoclint_available()
     sample_file = tmp_path / "pydoclint_violations.py"
     shutil.copy(SAMPLE_FILE, sample_file)
     logger.info(f"SAMPLE_FILE: {sample_file}, exists: {sample_file.exists()}")
@@ -121,7 +103,6 @@ def test_pydoclint_output_consistency_direct_vs_lintro(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    _ensure_pydoclint_available()
     sample_file = tmp_path / "pydoclint_violations.py"
     shutil.copy(SAMPLE_FILE, sample_file)
     logger.info("[TEST] Comparing pydoclint CLI and Lintro PydoclintTool outputs...")
@@ -165,7 +146,6 @@ def test_pydoclint_clean_file_passes(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    _ensure_pydoclint_available()
     clean_file = tmp_path / "clean_module.py"
     # Clean file following Google style with types in annotations, not docstrings
     clean_file.write_text(

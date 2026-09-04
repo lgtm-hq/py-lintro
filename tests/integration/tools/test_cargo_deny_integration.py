@@ -6,54 +6,28 @@ They verify the CargoDenyPlugin definition, check command, and set_options metho
 
 from __future__ import annotations
 
-import re
-import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
-from packaging.version import Version
+
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-def _get_cargo_deny_version() -> Version | None:
-    """Get the installed cargo-deny version.
+_CARGO_DENY_MIN_VERSION = "0.14.0"
 
-    Returns:
-        Version object or None if not installed or version cannot be determined.
-    """
-    if shutil.which("cargo") is None:
-        return None
-    try:
-        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["cargo", "deny", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
-        if match:
-            return Version(match.group(1))
-    except (subprocess.SubprocessError, ValueError):
-        pass
-    return None
-
-
-_CARGO_DENY_MIN_VERSION = Version("0.14.0")
-_installed_version = _get_cargo_deny_version()
-
-# Skip all tests if cargo-deny is not installed or version is below minimum
-pytestmark = pytest.mark.skipif(
-    shutil.which("cargo") is None
-    or _installed_version is None
-    or _installed_version < _CARGO_DENY_MIN_VERSION,
-    reason=f"cargo-deny >= {_CARGO_DENY_MIN_VERSION} or cargo not installed "
-    f"(found: {_installed_version})",
+# cargo-deny ships as a cargo subcommand, so probing `cargo deny --version`
+# covers both the toolchain and the subcommand in one shot.
+pytestmark = require_tool(
+    "cargo",
+    version_args=("deny", "--version"),
+    min_version=_CARGO_DENY_MIN_VERSION,
+    label="cargo-deny",
 )
 
 

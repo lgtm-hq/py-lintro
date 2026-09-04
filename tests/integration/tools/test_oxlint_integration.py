@@ -6,8 +6,6 @@ They verify the OxlintPlugin definition, check command, fix command, and set_opt
 
 from __future__ import annotations
 
-import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,55 +13,13 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-def oxlint_is_available() -> bool:
-    """Check if oxlint is installed and actually works.
-
-    This is more robust than just checking shutil.which() because wrapper
-    scripts may exist even when the underlying npm package isn't installed.
-    We verify the tool works by actually linting a simple JavaScript snippet.
-
-    Returns:
-        True if oxlint is available and functional, False otherwise.
-    """
-    if shutil.which("oxlint") is None:
-        return False
-    try:
-        # First check --version works
-        version_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["oxlint", "--version"],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        if version_result.returncode != 0:
-            return False
-
-        # Then verify it can actually lint code (catches missing npm packages)
-        # oxlint returns 0 for clean files, non-zero for files with issues
-        # Use --quiet to minimize output and lint valid code that should pass
-        lint_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["oxlint", "--stdin-filename", "test.js"],
-            input=b"const x = 1;\n",
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        # returncode 0 = clean, 1 = issues found, other = error
-        # We accept 0 or 1 as "working" - anything else is a tool failure
-        return lint_result.returncode in (0, 1)
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-
-# Skip all tests if oxlint is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not oxlint_is_available(),
-    reason="oxlint not installed or not working",
-)
+pytestmark = require_tool("oxlint")
 
 
 @pytest.fixture

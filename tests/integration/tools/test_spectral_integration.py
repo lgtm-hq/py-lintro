@@ -7,7 +7,6 @@ and a ``spectral:oas`` ruleset.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -16,41 +15,18 @@ from assertpy import assert_that
 
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.tools.definitions.spectral import SpectralPlugin
+from tests.integration._tools import require_command
 from tests.test_samples_helpers import copy_sample
 
-
-def spectral_command() -> list[str] | None:
-    """Resolve the command the plugin itself would run, if it works.
-
-    Uses ``SpectralPlugin._get_spectral_command`` so the probe cannot drift
-    from production resolution (project-local binary, PATH, then bunx/npx).
-
-    Returns:
-        The plugin's command prefix if it runs, otherwise None.
-    """
-    plugin = SpectralPlugin()
-    cmd = plugin._get_spectral_command(cwd=tempfile.gettempdir())
-    try:
-        # Probe from a neutral cwd: the tests run the plugin against tmp
-        # directories, and bunx/npx resolution can differ between the repo
-        # root (whose node_modules may satisfy the CLI's dependencies) and
-        # anywhere else. Probing from the repo would validate an invocation
-        # that then fails inside the tests.
-        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            [*cmd, "--version"],
-            capture_output=True,
-            timeout=60,
-            check=False,
-            cwd=tempfile.gettempdir(),
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    return cmd if result.returncode == 0 else None
-
-
-pytestmark = pytest.mark.skipif(
-    spectral_command() is None,
-    reason="spectral CLI not available",
+# Resolve through ``SpectralPlugin._get_spectral_command`` so the gate cannot
+# drift from production resolution (project-local binary, PATH, then
+# bunx/npx). Probe from a neutral cwd: the tests run the plugin against tmp
+# directories, and bunx/npx resolution can differ between the repo root
+# (whose node_modules may satisfy the CLI) and anywhere else.
+pytestmark = require_command(
+    "spectral",
+    SpectralPlugin()._get_spectral_command(cwd=tempfile.gettempdir()),
+    cwd=tempfile.gettempdir(),
 )
 
 
