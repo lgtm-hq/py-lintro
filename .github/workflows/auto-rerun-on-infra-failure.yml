@@ -115,9 +115,10 @@ jobs:
       #      losing its runner already matches the built-in shutdown
       #      signatures, but since #2296 the 🚦 Code Quality Gate job goes red
       #      on its own too, and a run whose only failed job is the gate would
-      #      otherwise match nothing. Emitted verbatim by
-      #      scripts/ci/assert-required-check.sh and never printed for a
-      #      genuine lint verdict, which reports status=failed instead.
+      #      otherwise match nothing. Matched as a fixed-string substring of
+      #      the line scripts/ci/assert-required-check.sh prints (which also
+      #      carries a ::error:: prefix and a (result=...) suffix), and never
+      #      printed for a genuine lint verdict, which reports status=failed.
       signatures: |-
         fetching ambient OIDC credentials
         retrieving ID token

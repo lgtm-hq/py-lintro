@@ -12,7 +12,9 @@
 #                     was runner noise rather than a lint violation
 #   GATE_STATUS       Gate status output (passed, failed, no-verdict)
 #   GATE_RESULT       Gate result output (success, failure)
-#   MAX_RERUN_ATTEMPTS  Rerun budget in auto-rerun-on-infra-failure.yml
+#   MAX_RERUNS          Automatic rerun budget (max-reruns in
+#                       auto-rerun-on-infra-failure.yml). Counts reruns, not
+#                       attempts: the first attempt is not a rerun.
 #   GITHUB_RUN_ATTEMPT  Current run attempt (GitHub-provided)
 #   GITHUB_STEP_SUMMARY Markdown summary file (GitHub-provided)
 
@@ -36,11 +38,19 @@ if [[ "${GATE_INFRA_FLAKE:-}" != "true" ]]; then
 fi
 
 attempt="${GITHUB_RUN_ATTEMPT:-1}"
-max_attempts="${MAX_RERUN_ATTEMPTS:-3}"
+max_reruns="${MAX_RERUNS:-3}"
+# Attempt 1 is the original run, so the budget allows attempts up to
+# max_reruns + 1. Say so plainly rather than promising a rerun that the
+# run-attempt guard upstream will refuse.
+if ((attempt > max_reruns)); then
+	rerun_note="the automatic rerun budget (${max_reruns}) is now exhausted"
+else
+	rerun_note="up to ${max_reruns} automatic reruns"
+fi
 
 if [[ "${GATE_STATUS:-}" == "no-verdict" ]]; then
 	summary="🚦 **No lint verdict (runner loss); auto-rerun will retry** "
-	summary+="(attempt ${attempt} of ${max_attempts}).\n\n"
+	summary+="(run attempt ${attempt}; ${rerun_note}).\n\n"
 	summary+="The dogfooding lint job was killed, cancelled, or timed out "
 	summary+="before it reported a verdict, so the required "
 	summary+="\`lintro-code-quality\` check fails closed (#2296). This is not "

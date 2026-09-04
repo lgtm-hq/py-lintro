@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess  # nosec B404 - subprocess drives shell scripts under test; shell=False
 import tempfile
 from pathlib import Path
@@ -1043,14 +1044,14 @@ def test_gate_summary_explains_a_no_verdict_failure() -> None:
                 "GATE_STATUS": "no-verdict",
                 "GATE_RESULT": "failure",
                 "GITHUB_RUN_ATTEMPT": "2",
-                "MAX_RERUN_ATTEMPTS": "3",
+                "MAX_RERUNS": "3",
             },
         )
         assert_that(result.returncode).is_equal_to(0)
         summary = Path(summary_path).read_text()
         assert_that(summary).contains("No lint verdict (runner loss)")
         assert_that(summary).contains("auto-rerun will retry")
-        assert_that(summary).contains("attempt 2 of 3")
+        assert_that(summary).contains("run attempt 2; up to 3 automatic reruns")
     finally:
         Path(summary_path).unlink(missing_ok=True)
 
@@ -1103,8 +1104,11 @@ def test_auto_rerun_signature_matches_the_assert_script_message() -> None:
     """The rerun signature is a fixed string grepped from the failed job log.
 
     ``auto-rerun-on-infra-failure.yml`` matches with ``grep -qF``, so the
-    signature must stay byte-identical to what ``assert-required-check.sh``
-    prints; a drifted message would silently stop the rerun.
+    signature must stay a byte-identical substring of what
+    ``assert-required-check.sh`` prints; a drifted message would silently stop
+    the rerun. The literal below is the third copy on purpose — changing the
+    message means changing all three together, and this test is what makes a
+    half-done rename loud.
     """
     signature = "No lint verdict (runner loss); auto-rerun will retry"
     assert_script = (
@@ -1116,3 +1120,53 @@ def test_auto_rerun_signature_matches_the_assert_script_message() -> None:
 
     assert_that(assert_script).contains(signature)
     assert_that(workflow).contains(signature)
+
+
+def test_gate_summary_attempt_budget_matches_the_auto_rerun_budget() -> None:
+    """The summary's "attempt N of M" must not quote a stale rerun budget.
+
+    ``MAX_RERUNS`` in docker-ci.yml and ``max-reruns`` in
+    auto-rerun-on-infra-failure.yml are the same number in two files; bind
+    them so a changed budget cannot leave the job summary lying.
+    """
+    docker_ci = (_REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+        encoding="utf-8",
+    )
+    auto_rerun = (
+        _REPO_ROOT / ".github" / "workflows" / "auto-rerun-on-infra-failure.yml"
+    ).read_text(encoding="utf-8")
+
+    summary_budget = re.findall(r"MAX_RERUNS: '(\d+)'", docker_ci)
+    rerun_budget = re.findall(r"max-reruns: '(\d+)'", auto_rerun)
+
+    assert_that(summary_budget).is_length(1)
+    assert_that(rerun_budget).is_length(1)
+    assert_that(summary_budget).is_equal_to(rerun_budget)
+
+
+def test_gate_summary_stops_promising_a_rerun_past_the_budget() -> None:
+    """The last attempt must not claim another rerun is coming.
+
+    ``max-reruns`` counts reruns, not attempts, so attempt 4 of a budget of 3
+    is the final one and the summary says the budget is exhausted.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as summary_file:
+        summary_path = summary_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/summarize-code-quality-gate.sh",
+            env={
+                "GITHUB_STEP_SUMMARY": summary_path,
+                "GATE_INFRA_FLAKE": "true",
+                "GATE_STATUS": "no-verdict",
+                "GATE_RESULT": "failure",
+                "GITHUB_RUN_ATTEMPT": "4",
+                "MAX_RERUNS": "3",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        summary = Path(summary_path).read_text()
+        assert_that(summary).contains("budget (3) is now exhausted")
+    finally:
+        Path(summary_path).unlink(missing_ok=True)

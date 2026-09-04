@@ -960,7 +960,7 @@ jobs:
           GATE_STATUS: ${{ steps.gate.outputs.status }}
           GATE_RESULT: ${{ steps.gate.outputs.result }}
           # Keep in step with max-reruns in auto-rerun-on-infra-failure.yml.
-          MAX_RERUN_ATTEMPTS: '3'
+          MAX_RERUNS: '3'
         run: scripts/ci/summarize-code-quality-gate.sh
 
   dogfooding-pr-comment:
