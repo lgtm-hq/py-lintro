@@ -52,7 +52,9 @@ Usage:
   LINTRO_IMAGE=<image> REPORT_JSON=<existing-report> scripts/ci/dogfood-skip-gate.sh
 
 Run lintro chk (JSON) in Docker and fail on non-allowlisted tool skips.
-Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653).
+Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653), plus
+status / exit-code once the skip check reaches a verdict (#2246): their absence
+is how a caller tells a killed run from a real skip regression.
 
 Environment:
   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest).
@@ -182,7 +184,32 @@ fi
 # needed. The workspace is mounted at /code, so the report and allowlist are
 # both visible there.
 log_info "Checking skips against ${ALLOWLIST}..."
+set +e
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
 	/code/scripts/ci/check-dogfood-skips.py \
 	--report "$report_in_container" \
 	--allowlist "/code/${ALLOWLIST}"
+gate_exit_code=$?
+set -e
+
+# Publish this gate's own verdict (#2246). A consumer must be able to tell
+# "the gate ran and found non-allowlisted skips" from "the runner died before
+# the gate reached a verdict": the first is a regression to report, the second
+# is a night with no coverage that a bounded retry can still answer. Only a
+# completed check writes these outputs, so their absence IS the no-verdict
+# signal — nothing here can be forged by a killed run. Only the checker's two
+# verdict codes publish a status: 2 (report/allowlist error) and a docker-side
+# kill such as 143 leave status absent so the retry predicate (status == '')
+# and the classifier see a missing verdict, not a fabricated failed one. The
+# raw exit code is still published for those, so the shared infra classifier
+# can tell a SIGTERM (143, absorbed as a kill) from a configuration error (2,
+# which stays action-required).
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	case "${gate_exit_code}" in
+	0) printf 'status=passed\n' >>"${GITHUB_OUTPUT}" ;;
+	1) printf 'status=failed\n' >>"${GITHUB_OUTPUT}" ;;
+	esac
+	printf 'exit-code=%s\n' "${gate_exit_code}" >>"${GITHUB_OUTPUT}"
+fi
+
+exit "${gate_exit_code}"

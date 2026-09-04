@@ -1915,8 +1915,12 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
         r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
     )
 
-    # A pinned-digest failure must reach the deduplicated failure notifier.
-    assert_that(jobs["notify-failure"]["needs"]).contains("verify-pinned-image-tools")
+    # A pinned-digest failure must still reach the deduplicated failure
+    # notifier — now through the classifier that gates it (#2246).
+    assert_that(jobs["notify-failure"]["needs"]).contains("classify-failure")
+    assert_that(jobs["classify-failure"]["needs"]).contains(
+        "verify-pinned-image-tools",
+    )
 
 
 def test_docker_ci_defers_ci_tag_cleanup() -> None:
@@ -2955,7 +2959,7 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
 # surviving references agree would stay green if a refactor deleted all but one
 # pin, which is exactly the drift this guard exists to catch (#1751).
 _PINNED_IMAGE_SITES = {
-    "dogfood-nightly.yml": 3,
+    "dogfood-nightly.yml": 5,
     "docker-ci.yml": 4,
 }
 
@@ -3532,9 +3536,10 @@ _EXPECTED_DOGFOOD_TOOL_OPTIONS = (
 def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> None:
     """Every dogfood options string must match and include ``gitleaks:timeout=120``.
 
-    ``dogfooding-lint`` (docker-ci) and ``dogfood-full`` (dogfood-nightly) share
-    one ``lintro-tool-options`` / ``TOOL_OPTIONS`` value. A drift lets one job
-    keep the 60s gitleaks default (#2206) while the others get the 120s floor.
+    ``dogfooding-lint`` (docker-ci) and ``dogfood-full`` (dogfood-nightly),
+    their bounded retries and both skip gates share one
+    ``lintro-tool-options`` / ``TOOL_OPTIONS`` value. A drift lets one job keep
+    the 60s gitleaks default (#2206) while the others get the 120s floor.
     """
     texts = [
         (_REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
@@ -3546,7 +3551,7 @@ def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> Non
         for match in _DOGFOOD_TOOL_OPTIONS_RE.finditer(text)
     ]
 
-    assert_that(found).is_length(6)
+    assert_that(found).is_length(8)
     assert_that(set(found)).is_equal_to({_EXPECTED_DOGFOOD_TOOL_OPTIONS})
     assert_that(_EXPECTED_DOGFOOD_TOOL_OPTIONS).contains("gitleaks:timeout=120")
 
@@ -3577,3 +3582,150 @@ def test_tools_publish_no_cache_covers_schedule_and_force_publish() -> None:
         assert_that(len(line)).described_as(
             f"{path.name}:{lineno} exceeds yamllint line-length 88",
         ).is_less_than_or_equal_to(88)
+
+
+def test_dogfood_nightly_retries_killed_lint_without_a_verdict() -> None:
+    """The nightly full lint gets one bounded retry on a no-verdict kill (#2246).
+
+    Mirrors ``dogfooding_lint_retry`` in docker-ci.yml, with one extra guard:
+    a primary attempt that published a genuine verdict is never re-run, so a
+    real regression reaches the tracker the same night instead of paying for
+    a second twenty-minute lint that can only agree.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    retry = nightly["jobs"]["dogfood_full_retry"]
+    condition = _normalize_github_expr(retry["if"])
+
+    assert_that(retry["needs"]).contains("dogfood-full")
+    assert_that(condition).contains("needs.dogfood-full.result == 'failure'")
+    assert_that(condition).contains("needs.dogfood-full.result == 'cancelled'")
+    # Runner shutdown makes lintro exit 143; that stays retryable even when a
+    # dying run wrote status=failed on its way out.
+    assert_that(condition).contains("needs.dogfood-full.outputs.exit-code == '143'")
+    # A tool-execution timeout publishes status=failed/exit-code=1 from the
+    # attempt's own report; the shared classifier calls that infra, so the
+    # retry must run for it or the classifier would fail closed and ping.
+    assert_that(condition).contains(
+        "needs.dogfood-full.outputs.timeout-flake == 'true'",
+    )
+    assert_that(condition).contains("needs.dogfood-full.outputs.status != 'failed'")
+    assert_that(condition).contains("needs.dogfood-full.outputs.exit-code != '1'")
+
+    # Exactly one attempt: the retry must not depend on itself or chain.
+    assert_that(nightly["jobs"]).does_not_contain_key("dogfood_full_retry_retry")
+    assert_that(retry["with"]["job-name"]).contains("retry")
+
+
+def test_dogfood_nightly_skip_gate_publishes_and_retries_its_verdict() -> None:
+    """The nightly skip gate publishes a verdict and retries when it has none.
+
+    The gate's ``status``/``exit-code`` outputs come from
+    ``scripts/ci/dogfood-skip-gate.sh`` and exist only once the skip check
+    completes, so their absence is what distinguishes a runner kill from a
+    real non-allowlisted skip (#2246).
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    gate = nightly["jobs"]["dogfood-skip-gate"]
+    retry = nightly["jobs"]["dogfood_skip_gate_retry"]
+
+    for job in (gate, retry):
+        assert_that(job["outputs"]["status"]).is_equal_to(
+            "${{ steps.skips.outputs.status }}",
+        )
+        assert_that(job["outputs"]["exit-code"]).is_equal_to(
+            "${{ steps.skips.outputs.exit-code }}",
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        assert_that(check["run"]).contains("scripts/ci/dogfood-skip-gate.sh")
+
+    condition = _normalize_github_expr(retry["if"])
+    assert_that(retry["needs"]).contains("dogfood-skip-gate")
+    assert_that(condition).contains("needs.dogfood-skip-gate.result == 'failure'")
+    assert_that(condition).contains("needs.dogfood-skip-gate.result == 'cancelled'")
+    # Only a gate that never reached a verdict is retried.
+    assert_that(condition).contains("needs.dogfood-skip-gate.outputs.status == ''")
+
+
+def test_dogfood_nightly_skip_gate_retry_is_a_lockstep_copy() -> None:
+    """The skip-gate retry must run exactly what the primary ran (#2246).
+
+    GitHub has no job-level retry, so the retry job is a copy of the primary;
+    every input that decides what the gate checks (egress allowlist, image,
+    timeout budget, the gate script invocation) must stay identical or the
+    retry answers a different question than the attempt it retries.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    gate = nightly["jobs"]["dogfood-skip-gate"]
+    retry = nightly["jobs"]["dogfood_skip_gate_retry"]
+
+    def _facts(job: dict[str, Any]) -> dict[str, Any]:
+        harden = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        return {
+            "timeout-minutes": job.get("timeout-minutes"),
+            "allowed-endpoints": harden["with"]["allowed-endpoints"].split(),
+            "egress-policy": harden["with"].get("egress-policy"),
+            "image": (check.get("env") or {}).get("LINTRO_IMAGE"),
+            "run": check["run"],
+        }
+
+    assert_that(_facts(retry)).is_equal_to(_facts(gate))
+
+
+def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
+    """notify-failure consumes the effective post-retry verdict (#2246).
+
+    The tracker is a human triage queue, so the notifier must key off the
+    classifier's decision rather than ``failure()``, and the classifier must
+    see every job that can fail plus its retry.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    classify = nightly["jobs"]["classify-failure"]
+    notify = nightly["jobs"]["notify-failure"]
+
+    assert_that(classify["needs"]).contains(
+        "dogfood-full",
+        "dogfood_full_retry",
+        "verify-pinned-image-tools",
+        "dogfood-skip-gate",
+        "dogfood_skip_gate_retry",
+    )
+    step = next(step for step in classify["steps"] if step.get("id") == "classify")
+    assert_that(step["run"]).contains(
+        "scripts/ci/classify-nightly-dogfood-failure.py",
+    )
+    # Both attempts of both retried jobs must reach the classifier.
+    env = step["env"]
+    for prefix in ("LINT", "LINT_RETRY"):
+        for suffix in (
+            "RESULT",
+            "STATUS",
+            "EXIT_CODE",
+            "TIMEOUT_FLAKE",
+            "TIMED_OUT_TOOLS",
+        ):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    for prefix in ("SKIP_GATE", "SKIP_GATE_RETRY"):
+        for suffix in ("RESULT", "STATUS", "EXIT_CODE"):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    assert_that(env).contains_key("VERIFY_RESULT")
+    # The classifier reuses the PR path's signatures instead of copying them.
+    checkout = next(
+        item
+        for item in classify["steps"]
+        if "sparse-checkout" in (item.get("with") or {})
+    )
+    assert_that(checkout["with"]["sparse-checkout"]).contains(
+        "scripts/ci/is-infra-flake-failure.sh",
+    )
+
+    condition = _normalize_github_expr(notify["if"])
+    assert_that(notify["needs"]).is_equal_to(["classify-failure"])
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+    assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
+    # Fail closed: a classifier that did not succeed still pings.
+    assert_that(condition).contains("needs.classify-failure.result != 'success'")
