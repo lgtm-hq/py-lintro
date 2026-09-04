@@ -303,26 +303,22 @@ def _contradicted_paths(
         for path in changed_paths
         if not (own and _paths_match(token=own, path=_normalize_path_token(token=path)))
     ]
+    qualified = sorted(token for token in tokens if "/" in token)
+    bare = {token for token in tokens if "/" not in token}
+    basenames = [norm.rsplit("/", 1)[-1] for _path, norm in candidates]
     hits: list[str] = []
-    for token in tokens:
-        if "/" in token:
-            matched = [
-                path
-                for path, norm in candidates
-                if _paths_match(token=token, path=norm)
-            ]
-        else:
-            # A bare basename is only evidence when it names exactly one
-            # changed file; `utils.py` in a PR that touched two of them is a
-            # guess, and a guess must not downgrade a finding.
-            matched = [
-                path for path, norm in candidates if norm.rsplit("/", 1)[-1] == token
-            ]
-            if len(matched) != 1:
-                matched = []
-        for path in matched:
-            if path not in hits:
-                hits.append(path)
+    # Walk the changed set, not the token set, so the result (and the log line
+    # built from it) is in changed-set order regardless of prose order.
+    for path, norm in candidates:
+        if any(_paths_match(token=token, path=norm) for token in qualified):
+            hits.append(path)
+            continue
+        base = norm.rsplit("/", 1)[-1]
+        # A bare basename is only evidence when it names exactly one changed
+        # file; `utils.py` in a PR that touched two of them is a guess, and a
+        # guess must not downgrade a finding.
+        if base in bare and basenames.count(base) == 1:
+            hits.append(path)
     return tuple(hits)
 
 

@@ -440,7 +440,8 @@ The downgrade is visible everywhere: the terminal prints the count under the fin
 header, `--output json` carries `cross_chunk_contradictions` at the payload root plus a
 per-finding `cross_chunk_contradiction` tag, and the GitHub review body (in **📊 Run
 stats**) and the sticky comment share one note. A run the guard did not touch renders
-exactly as before.
+exactly as before on the terminal and the GitHub surfaces; the JSON keys are always
+present, carrying `0` at the root and `null` per finding.
 
 Prevention runs ahead of that downgrade. Every chunk prompt now carries the **whole**
 PR's changed-file list, not just the chunk's own slice, with the chunk's files marked

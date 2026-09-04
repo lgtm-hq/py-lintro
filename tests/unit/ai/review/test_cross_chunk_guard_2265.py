@@ -33,6 +33,7 @@ from lintro.ai.review.finding_matcher import (
     match_findings,
     review_findings_from_unposted,
 )
+from lintro.ai.review.github_render import format_cross_chunk_note
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -42,7 +43,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.orchestrator import run_review_async
+from lintro.ai.review.orchestrator import guard_changed_paths, run_review_async
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.severity_gate import (
     UNCHANGED_CLAIM_PHRASES,
@@ -591,8 +592,6 @@ def test_the_two_github_surfaces_render_the_same_note(
     Args:
         guarded_result: Result carrying a tagged finding.
     """
-    from lintro.ai.review.github_render import format_cross_chunk_note
-
     note = format_cross_chunk_note(findings=guarded_result.findings)
 
     assert_that(_body(result=guarded_result)).contains(note)
@@ -615,7 +614,9 @@ def test_json_payload_counts_the_downgrades(
     assert_that(payload["findings"][0]["cross_chunk_contradiction"]).is_equal_to(
         str(CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED),
     )
-    assert_that(json.loads(json.dumps(payload))["cross_chunk_contradictions"])
+    assert_that(
+        json.loads(json.dumps(payload))["cross_chunk_contradictions"],
+    ).is_equal_to(1)
     clean = review_result_to_dict(result=sample_review_result)
     assert_that(clean["cross_chunk_contradictions"]).is_equal_to(0)
     assert_that(clean["findings"][0]["cross_chunk_contradiction"]).is_none()
@@ -765,8 +766,6 @@ async def test_a_full_run_downgrades_a_contradicted_p1(tmp_path: Path) -> None:
 
 def test_claim_and_changed_path_in_different_sentences_do_not_fire() -> None:
     """An unchanged claim about one file plus a changed file named elsewhere is not a contradiction."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description=(
@@ -786,8 +785,6 @@ def test_claim_and_changed_path_in_different_sentences_do_not_fire() -> None:
 
 def test_claim_and_changed_path_in_the_same_sentence_fire() -> None:
     """The same claim about a changed file, in one sentence, is downgraded."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="The helper in src/helpers.py is untouched by this change.",
@@ -803,8 +800,6 @@ def test_claim_and_changed_path_in_the_same_sentence_fire() -> None:
 
 def test_bare_basename_only_matches_a_unique_changed_file() -> None:
     """``utils.py`` in a PR that changed two of them is a guess, not evidence."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="The helper in utils.py is untouched by this change.",
@@ -825,8 +820,6 @@ def test_bare_basename_only_matches_a_unique_changed_file() -> None:
 
 def test_directory_qualified_token_does_not_match_a_different_directory() -> None:
     """``lib/utils.py`` never matches a changed ``src/utils.py``."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="The helper in lib/utils.py is untouched by this change.",
@@ -842,11 +835,6 @@ def test_directory_qualified_token_does_not_match_a_different_directory() -> Non
 
 def test_notice_wording_separates_tagged_from_downgraded() -> None:
     """A tagged P3 is reported as kept, never as downgraded."""
-    from lintro.ai.review.severity_gate import (
-        apply_cross_chunk_guard,
-        describe_cross_chunk_contradictions,
-    )
-
     p3 = _finding(
         file="src/app.py",
         severity=Severity.P3,
@@ -876,11 +864,6 @@ def test_notice_wording_separates_tagged_from_downgraded() -> None:
 
 def test_a_p2_moved_to_p3_counts_as_downgraded() -> None:
     """A P2 that became P3 is a downgrade, not a kept P3."""
-    from lintro.ai.review.severity_gate import (
-        apply_cross_chunk_guard,
-        describe_cross_chunk_contradictions,
-    )
-
     p2 = _finding(
         file="src/app.py",
         severity=Severity.P2,
@@ -903,8 +886,6 @@ def test_a_p2_moved_to_p3_counts_as_downgraded() -> None:
 
 def test_claim_and_path_in_different_fields_do_not_fire() -> None:
     """A changed path in the title and a claim in the description are separate sentences."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         title="src/helpers.py call site",
@@ -923,11 +904,6 @@ def test_claim_and_path_in_different_fields_do_not_fire() -> None:
 
 def test_guard_changed_paths_includes_rename_and_copy_sources() -> None:
     """The guard's changed set carries previous paths; agent scoping does not."""
-    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
-    from lintro.ai.review.models.changed_file import ChangedFile
-    from lintro.ai.review.models.review_context import ReviewContext
-    from lintro.ai.review.orchestrator import guard_changed_paths
-
     context = ReviewContext(
         base_ref="main",
         head_ref="feature",
@@ -953,8 +929,6 @@ def test_guard_changed_paths_includes_rename_and_copy_sources() -> None:
 
 def test_a_claim_about_a_rename_source_is_a_contradiction() -> None:
     """A claim that a rename's old path was never touched contradicts the diff."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="The old module src/legacy_helpers.py is untouched by this change.",
@@ -970,8 +944,6 @@ def test_a_claim_about_a_rename_source_is_a_contradiction() -> None:
 
 def test_nested_token_does_not_match_a_shorter_changed_path() -> None:
     """``src/utils.py`` in prose never matches a changed root ``utils.py``."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="The helper in src/utils.py is untouched by this change.",
@@ -993,9 +965,6 @@ def test_github_note_omits_the_band_clause_for_a_tagged_p3(
     Args:
         sample_review_result: Shared review result fixture.
     """
-    from lintro.ai.review.github_render import format_cross_chunk_note
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     p3 = _finding(
         file="src/app.py",
         severity=Severity.P3,
@@ -1070,8 +1039,6 @@ def test_a_bare_not_changed_claim_still_fires() -> None:
 
 def test_still_uses_phrasing_alone_does_not_fire() -> None:
     """Ordinary incomplete-update prose is not an unchanged-file claim."""
-    from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-
     finding = _finding(
         file="src/app.py",
         description="src/app.py still uses the helper exported by src/helpers.py.",
