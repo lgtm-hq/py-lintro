@@ -210,6 +210,10 @@ def is_infra_flake(attempt: Attempt, *, script: Path) -> bool:
         attempt: The attempt to classify.
         script: Path to ``is-infra-flake-failure.sh``.
 
+    Raises:
+        RuntimeError: If the classifier exits with anything other than its
+            two verdict codes (0 = infra, 1 = not infra).
+
     Returns:
         True when the shared classifier accepts the failure as infra noise.
     """
@@ -233,7 +237,18 @@ def is_infra_flake(attempt: Attempt, *, script: Path) -> bool:
     )
     if completed.stdout.strip():
         print(f"[INFO] {completed.stdout.strip()}")
-    return completed.returncode == 0
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    # Only 0 (infra) and 1 (not infra) are verdicts. Anything else means the
+    # classifier itself broke, and a broken classifier must never be read as
+    # "not infra": that would let an empty-output kill drift to NO_VERDICT and
+    # a passing retry silence a night the tracker should have heard about.
+    raise RuntimeError(
+        f"{script} exited {completed.returncode}: "
+        f"{completed.stderr.strip() or 'no diagnostic output'}",
+    )
 
 
 def classify_attempt(attempt: Attempt, *, script: Path) -> AttemptState:
@@ -408,7 +423,8 @@ def main(argv: list[str] | None = None) -> int:
 
     Returns:
         Process exit code: 0 when a decision was written, 2 when the shared
-        infra classifier is missing or cannot be executed.
+        infra classifier is missing, cannot be executed, or exits with
+        anything other than its two verdict codes.
     """
     parser = argparse.ArgumentParser(
         description=(
@@ -428,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     units = build_units(environ=dict(os.environ))
     try:
         decision = decide(units, script=script)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         print(f"[ERROR] cannot run {script}: {exc}", file=sys.stderr)
         return 2
 

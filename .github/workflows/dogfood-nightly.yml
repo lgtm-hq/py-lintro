@@ -78,6 +78,7 @@ jobs:
       ) &&
       (
         needs.dogfood-full.outputs.exit-code == '143' ||
+        needs.dogfood-full.outputs.timeout-flake == 'true' ||
         (
           needs.dogfood-full.outputs.status != 'failed' &&
           needs.dogfood-full.outputs.exit-code != '1'

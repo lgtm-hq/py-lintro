@@ -197,14 +197,21 @@ set -e
 # the gate reached a verdict": the first is a regression to report, the second
 # is a night with no coverage that a bounded retry can still answer. Only a
 # completed check writes these outputs, so their absence IS the no-verdict
-# signal — nothing here can be forged by a killed run.
+# signal — nothing here can be forged by a killed run. Only the checker's two
+# verdict codes count as "completed": 2 (report/allowlist error) and a
+# docker-side kill such as 143 leave both outputs absent so the retry and the
+# classifier see a missing verdict, not a fabricated failed one.
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	if [[ "${gate_exit_code}" -eq 0 ]]; then
+	case "${gate_exit_code}" in
+	0)
 		printf 'status=passed\n' >>"${GITHUB_OUTPUT}"
-	else
+		printf 'exit-code=0\n' >>"${GITHUB_OUTPUT}"
+		;;
+	1)
 		printf 'status=failed\n' >>"${GITHUB_OUTPUT}"
-	fi
-	printf 'exit-code=%s\n' "${gate_exit_code}" >>"${GITHUB_OUTPUT}"
+		printf 'exit-code=1\n' >>"${GITHUB_OUTPUT}"
+		;;
+	esac
 fi
 
 exit "${gate_exit_code}"

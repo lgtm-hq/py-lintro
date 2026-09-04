@@ -340,6 +340,54 @@ def test_failing_skip_check_publishes_a_failed_verdict(tmp_path: Path) -> None:
     assert_that(written).contains("exit-code=1")
 
 
+_CHECKER_EXIT_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >>"${DOCKER_ARGS_LOG}"
+if [[ "$*" == *"--entrypoint python3"* ]]; then
+\texit "${CHECKER_EXIT_CODE}"
+fi
+exit 0
+"""
+
+
+@pytest.mark.parametrize("checker_exit_code", ["2", "143"])
+def test_non_verdict_checker_exit_publishes_no_verdict(
+    tmp_path: Path,
+    checker_exit_code: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the checker's 0/1 verdict codes publish status and exit-code.
+
+    A report/allowlist error (2) or a docker-side kill (143) reaching the
+    publish step must leave both outputs absent, so the nightly retry (which
+    requires an empty status) and the classifier see a missing verdict rather
+    than a fabricated failed one (#2246).
+    """
+    report = tmp_path / "results.json"
+    _write_report(report)
+    allowlist = tmp_path / "allowlist.yaml"
+    allowlist.write_text("allowlist: []\n")
+    bin_dir, log_path = _docker_stub(tmp_path)
+    (bin_dir / "docker").write_text(_CHECKER_EXIT_STUB)
+    (bin_dir / "docker").chmod(0o755)
+    monkeypatch.setenv("CHECKER_EXIT_CODE", checker_exit_code)
+    output_path = tmp_path / "github-output"
+    output_path.touch()
+
+    result = _run_gate(
+        cwd=tmp_path,
+        report_json="results.json",
+        allowlist=allowlist,
+        bin_dir=bin_dir,
+        log_path=log_path,
+        output_path=output_path,
+    )
+
+    assert_that(result.returncode).is_equal_to(int(checker_exit_code))
+    written = output_path.read_text()
+    assert_that(written).does_not_contain("status=")
+    assert_that(written).does_not_contain("exit-code=")
+
+
 def test_configuration_error_publishes_no_verdict(tmp_path: Path) -> None:
     """A gate that never reaches the skip check leaves the verdict empty.
 

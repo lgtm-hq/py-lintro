@@ -3602,6 +3602,12 @@ def test_dogfood_nightly_retries_killed_lint_without_a_verdict() -> None:
     # Runner shutdown makes lintro exit 143; that stays retryable even when a
     # dying run wrote status=failed on its way out.
     assert_that(condition).contains("needs.dogfood-full.outputs.exit-code == '143'")
+    # A tool-execution timeout publishes status=failed/exit-code=1 from the
+    # attempt's own report; the shared classifier calls that infra, so the
+    # retry must run for it or the classifier would fail closed and ping.
+    assert_that(condition).contains(
+        "needs.dogfood-full.outputs.timeout-flake == 'true'",
+    )
     assert_that(condition).contains("needs.dogfood-full.outputs.status != 'failed'")
     assert_that(condition).contains("needs.dogfood-full.outputs.exit-code != '1'")
 

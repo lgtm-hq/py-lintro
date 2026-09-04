@@ -243,6 +243,61 @@ def test_tool_execution_timeout_is_absorbed_like_the_pr_gate(
     assert_that(decision.notify).is_false()
 
 
+def test_tool_execution_timeout_without_a_retry_fails_closed(
+    module: ModuleType,
+) -> None:
+    """A timeout-flake primary is infra, so a skipped retry must still ping.
+
+    The workflow retries on ``timeout-flake == 'true'`` precisely so this
+    branch is only reached when the retry job itself failed to start.
+    """
+    decision = _decide(
+        module,
+        LINT_RESULT="failure",
+        LINT_STATUS="failed",
+        LINT_EXIT_CODE="1",
+        LINT_TIMEOUT_FLAKE="true",
+        LINT_TIMED_OUT_TOOLS="semgrep",
+        LINT_RETRY_RESULT="skipped",
+    )
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.action_required).is_true()
+
+
+def test_broken_shared_classifier_is_an_error_not_a_verdict(
+    module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any exit code other than 0/1 from the shared classifier is fatal.
+
+    Treating a crash as "not infra" would let an empty-output kill fall
+    through to NO_VERDICT, after which a passing retry would silence the
+    night; the classifier must instead fail closed with exit code 2.
+    """
+    broken = tmp_path / "is-infra-flake-failure.sh"
+    broken.write_text("#!/usr/bin/env bash\necho boom >&2\nexit 3\n")
+    broken.chmod(0o755)
+    monkeypatch.setenv("INFRA_FLAKE_SCRIPT", str(broken))
+    monkeypatch.setenv("LINT_RESULT", "failure")
+    monkeypatch.setenv("LINT_RETRY_RESULT", "success")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary"))
+
+    attempt = module.Attempt(
+        result="failure",
+        conclusion="",
+        status="",
+        exit_code="",
+        timeout_flake="",
+        timed_out_tools="",
+    )
+    with pytest.raises(RuntimeError):
+        module.is_infra_flake(attempt, script=broken)
+    assert_that(module.main(argv=[])).is_equal_to(2)
+
+
 def test_partial_outputs_are_unclassifiable_and_ping(module: ModuleType) -> None:
     """A half-written verdict is never absorbed — absence of proof is not proof."""
     decision = _decide(
