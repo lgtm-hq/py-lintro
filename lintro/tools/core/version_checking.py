@@ -156,6 +156,14 @@ def get_install_hints() -> dict[str, str]:
             "Install via: brew install bufbuild/buf/buf "
             "or download from https://github.com/bufbuild/buf/releases (v{version}+)"
         ),
+        "import_linter": (
+            "Install via: pip install 'import-linter>={version}' "
+            "or uv add 'import-linter>={version}'"
+        ),
+        "import-linter": (
+            "Install via: pip install 'import-linter>={version}' "
+            "or uv add 'import-linter>={version}'"
+        ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
         "pip_audit": (
             "Install via: pip install 'pip-audit>={version}' "

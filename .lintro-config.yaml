@@ -104,6 +104,11 @@ tools:
   pydoclint:
     enabled: true
 
+  # Import-linter - Python import contracts (config in pyproject.toml
+  # [tool.importlinter]; the contract set is empty for now, see #2290)
+  import-linter:
+    enabled: true
+
   # Pytest - Test runner (config in pyproject.toml [tool.pytest.ini_options])
   pytest:
     enabled: true

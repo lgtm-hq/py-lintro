@@ -35,6 +35,7 @@ class DocUrlTemplate(StrEnum):
     DOTENV_LINTER = "https://dotenv-linter.github.io/#/checks/{code}"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
     HTML_VALIDATE = "https://html-validate.org/rules/{code}.html"
+    IMPORT_LINTER = "https://import-linter.readthedocs.io/en/stable/contract_types/"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"
     MYPY = "https://mypy.readthedocs.io/en/stable/error_code_list.html"
     OSV = "https://osv.dev/vulnerability/{code}"

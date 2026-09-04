@@ -108,6 +108,15 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No impact analysis or mutation testing; plugin install not managed
 - 🚀 **Enhanced**: Coverage helpers, parallel presets, plugin/marker/fixture listings
 
+### [import-linter Analysis](./import-linter-analysis.md)
+
+### Python Import-Contract Checker
+
+- ✅ **Preserved**: All contract types, native config discovery, exit-code semantics
+- ⚠️ **Limited**: Check-only (contract violations are design problems, not auto-fixable)
+- 🚀 **Enhanced**: Project-scoped single invocation, upward config discovery, clean
+  result when no contracts are declared
+
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 
 ### AI-Powered Idiomatic Code Reviewer (built-in plugin)
