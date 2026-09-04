@@ -483,6 +483,11 @@ def test_cross_file_finding_surfaces_tagged_and_counted() -> None:
     finding = result.findings[0]
     assert_that(finding.title).contains("retries positionally")
     assert_that(finding.origin).is_equal_to(FindingOrigin.SYNTHESIS)
+    # An evidenced P1 from this pass blocks the run like any other P1: the
+    # findings are merged before the result is assembled, so the derived
+    # verdict sees them.
+    assert_that(finding.severity).is_equal_to(Severity.P1)
+    assert_that(result.readiness_verdict).is_equal_to(ReviewVerdict.BLOCKED)
 
     payload = review_result_to_dict(result=result)
     synthesis_block = payload["synthesis"]
@@ -717,10 +722,13 @@ def test_guarded_changed_paths_matches_the_orchestrator_helper() -> None:
         pr_metadata=None,
     )
 
-    assert_that(guarded_changed_paths(context=context)).is_equal_to(
-        guard_changed_paths(context=context),
-    )
-    assert_that(guarded_changed_paths(context=context)).is_equal_to(
+    paths = guarded_changed_paths(context=context)
+
+    # The orchestrator name is a re-export, so this pins the delegation.
+    assert_that(paths).is_equal_to(guard_changed_paths(context=context))
+    # Asserted against the fixture rather than against the other helper, so
+    # both dropping a rename or copy source cannot pass by agreeing.
+    assert_that(paths).is_equal_to(
         (
             "pkg/renamed.py",
             "pkg/old_name.py",
@@ -729,6 +737,8 @@ def test_guarded_changed_paths_matches_the_orchestrator_helper() -> None:
             "pkg/plain.py",
         ),
     )
+    assert_that(paths).contains("pkg/old_name.py")
+    assert_that(paths).contains("pkg/source.py")
 
 
 # --- (e) cap and dedupe -------------------------------------------------------
@@ -1242,7 +1252,7 @@ def test_a_truncated_pass_degrades_coverage_end_to_end() -> None:
     assert_that(payload["synthesis"]["failed"]).is_false()
     assert_that(payload["findings_coverage_complete"]).is_false()
     note = format_synthesis_note_line(metadata=result.metadata)
-    assert_that(note).contains("only part of the diff")
+    assert_that(note).contains("less than its whole input")
 
 
 # --- (l) the sensitivity policy applies to synthesized findings ---------------
@@ -1607,13 +1617,18 @@ def test_restatements_never_consume_the_cap_window() -> None:
         '{"findings": "none"}',
         '{"findings": {"a": 1}}',
         '{"findings": null}',
+        # No ``findings`` key at all: an answer that never mentions findings
+        # did not answer, and must not read as "found nothing".
+        '{"summary": "all consistent"}',
+        "{}",
     ],
 )
 def test_a_non_list_findings_value_is_a_failed_pass(content: str) -> None:
-    """A malformed findings value is a failure, not an empty answer.
+    """A missing or malformed findings value is a failure, not an empty answer.
 
     Args:
-        content: A JSON object whose ``findings`` value is not a list.
+        content: A JSON object whose ``findings`` value is absent or not a
+            list.
     """
     result = _run(
         synthesis=ReviewSynthesisConfig(enabled=True),
@@ -1652,11 +1667,14 @@ async def test_an_interrupt_abandons_the_extra_call_and_degrades() -> None:
     process in the provider call instead.
     """
     stop = asyncio.Event()
-    stop.set()
     started = asyncio.Event()
 
     async def _never_returns(**_kwargs: Any) -> AIResponse:
+        # The stop is set from inside the call, so the event can only fire
+        # once the provider call is genuinely in flight: a pass that merely
+        # checked ``stop.is_set()`` before calling would hang here instead.
         started.set()
+        stop.set()
         await asyncio.Event().wait()  # pragma: no cover - cancelled by the race
         raise AssertionError("the abandoned call resumed")
 
@@ -1674,6 +1692,7 @@ async def test_an_interrupt_abandons_the_extra_call_and_degrades() -> None:
             stop=stop,
         )
 
+    assert_that(started.is_set()).is_true()
     assert_that(result.findings).is_empty()
     assert_that(result.outcome.failed).is_true()
     reasons = [item.reason for item in result.degradations]

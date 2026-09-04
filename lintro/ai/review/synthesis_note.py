@@ -50,6 +50,6 @@ def format_synthesis_note(*, metadata: ReviewMetadata) -> str:
     if outcome.truncated:
         sentence += (
             " Its input was truncated to the whole-PR token budget, so it saw "
-            "only part of the diff."
+            "less than its whole input."
         )
     return sentence

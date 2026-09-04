@@ -149,9 +149,10 @@ def _parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | No
 
     Returns:
         Parsed findings, or ``None`` when the response was not a JSON object
-        carrying a ``findings`` list — which the caller records as a failed
-        pass rather than an empty one, so "found nothing" and "could not be
-        read" never look alike.
+        carrying a ``findings`` list — a missing key counts the same as a
+        malformed value. The caller records that as a failed pass rather than
+        an empty one, so "found nothing" and "could not be read" never look
+        alike. Only a present, empty list is an empty success.
     """
     try:
         payload = json.loads(strip_json_fences(content=content))
@@ -161,7 +162,13 @@ def _parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | No
     if not isinstance(payload, dict):
         logger.warning("The cross-chunk synthesis payload was not an object.")
         return None
-    raw = payload.get("findings", [])
+    if "findings" not in payload:
+        # An answer that never mentions ``findings`` did not answer. Defaulting
+        # it to an empty list would report "found no cross-file
+        # inconsistencies" for a call that produced nothing usable.
+        logger.warning("The cross-chunk synthesis payload had no findings key.")
+        return None
+    raw = payload["findings"]
     if not isinstance(raw, list):
         # ``parse_findings`` would quietly render a string, a mapping, or a
         # null here as no findings at all, which is exactly the "empty

@@ -29,8 +29,8 @@ pieces above. Examples of what qualifies:
 
 - a function, method, or CLI signature changed in one file and a caller
   updated to the wrong shape in another;
-- a config key, env var, or constant renamed in one file with a consumer left
-  reading the old name;
+- a config key, env var, or constant renamed in one file while the consumer's
+  diff in another file still reads the old name;
 - a data contract, schema, or return type widened or narrowed in one file and
   a consumer that still assumes the old one;
 - a value produced in one file in units, encoding, or nullability the
@@ -44,9 +44,12 @@ Hard rules:
    That is what the earlier passes were for.
 3. Both halves must be visible in the diff above. If a file you want to blame
    is not in the diff you were given, say nothing about it.
-4. Do not claim a file "was never updated" unless its absence from the full
-   changed-file list above proves it. The list is complete; the diff may not
-   be.
+4. Never claim that a file "was never updated". If a path is in the
+   changed-file list above, this PR changed it and you cannot see how. If a
+   path is absent from that list, it is not part of this PR at all and is not
+   in your prompt, so its absence is not evidence of anything. Report an
+   inconsistency only when both halves of it are visible in the diff you were
+   given.
 5. Report at most {max_findings} findings. Fewer is normal. An empty list is
    the correct answer when the pieces are consistent.
 

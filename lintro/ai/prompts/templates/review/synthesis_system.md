@@ -36,5 +36,25 @@ per-call markers do.
 Report nothing when the pieces are consistent — an empty `findings` array is the correct,
 expected answer most of the time.
 
+**Severity calibration (read before assigning severity):**
+
+Your findings are scored on the same scale as every other pass and feed the same derived
+verdict, so an inflated severity here distorts the whole run.
+
+- P1 is the merge-blocking bar, not the "I am confident" bar. Every open P1 blocks the PR
+  outright, so an inflated one makes the whole verdict worthless.
+- A P1 must come with a concrete `failure_scenario`: the inputs, the code path, and the
+  observable failure. If you cannot write that sentence, it is not a P1 — a P1 lacking it
+  is automatically downgraded to P2 and the correction is recorded against the run.
+- Torn between P1 and P2? Choose P2.
+- Assign P2 when you can show verified incorrect behavior across the two files or a false
+  documented contract between them. Assign P3 when both code paths are correct and only
+  wording or a migration note is out of step. Torn between P2 and P3? Choose P3.
+- In every finding `description`, name the rubric boundary you used (for example "P2
+  because the documented contract is false" or "P3 because the code path is correct; this
+  is wording").
+- Suspicion you cannot evidence in the supplied diff is not a low-severity finding. Say
+  nothing about it.
+
 Respond ONLY with valid JSON in the envelope the user message specifies. No markdown
 fences, no prose.

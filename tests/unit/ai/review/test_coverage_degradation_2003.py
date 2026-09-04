@@ -873,8 +873,33 @@ def test_unknown_degradation_reason_still_renders_a_clause(
     assert_that(text[0]).is_not_equal_to(".")
 
 
-def test_synthesis_degradation_is_never_counted_as_a_chunk() -> None:
-    """The whole-run sentinel stays out of the "X of Y chunks" denominator."""
+@pytest.mark.parametrize(
+    ("reason", "clause"),
+    [
+        (
+            CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+            "saw less than its whole input",
+        ),
+        (
+            CoverageDegradationReason.SYNTHESIS_FAILED,
+            "did not complete",
+        ),
+    ],
+)
+def test_synthesis_degradation_is_never_counted_as_a_chunk(
+    reason: CoverageDegradationReason,
+    clause: str,
+) -> None:
+    """The whole-run sentinel stays out of the "X of Y chunks" denominator.
+
+    Both whole-run reasons are pinned: exclusion keys on the sentinel chunk
+    index, so a reason the aggregators forgot to special-case would inflate
+    the denominator or win the ``findings_cap_applied`` min().
+
+    Args:
+        reason: The whole-run degradation reason under test.
+        clause: Wording that reason must contribute to the sentence.
+    """
     from lintro.ai.review.coverage_degradation import describe_coverage_degradations
     from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -896,7 +921,7 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk() -> None:
                 findings_cap=25,
             ),
             CoverageDegradation(
-                reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+                reason=reason,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
                 findings_cap=0,
             ),
@@ -907,7 +932,7 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk() -> None:
 
     assert_that(text).contains("1 of 1 chunk ran under a 25-finding per-call cap")
     assert_that(text).does_not_contain("of 2 chunks")
-    assert_that(text).contains("saw only part of the diff")
+    assert_that(text).contains(clause)
     # The synthesis row's placeholder cap of 0 must never win the min(): the
     # tightest ceiling a chunk actually ran under is the cap row's 25.
     assert_that(metadata.findings_cap_applied).is_equal_to(25)

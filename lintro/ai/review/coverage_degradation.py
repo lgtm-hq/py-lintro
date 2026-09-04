@@ -101,7 +101,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     reasons = {item.reason for item in degradations}
     if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
         clauses.append(
-            "the cross-chunk synthesis pass saw only part of the diff "
+            "the cross-chunk synthesis pass saw less than its whole input "
             "(whole-PR token budget)",
         )
     if CoverageDegradationReason.SYNTHESIS_FAILED in reasons:

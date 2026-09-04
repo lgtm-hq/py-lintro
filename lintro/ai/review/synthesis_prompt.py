@@ -6,10 +6,13 @@ which files, how much diff, and what happens when the whole PR does not fit —
 lives on its own and can be tested without a provider.
 
 The budget reused here is the same per-call diff-token budget the chunk calls
-were planned against, and it is spent against the *whole* prompt — the
-changed-file list and the per-chunk digest are rendered and charged first, and
-the diff takes only what they leave over — so the extra call can never be the
-one prompt in a run that overruns the context window.
+were planned against, and it is spent against the *whole* prompt rather than
+the diff alone. The changed-file list is reserved first and never trimmed: the
+prompt's "do not claim a file was never updated" rule is only sound while that
+list is complete, so on a pull request with a very large file list the span can
+exceed the budget by design. The digest and then the diff take whatever remains
+(each with a floor of one token), which is what keeps the extra call from being
+the prompt in a run that overruns the context window on diff volume.
 """
 
 from __future__ import annotations

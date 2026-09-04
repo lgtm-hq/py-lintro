@@ -860,16 +860,21 @@ def _synthesis_result(
     truncated: bool = False,
     failed: bool = False,
 ) -> ReviewResult:
-    """Build a stubbed result whose finding came from the synthesis pass.
+    """Build a stubbed result for a run whose synthesis pass ran.
+
+    The chunk finding is always left untagged and a synthesis-origin finding
+    is appended only when the pass actually contributed one, so a serializer
+    that stamped ``origin`` on every finding whenever ``metadata.synthesis``
+    was set could not pass.
 
     Args:
-        findings_added: Findings the pass contributed.
+        findings_added: Findings the pass contributed. Zero leaves the result
+            carrying only the untagged chunk finding.
         truncated: Whether the pass saw less than its whole prompt input.
         failed: Whether the pass produced no usable answer.
 
     Returns:
-        ReviewResult: A result carrying one synthesis-origin finding and a
-        recorded synthesis outcome.
+        ReviewResult: A result carrying the recorded synthesis outcome.
     """
     from dataclasses import replace as dataclass_replace
 
@@ -877,9 +882,18 @@ def _synthesis_result(
     from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 
     base = _result()
+    chunk_finding = base.findings[0]
+    synthesized = tuple(
+        dataclass_replace(
+            chunk_finding,
+            title=f"Cross-file mismatch {index}",
+            origin=FindingOrigin.SYNTHESIS,
+        )
+        for index in range(findings_added)
+    )
     return dataclass_replace(
         base,
-        findings=(dataclass_replace(base.findings[0], origin=FindingOrigin.SYNTHESIS),),
+        findings=(chunk_finding, *synthesized),
         metadata=dataclass_replace(
             base.metadata,
             synthesis=SynthesisOutcome(
@@ -927,7 +941,10 @@ def test_review_payload_carries_synthesis_origin_and_block(
 
     _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
 
-    assert_that(payload["findings"][0]["origin"]).is_equal_to("synthesis")
+    # A mixed list: the chunk finding keeps no origin, only the synthesized
+    # one carries it, so a blanket stamp cannot pass.
+    assert_that(payload["findings"][0]).does_not_contain_key("origin")
+    assert_that(payload["findings"][1]["origin"]).is_equal_to("synthesis")
     assert_that(payload["synthesis"]).is_equal_to(
         {
             "enabled": True,
@@ -955,3 +972,29 @@ def test_review_payload_reports_a_failed_synthesis_pass(
     assert_that(payload["synthesis"]["failed"]).is_true()
     assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
     assert_that(payload["synthesis"]["truncated"]).is_false()
+    # A pass that contributed nothing leaves every surviving finding untagged.
+    for finding in payload["findings"]:
+        assert_that(finding).does_not_contain_key("origin")
+
+
+def test_review_payload_reports_an_empty_successful_synthesis_pass(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A pass that found nothing is a success and tags no finding.
+
+    The twin of the failed case: both report ``findings_added: 0``, and
+    ``failed`` is the only thing that tells them apart.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(findings_added=0, failed=False))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["synthesis"]["failed"]).is_false()
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
+    for finding in payload["findings"]:
+        assert_that(finding).does_not_contain_key("origin")

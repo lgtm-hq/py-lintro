@@ -543,7 +543,8 @@ What it adds to the surfaces:
   and the sentence also has plural (`added 3 cross-file findings`), empty
   (`found no cross-file inconsistencies`), and failed
   (`did not complete; the chunk findings below are unaffected`) forms, plus a trailing
-  sentence about the truncated input when the pass saw only part of the diff.
+  sentence about the truncated input when the pass saw less than its whole input — the
+  per-chunk digest or the diff was cut, matching the `truncated` flag below.
 - A `synthesis` block at the root of `--output json`, present only when the pass ran:
 
   ```json

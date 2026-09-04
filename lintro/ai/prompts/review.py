@@ -232,6 +232,11 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
     told not to restate them, so they carry only what makes a finding
     recognizable — severity, every location, title — and never its prose.
 
+    Questions (#1925) are skipped. They are excluded from every other prompt
+    scope, and rendering one here would put a `P2 file:line — title` line in
+    front of the model as an already-reported defect when it is an open
+    question about the change, not a finding at all.
+
     Args:
         summaries: Per-chunk digests in chunk order.
 
@@ -245,10 +250,10 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
     for summary in summaries:
         files = ", ".join(f"`{path}`" for path in summary.files) or "(no files)"
         lines = [f"Piece {summary.chunk_id} reviewed: {files}"]
-        if summary.findings:
+        reported = [finding for finding in summary.findings if not finding.is_question]
+        if reported:
             lines.extend(
-                _chunk_summary_finding_line(finding=finding)
-                for finding in summary.findings
+                _chunk_summary_finding_line(finding=finding) for finding in reported
             )
         else:
             lines.append("  - already reported: (nothing)")
