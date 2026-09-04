@@ -21,6 +21,16 @@ from lintro.tools.implementations.pytest.pytest_command_builder import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_coverage_rcfile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop an inherited COVERAGE_RCFILE so default discovery is deterministic.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to clear the env var.
+    """
+    monkeypatch.delenv("COVERAGE_RCFILE", raising=False)
+
+
 def test_no_configuration_reports_no_source(tmp_path: Path) -> None:
     """A project without coverage configuration declares no source.
 
@@ -237,3 +247,53 @@ def test_builder_falls_back_to_cov_dot_without_source(
     add_coverage_options(command, {"coverage_term_missing": True})
 
     assert_that(command).contains("--cov=.")
+
+
+def test_coveragerc_toml_source_is_detected(tmp_path: Path) -> None:
+    """A ``.coveragerc.toml`` outranks pyproject.toml.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / ".coveragerc.toml").write_text(
+        '[run]\nsource = ["pkg"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.coverage.run]\nbranch = true\n",
+        encoding="utf-8",
+    )
+
+    assert_that(coverage_source_configured(root=tmp_path)).is_true()
+
+
+def test_report_only_config_shadows_a_lower_priority_source(tmp_path: Path) -> None:
+    """A report-only .coveragerc is the active config, so no source is seen.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / ".coveragerc").write_text(
+        "[report]\nshow_missing = True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.coverage.run]\nsource = ["pkg"]\n',
+        encoding="utf-8",
+    )
+
+    assert_that(coverage_source_configured(root=tmp_path)).is_false()
+
+
+def test_percent_in_ini_value_does_not_raise(tmp_path: Path) -> None:
+    """A literal percent sign in an INI value is read without interpolation.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / ".coveragerc").write_text(
+        "[run]\nsource = pkg\nrelative_files = True\ndata_file = cov%data\n",
+        encoding="utf-8",
+    )
+
+    assert_that(coverage_source_configured(root=tmp_path)).is_true()
