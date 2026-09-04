@@ -849,8 +849,9 @@ as the legacy `ai.max_cost_usd` scalar.
 > YAML and in an overlay: `ai.max_cost_usd: 0` is a real $0 cap that stops the run on
 > the first budgeted call, while `LINTRO_AI_MAX_COST_USD=0` / `--max-cost-usd 0` is
 > rejected as ambiguous. Overlay `uncapped` lifts the ceiling outright; YAML `null` (or
-> omitting the key) only clears the legacy scalar, and any
-> `ai.transports.*.max_cost_usd` profile cap still applies.
+> omitting the key) only clears the legacy scalar; a transport-profile cap
+> (`ai.transports.api.max_cost_usd` or `ai.transports.cli.max_cost_usd_advisory`) still
+> applies.
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
