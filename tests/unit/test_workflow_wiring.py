@@ -1050,7 +1050,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "npm",
         "package.json",
         "pyproject.toml",
-        "pytest.ini",
         "renovate.json",
         "requirements-semgrep.in",
         "requirements-semgrep.txt",
