@@ -51,21 +51,24 @@ def format_max_cost_label(
     """Format a cost cap for display, including provenance.
 
     ``None`` renders as ``uncapped`` so a lifted ceiling is never silent
-    (#2024). Sub-cent caps get four decimals so ``--max-cost-usd 0.004``
-    does not read as a $0 ceiling (#2048).
+    (#2024). Sub-cent caps keep every significant decimal so a cap such as
+    ``--max-cost-usd 0.004`` or ``0.00001`` never reads as a $0 ceiling
+    (#2048).
 
     Args:
         max_cost_usd: Effective USD cap, or None when unlimited.
         source: Field provenance, or empty/None to omit the suffix.
 
     Returns:
-        ``$1.50 (env)``, ``$0.0040 (flag)``, ``uncapped (flag)``, or the
+        ``$1.50 (env)``, ``$0.004 (flag)``, ``uncapped (flag)``, or the
         bare label when *source* is absent.
     """
     if max_cost_usd is None:
         value = "uncapped"
     elif 0 < max_cost_usd < _SUB_CENT:
-        value = f"${max_cost_usd:.4f}"
+        # Eight decimals covers any cap a pricing table can produce; the
+        # trailing zeros go so the label reads as the number that was set.
+        value = f"${max_cost_usd:.8f}".rstrip("0")
     else:
         value = f"${max_cost_usd:.2f}"
     return format_sourced_value(value, source)

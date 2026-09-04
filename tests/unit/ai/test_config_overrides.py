@@ -602,8 +602,9 @@ def test_format_sourced_value_annotates_known_sources() -> None:
 @pytest.mark.parametrize(
     ("cap", "expected"),
     [
-        (0.004, "$0.0040 (flag)"),
+        (0.004, "$0.004 (flag)"),
         (0.0001, "$0.0001 (flag)"),
+        (0.00001, "$0.00001 (flag)"),
         (0.0, "$0.00 (flag)"),
         (0.01, "$0.01 (flag)"),
         (2.5, "$2.50 (flag)"),
