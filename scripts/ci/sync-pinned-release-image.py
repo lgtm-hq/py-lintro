@@ -68,7 +68,9 @@ PINNED_SITES: dict[str, int] = {
     # 5: dogfood-full, its bounded retry, the digest-lag verifier, the
     # skip gate and its bounded retry (#2246).
     ".github/workflows/dogfood-nightly.yml": 5,
-    ".github/workflows/docker-ci.yml": 4,
+    # 1: the single workflow-level `env: LINTRO_FORK_FALLBACK_IMAGE` that all
+    # four fork-fallback consumers read (#2297).
+    ".github/workflows/docker-ci.yml": 1,
 }
 
 ORG = "lgtm-hq"

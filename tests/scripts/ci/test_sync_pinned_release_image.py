@@ -291,3 +291,81 @@ def test_fetch_stops_once_a_release_is_in_hand(
     module._fetch_package_versions("token")
 
     assert_that(seen).is_equal_to([1])
+
+
+def test_apply_pin_rewrites_the_docker_ci_fork_fallback_env(
+    module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The single ``LINTRO_FORK_FALLBACK_IMAGE`` env line is what gets rewritten.
+
+    docker-ci.yml carries the fork-fallback pin exactly once, as a
+    workflow-level ``env`` folded scalar that four consumers read (#2297).
+    Previously each consumer held its own literal, so the sync had four sites
+    to hit in that file; now it has one, and this asserts the folded ``>-``
+    shape is still matched rather than skipped as an unrecognised pin.
+
+    Args:
+        module: The loaded sync module.
+        tmp_path: Temporary repo root.
+        monkeypatch: Fixture used to repoint the module at the fake repo.
+    """
+    workflow = tmp_path / "docker-ci.yml"
+    workflow.write_text(
+        "env:\n"
+        "  CACHE_OPTS: mode=max\n"
+        "  LINTRO_FORK_FALLBACK_IMAGE: >-\n"
+        f"    ghcr.io/lgtm-hq/py-lintro:0.1.0@{DIGEST_A}\n"
+        "jobs:\n"
+        "  build:\n"
+        "    outputs:\n"
+        "      fork-fallback-image: ${{ env.LINTRO_FORK_FALLBACK_IMAGE }}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "PINNED_SITES", {"docker-ci.yml": 1})
+
+    changed = module.apply_pin(version="0.143.0", digest=DIGEST_B)
+
+    updated = workflow.read_text(encoding="utf-8")
+    assert_that(changed).is_true()
+    assert_that(updated).contains(
+        f"    ghcr.io/lgtm-hq/py-lintro:0.143.0@{DIGEST_B}\n",
+    )
+    assert_that(updated).does_not_contain(DIGEST_A)
+    # The indirection the consumers read through must survive untouched.
+    assert_that(updated).contains(
+        "fork-fallback-image: ${{ env.LINTRO_FORK_FALLBACK_IMAGE }}",
+    )
+
+
+def test_apply_pin_is_a_no_op_when_the_env_already_names_the_release(
+    module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-running the sync on an already-current pin must not rewrite the file.
+
+    The sync runs unattended on every release, so a no-op has to report
+    ``False`` rather than produce an empty diff on the Version-PR.
+
+    Args:
+        module: The loaded sync module.
+        tmp_path: Temporary repo root.
+        monkeypatch: Fixture used to repoint the module at the fake repo.
+    """
+    workflow = tmp_path / "docker-ci.yml"
+    original = (
+        "env:\n"
+        "  LINTRO_FORK_FALLBACK_IMAGE: >-\n"
+        f"    ghcr.io/lgtm-hq/py-lintro:0.143.0@{DIGEST_A}\n"
+    )
+    workflow.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "PINNED_SITES", {"docker-ci.yml": 1})
+
+    changed = module.apply_pin(version="0.143.0", digest=DIGEST_A)
+
+    assert_that(changed).is_false()
+    assert_that(workflow.read_text(encoding="utf-8")).is_equal_to(original)

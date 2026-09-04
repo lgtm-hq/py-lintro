@@ -361,11 +361,13 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
             step
             for step in job["steps"]
             if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
-            and "ci-log.sh" in step.get("run", "")
+            and "skipped:" in step.get("run", "")
         ]
         assert_that(skip_steps).described_as(job_name).is_length(1)
         skip_step = skip_steps[0]
-        assert_that(skip_step["run"]).contains('"skipped:"')
+        # Inlined (#2297): ci-log.sh only ever ran `echo "$*"`.
+        assert_that(skip_step["run"]).starts_with("echo ")
+        assert_that(skip_step["run"]).contains("$SKIP_REASON")
         assert_that(skip_step["env"]["SKIP_REASON"]).contains(
             "needs.changes.outputs.skip-reason",
         )
@@ -3043,7 +3045,10 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
 # pin, which is exactly the drift this guard exists to catch (#1751).
 _PINNED_IMAGE_SITES = {
     "dogfood-nightly.yml": 5,
-    "docker-ci.yml": 4,
+    # One: docker-ci carries the pin in a single workflow-level
+    # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
+    # reads (#2297).
+    "docker-ci.yml": 1,
 }
 
 
@@ -3075,6 +3080,60 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
         references.update(matches)
 
     assert_that(references).is_length(1)
+
+
+def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
+    """Every docker-ci fork-fallback consumer reads the one workflow-level pin.
+
+    The pin used to be copy-pasted at four consumers, which is how it drifted
+    four releases behind the published image (#2297). It now lives once in
+    ``env.LINTRO_FORK_FALLBACK_IMAGE``. Two consumers read that context
+    directly; the two reusable-workflow callers cannot, because ``env`` is not
+    an available context in ``jobs.<id>.with`` — they go through
+    ``needs.docker-build.outputs.fork-fallback-image``, which republishes the
+    same env. This asserts no consumer reverted to its own literal and that
+    every caller still declares the ``docker-build`` dependency that
+    indirection needs.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    pin = docker_ci["env"]["LINTRO_FORK_FALLBACK_IMAGE"].strip()
+
+    assert_that(pin).matches(
+        r"^ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$",
+    )
+    assert_that(docker_ci["jobs"]["docker-build"]["outputs"]).contains_entry(
+        {"fork-fallback-image": "${{ env.LINTRO_FORK_FALLBACK_IMAGE }}"},
+    )
+
+    # job id -> the expression carrying the fork-fallback selection.
+    reusable_callers = ("dogfooding-lint", "dogfooding_lint_retry")
+    step_consumers = {
+        "dogfooding-lint-changed": "LINTRO_IMAGE",
+        "dogfood-skip-gate": "LINTRO_IMAGE",
+    }
+    expressions: list[str] = []
+    for job_id in reusable_callers:
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        expressions.append(job["with"]["lintro-image"])
+    for job_id, env_key in step_consumers.items():
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        values = [
+            step["env"][env_key]
+            for step in job["steps"]
+            if env_key in (step.get("env") or {})
+        ]
+        assert_that(values).described_as(job_id).is_length(1)
+        expressions.append(values[0])
+
+    assert_that(expressions).is_length(4)
+    for expression in expressions:
+        assert_that(expression).described_as(expression).does_not_contain("sha256:")
+        assert_that(
+            "env.LINTRO_FORK_FALLBACK_IMAGE" in expression
+            or "needs.docker-build.outputs.fork-fallback-image" in expression,
+        ).described_as(expression).is_true()
 
 
 def test_pinned_release_image_manager_covers_both_workflows() -> None:

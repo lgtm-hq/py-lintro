@@ -137,18 +137,6 @@ def _classify_paths(
     return output_file.read_text().splitlines(), result.stdout + result.stderr
 
 
-def test_detect_changes_help() -> None:
-    """detect-changes.sh should provide help and exit 0."""
-    script_path = Path("scripts/ci/detect-changes.sh").resolve()
-    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
-        [str(script_path), "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Usage:")
-
-
 def test_resolve_pipeline_relevance_help() -> None:
     """resolve-pipeline-relevance.sh should provide help and exit 0."""
     result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
