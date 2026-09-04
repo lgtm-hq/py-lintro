@@ -3430,8 +3430,29 @@ def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/is-infra-flake-failure.sh",
+        "scripts/ci/summarize-code-quality-gate.sh",
     ):
         assert_that(sparse).contains(script)
+
+
+def test_code_quality_gate_explains_an_infra_flake_in_the_summary() -> None:
+    """A fail-closed gate must say whether the red was runner loss (#2296).
+
+    The summary step has to survive the gate step's own failure, so it is
+    guarded by ``always()`` — that failure is exactly what it explains.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    summary_step = next(
+        step
+        for step in gate_job["steps"]
+        if "summarize-code-quality-gate.sh" in str(step.get("run", ""))
+    )
+    condition = _normalize_github_expr(str(summary_step["if"]))
+    assert_that(condition).contains("always()")
+    assert_that(condition).contains("steps.gate.outputs.infra-flake == 'true'")
+    assert_that(summary_step["env"]).contains_key("GATE_STATUS")
 
 
 # --- Release version-skew audit wiring (#1712) ------------------------------

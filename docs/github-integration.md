@@ -24,6 +24,31 @@ as a PR comment.
 **Triggers:** Pull requests, pushes to main, merge queue, manual dispatch (via
 docker-ci).
 
+### 1b. Required Lint Check (`lintro-code-quality`)
+
+**File:** `.github/workflows/docker-ci.yml` (`code-quality-gate` and
+`lintro-code-quality` jobs)
+
+The `code-quality-gate` job rolls the effective dogfooding lint attempt up into the
+single required `lintro-code-quality` check.
+
+**The gate fails closed (#2296).** When the lint job is killed (SIGTERM, `exit 143`),
+cancelled, or times out, it produced **no lint verdict** — and a check that never ran
+must not report success. The gate writes `status=no-verdict`, `infra-flake=true` and
+goes **red**, and the job summary says
+`No lint verdict (runner loss); auto-rerun will retry (attempt N of 3)` so the red check
+is not mistaken for a lint violation.
+
+`.github/workflows/auto-rerun-on-infra-failure.yml` reruns the failed jobs up to three
+times on that signature; the check turns green only once a rerun produces a real lint
+verdict. Runner noise is still _classified_ (`scripts/ci/is-infra-flake-failure.sh`) —
+it is just no longer absorbed into a green check.
+
+The one failure still absorbed is the mirror image: lint reported `status=passed` /
+`exit-code=0` and only a post-lint step of the surrounding job failed. That is a real
+verdict, so the check stays green with `infra-flake=true` — and image promotion in the
+`publish` job still refuses to promote an image built on an `infra-flake=true` run.
+
 ### 2. Test Suite & Coverage
 
 **File:** `.github/workflows/test-ci.yml` and `.github/workflows/docker-ci.yml`

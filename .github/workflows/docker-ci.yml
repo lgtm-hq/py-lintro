@@ -850,13 +850,15 @@ jobs:
   # Rolls the effective dogfooding result up into a single required-check
   # verdict (#1313). Picks whichever lint attempt is authoritative — the
   # changed-files job in scope 'changed', otherwise the retry when it ran,
-  # otherwise the full run — and treats runner infra-flake failures as
-  # non-blocking (scripts/ci/run-code-quality-gate.sh). Docs-only PRs
-  # (pipeline == 'false') report success without a lint run.
+  # otherwise the full run (scripts/ci/run-code-quality-gate.sh). Docs-only
+  # PRs (pipeline == 'false') report success without a lint run.
   #
-  # Since #2242 that absorption also covers a tool-execution timeout in the
-  # authoritative attempt (#1653), on that attempt's own timeout-flake output —
-  # never on dogfood-skip-gate's full-repo diagnostic verdict.
+  # Fail-closed since #2296: runner loss, cancellation, SIGTERM exit 143 and a
+  # tool-execution timeout (#1653) are still classified as infra noise, but
+  # they no longer green the required check — the gate reports
+  # status=no-verdict / infra-flake=true and goes red, and
+  # auto-rerun-on-infra-failure.yml retries the run. The only absorbed class
+  # left is a post-lint job failure on top of a passing lint verdict.
   code-quality-gate:
     name: 🚦 Code Quality Gate
     needs:
@@ -881,9 +883,11 @@ jobs:
       passed: ${{ steps.gate.outputs.passed }}
       status: ${{ steps.gate.outputs.status }}
       exit-code: ${{ steps.gate.outputs.exit-code }}
-      # 'true' when the gate went green by absorbing runner noise rather than
-      # by observing a successful lint run. The required check stays green
-      # (#1313), but `publish` refuses to promote an unlinted image.
+      # 'true' when the gate verdict rests on runner noise rather than on a
+      # lint violation. Since #2296 an attempt that produced no lint verdict
+      # fails closed (result=failure, status=no-verdict) and only a post-lint
+      # job failure on top of a passing lint verdict stays green — where
+      # `publish` still refuses to promote the image.
       infra-flake: ${{ steps.gate.outputs.infra-flake }}
     steps:
       - name: Checkout gate scripts
@@ -894,6 +898,7 @@ jobs:
             scripts/ci/evaluate-code-quality-gate.sh
             scripts/ci/assert-required-check.sh
             scripts/ci/is-infra-flake-failure.sh
+            scripts/ci/summarize-code-quality-gate.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Evaluate and assert code quality gate
@@ -945,6 +950,18 @@ jobs:
           RETRY_LINT_TIMED_OUT_TOOLS: >-
             ${{ needs.dogfooding_lint_retry.outputs.timed-out-tools }}
         run: scripts/ci/run-code-quality-gate.sh
+      # A fail-closed gate (#2296) goes red for runner loss as well as for a
+      # lint violation, so say which one this was. Runs even when the gate
+      # step failed — that is precisely the case it explains.
+      - name: Explain an infra-flaked gate
+        if: always() && steps.gate.outputs.infra-flake == 'true'
+        env:
+          GATE_INFRA_FLAKE: ${{ steps.gate.outputs.infra-flake }}
+          GATE_STATUS: ${{ steps.gate.outputs.status }}
+          GATE_RESULT: ${{ steps.gate.outputs.result }}
+          # Keep in step with max-reruns in auto-rerun-on-infra-failure.yml.
+          MAX_RERUN_ATTEMPTS: '3'
+        run: scripts/ci/summarize-code-quality-gate.sh
 
   dogfooding-pr-comment:
     # Comments with the outputs of whichever dogfooding attempt is
@@ -1023,7 +1040,8 @@ jobs:
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors
-      # whichever dogfooding attempt ran (#1361) and absorbs infra flakes.
+      # whichever dogfooding attempt ran (#1361). A lint attempt that never
+      # reported a verdict fails closed here (#2296).
       upstream-result: ${{ needs.code-quality-gate.outputs.result }}
       passed-output: ${{ needs.code-quality-gate.outputs.passed }}
       status-output: ${{ needs.code-quality-gate.outputs.status }}
