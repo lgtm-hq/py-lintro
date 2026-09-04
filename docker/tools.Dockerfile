@@ -33,7 +33,9 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 # LINTRO_TOOLS_IMAGE marks the image whose whole point is carrying every
 # wrapped tool: the integration suite fails instead of skipping when one of
-# them is missing here (#465, tests/integration/_tools.py).
+# them is missing here (#465). The name is defined in Python as
+# tests/integration/_tools.py::TOOLS_IMAGE_ENV and repeated in
+# docker-compose.yml; tests/unit/test_workflow_wiring.py pins all three.
 ENV LINTRO_TOOLS_IMAGE=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
