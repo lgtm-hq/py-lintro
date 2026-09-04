@@ -165,9 +165,10 @@ def add_coverage_options(cmd: list[str], options: dict[str, Any]) -> None:
         or coverage_threshold is not None
     )
     if needs_coverage:
-        # Add --cov flag to enable coverage collection
-        # Default to current directory, but can be overridden
-        cmd.append("--cov=.")
+        # Bare --cov enables coverage collection without pinning a path, so the
+        # measured source comes from the project's [tool.coverage.run] source
+        # setting instead of sweeping tests/ and scripts/ into the percentage.
+        cmd.append("--cov")
 
     # Add coverage HTML report
     if coverage_html:

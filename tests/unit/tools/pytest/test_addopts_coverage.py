@@ -199,7 +199,7 @@ def test_zero_coverage_threshold_enables_collection() -> None:
 
     add_coverage_options(command, {"coverage_threshold": 0})
 
-    assert_that(command).contains("--cov-fail-under", "0", "--cov=.")
+    assert_that(command).contains("--cov-fail-under", "0", "--cov")
 
 
 def test_banner_reports_enabled_for_zero_coverage_threshold(
