@@ -41,11 +41,12 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
-from lintro.ai.review.orchestrator import run_review
+from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     cross_chunk_paths,
+    guarded_changed_paths,
     select_synthesis_diff,
 )
 from lintro.ai.review.timings import ReviewPhase
@@ -60,6 +61,17 @@ _CALLER_DIFF = (
     "diff --git a/pkg/caller.py b/pkg/caller.py\n"
     "--- a/pkg/caller.py\n+++ b/pkg/caller.py\n"
     "@@ -1,2 +1,2 @@\n-send(body)\n+send(body, 3)\n"
+)
+_MIGRATE_DIFF = (
+    "diff --git a/scripts/migrate_docs.py b/scripts/migrate_docs.py\n"
+    "--- a/scripts/migrate_docs.py\n+++ b/scripts/migrate_docs.py\n"
+    "@@ -1,2 +1,2 @@\n-def migrate(path):\n+def migrate(path, *, dry_run):\n"
+)
+_MIGRATE_TEST_DIFF = (
+    "diff --git a/tests/unit/test_migrate_docs.py b/tests/unit/test_migrate_docs.py\n"
+    "--- a/tests/unit/test_migrate_docs.py\n"
+    "+++ b/tests/unit/test_migrate_docs.py\n"
+    "@@ -1,2 +1,2 @@\n-migrate(path)\n+migrate(path, dry_run=True)\n"
 )
 
 
@@ -188,6 +200,7 @@ def _response(*, content: str) -> AIResponse:
 def _run(
     *,
     synthesis: ReviewSynthesisConfig | None,
+    context: ReviewContext | None = None,
     chunks: list[ReviewChunk] | None = None,
     synthesis_content: str | None = None,
     synthesis_error: Exception | None = None,
@@ -201,6 +214,7 @@ def _run(
 
     Args:
         synthesis: Synthesis configuration passed to ``run_review``.
+        context: Review context to review. Defaults to the two-file fixture PR.
         chunks: Chunk plan to force. Defaults to the two-chunk fixture.
         synthesis_content: Raw text the synthesis call returns.
         synthesis_error: Exception the synthesis call raises instead.
@@ -233,7 +247,7 @@ def _run(
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         return run_review(
-            _pr_context(),
+            context if context is not None else _pr_context(),
             provider=provider,
             ai_config=AIConfig(
                 enabled=True,
@@ -476,6 +490,166 @@ def test_phantom_without_a_failure_mechanism_is_downgraded_not_blocking() -> Non
     assert_that(finding.severity).is_equal_to(Severity.P2)
     assert_that(finding.severity_downgraded).is_true()
     assert_that(result.readiness_verdict).is_not_equal_to(ReviewVerdict.BLOCKED)
+
+
+def _migrate_docs_context() -> ReviewContext:
+    """Build the #1914 fixture PR: a script and its test, both changed.
+
+    Returns:
+        A review context whose changed set holds both
+        ``scripts/migrate_docs.py`` and ``tests/unit/test_migrate_docs.py``,
+        so a claim that the test "was never updated" contradicts the diff.
+    """
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="scripts/migrate_docs.py",
+                status="modified",
+                additions=1,
+                deletions=1,
+            ),
+            ChangedFile(
+                path="tests/unit/test_migrate_docs.py",
+                status="modified",
+                additions=1,
+                deletions=1,
+            ),
+        ],
+        unified_diff=_MIGRATE_DIFF + _MIGRATE_TEST_DIFF,
+        pr_metadata=None,
+    )
+
+
+def _migrate_docs_chunks() -> list[ReviewChunk]:
+    """Split the #1914 fixture PR so neither half can see the other.
+
+    Returns:
+        Two single-file chunks, one for the script and one for its test.
+    """
+    return [
+        ReviewChunk(
+            id=1,
+            files=["scripts/migrate_docs.py"],
+            diff=_MIGRATE_DIFF,
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["tests/unit/test_migrate_docs.py"],
+            diff=_MIGRATE_TEST_DIFF,
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+
+def _migrate_docs_phantom() -> str:
+    """Build the #1914 phantom: an unchanged-file claim with a mechanism.
+
+    The fabricated ``failure_scenario`` is what carries it past the P1
+    evidence gate, so only the cross-chunk guard can stop it blocking.
+
+    Returns:
+        JSON text for a synthesis call returning one phantom P1.
+    """
+    return _synthesis_payload(
+        findings=[
+            {
+                "severity": "P1",
+                "category": "test-coverage",
+                "file": "scripts/migrate_docs.py",
+                "line": 1,
+                "title": "The dry-run path ships with no test",
+                "description": ("tests/unit/test_migrate_docs.py was never updated."),
+                "cause": "The new keyword-only parameter has no coverage",
+                "fix": "Add a dry-run case to tests/unit/test_migrate_docs.py",
+                "failure_scenario": (
+                    "A regression in the dry-run branch ships unnoticed and "
+                    "deletes the source files on the next release run."
+                ),
+                "confidence": "high",
+            },
+        ],
+    )
+
+
+def test_phantom_with_a_fabricated_mechanism_is_guarded_one_band_lower() -> None:
+    """A phantom past the evidence gate is still tagged and dropped a band."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        context=_migrate_docs_context(),
+        chunks=_migrate_docs_chunks(),
+        synthesis_content=_migrate_docs_phantom(),
+    )
+
+    assert_that(result.findings).is_length(1)
+    finding = result.findings[0]
+    assert_that(finding.severity).is_equal_to(Severity.P2)
+    assert_that(finding.cross_chunk_contradiction).is_not_none()
+    assert_that(finding.origin).is_equal_to(FindingOrigin.SYNTHESIS)
+    assert_that(result.readiness_verdict).is_not_equal_to(ReviewVerdict.BLOCKED)
+
+
+def test_guarded_synthesized_finding_is_counted_and_still_attributed() -> None:
+    """The guard's count reaches the JSON payload without losing the origin."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        context=_migrate_docs_context(),
+        chunks=_migrate_docs_chunks(),
+        synthesis_content=_migrate_docs_phantom(),
+    )
+
+    payload = review_result_to_dict(result=result)
+    assert_that(payload["cross_chunk_contradictions"]).is_equal_to(1)
+    assert_that(payload["findings"][0]["origin"]).is_equal_to("synthesis")
+    assert_that(payload["findings"][0]["cross_chunk_contradiction"]).is_not_none()
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(1)
+
+
+def test_guarded_changed_paths_matches_the_orchestrator_helper() -> None:
+    """The pass's local path list is the guard's list, renames and copies."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="pkg/renamed.py",
+                status="renamed",
+                additions=1,
+                deletions=1,
+                previous_path="pkg/old_name.py",
+            ),
+            ChangedFile(
+                path="pkg/copy.py",
+                status="copied",
+                additions=1,
+                deletions=0,
+                previous_path="pkg/source.py",
+            ),
+            ChangedFile(
+                path="pkg/plain.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff=_SIGNATURE_DIFF,
+        pr_metadata=None,
+    )
+
+    assert_that(guarded_changed_paths(context=context)).is_equal_to(
+        guard_changed_paths(context=context),
+    )
+    assert_that(guarded_changed_paths(context=context)).is_equal_to(
+        (
+            "pkg/renamed.py",
+            "pkg/old_name.py",
+            "pkg/copy.py",
+            "pkg/source.py",
+            "pkg/plain.py",
+        ),
+    )
 
 
 # --- (e) cap and dedupe -------------------------------------------------------

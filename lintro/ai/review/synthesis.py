@@ -43,8 +43,10 @@ from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.sensitivity import filter_findings_by_policy
+from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
+    guarded_changed_paths,
     select_synthesis_diff,
 )
 
@@ -80,9 +82,11 @@ class SynthesisPass:
     """Everything one synthesis pass contributed to a run.
 
     Attributes:
-        findings: Synthesized findings that survived the cap, the severity
-            gate, the sensitivity policy, and deduplication. Each carries
-            ``origin=FindingOrigin.SYNTHESIS``.
+        findings: Synthesized findings that survived the P1 evidence gate,
+            the sensitivity policy, the cross-chunk contradiction guard, the
+            cap, and deduplication. Each carries
+            ``origin=FindingOrigin.SYNTHESIS``; one the guard tagged also
+            carries ``cross_chunk_contradiction``.
         outcome: What the pass did, for the JSON payload and the shared note.
         degradations: Coverage degradations the pass incurred — a truncated
             input, a failed call, or both. Never empty when the pass could not
@@ -253,13 +257,22 @@ async def run_synthesis_pass(
     """Run the whole-PR cross-chunk pass and return what it contributed.
 
     Exactly one provider call, on the same ``call_ai`` transport and behind
-    the same redaction as every chunk call. The response goes through the
-    shared finding parser — so the P1 evidence gate applies to it exactly as
-    it applies to chunk output, and a phantom "the other file was never
-    updated" P1 with no failure mechanism comes back downgraded and
-    non-blocking rather than failing the review — then the run's sensitivity
-    policy, then the configured cap, then deduplication against the chunk
-    findings.
+    the same redaction as every chunk call. Its findings then pass every
+    filter a chunk finding passes, in this order:
+
+    - the **P1 evidence gate**, applied by the shared finding parser: a
+      phantom P1 with no failure mechanism comes back as a marked,
+      non-blocking P2 rather than failing the review;
+    - the run's **sensitivity policy**, so a preset that drops a band drops
+      it here too;
+    - the **cross-chunk contradiction guard** (#2265), so a phantom that does
+      name a failure mechanism but claims a file the PR changed was never
+      touched is tagged ``cross_chunk_contradiction`` and moved down one band
+      — the pass sees the whole PR, so a claim like that is wrong here for
+      the same reason it is wrong in a chunk;
+    - the configured ``max_findings`` cap, then deduplication against the
+      chunk findings. Both run on the guarded severity, so a tagged finding
+      cannot survive a dedupe drop under a different fingerprint.
 
     Args:
         context: Collected review diff context.
@@ -327,7 +340,17 @@ async def run_synthesis_pass(
         replace(finding, origin=FindingOrigin.SYNTHESIS) for finding in parsed
     )
     gated = filter_findings_by_policy(findings=tagged, policy=policy)
-    capped = tuple(gated)[: max(config.max_findings, 1)]
+    # #2265 applies to this pass too. Guarding here, rather than leaning on
+    # the orchestrator's finalize guard alone, keeps the pass self-contained
+    # and puts the tag on before the cap and the dedupe: whatever this
+    # returns is already guarded, so a tagged phantom can never survive a
+    # dedupe drop under a different fingerprint. The guard is idempotent, so
+    # the finalize pass over the merged list leaves these findings alone.
+    guarded = apply_cross_chunk_guard(
+        findings=gated,
+        changed_paths=guarded_changed_paths(context=context),
+    )
+    capped = tuple(guarded)[: max(config.max_findings, 1)]
     kept = _deduplicate(candidates=capped, existing=existing_findings)
 
     degradations = (

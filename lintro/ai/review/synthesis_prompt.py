@@ -33,8 +33,32 @@ if TYPE_CHECKING:
 __all__ = [
     "build_synthesis_prompt",
     "cross_chunk_paths",
+    "guarded_changed_paths",
     "select_synthesis_diff",
 ]
+
+
+def guarded_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
+    """Return every path the cross-chunk guard treats as changed by the PR.
+
+    A local twin of ``orchestrator.guard_changed_paths``. The synthesis pass
+    needs the same list to guard its own findings before they are capped and
+    deduplicated, and importing it from the orchestrator would close an import
+    cycle: the orchestrator imports :mod:`lintro.ai.review.synthesis`, which
+    imports this module. The two are pinned to the same result by a test.
+
+    Args:
+        context: Collected review context.
+
+    Returns:
+        Changed paths and rename/copy sources, in changed-file order.
+    """
+    return tuple(
+        path
+        for file in context.changed_files
+        for path in (file.path, file.previous_path)
+        if path
+    )
 
 
 def _referenced_paths(*, summary: ChunkSummary) -> frozenset[str]:

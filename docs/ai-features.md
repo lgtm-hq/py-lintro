@@ -488,11 +488,20 @@ How it behaves when enabled:
   planned against. If the whole PR does not fit, the files that more than one chunk
   referenced go in first — those are the seams the pass exists to inspect — and the rest
   follow in path order until the budget is spent.
-- Its output goes through the same finding parser as every chunk, so the P1 evidence
-  gate applies: a phantom P1 with no failure mechanism comes back as a marked,
-  non-blocking P2 rather than failing the review. It is then filtered by the run's
-  sensitivity policy, capped at `max_findings`, and deduplicated against the chunk
-  findings by the same fingerprint the state ledger uses.
+- **Its findings pass every filter a chunk finding passes**, in this order: the **P1
+  evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
+  with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
+  the review); the run's **sensitivity policy**; and the **cross-chunk contradiction
+  guard** described above. The guard matters here for the phantom the evidence gate
+  cannot catch — the one that _does_ name a failure mechanism while claiming a file the
+  PR changed was never updated. The pass sees the whole PR, so a claim like that is
+  wrong here for the same reason it is wrong in a chunk: it comes back tagged
+  `cross_chunk_contradiction` and one band lower, so it cannot block on its own. What
+  survives is then capped at `max_findings` and deduplicated against the chunk findings
+  by the same fingerprint the state ledger uses — both on the guarded severity, so a
+  tagged finding cannot slip through a dedupe drop under a different fingerprint. A
+  guarded synthesized finding is counted in the root `cross_chunk_contradictions` like
+  any other and keeps its `"origin": "synthesis"`.
 - **A synthesis failure is never fatal.** A provider error, a budget stop, or an
   unreadable answer leaves the chunk findings intact and marks the run's coverage
   degraded instead.
