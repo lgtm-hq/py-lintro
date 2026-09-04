@@ -971,7 +971,16 @@ def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
     dockerfile = (_REPO_ROOT / "docker" / "tools.Dockerfile").read_text(
         encoding="utf-8",
     )
-    assert_that(dockerfile).described_as("docker/tools.Dockerfile").contains(switch)
+    # Match the ENV instruction itself: a bare substring would also be
+    # satisfied by the surrounding comment or by a RUN line, neither of which
+    # puts the variable in the test process's environment.
+    env_instruction = re.search(
+        rf"(?m)^\s*ENV\s+{re.escape(switch)}(?:\s|$)",
+        dockerfile,
+    )
+    assert_that(env_instruction).described_as(
+        "docker/tools.Dockerfile ENV instruction",
+    ).is_not_none()
 
     compose = yaml.safe_load(
         (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
