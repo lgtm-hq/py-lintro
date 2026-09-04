@@ -69,6 +69,7 @@ EXIT_DEGRADED = 2
 _PENDING_RUN_STATES = frozenset(
     {"queued", "in_progress", "waiting", "pending", "requested", "action_required"},
 )
+_NPM_JOB_PREFIX = "publish to npm"
 
 _FORMULA_VERSION = re.compile(r'^\s*version\s+"([^"]+)"', re.MULTILINE)
 _VERSION_CORE = re.compile(r"^(\d+(?:\.\d+)*)(.*)$")
@@ -307,15 +308,19 @@ def release_pipeline_pending(
     """
     url = (
         f"https://api.github.com/repos/{repo}/actions/workflows/"
-        f"{workflow}/runs?per_page=10"
+        f"{workflow}/runs?per_page=100"
     )
     try:
-        payload: dict[str, Any] = json.loads(fetch(url=url))
+        payload = json.loads(fetch(url=url))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise RuntimeError(
             f"GitHub API unreachable: {type(exc).__name__}: {exc}",
         ) from exc
-    runs = payload.get("workflow_runs", [])
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Unexpected GitHub API payload: expected a top-level JSON object",
+        )
+    runs = payload.get("workflow_runs")
     if not isinstance(runs, list):
         raise RuntimeError("Unexpected GitHub API payload: workflow_runs missing")
     pending_runs = [
@@ -330,6 +335,100 @@ def release_pipeline_pending(
         str(run.get("head_branch", "")).strip().lstrip("vV") == wanted
         for run in pending_runs
     )
+
+
+def pending_npm_publish_runs(
+    *,
+    repo: str,
+    workflow: str,
+    fetch: TextFetcher,
+    expected: str,
+) -> list[str]:
+    """Return URLs of expected-version runs with npm still in flight.
+
+    The npm workflow is reusable, so its production invocation is represented
+    by a job nested in the PyPI/tag workflow run.  Looking up the standalone
+    ``publish-npm.yml`` workflow would find only manual dispatches; those runs
+    use ``main`` as ``head_branch`` and do not expose their ``release_tag`` in
+    the workflow-runs listing.  Correlating the parent run by its release tag
+    and then checking its npm job avoids stale/manual false positives.
+
+    Args:
+        repo: Repository in ``owner/name`` form.
+        workflow: Production release workflow file name.
+        fetch: Text fetcher used for GitHub API requests.
+        expected: Version under audit.
+
+    Returns:
+        Parent run URLs whose npm job has a pending status.
+
+    Raises:
+        RuntimeError: If the GitHub API could not be queried or parsed.
+    """
+    runs_url = (
+        f"https://api.github.com/repos/{repo}/actions/workflows/"
+        f"{workflow}/runs?per_page=100"
+    )
+    try:
+        payload = json.loads(fetch(url=runs_url))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"GitHub API unreachable: {type(exc).__name__}: {exc}",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Unexpected GitHub API payload: expected a top-level JSON object",
+        )
+    runs = payload.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise RuntimeError("Unexpected GitHub API payload: workflow_runs missing")
+
+    wanted = expected.strip().lstrip("vV")
+    matching_runs = [
+        run
+        for run in runs
+        if isinstance(run, dict)
+        and str(run.get("head_branch", "")).strip().lstrip("vV") == wanted
+        and str(run.get("status", "")) in _PENDING_RUN_STATES
+    ]
+    pending_urls: list[str] = []
+    for run in matching_runs:
+        run_id = run.get("id")
+        raw_run_url = run.get("html_url")
+        run_url = raw_run_url.strip() if isinstance(raw_run_url, str) else ""
+        if not isinstance(run_id, int) or not run_url:
+            # A malformed unrelated entry should not manufacture an approval
+            # instruction.  The parent run lookup itself remains usable.
+            continue
+        jobs_url = (
+            f"https://api.github.com/repos/{repo}/actions/runs/"
+            f"{run_id}/jobs?per_page=100"
+        )
+        try:
+            jobs_payload = json.loads(fetch(url=jobs_url))
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise RuntimeError(
+                f"GitHub API unreachable while reading run {run_id}: "
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        if not isinstance(jobs_payload, dict):
+            raise RuntimeError(
+                f"Unexpected GitHub API payload for run {run_id}: "
+                "expected a top-level JSON object",
+            )
+        jobs = jobs_payload.get("jobs")
+        if not isinstance(jobs, list):
+            raise RuntimeError(
+                f"Unexpected GitHub API payload for run {run_id}: jobs missing",
+            )
+        if any(
+            isinstance(job, dict)
+            and str(job.get("status", "")) in _PENDING_RUN_STATES
+            and str(job.get("name", "")).strip().lower().startswith(_NPM_JOB_PREFIX)
+            for job in jobs
+        ):
+            pending_urls.append(run_url)
+    return pending_urls
 
 
 def leader_version(*, channels: list[ChannelStatus]) -> str | None:
@@ -462,6 +561,12 @@ def audit(
         )
 
     expected = requested or leader_version(channels=channels)
+    if expected is None:
+        return EXIT_DEGRADED, (
+            "## Version skew audit: degraded\n\n"
+            "Could not determine the expected release version; no skew verdict "
+            f"was reached.\n\n{render_table(channels=channels, expected=None)}"
+        )
     table = render_table(channels=channels, expected=expected)
     skewed = [channel for channel in channels if channel.version != expected]
     if not skewed:
@@ -486,11 +591,31 @@ def audit(
             fetch=fetch,
             expected=expected,
         )
+        npm_pending_runs = []
+        if any(channel.name == "npm" for channel in skewed):
+            npm_pending_runs = pending_npm_publish_runs(
+                repo=args.repo,
+                workflow=args.release_workflow,
+                fetch=fetch,
+                expected=expected,
+            )
     except RuntimeError as exc:
         return EXIT_DEGRADED, (
             f"## Version skew audit: degraded\n\n"
             f"Channels disagree but the release-pipeline state could not be "
             f"confirmed ({exc}), so no alarm was raised.\n\n{table}"
+        )
+    lagging = ", ".join(f"{c.name}={c.version}" for c in skewed)
+    if npm_pending_runs:
+        approvals = "\n".join(
+            f"- pending approval: run {run_url}" for run_url in npm_pending_runs
+        )
+        return EXIT_SKEW, (
+            f"## Version skew audit: FAILED\n\n"
+            f"Published channels disagree past the settle window. "
+            f"Expected `{expected}`; lagging: {lagging}.\n\n"
+            f"Publish - npm is still in flight for the expected release; "
+            f"maintainer action may be required:\n{approvals}\n\n{table}"
         )
     if pending:
         return EXIT_OK, (
@@ -500,7 +625,6 @@ def audit(
             f"{table}"
         )
 
-    lagging = ", ".join(f"{c.name}={c.version}" for c in skewed)
     return EXIT_SKEW, (
         f"## Version skew audit: FAILED\n\n"
         f"Published channels disagree past the settle window. "

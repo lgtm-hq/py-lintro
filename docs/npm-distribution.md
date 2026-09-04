@@ -65,6 +65,18 @@ older than the registry's current `latest`, set `dist_tag` to a non-latest value
 version remains installable as `@lgtm-hq/lintro@<version>`; only the floating `latest`
 pointer is left alone.
 
+### Approval and backfills
+
+The `npm` environment approval gate is intentionally preserved. Normal releases follow
+the dependency order PyPI → platform binaries/Homebrew tap → npm: approve the npm
+deployment only after the preceding jobs have uploaded the release binaries. If a
+production release is interrupted, open the original `Publish - PyPI Production` run and
+choose **Re-run failed jobs**. This reruns the binaries/Homebrew work and the dependent
+npm publish in the existing PyPI → binaries/Homebrew → npm order. Approve the npm
+environment only when that same production run reaches its waiting npm job. Do not
+dispatch or retry the standalone `publish-npm.yml` workflow as a substitute for the
+production chain.
+
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place
 self-upgrade) in CI. That mutates the Actions toolcache npm tree and breaks
