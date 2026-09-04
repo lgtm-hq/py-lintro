@@ -19,7 +19,11 @@ still names the sticky's fix-all for everything open across all rounds.
 from __future__ import annotations
 
 from lintro import __version__ as lintro_version
-from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
+from lintro.ai.resolved_ai_config import (
+    MAX_COST_LABEL,
+    format_max_cost_label,
+    format_sourced_value,
+)
 from lintro.ai.review.agent_prompts import (
     prompt_findings,
     render_agent_prompt_panel,
@@ -267,7 +271,7 @@ def _run_stats_section(
     if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
         secondary.append(
             (
-                "max cost",
+                MAX_COST_LABEL,
                 format_max_cost_label(
                     max_cost_usd=metadata.max_cost_usd,
                     source=metadata.max_cost_usd_source or None,

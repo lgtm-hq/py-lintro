@@ -303,7 +303,7 @@ def test_run_stats_show_uncapped_max_cost_with_source(
         transport="cli",
     )
 
-    assert_that(body).contains("| transport | max cost |")
+    assert_that(body).contains("| transport | Max cost |")
     assert_that(body).contains("uncapped (env)")
 
 

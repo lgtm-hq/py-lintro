@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -133,12 +135,17 @@ def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
     assert_that(result.output).does_not_contain("Traceback")
 
 
-def test_review_max_cost_flag_beats_transport_profile() -> None:
-    """``--max-cost-usd uncapped`` lifts a YAML transport-profile cap (#2154)."""
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
+@pytest.fixture
+def profile_cap_review_pipeline() -> Iterator[dict[str, MagicMock]]:
+    """Enter the review pipeline patched over a CLI transport-profile cap.
+
+    Shared by the cost-cap provenance tests so the same ~50-line patch
+    stack is not written twice (#2048).
+
+    Yields:
+        dict[str, MagicMock]: Entered patch mocks keyed by the patched
+            review dependency name.
+    """
     mock_config = MagicMock(
         ai={
             "enabled": True,
@@ -154,118 +161,45 @@ def test_review_max_cost_flag_beats_transport_profile() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=_empty_result(),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.render_review_output",
-        ) as mock_render,
-    ):
-        mock_get_provider.return_value = MagicMock(
-            model_name="gpt-4o",
-            name="openai",
-        )
-        result = runner.invoke(cli, ["review", "--max-cost-usd", "uncapped"])
+    patches = _mock_review_pipeline(mock_config=mock_config)
+    with ExitStack() as stack:
+        yield {name: stack.enter_context(patcher) for name, patcher in patches.items()}
+
+
+def test_review_max_cost_flag_beats_transport_profile(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """``--max-cost-usd uncapped`` lifts a YAML transport-profile cap (#2154).
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review", "--max-cost-usd", "uncapped"])
 
     assert_that(result.exit_code).is_equal_to(0)
+    mock_get_provider = profile_cap_review_pipeline["get_provider"]
     provider_config = mock_get_provider.call_args.args[0]
     assert_that(provider_config.max_cost_usd).is_none()
+    mock_render = profile_cap_review_pipeline["render_review_output"]
     rendered = mock_render.call_args.kwargs["result"]
     assert_that(rendered.metadata.max_cost_usd).is_none()
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
 
 
-def test_review_profile_cap_provenance_is_config() -> None:
-    """A YAML-only transport-profile cap is sourced as config, not default."""
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
-    mock_config = MagicMock(
-        ai={
-            "enabled": True,
-            "review": True,
-            "provider": "openai",
-            "transport": "cli",
-            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
-        },
-    )
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
+def test_review_profile_cap_provenance_is_config(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """A YAML-only transport-profile cap is sourced as config, not default.
 
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=_empty_result(),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.render_review_output",
-        ) as mock_render,
-    ):
-        mock_get_provider.return_value = MagicMock(
-            model_name="gpt-4o",
-            name="openai",
-        )
-        result = runner.invoke(cli, ["review"])
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
+    mock_render = profile_cap_review_pipeline["render_review_output"]
     rendered = mock_render.call_args.kwargs["result"]
     assert_that(rendered.metadata.max_cost_usd).is_equal_to(1.25)
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("config")

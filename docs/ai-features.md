@@ -845,10 +845,15 @@ as the legacy `ai.max_cost_usd` scalar.
 | `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`       | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                      |
 | `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                 |
 
+> **Do not copy a cost cap between the two surfaces.** `0` means different things in
+> YAML and in an overlay: `ai.max_cost_usd: 0` is a real $0 cap that stops the run on
+> the first budgeted call, while `LINTRO_AI_MAX_COST_USD=0` / `--max-cost-usd 0` is
+> rejected as ambiguous. Only `uncapped` (overlay) or `null` (YAML) lifts the ceiling.
+
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
 default. Review output annotates each resolved field with its source
-(`provider: cursor (env)`, `max cost: uncapped (env)`).
+(`provider: cursor (env)`, `Max cost: uncapped (env)`).
 
 ```bash
 # Try Cursor locally without dirtying .lintro-config.yaml

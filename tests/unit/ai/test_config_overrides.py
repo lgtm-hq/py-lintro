@@ -352,7 +352,13 @@ def test_max_cost_usd_overlay_zero_is_rejected(
 
 
 def test_yaml_zero_is_a_zero_dollar_cap_not_uncapped() -> None:
-    """Committed YAML ``0`` is a $0 cap (#2024). Overlay rejection is separate."""
+    """Committed YAML ``0`` is a $0 cap, matching ``CostBudget`` (#2024).
+
+    ``CostBudget`` treats ``0.0`` as a hard $0 ceiling and only ``None`` as
+    unlimited, so YAML ``0`` must never be reinterpreted as uncapped. The
+    overlay surface rejects ``0`` instead (#2154); the two spellings are
+    not interchangeable.
+    """
     resolved = AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0))
 
     assert_that(resolved.config.max_cost_usd).is_equal_to(0.0)
@@ -481,17 +487,38 @@ def test_nonnumeric_max_cost_usd_flag_fails_loud() -> None:
     assert_that(message).contains("uncapped")
 
 
-def test_nonfinite_max_cost_usd_fails_loud() -> None:
-    """NaN and inf are rejected rather than stored as a cap (#2024)."""
-    for raw in ("nan", "inf", "-inf"):
-        with pytest.raises(AIConfigOverrideError) as exc_info:
-            apply_cli_overrides(
-                AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
-                max_cost_usd=raw,
-            )
-        message = str(exc_info.value)
-        assert_that(message).contains(f"--max-cost-usd='{raw}'")
-        assert_that(message).contains("uncapped")
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+def test_nonfinite_max_cost_usd_fails_loud(raw: str) -> None:
+    """NaN and inf are rejected rather than stored as a cap (#2024).
+
+    Args:
+        raw: Non-finite ``--max-cost-usd`` spelling under test.
+    """
+    with pytest.raises(AIConfigOverrideError) as exc_info:
+        apply_cli_overrides(
+            AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+            max_cost_usd=raw,
+        )
+
+    message = str(exc_info.value)
+    assert_that(message).contains(f"--max-cost-usd='{raw}'")
+    assert_that(message).contains("uncapped")
+
+
+@pytest.mark.parametrize("raw", ["", "   "])
+def test_blank_max_cost_usd_flag_is_unset(raw: str) -> None:
+    """A blank ``--max-cost-usd`` is unset, like the other string flags (#2048).
+
+    Args:
+        raw: Blank or whitespace-only flag value under test.
+    """
+    resolved = apply_cli_overrides(
+        AIConfig.resolve_from_mapping(_mapping(max_cost_usd=0.5)),
+        max_cost_usd=raw,
+    )
+
+    assert_that(resolved.config.max_cost_usd).is_equal_to(0.5)
+    assert_that(resolved.source_of("max_cost_usd")).is_equal_to(ConfigSource.CONFIG)
 
 
 def test_whitespace_max_cost_usd_env_is_unset(
@@ -572,6 +599,31 @@ def test_format_sourced_value_annotates_known_sources() -> None:
     ).is_equal_to("$1.50 (flag)")
 
 
+@pytest.mark.parametrize(
+    ("cap", "expected"),
+    [
+        (0.004, "$0.0040 (flag)"),
+        (0.0001, "$0.0001 (flag)"),
+        (0.0, "$0.00 (flag)"),
+        (0.01, "$0.01 (flag)"),
+        (2.5, "$2.50 (flag)"),
+    ],
+)
+def test_format_max_cost_label_keeps_sub_cent_precision(
+    cap: float,
+    expected: str,
+) -> None:
+    """Sub-cent caps render with four decimals, not as ``$0.00`` (#2048).
+
+    Args:
+        cap: Effective USD ceiling under test.
+        expected: Rendered label including provenance.
+    """
+    assert_that(
+        format_max_cost_label(max_cost_usd=cap, source="flag"),
+    ).is_equal_to(expected)
+
+
 def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-execution status shows env provenance for provider/model/transport."""
     from lintro.ai.display.status import render_ai_status
@@ -591,7 +643,7 @@ def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert_that(lines).contains("  provider: openai (env)")
     assert_that("".join(lines)).contains("transport: api (config)")
-    assert_that(lines).contains("  max_cost_usd: uncapped (default)")
+    assert_that(lines).contains("  Max cost: uncapped (default)")
 
 
 def test_status_annotates_env_max_cost_usd(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -610,7 +662,7 @@ def test_status_annotates_env_max_cost_usd(monkeypatch: pytest.MonkeyPatch) -> N
         is_ci=False,
     )
 
-    assert_that(lines).contains("  max_cost_usd: $2.50 (env)")
+    assert_that(lines).contains("  Max cost: $2.50 (env)")
 
 
 def test_status_annotates_profile_cap_as_config(
@@ -635,8 +687,8 @@ def test_status_annotates_profile_cap_as_config(
         is_ci=False,
     )
 
-    assert_that(lines).contains("  max_cost_usd: $1.25 (config)")
-    assert_that(lines).does_not_contain("  max_cost_usd: uncapped (default)")
+    assert_that(lines).contains("  Max cost: $1.25 (config)")
+    assert_that(lines).does_not_contain("  Max cost: uncapped (default)")
 
 
 def test_status_marks_enabled_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -586,20 +586,20 @@ export LINTRO_AI_REVIEW=1
 export LINTRO_AI_MAX_COST_USD=uncapped # sentinel; a positive number is a USD cap; overlay 0 is an error
 ```
 
-| Variable                         | Description                                                  | Default   |
-| -------------------------------- | ------------------------------------------------------------ | --------- |
-| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
-| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
-| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
-| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
-| `LINTRO_NO_CACHE`                | Force-clear caches each invoke (`1`/`true`/`yes`/`on`)       | -         |
-| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)   | -         |
-| `LINTRO_AI_MODEL`                | Override `ai.model`                                          | -         |
-| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                      | -         |
-| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)               | -         |
-| `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                | -         |
-| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (USD cap or `uncapped`)           | -         |
+| Variable                         | Description                                                                                                                                  | Default   |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                                                                                                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)                                                                                  | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`                                                                                       | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only                                                                                 | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)                                                                                   | `0`       |
+| `LINTRO_NO_CACHE`                | Force-clear caches each invoke (`1`/`true`/`yes`/`on`)                                                                                       | -         |
+| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)                                                                                   | -         |
+| `LINTRO_AI_MODEL`                | Override `ai.model`                                                                                                                          | -         |
+| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                                                                                                      | -         |
+| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                                                                                               | -         |
+| `LINTRO_AI_REVIEW`               | Override `ai.review` (`1`/`0`/`true`/`false`)                                                                                                | -         |
+| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (USD cap or `uncapped`; `0` is rejected — YAML `0` is a $0 cap, so never copy the value between the two surfaces) | -         |
 
 `LINTRO_NO_CACHE` is truthy after trim and case-insensitive match against `1`, `true`,
 `yes`, or `on`.
