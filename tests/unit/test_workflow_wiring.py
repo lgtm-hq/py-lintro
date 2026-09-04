@@ -923,10 +923,22 @@ def test_test_ci_has_no_path_classification_surface() -> None:
     assert_that(test_ci["jobs"]).does_not_contain_key("changes")
     assert_that(raw).does_not_contain("resolve-pipeline-relevance.sh")
     assert_that(raw).does_not_contain("needs.changes.")
-    for job_id, job in test_ci["jobs"].items():
-        assert_that(job.get("needs") or []).described_as(
-            f"{job_id} still depends on a path classifier",
-        ).does_not_contain("changes")
+
+    # Exact dependency lists, not a "does not contain 'changes'" subset check:
+    # a classifier reintroduced under any other job id would slip past a
+    # name-shaped assertion. These are the only edges test-ci may have.
+    expected_needs: dict[str, list[str]] = {
+        "test-compat": [],
+        "test-coverage": [],
+        "test-gate": ["test-compat", "test-coverage"],
+        "test-suite-coverage": ["test-gate"],
+        "stage-coverage-html": ["test-coverage"],
+    }
+    assert_that(set(test_ci["jobs"])).is_equal_to(set(expected_needs))
+    for job_id, expected in expected_needs.items():
+        assert_that(test_ci["jobs"][job_id].get("needs") or []).described_as(
+            job_id,
+        ).is_equal_to(expected)
     # on.<event>.paths collapses nested required contexts (#1359).
     triggers = test_ci["on"]
     assert_that(triggers).is_not_empty()
@@ -972,7 +984,7 @@ def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains("test-gate")
+    assert_that(gate["needs"]).is_equal_to(["test-gate"])
     assert_that(gate["with"]).does_not_contain_key("pipeline-skip")
     assert_that(gate["with"]["upstream-result"]).is_equal_to(
         "${{ needs.test-gate.outputs.result }}",
