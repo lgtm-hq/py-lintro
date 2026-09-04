@@ -387,12 +387,17 @@ def evaluate_convergence(
         score is not None and math.isfinite(score) and 0.0 <= score < threshold
         for score in scores
     )
-    # ``score`` stays unset when the latest window run was never measured:
-    # a fabricated zero would read as the quietest possible round.
+    # ``score`` stays unset when the latest window run was never measured, or
+    # was measured to something unusable: a fabricated zero would read as the
+    # quietest possible round, and a NaN/inf would render as a nonsense stamp
+    # and serialize to invalid JSON on the way to CI (#2099 review).
+    latest = scores[-1]
+    if latest is not None and not (math.isfinite(latest) and latest >= 0.0):
+        latest = None
     return ConvergenceDecision(
         converged=quiet and not degraded,
         round_number=window[-1].round + 1,
-        score=scores[-1],
+        score=latest,
         threshold=threshold,
         stable_rounds=stable_rounds,
         trajectory=trajectory,

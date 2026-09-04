@@ -618,17 +618,21 @@ provider is constructed, so a converged round costs nothing:
   the next round that does run resumes from there.
 - The sticky comment is re-rendered from the last good board with a
   `🔁 Converged — converged at round N (score X < threshold Y)` banner.
-- Exit code `0`, and `--output json` emits a distinct envelope
+- `--output json` emits a distinct envelope
   (`{"outcome": "converged", "converged": {...}}`) that carries no `readiness_verdict`,
   no `findings`, and no `partial` key. `scripts/ci/classify_review_outcome.py` reports
-  it as its own green **converged** outcome — never as "reviewed, found nothing" and
-  never as a failure.
+  it as its own **converged** outcome — never as "reviewed, found nothing". Exit 0
+  unless `converged.open_p1` is greater than zero, in which case the skip exits 1 and
+  the check goes red; see the readiness-gate bullet below for the single exit contract.
 - A `partial` or coverage-limited round can never count toward the streak: a low score
   from a round that never looked properly is not evidence of stability. Rounds persisted
   before scoring existed carry no score and are likewise not evidence.
-- A converged skip runs no provider call and no advisory tools, so `--fail-on-findings`
-  has nothing to evaluate on that invocation; the last real round's advisory result
-  stands.
+- A converged skip is a short-circuit of the whole command, not just the review round:
+  it returns before the advisory tools (`idiom-review` and friends) run, so
+  `--fail-on-findings` always has nothing to evaluate on that invocation and never
+  contributes to the exit code. The last real round's advisory result stands; run
+  `lintro review --full` to re-run the advisory tail. This is deliberate — the skip
+  exists to spend nothing.
 - A converged skip exits 0 unless the last real round left an open P1, in which case it
   exits 1 exactly as that round did: skipping never relaxes the readiness gate. The JSON
   envelope reports the count as `converged.open_p1`.

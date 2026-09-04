@@ -208,11 +208,26 @@ def test_the_sticky_stays_under_its_size_caps(
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(len(body)).is_less_than_or_equal_to(PRIMARY_SOFT_LIMIT)
+    # Fitting under the cap must not be achieved by dropping the signal the
+    # line exists to carry: a fitter that shed it would still pass a pure
+    # length assertion (#2099 review).
+    assert_that(body).contains("Convergence score")
 
 
-def test_the_converged_banner_stamps_the_board_it_re_renders() -> None:
-    """A skipped round explains itself over the last good board."""
-    state = ReviewState(
+def test_the_converged_banner_stamps_the_board_it_re_renders(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A skipped round explains itself *over the last good board*.
+
+    The board carries real open findings, so a stamp that blanked it — or
+    rendered the empty-state page under the banner — fails here. An empty
+    board could not distinguish the two.
+
+    Args:
+        sample_review_result: Baseline review result fixture.
+    """
+    state = replace(
+        advance_review_state(result=sample_review_result, head_sha="a" * 40),
         runs=(
             RunRecord(round=1, sha="sha1", model="claude", convergence_score=1.0),
             RunRecord(round=2, sha="sha2", model="claude", convergence_score=0.5),
@@ -232,6 +247,9 @@ def test_the_converged_banner_stamps_the_board_it_re_renders() -> None:
     assert_that(body).contains("converged at round 3 (score 0.50 < threshold 3.00)")
     assert_that(body).contains("No provider call")
     assert_that(body).contains("--full")
+    assert_that(state.findings).is_not_empty()
+    for record in state.findings:
+        assert_that(body).contains(record.title)
 
 
 def test_the_converged_banner_names_the_streak_that_earned_the_stop() -> None:

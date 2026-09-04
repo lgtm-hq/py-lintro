@@ -17,8 +17,11 @@ from lintro.ai.review.convergence import (
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
-from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 
 
@@ -54,6 +57,49 @@ def _record(
         evidence_style=evidence_style,
         status=status,
         kind=kind,
+    )
+
+
+def _matched(
+    *,
+    round_number: int,
+    style: EvidenceStyle | None = None,
+    previous: ReviewState | None = None,
+) -> FindingMatchResult:
+    """Run one matching round through the public ``match_findings`` seam.
+
+    Args:
+        round_number: Round being matched.
+        style: Evidence basis this round reports, or ``None`` to report no
+            findings at all (which resolves the prior one).
+        previous: State persisted by the prior round.
+
+    Returns:
+        The match result for the round.
+    """
+    findings = (
+        ()
+        if style is None
+        else (
+            ReviewFinding(
+                title="Leak",
+                file="a.py",
+                line=10,
+                severity=Severity.P2,
+                category="logic-bug",
+                confidence="high",
+                evidence_style=style,
+                description="d",
+                cause="c",
+                fix="f",
+            ),
+        )
+    )
+    return match_findings(
+        previous=previous,
+        findings=findings,
+        round_number=round_number,
+        head_sha=f"sha{round_number}",
     )
 
 
@@ -492,27 +538,40 @@ def test_a_decision_serializes_its_whole_case() -> None:
 
 
 def test_carried_finding_keeps_its_scored_evidence_style() -> None:
-    """A carried finding is not re-scored on a changed evidence label."""
-    from dataclasses import replace
+    """A carried finding is not re-scored on a changed evidence label.
 
-    from lintro.ai.review.finding_matcher import _merge_pair
-
-    prior = FindingRecord(
-        fingerprint="fp",
-        severity=Severity.P2,
-        evidence_style=EvidenceStyle.DIFF_LOCAL,
-        status=FindingStatus.OPEN,
-    )
-    current = replace(prior, evidence_style=EvidenceStyle.SPECULATIVE)
-
-    carried, _outcome = _merge_pair(prior=prior, current=current)
-    regressed, _outcome = _merge_pair(
-        prior=replace(prior, status=FindingStatus.RESOLVED),
-        current=current,
+    Driven through the public ``match_findings`` seam production uses, so a
+    later change that dropped or overwrote ``evidence_style`` after the merge
+    fails here rather than passing on the private helper.
+    """
+    first = _matched(round_number=1, style=EvidenceStyle.DIFF_LOCAL)
+    carried = _matched(
+        round_number=2,
+        style=EvidenceStyle.SPECULATIVE,
+        previous=ReviewState(findings=first.records),
     )
 
-    assert_that(carried.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
-    assert_that(regressed.evidence_style).is_equal_to(EvidenceStyle.SPECULATIVE)
+    assert_that(carried.carried).is_length(1)
+    assert_that(carried.carried[0].evidence_style).is_equal_to(
+        EvidenceStyle.DIFF_LOCAL,
+    )
+
+
+def test_regressed_finding_is_re_scored_on_its_new_evidence() -> None:
+    """A regression is a fresh sighting, so it adopts this round's basis."""
+    first = _matched(round_number=1, style=EvidenceStyle.DIFF_LOCAL)
+    resolved = _matched(round_number=2, previous=ReviewState(findings=first.records))
+    regressed = _matched(
+        round_number=3,
+        style=EvidenceStyle.SPECULATIVE,
+        previous=ReviewState(findings=resolved.records),
+    )
+
+    assert_that(resolved.resolved).is_length(1)
+    assert_that(regressed.regressed).is_length(1)
+    assert_that(regressed.regressed[0].evidence_style).is_equal_to(
+        EvidenceStyle.SPECULATIVE,
+    )
 
 
 @pytest.mark.parametrize("field", ["threshold", "stable_rounds"])
@@ -613,30 +672,110 @@ def test_score_at_the_threshold_is_not_quiet() -> None:
 
 
 def test_carried_finding_scores_on_its_original_likelihood() -> None:
-    """The matcher's carry rule keeps the score a finding was first given."""
-    from dataclasses import replace
+    """The matcher's carry rule keeps the score a finding was first given.
 
-    from lintro.ai.review.finding_matcher import _merge_pair
+    The first sighting is deliberately *not* the default style, so a merge
+    that dropped the field (falling back to ``DIFF_LOCAL``) would change the
+    score. Driven through ``match_findings``, not the private merge helper.
+    """
+    first = _matched(round_number=1, style=EvidenceStyle.SPECULATIVE)
+    carried = _matched(
+        round_number=2,
+        style=EvidenceStyle.DIFF_LOCAL,
+        previous=ReviewState(findings=first.records),
+    )
 
-    # The prior is deliberately *not* the default style, so a merge that
-    # dropped the field (falling back to DIFF_LOCAL) would change the score.
-    prior = FindingRecord(
-        fingerprint="fp",
-        severity=Severity.P2,
-        category="logic-bug",
-        confidence="high",
-        evidence_style=EvidenceStyle.SPECULATIVE,
-        status=FindingStatus.OPEN,
+    assert_that(score_records(records=carried.records)).is_equal_to(
+        score_records(records=first.records),
     )
-    current = replace(prior, evidence_style=EvidenceStyle.DIFF_LOCAL)
-    carried, _outcome = _merge_pair(prior=prior, current=current)
+    assert_that(score_records(records=carried.records)).is_not_equal_to(
+        score_records(records=(_record(evidence_style=EvidenceStyle.DIFF_LOCAL),)),
+    )
 
-    assert_that(score_records(records=(carried,))).is_equal_to(
-        score_records(records=(prior,)),
+
+def test_a_v2_record_without_an_evidence_style_scores_at_diff_local() -> None:
+    """An upgraded blob scores rather than raising on the missing key.
+
+    A v2 state blob carries no ``evidence_style``, and the likelihood table is
+    indexed directly. Decoding must therefore land on a real member — the
+    ``diff_local`` default, which is the *highest* likelihood, so a missing
+    label can never deflate a PR toward an early stop.
+    """
+    v2_payload = {
+        "fingerprint": "a" * 16,
+        "severity": "P2",
+        "category": "logic-bug",
+        "confidence": "high",
+        "status": "open",
+    }
+    record = FindingRecord.from_dict(v2_payload)
+
+    assert_that(record).is_not_none()
+    assert record is not None
+    assert_that(record.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
+    assert_that(score_records(records=(record,))).is_equal_to(
+        score_records(records=(_record(evidence_style=EvidenceStyle.DIFF_LOCAL),)),
     )
-    assert_that(score_records(records=(carried,))).is_not_equal_to(
-        score_records(records=(current,)),
+
+
+@pytest.mark.parametrize(
+    "bad_score",
+    [float("nan"), float("inf"), float("-inf")],
+    ids=["nan", "inf", "-inf"],
+)
+def test_a_non_finite_score_is_never_serialized(bad_score: float) -> None:
+    """A corrupt score is dropped, never written as invalid JSON.
+
+    ``json.dumps`` emits a bare ``NaN``/``Infinity`` token for a non-finite
+    float, which no strict JSON reader accepts — one such value would make the
+    whole state blob undecodable for every later round.
+
+    Args:
+        bad_score: Unusable score value under test.
+    """
+    import json
+
+    payload = RunRecord(round=1, convergence_score=bad_score).to_dict()
+
+    assert_that(payload).does_not_contain_key("convergence_score")
+    assert_that(json.loads(json.dumps(payload, allow_nan=False))).is_equal_to(payload)
+
+
+def test_a_negative_persisted_score_decodes_as_unmeasured() -> None:
+    """A negative score is valid JSON but impossible, so it never scores.
+
+    Scores are non-negative by construction, and zero is the strongest
+    possible evidence of convergence — so a corrupt negative must degrade to
+    "not measured" rather than to the quietest round imaginable.
+    """
+    decoded = RunRecord.from_dict({"round": 1, "convergence_score": -1.0})
+
+    assert_that(decoded.convergence_score).is_none()
+
+
+@pytest.mark.parametrize(
+    "bad_score",
+    [float("nan"), float("inf"), -1.0],
+    ids=["nan", "inf", "negative"],
+)
+def test_an_unusable_in_memory_score_never_reaches_the_decision(
+    bad_score: float,
+) -> None:
+    """The decision reports "not measured" rather than a nonsense number.
+
+    Args:
+        bad_score: Unusable score value under test.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=0.5),
+        RunRecord(round=2, convergence_score=bad_score),
     )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_false()
+    assert_that(decision.score).is_none()
+    assert_that(decision.to_dict()["score"]).is_none()
 
 
 def test_stamp_refuses_a_decision_without_a_measured_score() -> None:

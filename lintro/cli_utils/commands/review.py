@@ -194,14 +194,26 @@ def _finish_converged_review(
     effective_repo: str | None,
     prior_state: ReviewState,
 ) -> NoReturn:
-    """Stamp a short-circuited round and exit 0 without calling the provider.
+    """Stamp a short-circuited round and exit without calling the provider.
 
     Reached only when the convergence stop rule fired (#2099), which happens
-    before the provider is constructed — so this path costs nothing and can
-    never touch the coverage or resume bookkeeping. Deliberately no state is
-    persisted: no round ran, so the round counter, the tracked findings, and
-    the carried coverage all stay exactly as the last real round left them,
-    and the next round that *does* run resumes from there untouched.
+    before the provider is constructed — so no provider call is made and the
+    coverage and resume bookkeeping are never touched. Deliberately no state
+    is persisted: no round ran, so the round counter, the tracked findings,
+    and the carried coverage all stay exactly as the last real round left
+    them, and the next round that *does* run resumes from there untouched.
+
+    This raises, so it short-circuits the *whole* command, not just the review
+    round: the advisory-tool tail and the ``--fail-on-findings`` gate below
+    never run either. That is the point — the skip exists to spend nothing —
+    and ``--full`` re-runs the command end to end when the advisory tools are
+    wanted. Context collection and ``--with-lint`` have already run by this
+    point, so "costs nothing" means no provider call, not literally no work.
+
+    The exit contract is the same one a real round uses: 0 when nothing open
+    blocks, 1 when the last real round left an open P1. Questions never block,
+    matching :func:`~lintro.ai.review.finding_matcher.derive_verdict` and
+    ``ReviewResult.has_p1_findings``.
 
     Args:
         decision: The converged decision that skipped the round.

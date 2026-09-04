@@ -5,13 +5,16 @@ The dogfood AI review check reported ``success`` on every pull request while
 producing no review at all: a depleted Anthropic balance made every run abort,
 the wrapper swallowed the exit code, and ``AI Review ✓`` in the check list meant
 nothing (#1826). This module is the decision point that fixes that — it maps a
-``lintro review`` invocation to one of three outcomes:
+``lintro review`` invocation to one of four outcomes:
 
 * **reviewed** -- a review was produced (with or without P1 findings). Green.
 * **converged** -- the deterministic convergence stop rule (#2099) skipped the
   round before any provider call, because the last N rounds all scored below
-  the configured threshold. Green: nothing was reviewed, but nothing needed to
-  be, and the reason is stated rather than implied by a silent pass.
+  the configured threshold. Nothing was reviewed, but nothing needed to be, and
+  the reason is stated rather than implied by a silent pass. Green *unless* the
+  last real round left open P1 findings: skipping never relaxes the readiness
+  gate, so a skip carrying ``open_p1 > 0`` goes red with exit 1, exactly as the
+  round that found them did.
 * **not reviewed** -- no credential, a dead credential, a depleted balance, or an
   unreachable provider. The check goes red with a visible reason. It is
   deliberately *not* a required check, so a billing condition is loud without
@@ -91,6 +94,12 @@ DEFAULT_TRANSPORT: Final[str] = "cli"
 # the round (#2099). Mirrors lintro.ai.review.output.CONVERGED_ENVELOPE_KEY;
 # tests/scripts/test_classify_review_outcome.py fails if the two drift.
 CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
+
+# Value of the envelope's top-level `outcome` field for a skipped round. Used
+# as the discriminator so a nested object carrying a `converged` key can never
+# be mistaken for the envelope itself. Mirrors
+# lintro.ai.review.output.CONVERGED_OUTCOME; a contract test pins the pair.
+CONVERGED_OUTCOME: Final[str] = "converged"
 
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
@@ -303,25 +312,26 @@ def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
 def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the convergence stop-rule object from captured review output.
 
+    Shares :func:`_iter_json_objects` with every other envelope parser, so a
+    later fix to the scan reaches the stop-rule branch too. That scan tries
+    every ``{``, so it also yields objects nested inside a larger payload:
+    the ``outcome`` discriminator is therefore required alongside the
+    ``converged`` mapping, and only the producer's own top-level envelope
+    carries both. A finding or coverage object that merely happens to hold a
+    ``converged`` key can no longer classify a real review as a skip.
+
     Args:
         text: Combined stdout/stderr captured from the review run.
 
     Returns:
         The ``converged`` mapping, or ``None`` when the round was not skipped.
     """
-    decoder = json.JSONDecoder()
-    index = text.find("{")
-    while index != -1:
-        try:
-            payload, _end = decoder.raw_decode(text[index:])
-        except ValueError:
-            index = text.find("{", index + 1)
+    for payload in _iter_json_objects(text=text):
+        if payload.get("outcome") != CONVERGED_OUTCOME:
             continue
-        if isinstance(payload, dict):
-            converged = payload.get(CONVERGED_ENVELOPE_KEY)
-            if isinstance(converged, dict):
-                return {**converged, "detail": str(payload.get("detail") or "")}
-        index = text.find("{", index + 1)
+        converged = payload.get(CONVERGED_ENVELOPE_KEY)
+        if isinstance(converged, dict):
+            return {**converged, "detail": str(payload.get("detail") or "")}
     return None
 
 

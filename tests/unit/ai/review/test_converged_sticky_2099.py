@@ -16,6 +16,7 @@ from lintro.ai.review.github_sticky import (
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.review_state_codec import legacy_state_block
 
 # One real round persisted, so the skipped round is round 2.
 _DECISION = ConvergenceDecision(
@@ -120,6 +121,62 @@ def test_converged_stamp_leaves_the_sticky_alone_without_recoverable_state(
     assert_that(posted).is_false()
     reporter.update_issue_comment.assert_not_called()
     reporter.post_issue_comment.assert_not_called()
+
+
+def test_converged_stamp_falls_back_to_the_stickys_own_state_blob(
+    prior_state: ReviewState,
+    prior_body: str,
+) -> None:
+    """With no artifact state, a decodable sticky blob still stamps in place.
+
+    The artifact is not always available — a fresh runner, an expired upload,
+    a local ``--post`` — but the sticky carries its own state. The stamp must
+    recover the board from there rather than refusing (#2099 review).
+    """
+    reporter = _reporter(prior_body=prior_body + legacy_state_block(state=prior_state))
+
+    posted = post_review_converged_to_github(
+        decision=_DECISION,
+        reporter=reporter,
+        prior_state=ReviewState(),
+    )
+    body = reporter.update_issue_comment.call_args.kwargs["body"]
+
+    assert_that(posted).is_true()
+    assert_that(body).contains("converged at round 2 (score 0.50 < threshold 3.00)")
+    assert_that(prior_state.findings).is_not_empty()
+    for record in prior_state.findings:
+        assert_that(body).contains(record.title)
+
+
+def test_converged_stamp_uses_the_reporter_pr_context_when_none_is_passed(
+    prior_body: str,
+    prior_state: ReviewState,
+) -> None:
+    """A successful stamp needs no explicit repo/pr_number.
+
+    Mirrors ``test_posting_falls_back_to_the_reporter_pr_context`` (#1954):
+    when the caller has no PR identity to hand, the reporter's own context is
+    authoritative and posting still succeeds.
+
+    Args:
+        prior_body: Sticky body the reporter serves.
+        prior_state: Artifact state persisted by the prior round.
+    """
+    reporter = _reporter(prior_body=prior_body)
+
+    posted = post_review_converged_to_github(
+        decision=_DECISION,
+        reporter=reporter,
+        prior_state=prior_state,
+    )
+
+    assert_that(posted).is_true()
+    assert_that(
+        reporter.update_issue_comment.call_args.kwargs["comment_id"],
+    ).is_equal_to(
+        9,
+    )
 
 
 def test_converged_stamp_skips_when_no_pr_context(prior_body: str) -> None:

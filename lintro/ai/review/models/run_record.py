@@ -190,7 +190,14 @@ class RunRecord:
             payload["open_after"] = self.open_after
         if self.narrative:
             payload["narrative"] = self.narrative
-        if self.convergence_score is not None:
+        # A non-finite score is dropped rather than written: json.dumps would
+        # emit a bare NaN/Infinity token, which is not valid JSON and would
+        # make the whole state blob undecodable for every later round. Omitted
+        # reads as "not measured", which is what _optional_score already
+        # decodes a corrupt value back to (#2099 review).
+        if self.convergence_score is not None and math.isfinite(
+            self.convergence_score,
+        ):
             payload["convergence_score"] = round(
                 self.convergence_score,
                 CONVERGENCE_SCORE_PRECISION,

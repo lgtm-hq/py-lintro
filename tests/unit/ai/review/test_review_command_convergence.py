@@ -13,6 +13,7 @@ from click.testing import CliRunner
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.cli_utils.commands import review as review_module
@@ -328,9 +329,15 @@ def test_post_loads_state_for_the_pr_detected_from_ci(
 
     monkeypatch.setattr(review_module, "_load_prior_review_state", _load)
     monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
+    posted: list[dict[str, object]] = []
+
+    def _post(**kwargs: object) -> bool:
+        posted.append(kwargs)
+        return True
+
     monkeypatch.setattr(
         "lintro.ai.review.github.post_review_converged_to_github",
-        lambda **kwargs: True,
+        _post,
     )
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
 
@@ -338,6 +345,14 @@ def test_post_loads_state_for_the_pr_detected_from_ci(
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(seen["pr_number"]).is_equal_to(42)
+    # The seam itself is asserted, not just stubbed: a converged path that
+    # never posted would otherwise pass this test (#2099 review).
+    assert_that(posted).is_length(1)
+    assert_that(posted[0]["pr_number"]).is_equal_to(42)
+    assert_that(posted[0]["repo"]).is_equal_to("owner/name")
+    decision = posted[0]["decision"]
+    assert isinstance(decision, ConvergenceDecision)
+    assert_that(decision.converged).is_true()
 
 
 def test_a_coverage_limited_prior_round_still_reviews(
@@ -364,6 +379,9 @@ def test_a_coverage_limited_prior_round_still_reviews(
     CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["get_provider"]).is_equal_to(1)
+    # Constructing the provider is not the same as reviewing: assert the round
+    # really ran, matching the partial sibling above (#2099 review).
+    assert_that(review_calls["run_review"]).is_equal_to(1)
 
 
 def test_a_score_equal_to_the_threshold_still_reviews(
@@ -388,6 +406,9 @@ def test_a_score_equal_to_the_threshold_still_reviews(
     CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["get_provider"]).is_equal_to(1)
+    # Constructing the provider is not the same as reviewing: assert the round
+    # really ran, matching the partial sibling above (#2099 review).
+    assert_that(review_calls["run_review"]).is_equal_to(1)
 
 
 def test_a_converged_skip_keeps_an_open_p1_blocking(
@@ -424,4 +445,4 @@ def test_a_converged_skip_keeps_an_open_p1_blocking(
 
     assert_that(review_calls["get_provider"]).is_equal_to(0)
     assert_that(result.exit_code).is_equal_to(1)
-    assert_that(json.loads(result.output)["converged"]["open_p1"]).is_equal_to(1)
+    assert_that(_envelope(output=result.output)["converged"]["open_p1"]).is_equal_to(1)

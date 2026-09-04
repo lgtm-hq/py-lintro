@@ -30,6 +30,7 @@ from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.output import (
     CONVERGED_ENVELOPE_KEY,
+    CONVERGED_OUTCOME,
     INLINE_POST_FAILURE_KEY,
     render_convergence_outcome_json,
     render_inline_post_failure_json,
@@ -977,12 +978,56 @@ def test_converged_summary_does_not_tell_reviewers_to_fall_back(
 
 
 def test_converged_envelope_key_matches_the_producer(classifier: ModuleType) -> None:
-    """The classifier keys on the exact key lintro writes.
+    """The classifier keys on the exact key and discriminator lintro writes.
 
     Args:
         classifier: Loaded classifier module.
     """
     assert_that(classifier.CONVERGED_ENVELOPE_KEY).is_equal_to(CONVERGED_ENVELOPE_KEY)
+    assert_that(classifier.CONVERGED_OUTCOME).is_equal_to(CONVERGED_OUTCOME)
+
+
+def test_a_nested_converged_object_does_not_classify_a_real_review_as_a_skip(
+    classifier: ModuleType,
+) -> None:
+    """A finding that merely mentions ``converged`` is not the stop envelope.
+
+    The shared JSON scan tries every ``{``, so nested objects are yielded too.
+    Without the top-level ``outcome`` discriminator, a reviewed round carrying
+    a nested ``converged`` mapping would be reported as a skipped one — a
+    review that really ran would vanish from CI (#2099 review).
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    output = json.dumps(
+        {
+            "readiness_verdict": "blocked",
+            "findings": [
+                {"title": "x", "meta": {"converged": {"round": 9, "open_p1": 0}}},
+            ],
+        },
+    )
+
+    report = classifier.classify(status=1, output=output)
+
+    assert_that(str(report.outcome)).is_equal_to("reviewed")
+    assert_that(report.headline).contains("P1 findings")
+
+
+def test_the_converged_envelope_is_still_found_after_leading_log_lines(
+    classifier: ModuleType,
+) -> None:
+    """The discriminator did not cost the parser its real envelope.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    output = f"INFO starting review\n{{ not json\n{_converged_output()}"
+
+    report = classifier.classify(status=0, output=output)
+
+    assert_that(str(report.outcome)).is_equal_to("converged")
 
 
 def test_a_normal_review_is_still_classified_as_reviewed(

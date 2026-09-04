@@ -328,8 +328,10 @@ def _merge_pair(
         # reported it too, and — symmetrically — a chunk-first record is not
         # retroactively re-attributed to the synthesis pass by a later round.
         origin=prior.origin,
-        # A carried finding keeps the evidence basis it was first scored on,
-        # so its convergence score cannot drift on label noise alone; a
+        # A carried finding keeps the *evidence basis* it was first scored on,
+        # so the likelihood term cannot drift on label noise alone. Severity
+        # and confidence still follow the current round, so the numeric score
+        # can still move — the freeze is on the basis, not on the score. A
         # regressed finding is a fresh sighting and is re-scored (#2099).
         evidence_style=current.evidence_style if regressed else prior.evidence_style,
     )

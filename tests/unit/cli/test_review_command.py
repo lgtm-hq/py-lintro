@@ -811,6 +811,12 @@ def _mock_review_pipeline(
         mock_config.review.sensitivity = MagicMock()
         mock_config.review.force_semantic_chunking = False
         mock_config.review.checklist_display = ChecklistDisplay.OFF
+        # Pinned to the production defaults: an auto-attr MagicMock here would
+        # feed the convergence stop rule a Mock threshold rather than the
+        # ``None`` that disables it, so these fixtures would stop matching the
+        # disable-by-default behavior they are meant to exercise (#2099).
+        mock_config.review.convergence.threshold = None
+        mock_config.review.convergence.stable_rounds = 2
 
     collect_patch = (
         patch(
