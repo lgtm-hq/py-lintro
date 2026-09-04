@@ -797,6 +797,24 @@ ai:
   review_allow_unredacted_git_native: false
 ```
 
+### Cursor workspace trust
+
+> **Note — `ai.cursor_trust_workspace` grants workspace trust by default.**
+>
+> Choosing `provider: cursor` is the consent, so lintro passes `--trust` to the `agent`
+> CLI by default rather than stalling on its interactive trust prompt. The residual risk
+> is that review content is untrusted and prompt-injectable: a `lintro review --pr N`
+> run embeds the diff of an arbitrary fork PR, and an injected instruction in that diff
+> is then read by an agent operating with full workspace trust. Lintro redacts secrets
+> and scans prompts for injection patterns, but neither is a guarantee. Set
+> `cursor_trust_workspace: false` to restore the agent's interactive trust prompt if you
+> want that posture; reviewing untrusted fork PRs with the Cursor provider is the case
+> that most warrants it.
+
+`ai.cursor_trust_workspace` is the **only** default site for this flag: `CursorProvider`
+takes it as a required argument, and the provider factory always forwards the resolved
+config value.
+
 ### Config Defaults for CLI Flags
 
 If you always want `--fix` without typing it, set the default in config:

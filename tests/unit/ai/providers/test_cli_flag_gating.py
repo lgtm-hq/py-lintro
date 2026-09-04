@@ -286,7 +286,7 @@ async def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> N
         reject="--resume",
         calls=calls,
     )
-    provider = CursorProvider()
+    provider = CursorProvider(cursor_trust_workspace=True)
     with patch_cli_exec(side_effect=runner):
         provider.begin_durable_session(repo_root="/tmp/repo")
         await provider.complete("first", repo_root="/tmp/repo")
@@ -297,6 +297,8 @@ async def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> N
     assert_that(completions).is_length(3)
     assert_that(completions[1]).contains("--resume", "sess-123")
     assert_that(completions[-1]).does_not_contain("--resume")
+    # The retry drops --resume only; the explicit trust grant survives it.
+    assert_that(completions[-1]).contains("--trust")
 
 
 # -- Codex ------------------------------------------------------------------
