@@ -6,7 +6,6 @@ They verify the MypyPlugin definition, check command, and set_options method.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,15 +14,12 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.mypy.mypy_issue import MypyIssue
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if mypy is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("mypy") is None,
-    reason="mypy not installed",
-)
+pytestmark = require_tool("mypy")
 
 
 @pytest.fixture

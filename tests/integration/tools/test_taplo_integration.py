@@ -7,7 +7,6 @@ and set_options method.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,14 +14,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if taplo is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("taplo") is None,
-    reason="taplo not installed",
-)
+pytestmark = require_tool("taplo")
 
 
 @pytest.fixture

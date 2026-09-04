@@ -10,6 +10,7 @@ from loguru import logger
 
 from lintro.parsers.markdownlint.markdownlint_issue import MarkdownlintIssue
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_command
 
 logger.remove()
 logger.add(lambda msg: print(msg, end=""), level="INFO")
@@ -29,6 +30,9 @@ def find_markdownlint_cmd() -> list[str] | None:
     return None
 
 
+pytestmark = require_command("markdownlint-cli2", find_markdownlint_cmd())
+
+
 def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
     """Run markdownlint-cli2 directly on a file and return result tuple.
 
@@ -39,8 +43,9 @@ def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
         tuple[bool, str, int]: Success status, output text, and issue count.
     """
     cmd_base = find_markdownlint_cmd()
-    if cmd_base is None:
-        pytest.skip("markdownlint-cli2 not found in PATH")
+    # The module-level require_command gate already proved this resolves;
+    # the assert only narrows the Optional for the type checker.
+    assert cmd_base is not None  # noqa: S101 - type narrowing, not a test assertion  # nosec B101 - narrowing only
     # Use relative path from repo root to match lintro's behavior
     repo_root = Path(__file__).parent.parent.parent
     # Resolve to absolute path first if it's relative
@@ -74,26 +79,6 @@ def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
 
 
 @pytest.mark.markdownlint
-def test_markdownlint_available() -> None:
-    """Check if markdownlint-cli2 is available in PATH."""
-    cmd_base = find_markdownlint_cmd()
-    if cmd_base is None:
-        pytest.skip("markdownlint-cli2 not found in PATH")
-    try:
-        cmd = [*cmd_base, "--version"]
-        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        assert_that(result.returncode).is_equal_to(0)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pytest.skip("markdownlint-cli2 not available")
-
-
-@pytest.mark.markdownlint
 def test_markdownlint_direct_vs_lintro_parity() -> None:
     """Compare direct markdownlint-cli2 output with lintro wrapper.
 
@@ -101,8 +86,6 @@ def test_markdownlint_direct_vs_lintro_parity() -> None:
     issue count with lintro's wrapper to ensure parity.
     """
     sample_path = Path(SAMPLE_FILE)
-    if not sample_path.exists():
-        pytest.skip(f"Sample file {SAMPLE_FILE} not found")
 
     # Run markdownlint-cli2 directly
     direct_success, direct_output, direct_count = run_markdownlint_directly(
@@ -136,8 +119,6 @@ def test_markdownlint_integration_basic() -> None:
     Verifies that the tool can discover files, run checks, and parse output.
     """
     sample_path = Path(SAMPLE_FILE)
-    if not sample_path.exists():
-        pytest.skip(f"Sample file {SAMPLE_FILE} not found")
 
     tool = ToolRegistry.get("markdownlint")
     assert_that(tool).is_not_none()

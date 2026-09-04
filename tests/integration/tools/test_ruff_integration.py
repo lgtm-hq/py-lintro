@@ -6,7 +6,6 @@ They verify the RuffPlugin definition, check command, fix command, and set_optio
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,14 +13,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if ruff is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("ruff") is None,
-    reason="ruff not installed",
-)
+pytestmark = require_tool("ruff")
 
 
 @pytest.fixture

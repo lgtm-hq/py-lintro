@@ -36,13 +36,16 @@ required):
 - **Many wrapped tools are external (non-Python) and optional.** `uv sync` does NOT
   install prettier, hadolint, shellcheck, actionlint, oxlint, taplo, gitleaks,
   `markdownlint-cli2`, rustfmt/cargo, etc. `lintro check .` silently **skips** any tool
-  missing from `PATH`, so it still passes without them — but some `tests/integration/**`
-  tests assume the external tool is present and will **fail (not skip)** without it
-  (e.g. `test_rustfmt_integration.py` needs a Rust toolchain; the markdownlint parity
-  test needs `markdownlint-cli2` on `PATH` because `npx` alone makes it non-skip).
-  Install the full set with `./scripts/utils/install-tools.sh --local` (network-heavy;
-  installs into `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin` and pulls a Rust
-  toolchain). This is intentionally kept out of the update script.
+  missing from `PATH`, so it still passes without them. `tests/integration/**` behaves
+  the same way: every module gates on `tests/integration/_tools.py::require_tool`, which
+  runs the tool's version command and **skips** the module when it does not answer, so
+  the suite is green on a toolless machine. Inside the tools image
+  (`LINTRO_TOOLS_IMAGE=1`, set by `docker/tools.Dockerfile` and the `test-integration`
+  compose service) the same gate **fails** instead — a tool missing there is an image
+  regression (#465). Install the full set with
+  `./scripts/utils/install-tools.sh --local` (network-heavy; installs into
+  `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin` and pulls a Rust toolchain). This is
+  intentionally kept out of the update script.
 - **`tests/integration/test_built_package.py` needs the system `python3.12-venv`
   package.** Those wheel tests call stdlib `python -m venv`; without `ensurepip` they
   fail with "recreate your virtual environment" (not a code bug). Install once with

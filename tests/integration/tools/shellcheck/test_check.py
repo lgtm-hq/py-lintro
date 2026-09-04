@@ -5,22 +5,19 @@ These tests verify the check command works correctly on various inputs.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
+
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("shellcheck") is None,
-    reason="shellcheck not installed",
-)
+pytestmark = require_tool("shellcheck")
 
 
 def test_check_file_with_issues(
