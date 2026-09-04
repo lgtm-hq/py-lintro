@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.141.3] - 2026-09-04
+
+### Fixed
+
+- **release**: npm publish stuck in waiting — npm lags a released version, tripping the
+  skew audit (#2251) (3ac3500)
+
 ## [0.141.2] - 2026-09-03
 
 ### Fixed
