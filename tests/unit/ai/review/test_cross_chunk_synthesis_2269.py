@@ -910,7 +910,7 @@ def test_select_synthesis_diff_keeps_shared_files_first_when_over_budget() -> No
     diff, truncated = select_synthesis_diff(
         context=context,
         summaries=summaries,
-        diff_budget=len(_CALLER_DIFF) // 4 + 1,
+        diff_budget=estimate_tokens(_CALLER_DIFF) + 1,
     )
 
     assert_that(truncated).is_true()
@@ -928,7 +928,7 @@ def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
     plan = plan_synthesis_prompt(
         context=context,
         summaries=(),
-        diff_budget=len(_SIGNATURE_DIFF) // 4 + 1,
+        diff_budget=estimate_tokens(_SIGNATURE_DIFF) + 1,
     )
     _system, user_prompt = build_synthesis_prompt(
         context=context,
@@ -1233,20 +1233,21 @@ def test_a_truncated_pass_degrades_coverage_end_to_end() -> None:
 
 def test_the_sensitivity_policy_can_drop_a_synthesized_finding() -> None:
     """A preset that drops a band drops it for this pass too."""
+    # On a reviewed path, so only the sensitivity policy can be what drops it.
     doc_nit = _synthesis_payload(
         findings=[
             {
                 "severity": "P3",
                 "category": "contract-drift",
-                "file": "docs/guide.md",
-                "line": 4,
-                "title": "Docs still describe the old signature",
+                "file": "pkg/caller.py",
+                "line": 1,
+                "title": "Comment still describes the old signature",
                 "description": (
-                    "pkg/api.py changed the signature; the docs were not "
-                    "updated in lockstep."
+                    "pkg/api.py changed the signature; the docstring in "
+                    "pkg/caller.py still spells the old one."
                 ),
                 "cause": "signature change",
-                "fix": "update the docs",
+                "fix": "update the docstring",
                 "confidence": "medium",
             },
         ],
@@ -1388,3 +1389,59 @@ def test_a_chunk_record_is_not_re_attributed_by_a_later_synthesis_hit() -> None:
     carried = [record for record in match.records if record.file == "pkg/caller.py"]
     assert_that(carried).is_length(1)
     assert_that(carried[0].origin).is_none()
+
+
+# --- (n) the count the surfaces render is the count that survived -------------
+
+
+def test_a_rejected_synthesized_finding_is_recounted_on_every_surface() -> None:
+    """A finding dropped after the pass returned lowers the reported count.
+
+    ``reject_context_findings`` and the cross-chunk guard both run after the
+    pass reported its own tally, so a synthesized finding on a path this round
+    was never asked to review is discarded downstream. The JSON block and the
+    shared note must agree with what actually survived.
+    """
+    kept = {
+        "severity": "P2",
+        "category": "logic-bug",
+        "file": "pkg/caller.py",
+        "line": 1,
+        "title": "Caller passes retries positionally",
+        "description": "pkg/api.py made retries keyword-only.",
+        "cause": "signature change",
+        "fix": "use a keyword",
+        "confidence": "high",
+    }
+    # Not a changed file, so the context-finding rejection discards it.
+    rejected = {
+        "severity": "P2",
+        "category": "logic-bug",
+        "file": "pkg/untouched.py",
+        "line": 9,
+        "title": "Unrelated module disagrees",
+        "description": "pkg/api.py disagrees with pkg/untouched.py.",
+        "cause": "signature change",
+        "fix": "align them",
+        "confidence": "medium",
+    }
+
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=_synthesis_payload(findings=[kept, rejected]),
+    )
+
+    surviving = [
+        finding
+        for finding in result.findings
+        if finding.origin is FindingOrigin.SYNTHESIS
+    ]
+    assert_that(surviving).is_length(1)
+    assert_that(surviving[0].file).is_equal_to("pkg/caller.py")
+
+    assert_that(_outcome(result=result).findings_added).is_equal_to(1)
+    payload = review_result_to_dict(result=result)
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(1)
+    note = format_synthesis_note_line(metadata=result.metadata)
+    assert_that(note).contains("added 1 cross-file finding")
+    assert_that(note).does_not_contain("2 cross-file findings")

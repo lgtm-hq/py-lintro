@@ -73,6 +73,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 )
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
     ReviewErrorKind,
@@ -1569,6 +1570,24 @@ async def run_review_async(
         findings=filtered_findings,
         changed_paths=guard_changed_paths(context=context),
     )
+    if synthesis_pass is not None:
+        # Both passes above run *after* the synthesis pass returned its own
+        # tally, and on a resumed run either can convert or discard one of its
+        # findings — ``reject_context_findings`` drops a finding on a path
+        # this round was not asked to re-review. The number every surface
+        # renders must be the number that actually survived, so it is counted
+        # from what is left rather than carried over from the pass.
+        metadata = replace(
+            metadata,
+            synthesis=replace(
+                synthesis_pass.outcome,
+                findings_added=sum(
+                    1
+                    for finding in filtered_findings
+                    if finding.origin is FindingOrigin.SYNTHESIS
+                ),
+            ),
+        )
     prior_flags = prior_state.flagged_files if prior_state is not None else ()
     prior_consumed = (
         () if force_full or prior_state is None else prior_state.consumed_flags

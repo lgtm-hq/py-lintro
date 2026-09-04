@@ -153,7 +153,8 @@ def select_synthesis_diff(
 
     priority = cross_chunk_paths(summaries=summaries)
     ordered = [path for path in priority if path in per_file]
-    ordered.extend(path for path in sorted(per_file) if path not in set(ordered))
+    seen = set(ordered)
+    ordered.extend(path for path in sorted(per_file) if path not in seen)
 
     priority_paths = set(priority)
     kept: list[str] = []
