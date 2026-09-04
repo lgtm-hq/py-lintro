@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.resolved_ai_config import (
+    MAX_COST_LABEL,
     ResolvedAIConfig,
     format_max_cost_label,
     format_sourced_value,
@@ -160,21 +161,18 @@ def render_ai_status(
         )
         from lintro.ai.transport import resolve_max_cost_with_source
 
-        cap, cap_source = (
-            resolve_max_cost_with_source(resolved_for_cost)
-            if resolved_for_cost is not None
-            else (
-                ai_config.max_cost_usd,
-                sources.get("max_cost_usd"),
+        # ``sources`` and ``resolved_for_cost`` are assigned in the same
+        # branches, so a known provenance map always carries a resolved
+        # config; the guard is narrowing only, never a fallback (#2048).
+        if resolved_for_cost is not None:
+            cap, cap_source = resolve_max_cost_with_source(resolved_for_cost)
+            ai_parts.append(
+                f"  {MAX_COST_LABEL}: "
+                + format_max_cost_label(
+                    max_cost_usd=cap,
+                    source=cap_source,
+                ),
             )
-        )
-        ai_parts.append(
-            "  max_cost_usd: "
-            + format_max_cost_label(
-                max_cost_usd=cap,
-                source=cap_source,
-            ),
-        )
 
     # auto_apply warning
     if ai_config.auto_apply:

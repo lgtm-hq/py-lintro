@@ -323,7 +323,7 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     help=(
         "Override ai.max_cost_usd for this invocation. A positive number is "
         "the USD cap; 'uncapped' lifts the ceiling. 0 is rejected as "
-        "ambiguous."
+        "ambiguous; an empty value is treated as unset."
     ),
 )
 @click.option(

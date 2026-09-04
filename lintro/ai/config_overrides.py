@@ -154,8 +154,10 @@ def apply_cli_overrides(
     """Apply ``lintro review`` CLI flags on top of a resolved config.
 
     Flags beat env vars. Omitted flags leave the corresponding field
-    untouched. There is no ``--enabled`` flag. ``uncapped`` (any case)
-    lifts the ceiling. Overlay ``0`` is rejected as ambiguous (#2154).
+    untouched, and a blank or whitespace-only value is treated as unset
+    for every string-valued flag, ``--max-cost-usd`` included. There is no
+    ``--enabled`` flag. ``uncapped`` (any case) lifts the ceiling. Overlay
+    ``0`` is rejected as ambiguous (#2154).
     Overlaying ``max_cost_usd`` also stamps both transport-profile cost
     fields so ``apply_resolved_transport`` cannot clobber flag/env with a
     YAML profile cap (#2024).
@@ -166,7 +168,7 @@ def apply_cli_overrides(
         model: ``--model`` value, or None when unset.
         transport: ``--transport`` value, or None when unset.
         review: ``--review/--no-review`` value, or None when unset.
-        max_cost_usd: ``--max-cost-usd`` value, or None when unset.
+        max_cost_usd: ``--max-cost-usd`` value, or None/blank when unset.
 
     Returns:
         A new resolved config when any flag is set; *resolved* otherwise.
@@ -180,7 +182,7 @@ def apply_cli_overrides(
         overlay["transport"] = str(transport).strip()
     if review is not None:
         overlay["review"] = review
-    if max_cost_usd is not None:
+    if max_cost_usd is not None and str(max_cost_usd).strip():
         overlay["max_cost_usd"] = _parse_max_cost_usd(
             max_cost_usd,
             name=_FLAG_BY_FIELD["max_cost_usd"],
@@ -240,9 +242,15 @@ def _parse_bool_override(raw: str, *, name: str) -> bool:
 def _parse_max_cost_usd(raw: object, *, name: str) -> float | None:
     """Parse a cost-cap override into a USD ceiling, or None if uncapped.
 
-    ``uncapped`` (case-insensitive) lifts the ceiling. Overlay ``0`` is
-    rejected — it was the #2024 spelling for uncapped and is now
-    ambiguous against a literal $0 YAML cap (#2154).
+    ``uncapped`` (case-insensitive) lifts the ceiling; only ``None``
+    disables :class:`~lintro.ai.budget.CostBudget`. ``0`` is *not* a
+    synonym for uncapped anywhere: :class:`CostBudget` treats ``0.0`` as a
+    hard $0 cap that raises on the first budgeted call, and YAML
+    ``ai.max_cost_usd: 0`` keeps exactly that meaning (per ADR 0006).
+    Overlay ``0`` is rejected rather than silently reinterpreted — it was
+    the #2024 spelling for uncapped and is now ambiguous against the
+    literal $0 YAML cap (#2154). Never copy a ``0`` between the two
+    surfaces: write ``uncapped`` for an overlay that lifts the ceiling.
 
     Args:
         raw: Env-var string or CLI float.
