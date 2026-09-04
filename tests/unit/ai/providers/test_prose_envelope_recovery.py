@@ -90,7 +90,10 @@ def _providers() -> dict[str, BaseAIProvider]:
             transport=AITransport.CLI,
             cli_bare=CliBareMode.NEVER,
         ),
-        "cursor": CursorProvider(transport=AITransport.CLI),
+        "cursor": CursorProvider(
+            transport=AITransport.CLI,
+            cursor_trust_workspace=True,
+        ),
         "openai": OpenAIProvider(transport=AITransport.CLI),
     }
 
