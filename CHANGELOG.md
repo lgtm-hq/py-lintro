@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.143.0] - 2026-09-04
+
+### Added
+
+- **ai**: add an off-by-default cross-chunk synthesis pass to the review finalize step
+  (#2316) (1881aff)
+
+### Changed
+
+- **ai**: polish the cost-cap override docs, blank-flag handling, precedence and labels
+  (#2282) (0d123a1)
+
 ## [0.142.1] - 2026-09-04
 
 ### Fixed
