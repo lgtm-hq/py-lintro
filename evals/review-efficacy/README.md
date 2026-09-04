@@ -49,12 +49,25 @@ is the worst case, not a guess.
 ## How configs are driven
 
 Only the documented environment overrides (`lintro/ai/config_overrides.py`) select a
-provider:
+provider. The runner builds each cell's environment itself, so you do not export any of
+these by hand:
 
 - `LINTRO_AI_PROVIDER`
 - `LINTRO_AI_MODEL`
 - `LINTRO_AI_TRANSPORT`
 - `LINTRO_AI_MAX_COST_USD`
+- `LINTRO_AI_ENABLED=1` and `LINTRO_AI_REVIEW=1`
+
+The last two are why a cell runs at all. `lintro review` is gated on
+`review_enabled = ai.enabled and ai.review`, and this repository commits
+`ai.enabled: false`, so the provider triplet alone would exit at the review gate. The
+runner injects both switches with the rest of the overlay
+(`MatrixConfig.env_overrides`), exactly as `.github/workflows/ai-review.yml` does for
+the dogfood run — you do not need to edit `.lintro-config.yaml` or export anything.
+
+Every _other_ ambient `LINTRO_AI_*` variable is stripped before the overlay is applied
+(`build_env`). A shell exporting `LINTRO_AI_TRANSCRIPT`, or a stale `LINTRO_AI_MODEL`
+from an earlier experiment, would otherwise silently change what a cell measures.
 
 There is no code-side provider wiring in the harness, so a matrix run measures the
 shipped CLI rather than a harness-specific path through it.
@@ -65,9 +78,9 @@ confound a cross-config comparison. Note what the timeout means: it overrides
 `ai.api_timeout`, which sits above the built-in per-transport default (api 60s, cli
 1800s). The committed `1800` therefore matches the cli cell's own budget but _lengthens_
 the api cells past the 60s they would get by default, so eval timings are not directly
-comparable to a default `lintro review` on an api transport. Provider credentials come
-from your environment as usual, and `ai.review` must be enabled in the checkout's
-`.lintro-config.yaml`.
+comparable to a default `lintro review` on an api transport. Provider credentials are
+the one thing that does come from your environment as usual: they carry no `LINTRO_AI_`
+prefix, so the strip leaves them alone.
 
 ## Output
 

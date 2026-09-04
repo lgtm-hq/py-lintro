@@ -104,12 +104,13 @@ def _cost_line(*, report: MatrixReport) -> str:
         The markdown bullet. When some runs recorded no readable cost, the
         total is labelled a floor rather than presented as the whole spend.
     """
-    total = f"- Total recorded cost: ${report.total_cost_usd:.2f}"
     if not report.unknown_cost_runs:
-        return total
+        return f"- Total recorded cost: ${report.total_cost_usd:.2f}"
+    # "at least" qualifies the dollar amount, which is a floor; the run count
+    # beside it is exact.
     return (
-        f"{total} (at least: {report.unknown_cost_runs} run(s) recorded no "
-        f"readable cost)"
+        f"- Total recorded cost: at least ${report.total_cost_usd:.2f} "
+        f"({report.unknown_cost_runs} run(s) recorded no readable cost)"
     )
 
 

@@ -270,3 +270,45 @@ def test_report_to_dict_leaves_unmeasurable_rates_null() -> None:
     assert_that(stability["compared_pairs"]).is_equal_to(0)
     assert_that(stability["verdict_flip_rate"]).is_none()
     assert_that(stability["mean_jaccard"]).is_none()
+
+
+def test_render_markdown_labels_the_cost_as_a_floor_when_any_is_unknown() -> None:
+    """An unreadable cost makes the total a floor, with an exact run count."""
+    known = EvalRun(
+        config_id="config-a",
+        item_id="pr-1",
+        repeat=1,
+        status=RunStatus.OK,
+        verdict=ReviewVerdict.READY,
+        cost_usd=0.25,
+    )
+    unknown = EvalRun(
+        config_id="config-a",
+        item_id="pr-1",
+        repeat=2,
+        status=RunStatus.OK,
+        verdict=ReviewVerdict.READY,
+        cost_usd=None,
+    )
+
+    report = build_report(
+        spec=SPEC,
+        corpus=_corpus(labeled=False),
+        runs=(known, unknown),
+    )
+    markdown = render_markdown(report=report)
+
+    assert_that(report.unknown_cost_runs).is_equal_to(1)
+    assert_that(markdown).contains(
+        "Total recorded cost: at least $0.25 (1 run(s) recorded no readable cost)",
+    )
+
+
+def test_render_markdown_states_the_cost_plainly_when_all_are_known() -> None:
+    """With every cost readable the total is exact, with no floor qualifier."""
+    report = build_report(spec=SPEC, corpus=_corpus(labeled=False), runs=_runs())
+    markdown = render_markdown(report=report)
+
+    assert_that(report.unknown_cost_runs).is_equal_to(0)
+    assert_that(markdown).contains("Total recorded cost: $")
+    assert_that(markdown).does_not_contain("at least")
