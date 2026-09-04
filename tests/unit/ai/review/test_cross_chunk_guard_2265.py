@@ -1190,3 +1190,21 @@ def test_own_file_exclusion_is_by_identity_not_prose_matching() -> None:
     assert_that(guarded.severity).is_equal_to(Severity.P2)
     assert_that(guarded.cross_chunk_contradiction).is_not_none()
     assert_that(same.cross_chunk_contradiction).is_none()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["title", "description", "cause", "failure_scenario"],
+    ids=["field=title", "field=description", "field=cause", "field=failure_scenario"],
+)
+def test_every_evidence_field_is_a_claim_source(field_name: str) -> None:
+    """The claim may sit in any evidence field on its own.
+
+    Args:
+        field_name: Evidence field carrying the claim.
+    """
+    finding = _guard(
+        **{field_name: "tests/unit/test_migrate_docs.py was never updated."},
+    )
+
+    assert_that(finding.cross_chunk_contradiction).is_not_none()
