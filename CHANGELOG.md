@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.141.4] - 2026-09-04
+
+### Fixed
+
+- **ci**: classify nightly dogfood runner-loss kills before pinging the tracker (#2279)
+  (9362ad0)
+
 ## [0.141.3] - 2026-09-04
 
 ### Fixed
