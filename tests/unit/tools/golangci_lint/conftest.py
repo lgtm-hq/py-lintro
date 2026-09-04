@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Generator
 from unittest.mock import patch
 
@@ -42,15 +41,3 @@ def golangci_lint_plugin() -> Generator[GolangciLintPlugin, None, None]:
         return_value=None,
     ):
         yield GolangciLintPlugin()
-
-
-def golangci_lint_available() -> bool:
-    """Return whether golangci-lint and the Go toolchain are on PATH.
-
-    golangci-lint requires the Go toolchain to build and analyze a module, so
-    integration tests are gated on both being present.
-
-    Returns:
-        bool: True when both golangci-lint and go can be invoked.
-    """
-    return shutil.which("golangci-lint") is not None and shutil.which("go") is not None
