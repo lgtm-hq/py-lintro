@@ -915,6 +915,13 @@ def test_guard_changed_paths_includes_rename_and_copy_sources() -> None:
                 additions=1,
                 deletions=0,
             ),
+            ChangedFile(
+                path="src/utils_copy.py",
+                status=ChangedFileStatus.COPIED,
+                previous_path="src/utils.py",
+                additions=0,
+                deletions=0,
+            ),
             ChangedFile(path="src/app.py", status="modified", additions=1, deletions=0),
         ],
         unified_diff="",
@@ -923,7 +930,13 @@ def test_guard_changed_paths_includes_rename_and_copy_sources() -> None:
     )
 
     assert_that(guard_changed_paths(context=context)).is_equal_to(
-        ("src/helpers.py", "src/legacy_helpers.py", "src/app.py"),
+        (
+            "src/helpers.py",
+            "src/legacy_helpers.py",
+            "src/utils_copy.py",
+            "src/utils.py",
+            "src/app.py",
+        ),
     )
 
 

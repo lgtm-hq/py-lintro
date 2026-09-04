@@ -110,8 +110,12 @@ def test_chunk_prompt_lists_every_changed_path_of_the_pr(
     """
     prompt = _build(builder_name=builder_name)
 
+    listed = [line for line in prompt.splitlines() if line.startswith("- `")]
+
+    # Each path must be a list entry of its own, not merely visible somewhere
+    # in the chunk diff.
     for path in (_CHUNK_PATH, *_OTHER_PATHS):
-        assert_that(prompt).contains(path)
+        assert_that([line for line in listed if f"`{path}`" in line]).is_not_empty()
 
 
 @pytest.mark.parametrize(
@@ -158,8 +162,52 @@ def test_chunk_prompt_warns_that_other_files_are_stale_on_disk(
     )
 
 
-def test_chunk_prompt_keeps_the_chunk_scoped_changed_files_section() -> None:
-    """The chunk-scoped ``changed_files`` header still counts only the chunk."""
-    prompt = _build(builder_name="diff")
+@pytest.mark.parametrize(
+    "builder_name",
+    ["diff", "git_native"],
+    ids=["builder=diff", "builder=git_native"],
+)
+def test_chunk_prompt_keeps_the_chunk_scoped_changed_files_section(
+    builder_name: str,
+) -> None:
+    """The chunk-scoped ``changed_files`` header still counts only the chunk.
+
+    Args:
+        builder_name: Prompt builder under test.
+    """
+    prompt = _build(builder_name=builder_name)
 
     assert_that(prompt).contains("**Changed files (1):**")
+
+
+@pytest.mark.parametrize(
+    "builder_name",
+    ["diff", "git_native"],
+    ids=["builder=diff", "builder=git_native"],
+)
+def test_full_pr_file_list_goes_through_redaction(
+    builder_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The full-PR path list passes the same redaction choke point as the diff.
+
+    Args:
+        builder_name: Prompt builder under test.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.ai.review.orchestrator as orchestrator_module
+
+    def _tagged(*, text: str, source: str) -> str:
+        return f"[redacted:{source}]{text}"
+
+    monkeypatch.setattr(orchestrator_module, "redact_prompt_text", _tagged)
+
+    prompt = _build(builder_name=builder_name)
+    marked = [line for line in prompt.splitlines() if CHUNK_FILE_MARKER in line]
+
+    # The full-PR list is rendered as one redacted block: its first line
+    # carries the tag, and the chunk's marked entry sits inside that block.
+    assert_that(marked).is_not_empty()
+    assert_that(prompt).contains("[redacted:changed files]- `")
+    tagged_blocks = prompt.count("[redacted:changed files]")
+    assert_that(tagged_blocks).is_greater_than_or_equal_to(2)
