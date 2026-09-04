@@ -952,11 +952,16 @@ def test_a_p2_moved_to_p3_counts_as_downgraded() -> None:
 
 
 def test_claim_and_path_in_different_fields_do_not_fire() -> None:
-    """A changed path in the title and a claim in the description are separate sentences."""
+    """A changed path in the title and a claim in the description are separate sentences.
+
+    The description carries a bare claim with no path of its own, so the only
+    way it could pair with ``src/helpers.py`` is if the fields were joined
+    without a sentence terminator.
+    """
     finding = _finding(
         file="src/app.py",
         title="src/helpers.py call site",
-        description="The legacy loader in src/legacy.py is untouched by this change",
+        description="The legacy loader is untouched by this change",
         cause="",
         failure_scenario="",
     )
