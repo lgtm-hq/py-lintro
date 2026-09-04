@@ -305,11 +305,19 @@ def classify_unit(
         # The retry should have run for this state; fail closed rather than
         # silently swallowing a night with no coverage and no explanation.
         return UnitVerdict.PING, f"{unit.name}: {primary}, no retry ran, ping"
-    if retry in (AttemptState.INFRA, AttemptState.NO_VERDICT):
+    if primary is AttemptState.INFRA and retry in (
+        AttemptState.INFRA,
+        AttemptState.NO_VERDICT,
+    ):
+        # Two runner kills in one night: a coverage gap, not a regression.
         return (
             UnitVerdict.PING_NO_VERDICT,
             f"{unit.name}: {primary} twice, no verdict",
         )
+    # A primary that produced no verdict for a non-infra reason (checker
+    # configuration error, failed image pull) and then did it again is a
+    # deterministic failure, not a kill: it needs a human, so it keeps the
+    # action-required ping instead of the "no action required" annotation.
     return UnitVerdict.PING, f"{unit.name}: {primary}, retry {retry}, ping"
 
 

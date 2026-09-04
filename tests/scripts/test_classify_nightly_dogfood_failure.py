@@ -298,6 +298,26 @@ def test_broken_shared_classifier_is_an_error_not_a_verdict(
     assert_that(module.main(argv=[])).is_equal_to(2)
 
 
+def test_double_no_verdict_without_a_kill_demands_action(
+    module: ModuleType,
+) -> None:
+    """Two no-verdict failures that are not runner kills are a real problem.
+
+    A checker configuration error or a failed image pull leaves the verdict
+    absent on both attempts; that is deterministic, so it must not borrow the
+    "infra kill, no action required" annotation.
+    """
+    decision = _decide(
+        module,
+        LINT_RESULT="failure",
+        LINT_RETRY_RESULT="failure",
+    )
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.action_required).is_true()
+    assert_that(decision.annotation).is_empty()
+
+
 def test_partial_outputs_are_unclassifiable_and_ping(module: ModuleType) -> None:
     """A half-written verdict is never absorbed — absence of proof is not proof."""
     decision = _decide(
