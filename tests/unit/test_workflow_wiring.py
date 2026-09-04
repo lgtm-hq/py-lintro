@@ -955,6 +955,24 @@ def test_test_ci_reusables_never_path_skip() -> None:
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
 
 
+def test_test_ci_matrix_collects_the_integration_suite() -> None:
+    """The Python matrix runs tests/integration instead of ignoring it (#465).
+
+    Every integration module gates on ``tests/integration/_tools.py``, which
+    skips on a toolless runner and only fails inside the tools image, so the
+    hosted matrix can collect the suite without installing any wrapped tool.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job = test_ci["jobs"][job_name]
+        assert_that(job["with"]["test-path"]).described_as(job_name).is_equal_to(
+            "tests",
+        )
+        assert_that(job["with"]["extra-args"]).described_as(
+            job_name,
+        ).does_not_contain("tests/integration")
+
+
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
     """Required coverage gate mirrors test-gate with no pipeline=false shortcut.
 
