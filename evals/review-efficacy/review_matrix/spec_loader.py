@@ -32,6 +32,12 @@ __all__ = [
 #: absolute, and never a leading dot.
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+#: ``lintro review --depth`` is ``click.IntRange(1, 3)``, so a matrix that
+#: asked for anything else would parse cleanly and then fail every cell at
+#: invoke time. Bounded here so the failure is one spec error, not N runs.
+MIN_DEPTH = 1
+MAX_DEPTH = 3
+
 DEFAULT_DEPTH = 1
 DEFAULT_TIMEOUT_SECONDS = 900.0
 DEFAULT_REPEATS = 3
@@ -178,11 +184,7 @@ def parse_matrix(document: Mapping[str, Any]) -> MatrixSpec:
             key="version",
         ),
         repeats=repeats,
-        depth=_positive_int(
-            document.get("depth", DEFAULT_DEPTH),
-            where="matrix",
-            key="depth",
-        ),
+        depth=_bounded_depth(document.get("depth", DEFAULT_DEPTH)),
         timeout_seconds=_positive_float(
             document.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS),
             where="matrix",
@@ -280,7 +282,10 @@ def _parse_labels(value: Any, *, where: str) -> tuple[LabeledFinding, ...]:
         if not isinstance(raw, dict):
             raise SpecError(f"{where}: label #{index + 1} must be a mapping")
         label_where = f"{where} label #{index + 1}"
-        severity_raw = str(raw.get("severity", Severity.P2.value)).upper()
+        # Severity is required, never defaulted: a label's severity is what
+        # the expected verdict is derived from, so a forgotten P1 silently
+        # stored as P2 would move the verdict without anyone noticing.
+        severity_raw = _require_str(raw, "severity", where=label_where).upper()
         try:
             severity = Severity(severity_raw)
         except ValueError as exc:
@@ -296,6 +301,27 @@ def _parse_labels(value: Any, *, where: str) -> tuple[LabeledFinding, ...]:
             ),
         )
     return tuple(labels)
+
+
+def _bounded_depth(value: Any) -> int:
+    """Read the shared review depth, bounded to what the CLI accepts.
+
+    Args:
+        value: Raw ``depth`` value.
+
+    Returns:
+        The parsed depth.
+
+    Raises:
+        SpecError: When the depth is not an integer in ``[1, 3]``.
+    """
+    depth = _positive_int(value, where="matrix", key="depth")
+    if depth > MAX_DEPTH:
+        raise SpecError(
+            f"matrix: 'depth' must be between {MIN_DEPTH} and {MAX_DEPTH} "
+            f"(lintro review --depth accepts no more)",
+        )
+    return depth
 
 
 def _positive_int(value: Any, *, where: str, key: str) -> int:

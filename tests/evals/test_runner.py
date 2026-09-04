@@ -10,6 +10,7 @@ import json
 
 # Imported only for its TimeoutExpired type; no test here starts a process.
 import subprocess  # nosec B404
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -33,9 +34,11 @@ from review_matrix.runner import (
 )
 
 from lintro.ai.config_overrides import (
+    ENV_ENABLED,
     ENV_MAX_COST_USD,
     ENV_MODEL,
     ENV_PROVIDER,
+    ENV_REVIEW,
     ENV_TRANSPORT,
 )
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
@@ -155,12 +158,34 @@ def test_confirmed_spend_plan_announces_execution() -> None:
 
 
 def test_build_command_pins_the_shared_review_knobs() -> None:
-    """Depth, timeout, JSON output and no advisory tools are shared by all."""
-    command = build_command(config=CONFIG_A, item=CORPUS.items[0], spec=SPEC)
+    """Depth, timeout, JSON output and no advisory tools are shared by all.
 
-    assert_that(list(command)).contains("--depth", "1", "--output", "json")
-    assert_that(list(command)).contains("--advisory-tools", "none")
-    assert_that(list(command)).contains("--pr", "1", "--repo", "lgtm-hq/py-lintro")
+    Each flag is read positionally: ``contains`` alone cannot tell ``--depth 1``
+    from the ``1`` of ``--pr 1``.
+    """
+    spec = replace(SPEC, depth=2)
+
+    command = list(build_command(config=CONFIG_A, item=CORPUS.items[0], spec=spec))
+
+    assert_that(command[command.index("--depth") + 1]).is_equal_to("2")
+    assert_that(command[command.index("--output") + 1]).is_equal_to("json")
+    assert_that(command[command.index("--advisory-tools") + 1]).is_equal_to("none")
+    assert_that(command[command.index("--pr") + 1]).is_equal_to("1")
+    assert_that(command[command.index("--repo") + 1]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(command[command.index("--timeout") + 1]).is_equal_to("900")
+
+
+def test_build_command_forces_a_full_review() -> None:
+    """Without --full a repeat would resume the previous repeat's coverage.
+
+    ``lintro review`` persists a local resume ledger after every successful
+    run, and a resumed round skips the files the previous one covered — which
+    would make repeat 2 report an empty finding set that scores as a clean,
+    comparable run.
+    """
+    command = list(build_command(config=CONFIG_A, item=CORPUS.items[0], spec=SPEC))
+
+    assert_that(command).contains("--full")
 
 
 def test_build_command_carries_no_provider_flags() -> None:
@@ -629,9 +654,10 @@ def test_build_env_strips_ambient_ai_overrides(
 
     leaked = [key for key in env if key.startswith(ENV_PREFIX)]
     assert_that(env).does_not_contain_key("LINTRO_AI_TRANSCRIPT")
-    assert_that(env).does_not_contain_key("LINTRO_AI_ENABLED")
-    assert_that(env).does_not_contain_key("LINTRO_AI_REVIEW")
     assert_that(sorted(leaked)).is_equal_to(sorted(CONFIG_A.env_overrides))
+    # The ambient values are replaced by the config's own, never inherited.
+    assert_that(env[ENV_ENABLED]).is_equal_to("1")
+    assert_that(env[ENV_REVIEW]).is_equal_to("1")
     assert_that(env["PATH"]).is_equal_to("/usr/bin")
 
 
@@ -646,6 +672,10 @@ def test_build_env_keeps_the_four_documented_overrides() -> None:
     assert_that(env[ENV_MODEL]).is_equal_to(CONFIG_A.model)
     assert_that(env[ENV_TRANSPORT]).is_equal_to("api")
     assert_that(env[ENV_MAX_COST_USD]).is_equal_to("3")
+    # A cell is self-contained: the master switches come from the config, so a
+    # checkout committing ai.enabled: false still runs the matrix.
+    assert_that(env[ENV_ENABLED]).is_equal_to("1")
+    assert_that(env[ENV_REVIEW]).is_equal_to("1")
     assert_that(env).does_not_contain_key("LINTRO_AI_TRANSCRIPT")
     assert_that(env["HOME"]).is_equal_to("/home/dev")
 
@@ -760,3 +790,100 @@ def test_execute_matrix_keeps_journalled_runs_when_a_cell_raises(
     lines = (tmp_path / RUNS_JSONL_NAME).read_text(encoding="utf-8").splitlines()
     assert_that(lines).is_length(2)
     assert_that(json.loads(lines[1])["repeat"]).is_equal_to(2)
+
+
+def test_execute_matrix_scores_an_empty_findings_list_as_a_clean_run(
+    tmp_path: Path,
+) -> None:
+    """A review that found nothing is a real, comparable result.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(stdout=make_payload(titles=()))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].is_comparable).is_true()
+    assert_that(runs[0].verdict).is_equal_to(ReviewVerdict.READY)
+    assert_that(runs[0].findings).is_empty()
+
+
+def test_execute_matrix_rejects_findings_that_all_drop_in_parsing(
+    tmp_path: Path,
+) -> None:
+    """Empty mappings are claimed findings the harness cannot read.
+
+    They must not be scored as a zero-finding review: the payload asserted
+    findings exist, so silently reading none is a parse failure, not a clean
+    result.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(
+        stdout=json.dumps({"metadata": {}, "findings": [[], "x"]}),
+    )
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.INVALID_OUTPUT)
+    assert_that(runs[0].error).is_equal_to("findings list had no usable entries")
+
+
+def test_execute_matrix_validates_ids_before_spending(tmp_path: Path) -> None:
+    """An unsafe id aborts before the first paid invocation, not after.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    calls: list[str] = []
+
+    def _record(
+        *,
+        config: MatrixConfig,
+        item: CorpusItem,
+        spec: MatrixSpec,
+    ) -> InvocationResult:
+        """Record that a paid invocation happened.
+
+        Args:
+            config: Matrix cell being exercised.
+            item: Corpus item being reviewed.
+            spec: Matrix specification.
+
+        Returns:
+            A canned invocation result.
+        """
+        del item, spec
+        calls.append(config.config_id)
+        return InvocationResult(
+            exit_code=0,
+            stdout=make_payload(titles=("Off by one",)),
+            stderr="",
+            elapsed_seconds=1.0,
+        )
+
+    escaping = replace(CONFIG_A, config_id="../escape")
+    spec = replace(SPEC, configs=(escaping,))
+
+    with pytest.raises(ValueError, match="unsafe config id"):
+        execute_matrix(
+            spec=spec,
+            corpus=CORPUS,
+            output_dir=tmp_path,
+            invoker=_record,
+        )
+
+    assert_that(calls).is_empty()

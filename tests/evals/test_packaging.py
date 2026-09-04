@@ -38,6 +38,22 @@ def test_manifest_prunes_the_evals_directory() -> None:
     assert_that(directives).contains("prune evals")
 
 
+def test_mypy_path_points_at_the_harness_root() -> None:
+    """Mypy resolves ``review_matrix`` from the harness root, not the package.
+
+    This is one of the three places that spell the harness root; the others
+    are tests/evals/conftest.py and evals/review-efficacy/run_matrix.py.
+    """
+    data = tomllib.loads(
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+
+    mypy_path = data["tool"]["mypy"]["mypy_path"]
+
+    assert_that(mypy_path).contains("evals/review-efficacy")
+    assert_that((REPO_ROOT / "evals" / "review-efficacy").is_dir()).is_true()
+
+
 def test_harness_lives_outside_the_lintro_package() -> None:
     """The harness package sits under evals/, not under lintro/."""
     harness = REPO_ROOT / "evals" / "review-efficacy" / "review_matrix"

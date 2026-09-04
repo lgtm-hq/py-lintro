@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 from review_matrix.cli import main
+from review_matrix.enums.run_status import RunStatus
 from review_matrix.invoker import InvocationResult, ReviewInvoker
 from review_matrix.models.corpus import CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
@@ -278,8 +279,111 @@ def test_cli_overwrite_clears_the_stale_run_journal(tmp_path: Path) -> None:
     journal = tmp_path / "runs" / "run-1" / RUNS_JSONL_NAME
     first_lines = journal.read_text(encoding="utf-8").splitlines()
 
-    _run_cli(tmp_path=tmp_path, stdout=payload, extra_args=("--overwrite",))
+    code = _run_cli(tmp_path=tmp_path, stdout=payload, extra_args=("--overwrite",))
 
+    # A fresh journal, not an append: same length rather than double, and the
+    # rewrite actually happened (exit 0), so a no-op second run would fail.
+    assert_that(code).is_equal_to(0)
     assert_that(journal.read_text(encoding="utf-8").splitlines()).is_length(
         len(first_lines),
     )
+
+
+def test_cli_dry_run_prints_the_projection_and_spends_nothing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without --confirm-spend the CLI projects the cost and executes nothing.
+
+    This is the spend gate itself: the flag defaults to off, and a regression
+    that executed the matrix anyway would spend real inference money.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        capsys: Pytest output capture fixture.
+    """
+    matrix_path, corpus_path = _write_specs(tmp_path)
+    calls: list[str] = []
+
+    def _must_not_run(
+        *,
+        config: MatrixConfig,
+        item: CorpusItem,
+        spec: MatrixSpec,
+    ) -> InvocationResult:
+        """Record a call the dry run must never make.
+
+        Args:
+            config: Matrix cell being exercised.
+            item: Corpus item being reviewed.
+            spec: Matrix specification.
+
+        Returns:
+            Never; the recorded call fails the test.
+        """
+        del item, spec
+        calls.append(config.config_id)
+        return InvocationResult(
+            exit_code=0,
+            stdout="",
+            stderr="",
+            elapsed_seconds=0.0,
+        )
+
+    code = main(
+        [
+            "--matrix",
+            str(matrix_path),
+            "--corpus",
+            str(corpus_path),
+            "--runs-root",
+            str(tmp_path / "runs"),
+        ],
+        invoker=_must_not_run,
+    )
+
+    out = capsys.readouterr().out
+    assert_that(code).is_equal_to(0)
+    assert_that(calls).is_empty()
+    assert_that(out).contains("Projected spend", "config-a", "TOTAL")
+    assert_that(out).contains("--confirm-spend")
+    assert_that((tmp_path / "runs").exists()).is_false()
+
+
+def test_cli_reports_a_malformed_corpus_separately_from_the_matrix(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A corpus parse failure exits 2 and names the corpus, not the matrix.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        capsys: Pytest output capture fixture.
+    """
+    matrix_path, _ = _write_specs(tmp_path)
+    bad_corpus = tmp_path / "corpus-bad.json"
+    bad_corpus.write_text(json.dumps({"items": []}), encoding="utf-8")
+
+    code = main(["--matrix", str(matrix_path), "--corpus", str(bad_corpus)])
+
+    assert_that(code).is_equal_to(2)
+    assert_that(capsys.readouterr().err).contains("corpus:")
+
+
+def test_cli_confirmed_run_writes_a_report_with_metrics(tmp_path: Path) -> None:
+    """The written report describes the cells that actually ran.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    code = _run_cli(tmp_path=tmp_path, stdout=make_payload(titles=("Off by one",)))
+
+    report = json.loads(
+        (tmp_path / "runs" / "run-1" / "report.json").read_text(encoding="utf-8"),
+    )
+    assert_that(code).is_equal_to(0)
+    assert_that(report["config_ids"]).is_equal_to(["config-a"])
+    assert_that(report["item_ids"]).is_equal_to(["pr-1"])
+    assert_that(report["runs"]).is_length(1)
+    assert_that(report["runs"][0]["status"]).is_equal_to(str(RunStatus.OK))
+    assert_that(report["stability"][0]["config_id"]).is_equal_to("config-a")

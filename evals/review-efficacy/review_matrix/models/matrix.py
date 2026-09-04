@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lintro.ai.config_overrides import (
+    ENV_ENABLED,
     ENV_MAX_COST_USD,
     ENV_MODEL,
     ENV_PROVIDER,
+    ENV_REVIEW,
     ENV_TRANSPORT,
 )
 
@@ -46,10 +48,20 @@ class MatrixConfig:
         overrides (:mod:`lintro.ai.config_overrides`), so the harness never
         needs provider wiring of its own.
 
+        The master switches are part of the overlay because a cell must be
+        self-contained: this repository commits ``ai.enabled: false``, and
+        :attr:`lintro.ai.config.AIConfig.review_enabled` requires both
+        ``enabled`` and ``review``, so a run driven only by the provider
+        triplet would exit at the review gate. The invoker strips every
+        ambient ``LINTRO_AI_*`` variable before applying this overlay, so
+        these two are the only thing that can turn the review on.
+
         Returns:
             Mapping of environment variable name to value.
         """
         return {
+            ENV_ENABLED: "1",
+            ENV_REVIEW: "1",
             ENV_PROVIDER: self.provider,
             ENV_MODEL: self.model,
             ENV_TRANSPORT: self.transport,

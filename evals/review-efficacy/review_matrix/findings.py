@@ -35,6 +35,12 @@ __all__ = [
     "verdict_for",
 ]
 
+#: Severity assumed when a payload entry omits the key, matching
+#: :func:`lintro.ai.review.finding_parser.parse_findings`. A *present but
+#: unrecognized* label still fails closed to P1 through the production
+#: normalizer; only an absent key takes this default.
+_DEFAULT_SEVERITY = "P3"
+
 #: Round number used for the "candidate" side of every harness comparison.
 #: The baseline side is always round 1, so a matched pair reads as *carried*.
 MATCH_ROUND = 2
@@ -64,7 +70,7 @@ def findings_from_payload(payload: Mapping[str, Any]) -> tuple[ReviewFinding, ..
             continue
         parsed.append(
             ReviewFinding(
-                severity=_parse_severity(item.get("severity")),
+                severity=_parse_severity(item.get("severity", _DEFAULT_SEVERITY)),
                 category=str(item.get("category", "")),
                 file=str(item.get("file", "")),
                 line=_parse_int(item.get("line")),
@@ -182,7 +188,8 @@ def _parse_severity(value: Any) -> Severity:
     Returns:
         The parsed severity from the production normalizer, which maps common
         synonyms and fails closed to P1 for unrecognized input so a corrupted
-        payload can never fabricate a clean verdict.
+        payload can never fabricate a clean verdict. An absent key is
+        defaulted by the caller to ``P3``, as ``parse_findings`` does.
     """
     return normalize_severity(raw=value)
 

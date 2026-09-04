@@ -254,7 +254,10 @@ def efficacy_against_labels(
         corpus: Corpus supplying the ground-truth labels.
 
     Returns:
-        The config's efficacy metrics; all-zero when the corpus is unlabeled.
+        The config's efficacy metrics. With an unlabeled corpus the counts are
+        zero and ``precision``/``recall``/``f1`` are ``None`` (rendered
+        ``n/a``), never ``0.0``: nothing was measured, which is not the same
+        as having measured zero.
     """
     labels_by_item: dict[str, CorpusItem] = {
         item.item_id: item for item in corpus.labeled_items

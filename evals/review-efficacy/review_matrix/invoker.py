@@ -91,6 +91,16 @@ def build_command(
 ) -> tuple[str, ...]:
     """Build the ``lintro review`` argument vector for one run.
 
+    ``--full`` is mandatory for an eval. ``lintro review`` persists a local
+    resume ledger after every successful run
+    (:func:`lintro.ai.review.state_store.write_local_state`), and without
+    ``--full`` the next round inherits that coverage
+    (:func:`lintro.ai.review.resume.plan_resume`), so repeat 2 would skip the
+    files repeat 1 already covered and report an empty finding set that looks
+    like a clean comparable run. ``--full`` discards carried coverage, flags
+    and pending invalidations, making every repeat an independent review of
+    the same diff.
+
     Advisory finder tools are switched off: they are a separate,
     non-diff-based surface and would add findings the matrix is not comparing.
 
@@ -120,6 +130,7 @@ def build_command(
         "json",
         "--advisory-tools",
         "none",
+        "--full",
     )
 
 
@@ -141,8 +152,9 @@ def build_env(
             environment.
 
     Returns:
-        A new environment mapping carrying exactly this config's
-        ``LINTRO_AI_*`` variables and no other.
+        A new environment mapping. Every non-``LINTRO_AI_*`` variable is
+        preserved (``PATH``, provider credentials, ``GITHUB_TOKEN``); the only
+        ``LINTRO_AI_*`` variables present are this config's own overrides.
     """
     source = os.environ if base_env is None else base_env
     env = {

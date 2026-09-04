@@ -22,13 +22,16 @@ class LabeledFinding:
         file: Repository-relative path the finding belongs to.
         category: Finding category label, matched case-insensitively.
         title: Expected finding title, matched after normalization.
-        severity: Severity the label carries, used for the expected verdict.
+        severity: Severity the label carries. Required, with no default: it
+            never affects whether a label matches a finding, but it is what
+            the expected verdict is derived from, so an omitted value must be
+            an authoring error rather than a silent P2.
     """
 
     file: str
     category: str
     title: str
-    severity: Severity = Severity.P2
+    severity: Severity
 
     def to_finding(self) -> ReviewFinding:
         """Return the label as a :class:`ReviewFinding` for the matcher.

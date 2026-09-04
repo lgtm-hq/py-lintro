@@ -9,6 +9,9 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 from review_matrix.spec_loader import (
+    DEFAULT_DEPTH,
+    DEFAULT_REPEATS,
+    DEFAULT_TIMEOUT_SECONDS,
     SpecError,
     load_corpus,
     load_matrix,
@@ -17,9 +20,11 @@ from review_matrix.spec_loader import (
 )
 
 from lintro.ai.config_overrides import (
+    ENV_ENABLED,
     ENV_MAX_COST_USD,
     ENV_MODEL,
     ENV_PROVIDER,
+    ENV_REVIEW,
     ENV_TRANSPORT,
 )
 from lintro.ai.review.models.review_finding import Severity
@@ -99,6 +104,8 @@ def test_matrix_config_env_overrides_use_the_documented_variables() -> None:
 
     assert_that(overrides).is_equal_to(
         {
+            ENV_ENABLED: "1",
+            ENV_REVIEW: "1",
             ENV_PROVIDER: "anthropic",
             ENV_MODEL: "claude-opus-4-5",
             ENV_TRANSPORT: "api",
@@ -170,8 +177,12 @@ def test_parse_corpus_reads_labels_and_marks_the_item_labeled() -> None:
     assert_that(label.to_finding().title).is_equal_to("Off by one")
 
 
-def test_parse_corpus_defaults_a_label_severity_to_p2() -> None:
-    """An unlabeled severity is a P2, not the verdict-moving P1."""
+def test_parse_corpus_requires_a_label_severity() -> None:
+    """An omitted severity is an authoring error, not a silent P2.
+
+    Severity is what the expected verdict is derived from, so a forgotten P1
+    must fail loudly rather than be stored as a P2.
+    """
     document = {
         **MINIMAL_CORPUS,
         "items": [
@@ -189,11 +200,8 @@ def test_parse_corpus_defaults_a_label_severity_to_p2() -> None:
         ],
     }
 
-    corpus = parse_corpus(document)
-
-    assert_that(corpus.items[0].labeled_findings[0].severity).is_equal_to(
-        Severity.P2,
-    )
+    with pytest.raises(SpecError, match="'severity' is required"):
+        parse_corpus(document)
 
 
 def test_parse_corpus_rejects_an_unknown_severity() -> None:
@@ -383,3 +391,73 @@ def test_load_matrix_reports_an_unreadable_path_as_a_spec_error(
 
     with pytest.raises(SpecError, match="cannot read"):
         load_matrix(directory)
+
+
+@pytest.mark.parametrize("depth", [4, 10])
+def test_parse_matrix_rejects_a_depth_the_review_cli_would_refuse(
+    depth: int,
+) -> None:
+    """``lintro review --depth`` is an IntRange(1, 3); a matrix cannot exceed it.
+
+    Args:
+        depth: Out-of-range depth that must not parse.
+    """
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document["depth"] = depth
+
+    with pytest.raises(SpecError, match="'depth' must be between 1 and 3"):
+        parse_matrix(document)
+
+
+def test_parse_matrix_applies_the_documented_defaults() -> None:
+    """Omitted repeats, depth and timeout fall back to the DEFAULT_* values."""
+    document = json.loads(json.dumps(MINIMAL_MATRIX))
+    document.pop("repeats")
+
+    spec = parse_matrix(document)
+
+    assert_that(spec.repeats).is_equal_to(DEFAULT_REPEATS)
+    assert_that(spec.depth).is_equal_to(DEFAULT_DEPTH)
+    assert_that(spec.timeout_seconds).is_equal_to(DEFAULT_TIMEOUT_SECONDS)
+
+
+def test_parse_corpus_prefers_an_item_repo_over_the_corpus_default() -> None:
+    """A per-item repo overrides the corpus-level default."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["repo"] = "lgtm-hq/other"
+
+    corpus = parse_corpus(document)
+
+    assert_that(corpus.items[0].repo).is_equal_to("lgtm-hq/other")
+
+
+def test_parse_corpus_rejects_duplicate_item_ids() -> None:
+    """Two items sharing an id would write into the same run directory."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"].append({"id": "pr-1", "pr": 2})
+
+    with pytest.raises(SpecError, match="duplicate item id"):
+        parse_corpus(document)
+
+
+def test_load_corpus_reports_a_missing_file(tmp_path: Path) -> None:
+    """A missing corpus path is a SpecError, like a missing matrix path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    with pytest.raises(SpecError, match="cannot read"):
+        load_corpus(tmp_path / "nope.yaml")
+
+
+def test_load_matrix_reports_malformed_yaml(tmp_path: Path) -> None:
+    """Unparseable YAML is a SpecError rather than a YAMLError traceback.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    bad = tmp_path / "matrix.yaml"
+    bad.write_text("configs: [\n  - id: 'unterminated\n", encoding="utf-8")
+
+    with pytest.raises(SpecError, match="cannot parse"):
+        load_matrix(bad)

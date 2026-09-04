@@ -118,6 +118,9 @@ def _stability_table(report: MatrixReport) -> list[str]:
         "## Stability (noise floor)",
         "",
         "| config | pairs | verdict flip rate | mean Jaccard | non-comparable runs |",
+        # The cell is StabilityMetrics.failed_runs, which counts every run
+        # that never became comparable — failed, unparseable or incomplete
+        # — not only the ones whose status is FAILED.
         "| --- | ---: | ---: | ---: | ---: |",
     ]
     lines.extend(
@@ -136,7 +139,10 @@ def _agreement_table(report: MatrixReport) -> list[str]:
         report: Report being rendered.
 
     Returns:
-        Markdown lines for the section; empty when no pair was comparable.
+        Markdown lines for the section; empty only when the matrix has fewer
+        than two configs, since ``build_report`` emits one entry per unordered
+        config pair. Two configs that shared no comparable run still get a
+        table, of ``n/a`` rows.
     """
     if not report.agreement:
         return []

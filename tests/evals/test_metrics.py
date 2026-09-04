@@ -156,7 +156,12 @@ def test_config_stability_reports_a_clean_noise_floor() -> None:
 
 
 def test_config_stability_measures_verdict_flips() -> None:
-    """A config that flips its verdict on one of three pairs is not stable."""
+    """A config that flips its verdict on two of three pairs is not stable.
+
+    Three repeats verdicted BLOCKED, BLOCKED, NITS_ONLY: pairs (1,3) and (2,3)
+    disagree, so the rate the metric counts is 2/3 of the pairs, not 1/3 of
+    the runs.
+    """
     blocking = (make_finding(title="Off by one", severity=Severity.P1),)
     nit = (make_finding(title="Off by one", severity=Severity.P3),)
     runs = [
@@ -469,3 +474,112 @@ def test_incomplete_runs_never_enter_a_metric() -> None:
     assert_that(efficacy.labeled_runs).is_equal_to(1)
     assert_that(efficacy.true_positives).is_equal_to(1)
     assert_that(efficacy.false_negatives).is_equal_to(1)
+
+
+def test_stability_averages_items_with_equal_weight() -> None:
+    """A busier corpus item cannot dominate the noise floor.
+
+    Item A contributes three repeats (three pairs, all agreeing, 0.0) and item
+    B two repeats (one pair, flipped, 1.0). The equal-weight mean of the two
+    per-item rates is 0.5; a run-weighted mean would be 1/4 = 0.25.
+    """
+    stable = (make_finding(title="Off by one", severity=Severity.P1),)
+    runs = [
+        _run(config_id="a", item_id="pr-1", repeat=1, findings=stable),
+        _run(config_id="a", item_id="pr-1", repeat=2, findings=stable),
+        _run(config_id="a", item_id="pr-1", repeat=3, findings=stable),
+        _run(config_id="a", item_id="pr-2", repeat=1, findings=stable),
+        _run(
+            config_id="a",
+            item_id="pr-2",
+            repeat=2,
+            findings=stable,
+            verdict=ReviewVerdict.BLOCKED,
+        ),
+    ]
+
+    stability = config_stability(config_id="a", runs=runs)
+
+    assert_that(stability.compared_pairs).is_equal_to(4)
+    assert_that(stability.verdict_flip_rate).is_equal_to(0.5)
+
+
+def test_cross_config_agreement_averages_items_with_equal_weight() -> None:
+    """Agreement is a mean of per-item means, not of raw cross pairs.
+
+    Item A pairs two-against-two in perfect agreement (1.0); item B pairs
+    one-against-one in total disagreement (0.0). Equal weight gives 0.5, while
+    weighting by the four-versus-one pair counts would give 0.8.
+    """
+    shared = (make_finding(title="Off by one"),)
+    other = (make_finding(title="Leaked handle"),)
+    runs = [
+        _run(config_id="a", item_id="pr-1", repeat=1, findings=shared),
+        _run(config_id="a", item_id="pr-1", repeat=2, findings=shared),
+        _run(config_id="b", item_id="pr-1", repeat=1, findings=shared),
+        _run(config_id="b", item_id="pr-1", repeat=2, findings=shared),
+        _run(config_id="a", item_id="pr-2", repeat=1, findings=shared),
+        _run(config_id="b", item_id="pr-2", repeat=1, findings=other),
+    ]
+    left = config_stability(config_id="a", runs=runs)
+    right = config_stability(config_id="b", runs=runs)
+
+    agreement = cross_config_agreement(left=left, right=right, runs=runs)
+
+    assert_that(agreement.compared_pairs).is_equal_to(5)
+    assert_that(agreement.mean_jaccard).is_equal_to(0.5)
+    assert_that(agreement.finding_match_rate).is_equal_to(0.5)
+
+
+def test_efficacy_pools_counts_across_labeled_items() -> None:
+    """Efficacy pools per run, so a busier item contributes more counts.
+
+    Unlike stability and agreement, precision/recall are pooled counts by
+    design: a config that only sometimes reports a labeled finding is scored
+    on how often it did.
+    """
+    corpus = Corpus(
+        version=1,
+        items=(
+            CorpusItem(
+                item_id="pr-1",
+                repo="lgtm-hq/py-lintro",
+                pr=1,
+                labeled_findings=(
+                    LabeledFinding(
+                        file="lintro/example.py",
+                        category="correctness",
+                        title="Off by one",
+                        severity=Severity.P1,
+                    ),
+                ),
+            ),
+            CorpusItem(
+                item_id="pr-2",
+                repo="lgtm-hq/py-lintro",
+                pr=2,
+                labeled_findings=(
+                    LabeledFinding(
+                        file="lintro/example.py",
+                        category="correctness",
+                        title="Leaked handle",
+                        severity=Severity.P2,
+                    ),
+                ),
+            ),
+        ),
+    )
+    found = (make_finding(title="Off by one", severity=Severity.P1),)
+    runs = [
+        _run(config_id="a", item_id="pr-1", repeat=1, findings=found),
+        _run(config_id="a", item_id="pr-1", repeat=2, findings=found),
+        _run(config_id="a", item_id="pr-2", repeat=1, findings=()),
+    ]
+
+    efficacy = efficacy_against_labels(config_id="a", runs=runs, corpus=corpus)
+
+    assert_that(efficacy.labeled_runs).is_equal_to(3)
+    assert_that(efficacy.true_positives).is_equal_to(2)
+    assert_that(efficacy.false_positives).is_equal_to(0)
+    assert_that(efficacy.false_negatives).is_equal_to(1)
+    assert_that(efficacy.precision).is_equal_to(1.0)

@@ -75,13 +75,15 @@ Each run writes `runs/<stamp>/`:
 Pass `--stamp` to name the run directory yourself; otherwise it is a UTC timestamp. An
 existing run directory is never written into twice: the command exits 2 unless
 `--overwrite` is passed, which clears the reports and this matrix's own run payloads
-first. A confirmed run exits 1 if none of its runs produced comparable findings. Nothing
-in a report depends on the clock, but two identical runs still differ in the elapsed
-time and the cost each one records.
+first. A confirmed run exits 1 if none of its runs produced comparable findings. The
+only clock-derived report field is each run's `elapsed_seconds`; that and the recorded
+cost are what differ between two otherwise identical runs.
 
 ## Adding labels
 
-Add `expected_findings` to a corpus item to bring it into the efficacy table:
+Add `expected_findings` to a corpus item to bring it into the efficacy table. All four
+fields are required — `severity` has no default, because it is what the expected verdict
+is derived from:
 
 ```yaml
 - id: pr-1928

@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.models.review_finding import ReviewFinding
 from review_matrix.enums.run_status import RunStatus
 from review_matrix.findings import findings_from_payload, verdict_for
 from review_matrix.invoker import InvocationResult, ReviewInvoker, run_review_cli
 from review_matrix.models.corpus import Corpus, CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
 from review_matrix.models.run import EvalRun
+from review_matrix.spec_loader import SAFE_ID_PATTERN
 
 __all__ = [
     "RUNS_JSONL_NAME",
-    "SAFE_ID_PATTERN",
     "ConfigSpend",
     "SpendPlan",
     "execute_matrix",
@@ -29,11 +29,6 @@ __all__ = [
     "summarize_runs",
 ]
 
-
-#: Ids are used verbatim as output path segments, so they must be a single
-#: safe segment. Mirrors :data:`review_matrix.spec_loader.SAFE_ID_PATTERN`;
-#: re-checked here so a directly constructed dataclass cannot escape either.
-SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 #: Append-only journal of run records, written as each cell completes so an
 #: aborted matrix still has every result it already paid for.
@@ -239,20 +234,51 @@ def _incomplete_reason(payload: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _has_usable_findings(payload: Mapping[str, Any]) -> bool:
-    """Return whether a payload's findings list holds any usable entry.
+def _has_usable_findings(
+    payload: Mapping[str, Any],
+    *,
+    parsed: Sequence[ReviewFinding],
+) -> bool:
+    """Return whether a payload's findings list survived parsing.
+
+    An empty ``findings`` list is a clean review, not junk: a config that
+    reports nothing is a real, comparable result. A *non-empty* list that
+    parses to nothing is the junk case — the run claimed findings the harness
+    cannot read, so it must never be scored as a zero-finding review.
 
     Args:
-        payload: Decoded review payload, already known to carry a list.
+        payload: Decoded review payload.
+        parsed: Findings :func:`findings_from_payload` recovered from it.
 
     Returns:
-        ``True`` when the list is empty (a clean review reports nothing) or
-        holds at least one mapping; ``False`` when every entry is junk.
+        ``True`` when the list is empty or at least one entry parsed.
     """
     raw = payload.get("findings")
     if not isinstance(raw, list) or not raw:
         return True
-    return any(isinstance(item, dict) for item in raw)
+    return bool(parsed)
+
+
+def _require_safe_ids(*, config: MatrixConfig, item: CorpusItem) -> None:
+    """Reject ids that could not be a single output path segment.
+
+    The loaders already reject these (the pattern is
+    :data:`review_matrix.spec_loader.SAFE_ID_PATTERN`, imported rather than
+    restated so the two layers cannot drift), but a directly constructed
+    dataclass must not be able to write outside the run directory — and must
+    not be able to spend first and fail afterwards.
+
+    Args:
+        config: Config whose id is used as a directory name.
+        item: Corpus item whose id is used as a directory name.
+
+    Raises:
+        ValueError: When either id is not a single safe path segment.
+    """
+    for label, value in (("config id", config.config_id), ("item id", item.item_id)):
+        if not SAFE_ID_PATTERN.fullmatch(value):
+            msg = f"unsafe {label} for an output path: {value!r}"
+            raise ValueError(msg)
 
 
 def _persist(
@@ -273,17 +299,11 @@ def _persist(
         result: Raw invocation result.
 
     Returns:
-        The payload path, relative to ``output_dir``.
-
-    Raises:
-        ValueError: When either id is not a single safe path segment. The
-            loaders already reject those, but a directly constructed
-            dataclass must not be able to write outside ``output_dir``.
+        The payload path, relative to ``output_dir``. Ids are re-validated
+        through :func:`_require_safe_ids` so a direct call cannot write
+        outside ``output_dir``.
     """
-    for label, value in (("config id", config.config_id), ("item id", item.item_id)):
-        if not SAFE_ID_PATTERN.fullmatch(value):
-            msg = f"unsafe {label} for an output path: {value!r}"
-            raise ValueError(msg)
+    _require_safe_ids(config=config, item=item)
     relative = Path(config.config_id) / item.item_id / f"run-{repeat}.json"
     payload_path = output_dir / relative
     payload_path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,7 +377,8 @@ def _run_to_record(
             error=error,
             output_path=output_path,
         )
-    if not _has_usable_findings(payload):
+    findings = findings_from_payload(payload)
+    if not _has_usable_findings(payload, parsed=findings):
         return EvalRun(
             config_id=config.config_id,
             item_id=item.item_id,
@@ -369,7 +390,6 @@ def _run_to_record(
             error="findings list had no usable entries",
             output_path=output_path,
         )
-    findings = findings_from_payload(payload)
     incomplete = _incomplete_reason(payload)
     if incomplete is not None:
         # A truncated review is not a config that found less. Its findings are
@@ -480,6 +500,9 @@ def execute_matrix(
     runs: list[EvalRun] = []
     for config in spec.configs:
         for item in corpus.items:
+            # Checked before the first paid invocation: an id that cannot be a
+            # path segment must abort the matrix before it spends, not after.
+            _require_safe_ids(config=config, item=item)
             for repeat in range(1, spec.repeats + 1):
                 result = invoke(config=config, item=item, spec=spec)
                 output_path = _persist(

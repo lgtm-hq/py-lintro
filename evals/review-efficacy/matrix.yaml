@@ -22,9 +22,11 @@ timeout_seconds: 900
 # Every model id must be one its own provider accepts. The anthropic and
 # openai ids are registered under those providers in lintro/ai/registry.py, so
 # cost accounting is real rather than the unknown-model fallback. The cursor
-# id is not in the registry (cursor's registered models are priced at zero
-# anyway); it is the id the Cursor CLI exposes, as documented in
-# docs/ai-features.md. tests/evals/test_matrix_models.py enforces this.
+# id is not in the registry, so its token accounting falls back to
+# DEFAULT_PRICING ($3/$15 per million, lintro/ai/cost.py) rather than to
+# Cursor's zero-priced registered ids; it is the id the Cursor CLI exposes, as
+# documented in docs/ai-features.md. tests/evals/test_matrix_models.py
+# enforces this.
 #
 # The two anthropic cells pair a small model with a mid-size one so the matrix
 # still measures a within-provider difference. They deliberately avoid
