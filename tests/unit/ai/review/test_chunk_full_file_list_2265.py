@@ -206,8 +206,17 @@ def test_full_pr_file_list_goes_through_redaction(
     marked = [line for line in prompt.splitlines() if CHUNK_FILE_MARKER in line]
 
     # The full-PR list is rendered as one redacted block: its first line
-    # carries the tag, and the chunk's marked entry sits inside that block.
+    # carries the tag and every PR path, marked or not, sits inside it.
     assert_that(marked).is_not_empty()
-    assert_that(prompt).contains("[redacted:changed files]- `")
-    tagged_blocks = prompt.count("[redacted:changed files]")
-    assert_that(tagged_blocks).is_greater_than_or_equal_to(2)
+    # Each redacted block is the list itself, up to the first blank line.
+    lists = [
+        block.split("\n\n")[0] for block in prompt.split("[redacted:changed files]")[1:]
+    ]
+    full_list = [
+        entry
+        for entry in lists
+        if any(CHUNK_FILE_MARKER in line for line in entry.splitlines())
+    ]
+    assert_that(full_list).is_length(1)
+    for path in (_CHUNK_PATH, *_OTHER_PATHS):
+        assert_that(full_list[0]).contains(f"- `{path}`")

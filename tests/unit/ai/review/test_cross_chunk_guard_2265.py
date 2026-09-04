@@ -1094,11 +1094,12 @@ def test_the_tag_is_persisted_on_the_record_only_when_set() -> None:
         round_number=1,
     ).records[0]
     assert_that(plain.to_dict()).does_not_contain_key("cross_chunk_contradiction")
-    assert_that(
-        FindingRecord.from_dict(
-            {**plain.to_dict(), "cross_chunk_contradiction": "bogus"},
-        ),
-    ).is_not_none()
+    bogus = FindingRecord.from_dict(
+        {**plain.to_dict(), "cross_chunk_contradiction": "bogus"},
+    )
+    assert_that(bogus).is_not_none()
+    assert bogus is not None
+    assert_that(bogus.cross_chunk_contradiction).is_none()
 
 
 def test_a_replayed_finding_keeps_its_tag_and_its_band() -> None:
