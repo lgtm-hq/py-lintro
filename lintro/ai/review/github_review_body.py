@@ -29,6 +29,7 @@ from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
     format_badge_tables,
     format_coverage_limited_warning,
+    format_cross_chunk_note,
     format_timings_note,
     run_stats_primary_cells,
     sanitize_comment_text,
@@ -292,6 +293,11 @@ def _run_stats_section(
         # Parity with the cost-cap partial warning: a findings-cap run says so
         # in the run-stats block, where the reader looks for run mechanics.
         lines.extend(["", coverage_warning])
+    cross_chunk_note = format_cross_chunk_note(findings=result.findings)
+    if cross_chunk_note:
+        # A guard-driven downgrade is run mechanics too: the reader needs to
+        # know a severity below was set here rather than by the model (#2265).
+        lines.extend(["", cross_chunk_note])
     timings_note = format_timings_note(metadata=metadata)
     if timings_note:
         lines.extend(["", timings_note])

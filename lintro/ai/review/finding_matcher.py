@@ -203,6 +203,7 @@ def _current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            cross_chunk_contradiction=finding.cross_chunk_contradiction,
             description=finding.description,
             cause=finding.cause,
             fix=finding.fix,
@@ -314,6 +315,7 @@ def _merge_pair(
         occurrences=current.occurrences or prior.occurrences,
         occurrences_total=max(prior.occurrence_total, current.occurrence_total),
         severity_downgraded=current.severity_downgraded,
+        cross_chunk_contradiction=current.cross_chunk_contradiction,
         description=current.description or prior.description,
         cause=current.cause or prior.cause,
         fix=current.fix or prior.fix,
@@ -381,6 +383,7 @@ def review_findings_from_unposted(
                 kind=record.kind,
                 occurrences=record.occurrences,
                 severity_downgraded=record.severity_downgraded,
+                cross_chunk_contradiction=record.cross_chunk_contradiction,
             ),
         )
     return tuple(extra)

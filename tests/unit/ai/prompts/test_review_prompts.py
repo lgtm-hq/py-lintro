@@ -35,6 +35,10 @@ _USER_PROMPT_KWARGS = {
     "external_review_section": "",
     "changed_file_count": 1,
     "changed_files": "- `src/main.py` (modified, +1/-0)",
+    "pr_changed_files": (
+        "- `src/main.py` (modified, +1/-0) — **(this chunk)**\n"
+        "- `src/other.py` (modified, +2/-0)"
+    ),
     "interaction_paths": "**Path A:** trace wiring",
     "checklist_count": 1,
     "checklist": "1. [logic-bug] Example question?",
@@ -65,6 +69,32 @@ def _collapsed(text: str) -> str:
         The text with each whitespace run reduced to a single space.
     """
     return " ".join(text.split())
+
+
+def test_review_user_prompt_interpolates_the_full_pr_file_list() -> None:
+    """The full-PR list, with its this-chunk marker, reaches the rendered prompt."""
+    rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
+        **_USER_PROMPT_KWARGS,
+        output_rules=format_output_rules(checklist_count=1),
+    )
+
+    assert_that(rendered).contains("- `src/other.py` (modified, +2/-0)")
+    assert_that(rendered).contains(
+        "- `src/main.py` (modified, +1/-0) — **(this chunk)**",
+    )
+
+
+def test_git_native_user_prompt_interpolates_the_full_pr_file_list() -> None:
+    """The git-native template carries the same full-PR list and marker."""
+    rendered = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
+        **{**_USER_PROMPT_KWARGS, "diff_section": "inline-diff"},
+        output_rules=format_output_rules(checklist_count=1),
+    )
+
+    assert_that(rendered).contains("- `src/other.py` (modified, +2/-0)")
+    assert_that(rendered).contains(
+        "- `src/main.py` (modified, +1/-0) — **(this chunk)**",
+    )
 
 
 def test_review_user_prompt_template_renders_all_placeholders() -> None:

@@ -22,6 +22,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
+from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
 from lintro.ai.review.timings import format_timing_summary
 
 __all__ = ["render_review_terminal"]
@@ -154,6 +155,11 @@ def _render_findings(
     drops = describe_suggestion_drops(findings=result.findings)
     if drops:
         console.print(f"[yellow]{drops}[/yellow]")
+    contradictions = describe_cross_chunk_contradictions(findings=result.findings)
+    if contradictions:
+        # No silent edits: a guard-driven downgrade is stated where the
+        # severities it changed are read (#2265).
+        console.print(f"[yellow]{contradictions}[/yellow]")
 
     for index, finding in enumerate(sorted_findings, start=1):
         _render_finding_panel(

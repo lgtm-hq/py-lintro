@@ -42,6 +42,7 @@ from lintro.ai.prompts.review import (
     format_changed_files_for_prompt,
     format_lint_results_section,
     format_output_rules,
+    format_pr_changed_files_for_prompt,
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
@@ -129,6 +130,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.state_store import state_dir, write_state_part
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 from lintro.ai.sanitize import make_boundary_marker
@@ -146,6 +148,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.resume import ResumePlan
 
 __all__ = [
+    "guard_changed_paths",
     "build_git_native_review_prompt",
     "build_review_prompt",
     "merge_checklist_answers",
@@ -1001,6 +1004,28 @@ def run_review(
     )
 
 
+def guard_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
+    """Return every path the cross-chunk guard treats as changed by the PR.
+
+    Current paths plus rename and copy sources: a chunk-local claim that a
+    rename's old path was never touched contradicts the diff just as a claim
+    about the new path does. This list is only for the guard; custom-agent
+    scoping keys on post-rename paths, whose diff sections exist.
+
+    Args:
+        context: Collected review context.
+
+    Returns:
+        Changed paths and rename/copy sources, in changed-file order.
+    """
+    return tuple(
+        path
+        for file in context.changed_files
+        for path in (file.path, file.previous_path)
+        if path
+    )
+
+
 async def run_review_async(
     context: ReviewContext,
     *,
@@ -1480,6 +1505,14 @@ async def run_review_async(
         allowed_paths=set(resume.queue),
         eligible_paths=set(resume.eligible),
     )
+    # #2265: a chunk only ever sees the other files at the base commit, so a
+    # finding asserting that a file this PR changed was never touched is
+    # reporting its own blind spot. The guard runs over the run's full changed
+    # set, not the chunk's, and downgrades rather than drops.
+    filtered_findings = apply_cross_chunk_guard(
+        findings=filtered_findings,
+        changed_paths=guard_changed_paths(context=context),
+    )
     prior_flags = prior_state.flagged_files if prior_state is not None else ()
     prior_consumed = (
         () if force_full or prior_state is None else prior_state.consumed_flags
@@ -1644,6 +1677,13 @@ def build_review_prompt(
             text=format_changed_files_for_prompt(files=changed_files),
             source="changed files",
         ),
+        pr_changed_files=redact_prompt_text(
+            text=format_pr_changed_files_for_prompt(
+                files=context.changed_files,
+                chunk_paths=set(chunk.files),
+            ),
+            source="changed files",
+        ),
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
@@ -1749,6 +1789,13 @@ def build_git_native_review_prompt(
         changed_file_count=len(changed_files),
         changed_files=redact_prompt_text(
             text=format_changed_files_for_prompt(files=changed_files),
+            source="changed files",
+        ),
+        pr_changed_files=redact_prompt_text(
+            text=format_pr_changed_files_for_prompt(
+                files=context.changed_files,
+                chunk_paths=set(chunk.files),
+            ),
             source="changed files",
         ),
         interaction_paths=interaction_paths,

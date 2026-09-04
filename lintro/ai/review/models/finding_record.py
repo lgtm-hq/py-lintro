@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models._coerce import coerce_int
@@ -56,6 +57,9 @@ class FindingRecord:
             ``addressed / total`` even after some locations are fixed.
         severity_downgraded: True when the P1 evidence gate downgraded the
             severity at the most recent sighting.
+        cross_chunk_contradiction: Why the cross-chunk guard tagged this
+            finding at the most recent sighting, persisted so a replayed
+            finding keeps its tag and is never guarded a second time (#2265).
         description: Finding body text, persisted so a SIGTERM resume can
             still post an actionable inline comment.
         cause: Root-cause text from the most recent sighting.
@@ -81,6 +85,7 @@ class FindingRecord:
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     occurrences_total: int = 0
     severity_downgraded: bool = False
+    cross_chunk_contradiction: CrossChunkContradiction | None = None
     description: str = ""
     cause: str = ""
     fix: str = ""
@@ -165,6 +170,8 @@ class FindingRecord:
             payload["occurrences_total"] = self.occurrence_total
         if self.severity_downgraded:
             payload["severity_downgraded"] = True
+        if self.cross_chunk_contradiction is not None:
+            payload["cross_chunk_contradiction"] = self.cross_chunk_contradiction.value
         if self.description:
             payload["description"] = self.description
         if self.cause:
@@ -213,6 +220,9 @@ class FindingRecord:
             occurrences=parse_occurrences(payload.get("occurrences")),
             occurrences_total=coerce_int(payload.get("occurrences_total")),
             severity_downgraded=bool(payload.get("severity_downgraded", False)),
+            cross_chunk_contradiction=_contradiction_from_payload(
+                payload.get("cross_chunk_contradiction"),
+            ),
             description=str(payload.get("description", "")),
             cause=str(payload.get("cause", "")),
             fix=str(payload.get("fix", "")),
@@ -276,3 +286,20 @@ def _parse_status(value: Any) -> FindingStatus:
         return FindingStatus(str(value).lower())
     except ValueError:
         return FindingStatus.OPEN
+
+
+def _contradiction_from_payload(value: object) -> CrossChunkContradiction | None:
+    """Parse a persisted cross-chunk tag, tolerating older states without one.
+
+    Args:
+        value: Raw payload value, ``None`` for states written before the tag.
+
+    Returns:
+        The tag, or ``None`` when absent or unrecognized.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return CrossChunkContradiction(value)
+    except ValueError:
+        return None

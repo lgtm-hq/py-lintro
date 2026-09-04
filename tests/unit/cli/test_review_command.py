@@ -2115,3 +2115,89 @@ def test_ci_does_not_import_the_local_ledger(
         post=False,
     )
     assert_that(loaded.coverage).is_empty()
+
+
+def test_post_replay_guards_an_unguarded_checkpoint_finding() -> None:
+    """The ``--post`` replay splice guards rows a checkpoint persisted raw.
+
+    A SIGTERM checkpoint stores chunk findings before finalize, so the prior
+    state can carry a phantom P1 with no cross-chunk tag. The CLI must run
+    the guard over exactly those replayed rows before posting (#2268).
+    """
+    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+    from lintro.ai.review.finding_matcher import match_findings
+    from lintro.ai.review.models.changed_file import ChangedFile
+    from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+    from lintro.ai.review.models.review_state import ReviewState
+
+    phantom = ReviewFinding(
+        severity=Severity.P1,
+        category="correctness",
+        file="src/a.py",
+        line=2,
+        title="Test never updated for the new value",
+        description="tests/test_a.py is untouched in this round.",
+        cause="The chunk only carried the source file.",
+        fix="Update the test.",
+        confidence="high",
+        failure_scenario="CI passes on a stale assertion.",
+    )
+    prior = ReviewState(
+        findings=match_findings(
+            previous=None,
+            findings=(phantom,),
+            round_number=1,
+        ).records,
+    )
+    mock_context = MagicMock()
+    mock_context.changed_files = [
+        ChangedFile(
+            path="src/a.py",
+            status=ChangedFileStatus.MODIFIED,
+            additions=1,
+            deletions=0,
+        ),
+        ChangedFile(
+            path="tests/test_a.py",
+            status=ChangedFileStatus.MODIFIED,
+            additions=1,
+            deletions=0,
+        ),
+    ]
+    mock_context.unified_diff = ""
+    runner = CliRunner()
+    patches = _mock_review_pipeline(
+        mock_collect=MagicMock(return_value=mock_context),
+    )
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review._load_prior_review_state",
+            return_value=prior,
+        ),
+        patch("lintro.cli_utils.commands.review._persist_review_state"),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--post", "--pr", "7", "--repo", "owner/name"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    posted = mock_post.call_args.kwargs["result"].findings
+    assert_that(posted).is_length(1)
+    assert_that(posted[0].severity).is_equal_to(Severity.P2)
+    assert_that(posted[0].cross_chunk_contradiction).is_not_none()

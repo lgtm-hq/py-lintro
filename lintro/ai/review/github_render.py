@@ -18,6 +18,7 @@ from lintro.ai.review.coverage_degradation import (
     describe_coverage_degradations,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
@@ -26,11 +27,13 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
+from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
 from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
     "format_coverage_limited_warning",
+    "format_cross_chunk_note",
     "format_inline_post_cause",
     "format_inline_post_note",
     "format_timings_note",
@@ -305,6 +308,51 @@ def format_inline_post_note(*, failure: InlinePostFailure | None) -> str:
     return (
         f"> ⚠️ **{failure.count} {noun} could not be posted as {surface}**"
         f"{cause}. Full details are folded in below instead."
+    )
+
+
+def _cross_chunk_band_clause(*, findings: Sequence[ReviewFinding]) -> str:
+    """Describe the severity effect of the tagged findings, if any moved.
+
+    Args:
+        findings: Findings after the cross-chunk guard ran.
+
+    Returns:
+        ``", one band lower"`` when at least one tagged finding was actually
+        downgraded; an empty string when only P3 findings were tagged.
+    """
+    lowered = any(
+        finding.cross_chunk_contradiction
+        is CrossChunkContradiction.UNCHANGED_FILE_CLAIM_DOWNGRADED
+        for finding in findings
+    )
+    return ", one band lower" if lowered else ""
+
+
+def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
+    """Render the shared cross-chunk downgrade note for posted GitHub surfaces.
+
+    The review body and the sticky comment both call this, so neither can
+    describe the guard differently from the other (#2265). The note says what
+    was downgraded and why, because the alternative — editing severities the
+    model reported and saying nothing — is exactly the silent behavior the
+    other no-silent-caps notices exist to prevent.
+
+    Args:
+        findings: Findings for the current round.
+
+    Returns:
+        A blockquote note naming the count, or an empty string when the guard
+        did not fire.
+    """
+    notice = describe_cross_chunk_contradictions(findings=findings)
+    if not notice:
+        return ""
+    return (
+        f"> 🧩 **{sanitize_comment_text(notice, limit=300)}** — chunked review "
+        "shows each chunk the other files at the base commit, so the claim is "
+        f"chunk-local; the finding is kept"
+        f"{_cross_chunk_band_clause(findings=findings)}."
     )
 
 

@@ -7,6 +7,8 @@ remain here as Python; only the static prompt copy lives in template files.
 
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from lintro.ai.prompts._loader import load_prompt_template
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -14,6 +16,7 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.verdict import VERDICT_LABELS
 
 __all__ = [
+    "CHUNK_FILE_MARKER",
     "REVIEW_ADVERSARIAL_SWEEP_TEMPLATE",
     "REVIEW_CUSTOM_AGENT_OUTPUT_SCHEMA",
     "REVIEW_CUSTOM_AGENT_SYSTEM",
@@ -34,6 +37,7 @@ __all__ = [
     "format_external_review_section",
     "format_lint_results_section",
     "format_output_rules",
+    "format_pr_changed_files_for_prompt",
 ]
 
 REVIEW_SYSTEM = load_prompt_template("review", "system.md")
@@ -115,6 +119,22 @@ def format_checklist_table_for_prompt(*, items: list[ChecklistItem]) -> str:
     return "\n".join(lines)
 
 
+#: Suffix marking a file that is part of the chunk currently under review.
+CHUNK_FILE_MARKER = "— **(this chunk)**"
+
+
+def _changed_file_line(*, file: ChangedFile) -> str:
+    """Render one changed file as a prompt bullet.
+
+    Args:
+        file: Changed file from review context.
+
+    Returns:
+        Bullet line with path, status, and line counts.
+    """
+    return f"- `{file.path}` ({file.status}, +{file.additions}/-{file.deletions})"
+
+
 def format_changed_files_for_prompt(*, files: list[ChangedFile]) -> str:
     """Format changed files as a bullet list with status.
 
@@ -126,8 +146,36 @@ def format_changed_files_for_prompt(*, files: list[ChangedFile]) -> str:
     """
     if not files:
         return "- (no changed files)"
+    return "\n".join(_changed_file_line(file=file) for file in files)
+
+
+def format_pr_changed_files_for_prompt(
+    *,
+    files: list[ChangedFile],
+    chunk_paths: Collection[str],
+) -> str:
+    """Format the whole PR's changed files, marking the current chunk's own.
+
+    Every chunk prompt carries the full list so a chunk can never conclude that
+    a file this pull request changed was left untouched (issue #2265). Files
+    outside ``chunk_paths`` are listed unmarked; the prompt template explains
+    that their on-disk copies are stale base-commit versions.
+
+    Args:
+        files: All changed files for the pull request.
+        chunk_paths: Paths belonging to the chunk under review.
+
+    Returns:
+        Bullet list suitable for prompt injection.
+    """
+    if not files:
+        return "- (no changed files)"
     return "\n".join(
-        f"- `{file.path}` ({file.status}, +{file.additions}/-{file.deletions})"
+        (
+            f"{_changed_file_line(file=file)} {CHUNK_FILE_MARKER}"
+            if file.path in chunk_paths
+            else _changed_file_line(file=file)
+        )
         for file in files
     )
 
