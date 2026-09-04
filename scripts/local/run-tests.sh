@@ -304,13 +304,27 @@ main() {
 	ensure_python_cli_tools
 
 	# Install project-level node_modules for integration tests that need
-	# npm plugins (e.g. prettier-plugin-astro for astro formatting tests)
-	if command -v bun &>/dev/null && [ -f "package.json" ] && [ ! -d "node_modules" ]; then
-		echo -e "${BLUE}Installing project node_modules for integration tests...${NC}"
+	# npm plugins (e.g. prettier-plugin-astro for astro formatting tests).
+	# Always install when package.json exists so Docker/CI picks up the
+	# package.json-pinned prettier (global image tools can lag behind).
+	if command -v bun &>/dev/null && [ -f "package.json" ]; then
+		if [ ! -d "node_modules" ]; then
+			echo -e "${BLUE}Installing project node_modules for integration tests...${NC}"
+		else
+			echo -e "${BLUE}Syncing project node_modules for integration tests...${NC}"
+		fi
 		if ! bun install --no-save; then
 			echo -e "${RED}✗ bun install failed — astro/prettier integration tests may be skipped${NC}"
 			exit 1
 		fi
+	fi
+
+	# Prefer project-pinned Node CLIs over stale globals from the tools image
+	# (e.g. /opt/bun/bin/prettier@3.9.4 vs node_modules prettier@3.9.5).
+	if [ -d "node_modules/.bin" ]; then
+		local_node_bin="$(pwd)/node_modules/.bin"
+		export PATH="${local_node_bin}:${PATH}"
+		echo -e "${GREEN}✓ Prepended ${local_node_bin} to PATH${NC}"
 	fi
 
 	# Discover available tools and tests

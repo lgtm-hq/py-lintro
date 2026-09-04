@@ -39,7 +39,11 @@ def temp_json_file_unformatted(tmp_path: Path) -> str:
         Path to the created file as a string.
     """
     file_path = tmp_path / "unformatted.json"
-    file_path.write_text('{"name":"test","version":"1.0.0","dependencies":{}}')
+    # Spaces around ":" / "," are rejected under both Prettier defaults and
+    # configs that keep compact JSON (e.g. singleQuote via --config).
+    file_path.write_text(
+        '{ "name" : "test" , "version" : "1.0.0" , "dependencies" : {} }',
+    )
     return str(file_path)
 
 
@@ -154,6 +158,7 @@ def test_check_json_file_formatting_state(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("prettier")
+    assert_that(result.skipped).is_false()
     if expect_issues:
         assert_that(result.issues_count).is_greater_than(0)
     else:
@@ -183,6 +188,7 @@ def test_fix_formats_json_file(
 
     assert_that(result).is_not_none()
     assert_that(result.success).is_true()
+    assert_that(result.skipped).is_false()
 
     new_content = Path(temp_json_file_unformatted).read_text()
     assert_that(new_content).is_not_equal_to(original)
@@ -337,6 +343,7 @@ def test_check_astro_file_formatting_state(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("prettier")
+    assert_that(result.skipped).is_false()
     if expect_issues:
         assert_that(result.issues_count).is_greater_than(0)
     else:
