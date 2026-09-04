@@ -12,6 +12,9 @@ from loguru import logger
 from lintro.tools.implementations.pytest.collection import (
     get_parallel_workers_from_preset,
 )
+from lintro.tools.implementations.pytest.coverage_source import (
+    coverage_source_configured,
+)
 from lintro.tools.implementations.pytest.markers import check_plugin_installed
 
 if TYPE_CHECKING:
@@ -165,10 +168,11 @@ def add_coverage_options(cmd: list[str], options: dict[str, Any]) -> None:
         or coverage_threshold is not None
     )
     if needs_coverage:
-        # Bare --cov enables coverage collection without pinning a path, so the
-        # measured source comes from the project's [tool.coverage.run] source
-        # setting instead of sweeping tests/ and scripts/ into the percentage.
-        cmd.append("--cov")
+        # Prefer bare --cov when the project declares a coverage source, so the
+        # configured source applies instead of sweeping tests/ and scripts/ into
+        # the percentage. Projects without such a declaration keep --cov=.,
+        # because bare --cov would otherwise measure every imported module.
+        cmd.append("--cov" if coverage_source_configured() else "--cov=.")
 
     # Add coverage HTML report
     if coverage_html:
