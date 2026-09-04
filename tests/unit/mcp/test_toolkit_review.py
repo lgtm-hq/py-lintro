@@ -854,56 +854,81 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
     assert_that(calls).is_empty()
 
 
-def test_mcp_findings_carry_synthesis_provenance_only_when_set() -> None:
-    """A synthesized finding is attributable on the MCP envelope too (#2269)."""
+def _synthesis_result(
+    *,
+    findings_added: int = 1,
+    truncated: bool = False,
+    failed: bool = False,
+) -> ReviewResult:
+    """Build a stubbed result whose finding came from the synthesis pass.
+
+    Args:
+        findings_added: Findings the pass contributed.
+        truncated: Whether the pass saw less than its whole prompt input.
+        failed: Whether the pass produced no usable answer.
+
+    Returns:
+        ReviewResult: A result carrying one synthesis-origin finding and a
+        recorded synthesis outcome.
+    """
     from dataclasses import replace as dataclass_replace
 
     from lintro.ai.review.enums.finding_origin import FindingOrigin
-    from lintro.mcp.toolkits.review import _finding_to_dict
-
-    chunk_finding = _result().findings[0]
-    synthesized = dataclass_replace(chunk_finding, origin=FindingOrigin.SYNTHESIS)
-
-    chunk_payload = _finding_to_dict(finding=chunk_finding)
-    synthesized_payload = _finding_to_dict(finding=synthesized)
-
-    assert_that(chunk_payload).does_not_contain_key("origin")
-    assert_that(synthesized_payload["origin"]).is_equal_to("synthesis")
-
-
-def test_mcp_payload_carries_the_synthesis_block_only_when_the_pass_ran() -> None:
-    """The tool result exposes the same ``synthesis`` block CLI JSON does."""
-    from dataclasses import replace as dataclass_replace
-
     from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
-    from lintro.mcp.toolkits.review import _BudgetPolicy, _review_payload
-
-    budget = _BudgetPolicy(
-        requested_usd=None,
-        configured_usd=1.0,
-        effective_usd=1.0,
-        clamped=False,
-    )
-    without = _review_payload(result=_result(), budget=budget)
 
     base = _result()
-    with_pass = _review_payload(
-        result=dataclass_replace(
-            base,
-            metadata=dataclass_replace(
-                base.metadata,
-                synthesis=SynthesisOutcome(
-                    findings_added=1,
-                    truncated=True,
-                    failed=False,
-                ),
+    return dataclass_replace(
+        base,
+        findings=(dataclass_replace(base.findings[0], origin=FindingOrigin.SYNTHESIS),),
+        metadata=dataclass_replace(
+            base.metadata,
+            synthesis=SynthesisOutcome(
+                findings_added=findings_added,
+                truncated=truncated,
+                failed=failed,
             ),
         ),
-        budget=budget,
     )
 
-    assert_that(without).does_not_contain_key("synthesis")
-    assert_that(with_pass["synthesis"]).is_equal_to(
+
+def test_review_payload_omits_synthesis_keys_on_a_default_run(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A run without the pass is byte-identical to one from before it existed.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_result())
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload).does_not_contain_key("synthesis")
+    assert_that(payload["findings"][0]).does_not_contain_key("origin")
+
+
+def test_review_payload_carries_synthesis_origin_and_block(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """Provenance and the pass outcome survive the whole handler (#2269).
+
+    Driven through the public tool rather than the serializers so the patch
+    validation the handler runs first is in the path too: a rewrite there that
+    rebuilt findings without ``origin`` would fail this.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(truncated=True))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["findings"][0]["origin"]).is_equal_to("synthesis")
+    assert_that(payload["synthesis"]).is_equal_to(
         {
             "enabled": True,
             "findings_added": 1,
@@ -911,3 +936,22 @@ def test_mcp_payload_carries_the_synthesis_block_only_when_the_pass_ran() -> Non
             "failed": False,
         },
     )
+
+
+def test_review_payload_reports_a_failed_synthesis_pass(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A failed pass is distinguishable from one that found nothing.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(findings_added=0, failed=True))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["synthesis"]["failed"]).is_true()
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
+    assert_that(payload["synthesis"]["truncated"]).is_false()

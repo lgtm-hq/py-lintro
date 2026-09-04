@@ -14,6 +14,7 @@ from lintro.ai.prompts._loader import load_prompt_template
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.verdict import VERDICT_LABELS
 
 if TYPE_CHECKING:
@@ -213,16 +214,14 @@ def _chunk_summary_finding_line(*, finding: ReviewFinding) -> str:
         One indented digest line — severity, primary location, any further
         locations, and the title. Never the finding's prose.
     """
+    primary = FindingOccurrence(file=finding.file, line=finding.line).label
     locations = [
-        f"{occurrence.file}:{occurrence.line}"
+        occurrence.label
         for occurrence in finding.all_occurrences
-        if f"{occurrence.file}:{occurrence.line}" != f"{finding.file}:{finding.line}"
+        if occurrence.label != primary
     ]
     also = f" (also {', '.join(locations)})" if locations else ""
-    return (
-        f"  - already reported: {finding.severity} "
-        f"{finding.file}:{finding.line}{also} — {finding.title}"
-    )
+    return f"  - already reported: {finding.severity} {primary}{also} — {finding.title}"
 
 
 def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> str:

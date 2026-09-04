@@ -908,3 +908,7 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk() -> None:
     assert_that(text).contains("1 of 1 chunk ran under a 25-finding per-call cap")
     assert_that(text).does_not_contain("of 2 chunks")
     assert_that(text).contains("saw only part of the diff")
+    # The synthesis row's placeholder cap of 0 must never win the min(): the
+    # tightest ceiling a chunk actually ran under is the cap row's 25.
+    assert_that(metadata.findings_cap_applied).is_equal_to(25)
+    assert_that(metadata.findings_coverage_complete).is_false()

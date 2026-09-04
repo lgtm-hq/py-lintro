@@ -488,6 +488,10 @@ How it behaves when enabled:
 
 - It runs only when the round actually used more than one chunk. A single-chunk run has
   no boundary to reason across and is never charged for the extra call.
+- It runs only on the completed path. A round that already stopped on a cost cap, a
+  timeout, or an interrupt (`partial`) skips the pass entirely and spends no extra call,
+  so an enabled multi-chunk partial carries no `synthesis` block at all — the same shape
+  a disabled run has.
 - Its input is bounded by the same per-call diff-token budget the chunk calls were
   planned against, and the budget covers the **whole prompt**: the changed-file list and
   the per-chunk digest are rendered and charged first, and the diff takes only what they
@@ -498,7 +502,9 @@ How it behaves when enabled:
   budget is spent. The first file that does not fit ends the selection: a cross-chunk
   file is cut into the remaining budget and kept, a non-priority one is dropped, and
   nothing follows either way, so the diff never jumps out of one file mid-hunk into
-  another. Anything cut or dropped sets `truncated`.
+  another. Anything cut or dropped anywhere in the prompt — a shed digest line as much
+  as a dropped file — sets `truncated`. A large digest can therefore set it on a round
+  whose remaining budget still held the whole diff.
 - **Its findings pass every filter a chunk finding passes**, in this order: the **P1
   evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
   with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
@@ -508,14 +514,23 @@ How it behaves when enabled:
   PR changed was never updated. The pass sees the whole PR, so a claim like that is
   wrong here for the same reason it is wrong in a chunk: it comes back tagged
   `cross_chunk_contradiction` and one band lower, so it cannot block on its own. What
-  survives is then capped at `max_findings` and deduplicated against the chunk findings
-  by the same fingerprint the state ledger uses — both on the guarded severity, so a
-  tagged finding cannot slip through a dedupe drop under a different fingerprint. A
-  guarded synthesized finding is counted in the root `cross_chunk_contradictions` like
-  any other and keeps its `"origin": "synthesis"`.
-- **A synthesis failure is never fatal.** A provider error, a budget stop, or an
-  unreadable answer leaves the chunk findings intact and marks the run's coverage
-  degraded instead.
+  survives is then deduplicated against the chunk findings by the same fingerprint the
+  state ledger uses and only then capped at `max_findings` — both on the guarded
+  severity, so a tagged finding cannot slip through a dedupe drop under a different
+  fingerprint, and a restatement can never consume a slot in the cap window that a novel
+  cross-file finding needed. A guarded synthesized finding is counted in the root
+  `cross_chunk_contradictions` like any other and keeps its `"origin": "synthesis"`. On
+  a resumed run they also go through the validation tail's **context-finding rejection**
+  alongside the chunk findings, so a synthesized finding on a path this round was not
+  asked to re-review is discarded; `findings_added` is recomputed from what survived
+  that tail, so the JSON block, the shared note, and the rendered finding list can never
+  disagree.
+- **A synthesis failure is never fatal.** A provider error, a timeout, a budget stop, an
+  interrupt that lands while the extra call is in flight, or an unreadable answer (not
+  JSON, not an object, or a `findings` value that is not a list) leaves the chunk
+  findings intact and marks the run's coverage degraded instead. A budget stop _during_
+  this call is recorded as `synthesis_failed` and does not make the run `partial`: every
+  chunk was already reviewed, so the only thing the cap cost was the optional sweep.
 
 What it adds to the surfaces:
 
@@ -543,10 +558,12 @@ What it adds to the surfaces:
   ```
 
   `findings_added` is what survived the cap and the dedupe, not what the model returned.
-  `truncated` means the pass saw only part of the diff — its whole prompt (the
-  changed-file list, the per-chunk digest, and the diff together) is fitted to one token
-  budget, so a large digest shrinks the diff rather than overrunning the context window.
-  `failed` distinguishes a pass that could not answer from one that found nothing, which
+  `truncated` means the pass saw less than its whole prompt input: the per-chunk digest
+  or the diff was cut. Its whole prompt (the changed-file list, the per-chunk digest,
+  and the diff together) is fitted to one token budget, so a large digest shrinks the
+  diff rather than overrunning the context window — and a digest large enough to shed
+  its own finding lines sets `truncated` even when the whole diff still fit. `failed`
+  distinguishes a pass that could not answer from one that found nothing, which
   `findings_added: 0` alone cannot. The same block is on the MCP `lintro_review` payload
   root, and MCP findings carry `"origin": "synthesis"` too.
 

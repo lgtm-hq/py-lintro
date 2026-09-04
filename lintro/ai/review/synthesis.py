@@ -24,10 +24,12 @@ move that call without touching anything in here.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
     from lintro.ai.budget import CostBudget
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.providers.response import AIResponse
     from lintro.ai.review.models.chunk_summary import ChunkSummary
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
@@ -68,6 +71,17 @@ __all__ = [
     "run_synthesis_pass",
     "should_run_synthesis",
 ]
+
+
+class _SynthesisInterruptedError(Exception):
+    """The run was interrupted while the extra call was still in flight.
+
+    Raised only inside this module and caught by the pass's own fail-soft
+    handler, which turns it into a failed pass. It is an ordinary
+    ``Exception`` rather than a ``CancelledError`` so that handler — which
+    deliberately catches ``Exception`` and not ``BaseException`` — sees it.
+    """
+
 
 #: ``findings_cap`` stamped on a synthesis coverage degradation. The synthesis
 #: reasons are excluded from ``ReviewMetadata.findings_cap_applied``, so this
@@ -134,9 +148,10 @@ def _parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | No
         content: Raw model response text.
 
     Returns:
-        Parsed findings, or ``None`` when the response was not a JSON object —
-        which the caller records as a failed pass rather than an empty one, so
-        "found nothing" and "could not be read" never look alike.
+        Parsed findings, or ``None`` when the response was not a JSON object
+        carrying a ``findings`` list — which the caller records as a failed
+        pass rather than an empty one, so "found nothing" and "could not be
+        read" never look alike.
     """
     try:
         payload = json.loads(strip_json_fences(content=content))
@@ -146,7 +161,14 @@ def _parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | No
     if not isinstance(payload, dict):
         logger.warning("The cross-chunk synthesis payload was not an object.")
         return None
-    return parse_findings(raw_findings=payload.get("findings", []))
+    raw = payload.get("findings", [])
+    if not isinstance(raw, list):
+        # ``parse_findings`` would quietly render a string, a mapping, or a
+        # null here as no findings at all, which is exactly the "empty
+        # success" this pass promises never to confuse with a failure.
+        logger.warning("The cross-chunk synthesis findings value was not a list.")
+        return None
+    return parse_findings(raw_findings=raw)
 
 
 def _deduplicate(
@@ -238,6 +260,51 @@ def _failed_pass(
     )
 
 
+async def _await_call_until_stop(
+    *,
+    call: Coroutine[Any, Any, AIResponse],
+    stop: asyncio.Event | None,
+) -> AIResponse:
+    """Await the pass's one provider call, abandoning it on an interrupt.
+
+    The same ``asyncio.wait`` race the chunk fan-out uses for SIGTERM. It
+    matters here because the pass runs after every chunk has been reviewed:
+    the run has real coverage to persist, and a bare await would hold the
+    process in the provider call for the whole shutdown window instead.
+
+    Args:
+        call: The pending provider call.
+        stop: Event set by the run's SIGTERM/SIGINT handler, or ``None`` when
+            the caller registered no interrupt.
+
+    Returns:
+        The provider response.
+
+    Raises:
+        _SynthesisInterruptedError: When the stop event won the race. The pass's
+            fail-soft handler turns that into a failed pass, so the chunk
+            findings and the resume checkpoint still stand.
+    """
+    if stop is None:
+        return await call
+    call_task = asyncio.ensure_future(call)
+    stop_task = asyncio.ensure_future(stop.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            {call_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done and stop.is_set() and not call_task.done():
+            raise _SynthesisInterruptedError
+        return await call_task
+    finally:
+        for task in (call_task, stop_task):
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+
 async def run_synthesis_pass(
     *,
     context: ReviewContext,
@@ -251,6 +318,7 @@ async def run_synthesis_pass(
     repo_root: str = "",
     use_one_shot: bool = True,
     diff_budget: int = 1,
+    stop: asyncio.Event | None = None,
 ) -> SynthesisPass:
     """Run the whole-PR cross-chunk pass and return what it contributed.
 
@@ -268,9 +336,17 @@ async def run_synthesis_pass(
       touched is tagged ``cross_chunk_contradiction`` and moved down one band
       — the pass sees the whole PR, so a claim like that is wrong here for
       the same reason it is wrong in a chunk;
-    - the configured ``max_findings`` cap, then deduplication against the
-      chunk findings. Both run on the guarded severity, so a tagged finding
-      cannot survive a dedupe drop under a different fingerprint.
+    - deduplication against the chunk findings, then the configured
+      ``max_findings`` cap. Both run on the guarded severity, so a tagged
+      finding cannot survive a dedupe drop under a different fingerprint, and
+      dedupe running first means a restatement can never consume a slot in
+      the cap window that a novel cross-file finding needed.
+
+    A finding that survives all of that can still be discarded downstream:
+    ``reject_context_findings`` drops a finding on a path the round was not
+    asked to re-review, which is why the orchestrator recounts
+    ``findings_added`` from the surviving findings rather than trusting the
+    tally this function returns.
 
     Args:
         context: Collected review diff context.
@@ -286,6 +362,10 @@ async def run_synthesis_pass(
         use_one_shot: When True, avoid durable provider sessions.
         diff_budget: Token budget the whole prompt must fit — the digest,
             the changed-file list, and the diff together.
+        stop: Event set by the run's interrupt handler. When it fires while
+            the extra call is in flight the call is abandoned and the pass
+            reports a failure, so a SIGTERM cannot hold the process in an
+            optional call while there is a completed review to persist.
 
     Returns:
         The pass result. Any failure — a budget stop, a provider error, an
@@ -306,15 +386,24 @@ async def run_synthesis_pass(
     )
     try:
         budget.check()
-        response = await call_ai(
-            provider=provider,
-            ai_config=ai_config,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            budget=budget,
-            repo_root=repo_root or None,
-            use_one_shot=use_one_shot,
+        response = await _await_call_until_stop(
+            call=call_ai(
+                provider=provider,
+                ai_config=ai_config,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                budget=budget,
+                repo_root=repo_root or None,
+                use_one_shot=use_one_shot,
+            ),
+            stop=stop,
         )
+    except _SynthesisInterruptedError:
+        logger.warning(
+            "The cross-chunk synthesis pass was interrupted; keeping the "
+            "chunk findings and marking coverage degraded.",
+        )
+        return _failed_pass(truncated=truncated)
     except Exception:
         # Deliberately broad: this pass is additive, so nothing it can raise —
         # a cost-cap stop, a provider error, a timeout — may be allowed to
@@ -358,8 +447,12 @@ async def run_synthesis_pass(
         findings=gated,
         changed_paths=guarded_changed_paths(context=context),
     )
-    capped = tuple(guarded)[: max(config.max_findings, 1)]
-    kept = _deduplicate(candidates=capped, existing=existing_findings)
+    # Dedupe first, then cap. A restatement of a chunk finding contributes
+    # nothing, so letting one consume a slot in the cap window would discard a
+    # novel cross-file finding that came after it — the exact thing this pass
+    # exists to surface.
+    deduplicated = _deduplicate(candidates=guarded, existing=existing_findings)
+    kept = deduplicated[: max(config.max_findings, 1)]
 
     degradations = (
         (

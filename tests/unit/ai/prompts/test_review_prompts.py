@@ -437,19 +437,104 @@ def test_chunk_summaries_list_every_occurrence_of_a_finding() -> None:
     assert_that(rendered).contains("pkg/api.py:12 (also pkg/other.py:40)")
 
 
-def test_synthesis_prompt_pair_never_demands_a_checklist() -> None:
-    """The findings-only pass is never told to answer the review checklist."""
-    user_prompt = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
+def _render_synthesis_user_prompt(
+    *,
+    boundary: str = "CODE_BLOCK_test1234",
+    truncation_note: str = "",
+    chunk_summaries: str = "Piece 1 reviewed: `a.py`",
+    max_findings: int = 5,
+) -> str:
+    """Render the synthesis user template with recognizable values.
+
+    Args:
+        boundary: Per-call boundary marker.
+        truncation_note: Truncation warning block.
+        chunk_summaries: Rendered per-chunk digest.
+        max_findings: Ceiling written into the prompt's output rules.
+
+    Returns:
+        The rendered user prompt.
+    """
+    return REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
         pr_title="Test PR",
         pr_summary="Summary text",
-        boundary="CODE_BLOCK_test1234",
+        boundary=boundary,
         changed_file_count=1,
         changed_files="- `a.py` (modified, +1/-0)",
-        chunk_summaries="Piece 1 reviewed: `a.py`",
-        truncation_note="",
+        chunk_summaries=chunk_summaries,
+        truncation_note=truncation_note,
         diff="diff body",
-        max_findings=5,
+        max_findings=max_findings,
     )
+
+
+def test_synthesis_user_template_interpolates_every_field() -> None:
+    """Every kwarg reaches the rendered prompt.
+
+    ``str.format`` silently drops a keyword the template never names, so a
+    template that stopped interpolating the cap or the truncation warning
+    would otherwise render fine and leave the model uncapped or unwarned.
+    """
+    rendered = _render_synthesis_user_prompt(
+        truncation_note="\nNote: the diff below is only part of this PR.\n",
+        chunk_summaries="Piece 1 reviewed: `a.py`\n\nPiece 2 reviewed: `b.py`",
+        max_findings=17,
+    )
+
+    assert_that(rendered).contains("Test PR")
+    assert_that(rendered).contains("Summary text")
+    assert_that(rendered).contains("- `a.py` (modified, +1/-0)")
+    assert_that(rendered).contains("Piece 1 reviewed")
+    assert_that(rendered).contains("Piece 2 reviewed")
+    assert_that(rendered).contains("only part of this PR")
+    assert_that(rendered).contains("diff body")
+    assert_that(rendered).contains("Report at most 17 findings")
+
+
+def test_synthesis_user_template_fences_the_pr_title() -> None:
+    """The PR title is untrusted workspace data and sits inside the fence.
+
+    Mirrors the chunk prompt's contract (#1884): a prompt-injection payload in
+    a PR title must reach the model as fenced data, never as bare prose.
+    """
+    boundary = "CODE_BLOCK_deadbeef"
+    rendered = _render_synthesis_user_prompt(boundary=boundary)
+
+    title_line = next(
+        line for line in rendered.splitlines() if line.startswith("PR title:")
+    )
+    assert_that(title_line).contains(f"<{boundary}>")
+    assert_that(title_line).contains(f"</{boundary}>")
+    assert_that(title_line).contains("Test PR")
+
+
+def test_synthesis_system_prompt_names_the_title_and_the_fence() -> None:
+    """The system trust boundary covers the PR title and any forged fence."""
+    assert_that(REVIEW_SYNTHESIS_SYSTEM_PROMPT).contains("PR title")
+    assert_that(REVIEW_SYNTHESIS_SYSTEM_PROMPT).contains("`CODE_BLOCK_*`")
+
+
+def test_chunk_summaries_join_two_chunks_into_one_digest() -> None:
+    """Two chunks render as two labelled blocks in one digest."""
+    rendered = format_chunk_summaries_for_prompt(
+        summaries=(
+            ChunkSummary(chunk_id=1, files=("pkg/api.py",), findings=()),
+            ChunkSummary(
+                chunk_id=2,
+                files=("pkg/caller.py",),
+                findings=(_digest_finding(title="Caller drifted"),),
+            ),
+        ),
+    )
+
+    assert_that(rendered).contains("Piece 1 reviewed: `pkg/api.py`")
+    assert_that(rendered).contains("Piece 2 reviewed: `pkg/caller.py`")
+    assert_that(rendered).contains("Caller drifted")
+
+
+def test_synthesis_prompt_pair_never_demands_a_checklist() -> None:
+    """The findings-only pass is never told to answer the review checklist."""
+    user_prompt = _render_synthesis_user_prompt()
     pair = f"{REVIEW_SYNTHESIS_SYSTEM_PROMPT}\n{user_prompt}"
 
     assert_that(REVIEW_SYSTEM).contains("Complete every checklist item")

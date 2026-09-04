@@ -1370,6 +1370,11 @@ async def run_review_async(
                     # pass is a standalone whole-PR question, not a chunk.
                     use_one_shot=True,
                     diff_budget=diff_budget,
+                    # The chunk fan-out already raced this event so a SIGTERM
+                    # can persist coverage inside the runner's shutdown
+                    # window; the extra call gets the same treatment, and a
+                    # stop that lands here is recorded as a failed pass.
+                    stop=interrupt,
                 )
             filtered_findings = filtered_findings + synthesis_pass.findings
             total_findings = len(filtered_findings)

@@ -76,14 +76,21 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     the result predates timing instrumentation.
 
     The top-level ``synthesis`` block reports the optional cross-chunk pass
-    (#2269): ``enabled``, ``findings_added``, and ``truncated``. It is absent
-    entirely when the pass did not run, which is the default.
+    (#2269): ``enabled``, ``findings_added``, ``truncated``, and ``failed``.
+    ``failed`` is carried explicitly because ``findings_added: 0`` alone
+    cannot tell a pass that found nothing from one that could not answer. The
+    block is absent entirely when the pass did not run, which is the default.
 
     The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
     ``findings_cap_applied`` / ``output_exhaustion_retried`` keys report
-    whether a CLI findings cap or an output-exhaustion retry may have
-    suppressed findings (#2003). They are always present, so a classifier can
-    tell "the model found N issues" from "we capped the model at N".
+    whether the run's finding depth was limited (#2003). A CLI findings cap or
+    an output-exhaustion retry is a per-chunk limit; an incomplete cross-chunk
+    synthesis pass (#2269) is a whole-run one, and it lands in
+    ``coverage_degradations`` and flips ``findings_coverage_complete`` too.
+    Only the two per-chunk reasons feed ``findings_cap_applied``, which stays
+    ``null`` on a run degraded solely by the synthesis pass. They are always
+    present, so a classifier can tell "the model found N issues" from "we
+    capped the model at N".
 
     ``cross_chunk_contradictions`` (#2265) reports how many findings the
     cross-chunk guard tagged for claiming a changed file was never touched

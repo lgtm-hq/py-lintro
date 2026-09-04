@@ -9,6 +9,7 @@ degrades rather than fails when the pass cannot do its job.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import ExitStack
 from dataclasses import replace
@@ -20,10 +21,13 @@ from assertpy import assert_that
 from pydantic import ValidationError
 from rich.console import Console
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AIError
+from lintro.ai.exceptions import AICostBudgetExceededError, AIError
 from lintro.ai.prompts.review import (
+    REVIEW_SYNTHESIS_SYSTEM_PROMPT,
+    REVIEW_SYSTEM,
     format_changed_files_for_prompt,
     format_chunk_summaries_for_prompt,
 )
@@ -53,6 +57,7 @@ from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.synthesis import run_synthesis_pass
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     cross_chunk_paths,
@@ -226,6 +231,7 @@ def _run(
     synthesis_calls: list[str] | None = None,
     strictness: ReviewStrictness | None = None,
     synthesis_diff_budget: int | None = None,
+    synthesis_system_prompts: list[str] | None = None,
 ) -> Any:
     """Run a review with the chunk and synthesis provider calls mocked apart.
 
@@ -244,6 +250,8 @@ def _run(
         synthesis_diff_budget: Optional token budget forced onto the synthesis
             prompt planner, so a fixture PR small enough to fit any real
             budget can still exercise the truncation path end to end.
+        synthesis_system_prompts: Optional sink recording the system prompt
+            each synthesis call was made with.
 
     Returns:
         The review result.
@@ -251,13 +259,22 @@ def _run(
     provider = _mock_provider()
     chunk_sink = chunk_calls if chunk_calls is not None else []
     synthesis_sink = synthesis_calls if synthesis_calls is not None else []
+    synthesis_system_sink = (
+        synthesis_system_prompts if synthesis_system_prompts is not None else []
+    )
 
     async def _chunk_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
         chunk_sink.append(user_prompt)
         return _response(content=_chunk_payload())
 
-    async def _synthesis_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+    async def _synthesis_call(
+        *,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        **_kwargs: Any,
+    ) -> AIResponse:
         synthesis_sink.append(user_prompt)
+        synthesis_system_sink.append(system_prompt or "")
         if synthesis_error is not None:
             raise synthesis_error
         return _response(content=synthesis_content or _synthesis_payload())
@@ -1445,3 +1462,286 @@ def test_a_rejected_synthesized_finding_is_recounted_on_every_surface() -> None:
     note = format_synthesis_note_line(metadata=result.metadata)
     assert_that(note).contains("added 1 cross-file finding")
     assert_that(note).does_not_contain("2 cross-file findings")
+
+
+# --- (o) the pass makes its call with its own system prompt -------------------
+
+
+def test_the_pass_calls_the_provider_with_the_synthesis_system_prompt() -> None:
+    """The extra call carries the findings-only prompt, not the chunk one."""
+    system_prompts: list[str] = []
+    chunk_calls: list[str] = []
+
+    _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        chunk_calls=chunk_calls,
+        synthesis_system_prompts=system_prompts,
+    )
+
+    assert_that(system_prompts).is_length(1)
+    assert_that(system_prompts[0]).is_equal_to(REVIEW_SYNTHESIS_SYSTEM_PROMPT)
+    assert_that(system_prompts[0]).is_not_equal_to(REVIEW_SYSTEM)
+    assert_that(system_prompts[0]).does_not_contain("Complete every checklist item")
+    assert_that(system_prompts[0]).contains("empty `findings` array")
+
+
+def test_the_terminal_note_reports_the_same_count_as_the_json_payload() -> None:
+    """Every surface reads the recounted number, never the pass's own tally."""
+    kept = {
+        "severity": "P2",
+        "category": "logic-bug",
+        "file": "pkg/caller.py",
+        "line": 1,
+        "title": "Caller passes retries positionally",
+        "description": "pkg/api.py made retries keyword-only.",
+        "cause": "signature change",
+        "fix": "use a keyword",
+        "confidence": "high",
+    }
+    rejected = {**kept, "file": "pkg/untouched.py", "title": "Unrelated module drifted"}
+
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=_synthesis_payload(findings=[kept, rejected]),
+    )
+
+    payload = review_result_to_dict(result=result)
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(1)
+    console = Console(record=True)
+    render_review_terminal(result=result, console=console)
+    terminal = console.export_text()
+    assert_that(terminal).contains("added 1 cross-file finding")
+    assert_that(terminal).does_not_contain("added 2 cross-file findings")
+
+
+# --- (p) dedupe runs before the cap -------------------------------------------
+
+
+def test_restatements_never_consume_the_cap_window() -> None:
+    """A novel cross-file finding survives a cap filled with restatements.
+
+    Deduplicating after the cap would let two restatements of chunk findings
+    eat a ``max_findings=2`` window and discard the one finding the pass
+    actually exists to surface.
+    """
+    chunk_findings: list[dict[str, Any]] = [
+        {
+            "severity": "P2",
+            "category": "logic-bug",
+            "file": "pkg/api.py",
+            "line": index + 1,
+            "title": f"Known chunk issue {index}",
+            "description": "reported by the chunk",
+            "cause": "c",
+            "fix": "f",
+            "confidence": "medium",
+        }
+        for index in range(2)
+    ]
+    chunk_payload = json.dumps(
+        {"summary": "Two issues.", "checklist": [], "findings": chunk_findings},
+    )
+    # The two restatements come first, so a cap applied before the dedupe
+    # would consume the whole window on them.
+    synthesized: list[dict[str, Any]] = [
+        {**finding, "line": int(finding["line"]) + 10} for finding in chunk_findings
+    ] + [
+        {
+            "severity": "P2",
+            "category": "logic-bug",
+            "file": "pkg/caller.py",
+            "line": 1,
+            "title": "Novel cross-file mismatch",
+            "description": "pkg/api.py disagrees with pkg/caller.py.",
+            "cause": "signature drift",
+            "fix": "align them",
+            "confidence": "high",
+        },
+    ]
+    provider = _mock_provider()
+
+    async def _chunk_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+        return _response(content=chunk_payload)
+
+    async def _synthesis_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+        return _response(content=_synthesis_payload(findings=synthesized))
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=_two_chunks(),
+        ),
+        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
+    ):
+        result = run_review(
+            _pr_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            synthesis=ReviewSynthesisConfig(enabled=True, max_findings=2),
+        )
+
+    synthesized_titles = [
+        finding.title
+        for finding in result.findings
+        if finding.origin is FindingOrigin.SYNTHESIS
+    ]
+    assert_that(synthesized_titles).is_equal_to(["Novel cross-file mismatch"])
+    assert_that(_outcome(result=result).findings_added).is_equal_to(1)
+
+
+# --- (q) a malformed findings value is a failure, not an empty answer ---------
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"findings": "none"}',
+        '{"findings": {"a": 1}}',
+        '{"findings": null}',
+    ],
+)
+def test_a_non_list_findings_value_is_a_failed_pass(content: str) -> None:
+    """A malformed findings value is a failure, not an empty answer.
+
+    Args:
+        content: A JSON object whose ``findings`` value is not a list.
+    """
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=content,
+    )
+
+    assert_that(_outcome(result=result).failed).is_true()
+    assert_that(_outcome(result=result).findings_added).is_equal_to(0)
+    reasons = [item.reason for item in result.metadata.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+
+
+def test_an_empty_findings_list_is_an_empty_success() -> None:
+    """The well-formed empty answer stays a success, not a failure."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content='{"findings": []}',
+    )
+
+    assert_that(_outcome(result=result).failed).is_false()
+    assert_that(_outcome(result=result).findings_added).is_equal_to(0)
+    assert_that(result.metadata.findings_coverage_complete).is_true()
+    note = format_synthesis_note_line(metadata=result.metadata)
+    assert_that(note).contains("found no cross-file inconsistencies")
+
+
+# --- (r) an interrupt abandons the extra call rather than holding the run -----
+
+
+async def test_an_interrupt_abandons_the_extra_call_and_degrades() -> None:
+    """A SIGTERM during the extra call is a failed pass, never a hung run.
+
+    The pass runs after every chunk is reviewed, so there is real coverage to
+    persist inside the runner's shutdown window; a bare await would hold the
+    process in the provider call instead.
+    """
+    stop = asyncio.Event()
+    stop.set()
+    started = asyncio.Event()
+
+    async def _never_returns(**_kwargs: Any) -> AIResponse:
+        started.set()
+        await asyncio.Event().wait()  # pragma: no cover - cancelled by the race
+        raise AssertionError("the abandoned call resumed")
+
+    with patch("lintro.ai.review.synthesis.call_ai", side_effect=_never_returns):
+        result = await run_synthesis_pass(
+            context=_pr_context(),
+            summaries=(),
+            existing_findings=(),
+            provider=_mock_provider(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            config=ReviewSynthesisConfig(enabled=True),
+            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+            budget=CostBudget(max_cost_usd=1.0),
+            diff_budget=100_000,
+            stop=stop,
+        )
+
+    assert_that(result.findings).is_empty()
+    assert_that(result.outcome.failed).is_true()
+    reasons = [item.reason for item in result.degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
+
+
+async def test_without_a_stop_event_the_call_is_awaited_normally() -> None:
+    """The race is opt-in: no event means the plain await path still runs."""
+
+    async def _answers(**_kwargs: Any) -> AIResponse:
+        return _response(content=_synthesis_payload())
+
+    with patch("lintro.ai.review.synthesis.call_ai", side_effect=_answers):
+        result = await run_synthesis_pass(
+            context=_pr_context(),
+            summaries=(),
+            existing_findings=(),
+            provider=_mock_provider(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            config=ReviewSynthesisConfig(enabled=True),
+            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+            budget=CostBudget(max_cost_usd=1.0),
+            diff_budget=100_000,
+        )
+
+    assert_that(result.outcome.failed).is_false()
+    assert_that(result.findings).is_length(1)
+
+
+# --- (s) a run that already stopped never spends the extra call ---------------
+
+
+def test_a_partial_run_never_spends_the_extra_call() -> None:
+    """A cost-cap stop leaves the round with no synthesis pass at all."""
+    synthesis_calls: list[str] = []
+    provider = _mock_provider()
+
+    async def _chunk_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+        raise AICostBudgetExceededError("cost cap reached")
+
+    async def _synthesis_call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+        synthesis_calls.append(user_prompt)
+        return _response(content=_synthesis_payload())
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=_two_chunks(),
+        ),
+        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
+    ):
+        result = run_review(
+            _pr_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=1,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            synthesis=ReviewSynthesisConfig(enabled=True),
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(synthesis_calls).is_empty()
+    assert_that(result.metadata.synthesis).is_none()
+    assert_that(format_synthesis_note_line(metadata=result.metadata)).is_empty()

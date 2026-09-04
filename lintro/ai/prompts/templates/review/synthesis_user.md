@@ -3,7 +3,7 @@ piece saw only its own files, so no earlier pass ever saw the whole change at
 once. Your only job is to find inconsistencies BETWEEN files that were
 reviewed in DIFFERENT pieces.
 
-PR title: {pr_title}
+PR title: <{boundary}> {pr_title} </{boundary}>
 PR description:
 <{boundary}>
 {pr_summary}
