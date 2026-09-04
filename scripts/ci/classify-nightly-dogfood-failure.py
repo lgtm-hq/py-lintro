@@ -53,6 +53,11 @@ value is the workflow's ``needs.<job>.result`` / ``needs.<job>.outputs.<name>``)
     VERIFY_RESULT, VERIFY_CONCLUSION
     INFRA_FLAKE_SCRIPT  Override for is-infra-flake-failure.sh (tests only).
 
+    The ``*_CONCLUSION`` values are forwarded to the shared classifier as
+    ``UPSTREAM_CONCLUSION`` for parity with the PR gate, but the ``needs``
+    context only exposes ``result`` (success/failure/cancelled/skipped), so
+    dogfood-nightly.yml never sets them; they exist for manual and test use.
+
 Outputs (stdout, and appended to ``GITHUB_OUTPUT`` when set):
     notify=true|false           whether to ping the deduplicated tracker
     action-required=true|false  false when every ping is a no-verdict night
@@ -305,19 +310,22 @@ def classify_unit(
         # The retry should have run for this state; fail closed rather than
         # silently swallowing a night with no coverage and no explanation.
         return UnitVerdict.PING, f"{unit.name}: {primary}, no retry ran, ping"
-    if primary is AttemptState.INFRA and retry in (
+    pair = {primary, retry}
+    if AttemptState.INFRA in pair and pair <= {
         AttemptState.INFRA,
         AttemptState.NO_VERDICT,
-    ):
-        # Two runner kills in one night: a coverage gap, not a regression.
+    }:
+        # At least one attempt was a classified runner kill and the other
+        # produced no verdict either way: a coverage gap, not a regression.
+        # The order does not matter — an empty-output kill answered by a 143
+        # retry is the same night as the reverse.
         return (
             UnitVerdict.PING_NO_VERDICT,
-            f"{unit.name}: {primary} twice, no verdict",
+            f"{unit.name}: {primary}, retry {retry}, no verdict",
         )
-    # A primary that produced no verdict for a non-infra reason (checker
-    # configuration error, failed image pull) and then did it again is a
-    # deterministic failure, not a kill: it needs a human, so it keeps the
-    # action-required ping instead of the "no action required" annotation.
+    # Neither attempt was classified as infra (checker configuration error,
+    # failed image pull) and neither produced a verdict: deterministic, so it
+    # keeps the action-required ping instead of the "no action" annotation.
     return UnitVerdict.PING, f"{unit.name}: {primary}, retry {retry}, ping"
 
 

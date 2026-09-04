@@ -353,6 +353,21 @@ def test_skip_gate_configuration_error_twice_demands_action(
     assert_that(decision.action_required).is_true()
 
 
+def test_kill_pair_annotation_does_not_depend_on_attempt_order(
+    module: ModuleType,
+) -> None:
+    """An empty-output kill answered by a SIGTERM kill is still a coverage gap."""
+    decision = _decide(
+        module,
+        LINT_RESULT="failure",
+        LINT_RETRY_RESULT="failure",
+        LINT_RETRY_EXIT_CODE="143",
+    )
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.action_required).is_false()
+
+
 def test_partial_outputs_are_unclassifiable_and_ping(module: ModuleType) -> None:
     """A half-written verdict is never absorbed — absence of proof is not proof."""
     decision = _decide(
