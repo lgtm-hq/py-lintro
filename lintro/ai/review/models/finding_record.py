@@ -7,6 +7,7 @@ from typing import Any
 
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models._coerce import coerce_int
 from lintro.ai.review.models.finding_occurrence import (
@@ -65,6 +66,10 @@ class FindingRecord:
         cause: Root-cause text from the most recent sighting.
         fix: Fix suggestion from the most recent sighting.
         confidence: Model confidence from the most recent sighting.
+        origin: Which non-chunk pass first reported the finding, or
+            ``None`` for an ordinary chunk finding (#2269). Persisted only
+            when set, so a blob written without the synthesis pass is
+            byte-identical to one written before it existed.
     """
 
     fingerprint: str
@@ -90,6 +95,7 @@ class FindingRecord:
     cause: str = ""
     fix: str = ""
     confidence: str = ""
+    origin: FindingOrigin | None = None
 
     @property
     def key(self) -> str:
@@ -180,6 +186,8 @@ class FindingRecord:
             payload["fix"] = self.fix
         if self.confidence:
             payload["confidence"] = self.confidence
+        if self.origin is not None:
+            payload["origin"] = str(self.origin)
         return payload
 
     @classmethod
@@ -227,7 +235,27 @@ class FindingRecord:
             cause=str(payload.get("cause", "")),
             fix=str(payload.get("fix", "")),
             confidence=str(payload.get("confidence", "")),
+            origin=_parse_origin(payload.get("origin")),
         )
+
+
+def _parse_origin(value: Any) -> FindingOrigin | None:
+    """Parse a finding origin label from an untrusted state blob.
+
+    Args:
+        value: Raw origin value decoded from the state blob.
+
+    Returns:
+        The matching member, or ``None`` when the key is absent or carries a
+        label this version does not know. An unrecognized origin degrades to
+        "ordinary chunk finding", which only loses a display tag.
+    """
+    if value is None:
+        return None
+    try:
+        return FindingOrigin(str(value).lower())
+    except ValueError:
+        return None
 
 
 def _parse_checklist_ids(value: Any) -> tuple[int, ...]:

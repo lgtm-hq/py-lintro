@@ -54,6 +54,9 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
         "sensitivity",
         "force_semantic_chunking",
         "workspace_root",
+        # #2269: the cross-chunk synthesis config is shared preparation —
+        # both adapters read it from the same project config section.
+        "synthesis",
     },
 )
 
@@ -184,7 +187,10 @@ def _write_review_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path.resolve()
     (workspace / ".lintro-config.yaml").write_text(
         "ai:\n  enabled: true\n  review: true\n  provider: anthropic\n"
-        "  model: test-model\n  max_cost_usd: 1.0\n",
+        "  model: test-model\n  max_cost_usd: 1.0\n"
+        # #2269: non-default on both axes, so value parity is a real
+        # assertion rather than two adapters agreeing on the same default.
+        "review:\n  synthesis:\n    enabled: true\n    max_findings: 7\n",
         encoding="utf-8",
     )
     _git("init", "--initial-branch", "main", cwd=workspace)
@@ -338,6 +344,12 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
     assert_that(cli_kwargs["ai_config"].provider).is_equal_to(
         mcp_kwargs["ai_config"].provider,
     )
+    # #2269: forwarding the same kwarg name is not parity — both adapters must
+    # forward the same *value*, read from the same project config section.
+    assert_that(cli_kwargs["synthesis"]).is_equal_to(mcp_kwargs["synthesis"])
+    for kwargs in (cli_kwargs, mcp_kwargs):
+        assert_that(kwargs["synthesis"].enabled).is_true()
+        assert_that(kwargs["synthesis"].max_findings).is_equal_to(7)
 
 
 # --- error mapping parity -----------------------------------------------------

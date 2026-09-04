@@ -34,6 +34,7 @@ from lintro.ai.review.github_render import (
     format_badge_tables,
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_synthesis_note_line,
     format_timings_note,
     run_stats_primary_cells,
     sanitize_comment_text,
@@ -302,6 +303,11 @@ def _run_stats_section(
         # A guard-driven downgrade is run mechanics too: the reader needs to
         # know a severity below was set here rather than by the model (#2265).
         lines.extend(["", cross_chunk_note])
+    synthesis_note = format_synthesis_note_line(metadata=metadata)
+    if synthesis_note:
+        # Rendered only when the optional cross-chunk pass ran (#2269), so a
+        # default round's run-stats block is byte-identical to before.
+        lines.extend(["", synthesis_note])
     timings_note = format_timings_note(metadata=metadata)
     if timings_note:
         lines.extend(["", timings_note])

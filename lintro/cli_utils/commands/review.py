@@ -649,6 +649,7 @@ def review_command(
             prior_state=prior_state,
             force_full=force_full,
             enforce_cost_cap=enforce_cap,
+            synthesis=lintro_config.review.synthesis,
         )
         from dataclasses import replace as dc_replace
 

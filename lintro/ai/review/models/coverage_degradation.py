@@ -9,7 +9,16 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 
-__all__ = ["CoverageDegradation"]
+__all__ = ["SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
+
+#: ``chunk_index`` stamped on a degradation that belongs to the whole run
+#: rather than to one chunk — today only the cross-chunk synthesis pass
+#: (#2269). The pass is not a chunk, so it takes a sentinel rather than
+#: borrowing a real chunk's index and inflating that chunk's degradation count
+#: on the #2003 surfaces. It lives beside the model, not in the synthesis
+#: module, so the surfaces that must exclude it can recognize it without
+#: importing the pass.
+SYNTHESIS_CHUNK_INDEX = -1
 
 
 @dataclass(frozen=True, slots=True)

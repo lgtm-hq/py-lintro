@@ -367,11 +367,18 @@ so lower-severity issues beyond the cap may exist and go unreported.
 That is recorded and surfaced rather than left silent:
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
-  event, each with a `reason` (`findings_cap_applied` or `output_exhaustion_retried`),
-  the `chunk_index`, and the `findings_cap` that was in force. A chunk that ran under
-  the cap and then retried after output exhaustion contributes two entries with the same
-  `chunk_index`. `findings_coverage_complete` is the derived "nothing was capped"
-  boolean.
+  event, each with a `reason` (`findings_cap_applied`, `output_exhaustion_retried`, or —
+  when the opt-in pass below ran — `synthesis_truncated` / `synthesis_failed`), the
+  `chunk_index`, and the `findings_cap` that was in force. The synthesis reasons carry a
+  placeholder `chunk_index` of `-1` and a placeholder `findings_cap` of `0`, and are
+  excluded from `findings_cap_applied`, which only ever reports a real per-call ceiling.
+  A chunk that ran under the cap and then retried after output exhaustion contributes
+  two entries with the same `chunk_index`. `findings_coverage_complete` is the derived
+  "no coverage degradation of any kind" boolean: **any** entry in
+  `coverage_degradations` makes it false, including a synthesis pass that was truncated
+  or did not complete. `findings_cap_applied` is the narrower signal and stays `null`
+  for a run degraded only by the synthesis pass, because no per-call ceiling was in
+  force.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
@@ -452,6 +459,122 @@ never updated; with the full list in the prompt, the contradiction that the guar
 downgrades mostly stops being written in the first place, for a few hundred extra tokens
 per chunk.
 
+### Cross-chunk synthesis (opt-in, off by default)
+
+A large diff is reviewed in chunks, and every chunk prompt carries only its own files'
+diff. A bug that exists solely in the _combination_ of two files split across chunks is
+therefore invisible to every chunk: a signature changed in `a.py` with a caller updated
+to the wrong shape in `b.py`, a config key renamed in one file with a consumer left
+reading the old name.
+
+`review.synthesis` adds one extra provider call per round, made after the chunk findings
+are merged, that sees the whole changed-file list, a compact per-chunk digest (which
+files each chunk reviewed, and one line per finding it already reported), and as much of
+the whole-PR diff as its token budget allows. It is asked for cross-file inconsistencies
+only, and is told never to restate a chunk finding.
+
+```yaml
+review:
+  synthesis:
+    enabled: false # default — see below
+    max_findings: 5 # ceiling on what the pass may add (int >= 1)
+```
+
+**It is off by default on purpose.** It costs one additional call per round, and the
+cost and wall-clock delta is measured through the phase timings above and the #2147
+cross-provider agreement matrix before it is switched on (#2269).
+
+How it behaves when enabled:
+
+- It runs only when the round actually used more than one chunk. A single-chunk run has
+  no boundary to reason across and is never charged for the extra call.
+- It runs only on the completed path. A round that already stopped on a cost cap, a
+  timeout, or an interrupt (`partial`) skips the pass entirely and spends no extra call,
+  so an enabled multi-chunk partial carries no `synthesis` block at all — the same shape
+  a disabled run has.
+- Its input is bounded by the same per-call diff-token budget the chunk calls were
+  planned against, and the budget covers the **whole prompt**: the changed-file list and
+  the per-chunk digest are rendered and charged first, and the diff takes only what they
+  leave over. A digest too large for the budget sheds its already-reported finding
+  lines, largest chunk first, before the per-chunk file lines are touched. If the whole
+  PR does not fit, the files that more than one chunk referenced go in first — those are
+  the seams the pass exists to inspect — and the rest follow in path order until the
+  budget is spent. The first file that does not fit ends the selection: a cross-chunk
+  file is cut into the remaining budget and kept, a non-priority one is dropped, and
+  nothing follows either way, so the diff never jumps out of one file mid-hunk into
+  another. Anything cut or dropped anywhere in the prompt — a shed digest line as much
+  as a dropped file — sets `truncated`. A large digest can therefore set it on a round
+  whose remaining budget still held the whole diff.
+- **Its findings pass every filter a chunk finding passes**, in this order: the **P1
+  evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
+  with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
+  the review); the run's **sensitivity policy**; and the **cross-chunk contradiction
+  guard** described above. The guard matters here for the phantom the evidence gate
+  cannot catch — the one that _does_ name a failure mechanism while claiming a file the
+  PR changed was never updated. The pass sees the whole PR, so a claim like that is
+  wrong here for the same reason it is wrong in a chunk: it comes back tagged
+  `cross_chunk_contradiction` and one band lower, so it cannot block on its own. What
+  survives is then deduplicated against the chunk findings by the same fingerprint the
+  state ledger uses and only then capped at `max_findings` — both on the guarded
+  severity, so a tagged finding cannot slip through a dedupe drop under a different
+  fingerprint, and a restatement can never consume a slot in the cap window that a novel
+  cross-file finding needed. A guarded synthesized finding is counted in the root
+  `cross_chunk_contradictions` like any other and keeps its `"origin": "synthesis"`. On
+  a resumed run they also go through the validation tail's **context-finding rejection**
+  alongside the chunk findings, so a synthesized finding on a path this round was not
+  asked to re-review is discarded; `findings_added` is recomputed from what survived
+  that tail, so the JSON block, the shared note, and the rendered finding list can never
+  disagree.
+- **A synthesis failure is never fatal.** A provider error, a timeout, a budget stop, an
+  interrupt that lands while the extra call is in flight, or an unreadable answer (not
+  JSON, not an object, or a `findings` value that is not a list) leaves the chunk
+  findings intact and marks the run's coverage degraded instead. A budget stop _during_
+  this call is recorded as `synthesis_failed` and does not make the run `partial`: every
+  chunk was already reviewed, so the only thing the cap cost was the optional sweep.
+
+What it adds to the surfaces:
+
+- A `synthesis` phase span in the timings block (see _Review phase timings_ below), so
+  its cost and wall-clock delta per round reads off the existing surfaces. The phase is
+  absent entirely from a round where the pass did not run.
+- One shared note on the terminal, the GitHub review body's run-stats block, and the
+  sticky's `This run` table, rendered only when the pass ran. Its wording follows the
+  outcome: `Cross-chunk synthesis added 1 cross-file finding.` is the one-finding form,
+  and the sentence also has plural (`added 3 cross-file findings`), empty
+  (`found no cross-file inconsistencies`), and failed
+  (`did not complete; the chunk findings below are unaffected`) forms, plus a trailing
+  sentence about the truncated input when the pass saw less than its whole input — the
+  per-chunk digest or the diff was cut, matching the `truncated` flag below.
+- A `synthesis` block at the root of `--output json`, present only when the pass ran:
+
+  ```json
+  {
+    "synthesis": {
+      "enabled": true,
+      "findings_added": 1,
+      "truncated": false,
+      "failed": false
+    }
+  }
+  ```
+
+  `findings_added` is what survived the cap and the dedupe, not what the model returned.
+  `truncated` means the pass saw less than its whole prompt input: the per-chunk digest
+  or the diff was cut. Its whole prompt (the changed-file list, the per-chunk digest,
+  and the diff together) is fitted to one token budget, so a large digest shrinks the
+  diff rather than overrunning the context window — and a digest large enough to shed
+  its own finding lines sets `truncated` even when the whole diff still fit. `failed`
+  distinguishes a pass that could not answer from one that found nothing, which
+  `findings_added: 0` alone cannot. The same block is on the MCP `lintro_review` payload
+  root, and MCP findings carry `"origin": "synthesis"` too.
+
+- `"origin": "synthesis"` on each finding the pass contributed, in the JSON `findings`
+  list and in the persisted state blob. The key is absent on every ordinary chunk
+  finding, so a run without the pass is byte-identical to one from before it existed.
+- A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
+  _Review coverage completeness_ above) when the input was cut or the pass did not
+  complete. The run stays complete for the chunk findings either way.
+
 ### Review readiness verdict
 
 The merge-readiness verdict is derived in code from open-finding severities (never asked
@@ -495,6 +618,7 @@ error stickies). `--output-format json` carries the full breakdown in a top-leve
       { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
       { "name": "provider", "seconds": 250.0, "occurrences": 1 },
       { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
+      { "name": "synthesis", "seconds": 12.4, "occurrences": 1 },
       { "name": "validation", "seconds": 0.1, "occurrences": 1 }
     ],
     "chunks": [
@@ -523,6 +647,9 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `synthesis` is the optional cross-chunk pass (see _Cross-chunk synthesis_ above). It
+  is off by default and only runs on a multi-chunk round, so the phase is absent from
+  most runs; when it is absent the round made no extra call.
 - `validation` is the post-merge tail of the run: provider session teardown and progress
   callbacks, then the pass that decides what survives (context-finding rejection,
   coverage and resume bookkeeping, flag reconciliation). A slow session close therefore

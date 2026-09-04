@@ -31,6 +31,7 @@ __all__ = [
     "ReviewChecklistItemConfig",
     "ReviewConfig",
     "ReviewSensitivityOverrides",
+    "ReviewSynthesisConfig",
 ]
 
 
@@ -118,6 +119,68 @@ class ReviewSensitivityOverrides(BaseModel):
     )
 
 
+class ReviewSynthesisConfig(BaseModel):
+    """Cross-chunk synthesis pass configuration (#2269).
+
+    Each review chunk is reviewed in isolation, so a bug that only exists in
+    the combination of two files split across chunks is invisible to every
+    chunk. The synthesis pass is one extra provider call, made after the chunk
+    findings are merged, that sees the whole changed-file list, a compact
+    per-chunk summary, and as much of the whole-PR diff as its token budget
+    allows, and is asked for cross-file inconsistencies only.
+
+    Off by default: it adds a call per round, and the cost and wall-clock
+    delta is measured through the #2148 phase timings and the #2147 matrix
+    before it is switched on.
+    """
+
+    model_config = ConfigDict(frozen=False, extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Run one extra whole-PR pass after the chunk findings are merged, "
+            "asked only for inconsistencies between files reviewed in "
+            "different chunks. Costs one additional provider call per round "
+            "and only runs when the review used more than one chunk."
+        ),
+    )
+    max_findings: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Maximum findings the synthesis pass may add to a round. The pass "
+            "is a targeted cross-file sweep, not a second review, so the cap "
+            "is deliberately small."
+        ),
+    )
+
+    @field_validator("max_findings", mode="before")
+    @classmethod
+    def _reject_bool_max_findings(cls, value: object) -> object:
+        """Reject a boolean where an integer count is required.
+
+        ``bool`` is an ``int`` subclass, so ``max_findings: true`` would
+        otherwise validate as ``1`` and silently cap the pass at one finding.
+
+        Args:
+            value: Raw ``review.synthesis.max_findings`` value.
+
+        Returns:
+            The value unchanged when it is not a boolean.
+
+        Raises:
+            ValueError: When the value is a boolean.
+        """
+        if isinstance(value, bool):
+            msg = (
+                "review.synthesis.max_findings must be an integer >= 1, "
+                f"got {value!r}"
+            )
+            raise ValueError(msg)
+        return value
+
+
 class ReviewConfig(BaseModel):
     """Configuration for the lintro review command."""
 
@@ -164,6 +227,13 @@ class ReviewConfig(BaseModel):
             "way; set false to keep resolving threads a manual ceremony. A "
             "partially addressed pattern is never resolved, and a regression "
             "never reopens a resolved thread."
+        ),
+    )
+    synthesis: ReviewSynthesisConfig = Field(
+        default_factory=ReviewSynthesisConfig,
+        description=(
+            "Final cross-chunk synthesis pass (#2269). Off by default pending "
+            "the #2147 cost/agreement measurement."
         ),
     )
     custom_agents: CustomAgentMode = Field(

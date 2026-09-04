@@ -41,6 +41,13 @@ class ReviewPhase(StrEnum):
     (context-finding rejection, coverage and resume bookkeeping, flag
     reconciliation), through to the assembled result.
 
+    ``synthesis`` is the optional final cross-chunk pass (#2269). It is one
+    extra provider call made after the chunk findings are merged, and it is
+    recorded outside the ``provider`` envelope so its cost and wall-clock
+    delta per round can be read directly off the existing timing surfaces.
+    The phase is absent from runs where the pass did not run, which is the
+    default.
+
     ``provider`` is an envelope: it spans the whole chunk fan-out, including
     the per-chunk ``generated_questions`` (depth >= 2) and ``adversarial``
     (depth >= 3) spans recorded inside it. Phase sums therefore exceed the run
@@ -58,6 +65,7 @@ class ReviewPhase(StrEnum):
     GENERATED_QUESTIONS = "generated_questions"
     ADVERSARIAL = "adversarial"
     PARSE_MERGE = "parse_merge"
+    SYNTHESIS = "synthesis"
     VALIDATION = "validation"
 
 

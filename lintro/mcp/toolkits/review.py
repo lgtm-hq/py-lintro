@@ -449,9 +449,12 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         finding: The review finding.
 
     Returns:
-        dict[str, Any]: The finding as the MCP contract carries it.
+        dict[str, Any]: The finding as the MCP contract carries it. ``origin``
+        appears only when the finding came from a non-chunk pass, so a run
+        without the cross-chunk synthesis pass (#2269) serializes exactly as
+        it did before that pass existed.
     """
-    return {
+    payload: dict[str, Any] = {
         "file": finding.file,
         "line": finding.line,
         "severity": str(finding.severity.value),
@@ -468,6 +471,9 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         "checklist_ids": list(finding.checklist_ids),
         "source": finding.source,
     }
+    if finding.origin is not None:
+        payload["origin"] = str(finding.origin)
+    return payload
 
 
 def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
@@ -568,6 +574,11 @@ def _review_payload(
         "readiness_verdict": result.readiness_verdict.value,
     }
     payload["findings_coverage_complete"] = result.metadata.findings_coverage_complete
+    # #2269: the same block CLI JSON carries, and only when the pass ran, so
+    # an agent can tell a truncated or failed cross-file sweep from one that
+    # simply found nothing without decoding ``coverage_degradations``.
+    if result.metadata.synthesis is not None:
+        payload["synthesis"] = result.metadata.synthesis.to_dict()
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()
         payload["partial"] = result.metadata.partial
@@ -755,6 +766,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             force_semantic_chunking=lintro_config.review.force_semantic_chunking,
             workspace_root=workspace,
             context_collection_seconds=context_collection_seconds,
+            synthesis=lintro_config.review.synthesis,
         )
     except ReviewContextError as exc:
         # Context errors raised inside run_review (e.g. the CLI diff-size

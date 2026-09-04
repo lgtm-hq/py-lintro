@@ -27,6 +27,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
 from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
+from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
 
 __all__ = ["render_review_terminal"]
@@ -106,6 +107,12 @@ def render_review_terminal(
             f"[bold yellow]⚠ {COVERAGE_LIMITED_HEADLINE}[/bold yellow]",
         )
         output.print(f"[yellow]{coverage_note}[/yellow]")
+
+    synthesis_note = format_synthesis_note(metadata=metadata)
+    if synthesis_note:
+        # Only rendered when the optional cross-chunk pass actually ran, so a
+        # default run's terminal output is unchanged (#2269).
+        output.print(f"[dim]{synthesis_note}[/dim]")
 
     if metadata.timings is not None:
         # One line, always on: which phase dominated the wait (#2148).
