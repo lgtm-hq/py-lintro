@@ -1058,3 +1058,37 @@ def test_a_clean_run_carries_no_error_kind(tmp_path: Path) -> None:
     )
 
     assert_that(runs[0].error_kind).is_none()
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_execute_matrix_treats_a_non_finite_cost_as_unknown(
+    tmp_path: Path,
+    token: str,
+) -> None:
+    """A non-finite cost is unknown spend, never a known one that poisons the total.
+
+    ``json.loads`` decodes the bare ``NaN`` / ``Infinity`` tokens by default,
+    so an unguarded ``float()`` would store one as a known cost and render the
+    whole matrix total as ``nan`` with nothing flagged as missing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        token: Non-finite JSON token to place at ``cost_estimate_usd``.
+    """
+    payload = make_payload(titles=("Off by one",)).replace(
+        '"cost_estimate_usd": 0.25',
+        f'"cost_estimate_usd": {token}',
+    )
+    invoker = _RecordingInvoker(stdout=payload)
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].cost_usd).is_none()
+    assert_that(count_unknown_costs(runs)).is_equal_to(len(runs))
+    assert_that(summarize_runs(runs)).is_equal_to(0.0)

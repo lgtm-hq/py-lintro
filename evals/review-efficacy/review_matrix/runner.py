@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -208,10 +209,14 @@ def _cost_from_payload(payload: Mapping[str, Any]) -> float | None:
         payload: Decoded review payload.
 
     Returns:
-        ``metadata.cost_estimate_usd``, or ``None`` when it is absent or
-        unreadable. ``None`` rather than ``0.0``: an unknown cost summed as
-        zero would silently understate what the matrix spent, which is the
-        one number an operator checks against their bill.
+        ``metadata.cost_estimate_usd``, or ``None`` when it is absent,
+        unreadable, or not finite. ``None`` rather than ``0.0``: an unknown
+        cost summed as zero would silently understate what the matrix spent,
+        which is the one number an operator checks against their bill. A
+        non-finite value is unknown for the same reason and worse: ``json``
+        decodes the bare ``NaN`` / ``Infinity`` tokens by default, and one of
+        them summed as a known cost would render the whole total as ``nan``
+        with nothing flagged as missing.
     """
     metadata = payload.get("metadata")
     if not isinstance(metadata, dict):
@@ -220,9 +225,10 @@ def _cost_from_payload(payload: Mapping[str, Any]) -> float | None:
     if raw is None or isinstance(raw, bool):
         return None
     try:
-        return float(raw)
+        cost = float(raw)
     except (TypeError, ValueError):
         return None
+    return cost if math.isfinite(cost) else None
 
 
 def _incomplete_reason(payload: Mapping[str, Any]) -> str | None:
