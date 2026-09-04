@@ -970,8 +970,46 @@ allow-init-docstring = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
-python_classes = "Test*"
 python_functions = "test_*"
+timeout = 120
+timeout_method = "thread"
+# The AI provider layer is async end to end (issue #722); auto mode runs
+# plain `async def test_*` functions without per-test decorators.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "docker_only: mark test as requiring Docker or Docker-specific dependencies",
+  "slow: mark test as slow running (use @pytest.mark.timeout(300) if needed)",
+  "timeout: override default timeout for slow tests",
+  "integration: mark test as integration test",
+  "unit: mark test as unit test",
+  "cli: mark test as CLI test",
+  "utils: mark test as utility test",
+  "formatters: mark test as formatter test",
+  "markdownlint: mark test as markdownlint specific",
+  "html_validate: mark test as html-validate specific",
+  "hadolint: mark test as hadolint specific",
+  "prettier: mark test as prettier specific",
+  "yamllint: mark test as yamllint specific",
+  "ruff: mark test as ruff specific",
+  "actionlint: mark test as actionlint specific",
+  "pytest: mark test as pytest specific",
+  # Tiered AI CLI contract tests (issue #1614). Tier 1 reads only --version
+  # and --help, so it is free and can gate every change; tier 2 makes a real
+  # call, so it spends quota and is opt-in via LINTRO_CONTRACT_TIER2=1.
+  "contract_tier1: free flag-surface check against an installed agent CLI",
+  "contract_tier2: real-invocation smoke test that spends provider quota",
+]
+# No --maxfail here on purpose (issue #2295): a red run must report every
+# failure, not just the first few.
+addopts = [
+  "--strict-markers",
+  "--durations=10",
+  "--tb=short",
+  "--showlocals",
+  "-v",
+]
+filterwarnings = ["ignore:Couldn't import C tracer"]
 
 [tool.coverage.run]
 source = ["lintro", "lintro_build"]
