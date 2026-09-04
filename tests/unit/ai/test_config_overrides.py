@@ -605,6 +605,7 @@ def test_format_sourced_value_annotates_known_sources() -> None:
         (0.004, "$0.004 (flag)"),
         (0.0001, "$0.0001 (flag)"),
         (0.00001, "$0.00001 (flag)"),
+        (1e-9, "$0.000000001 (flag)"),
         (0.0, "$0.00 (flag)"),
         (0.01, "$0.01 (flag)"),
         (2.5, "$2.50 (flag)"),
@@ -614,7 +615,7 @@ def test_format_max_cost_label_keeps_sub_cent_precision(
     cap: float,
     expected: str,
 ) -> None:
-    """Sub-cent caps render with four decimals, not as ``$0.00`` (#2048).
+    """Sub-cent caps keep every significant decimal so a positive cap never reads as $0.
 
     Args:
         cap: Effective USD ceiling under test.

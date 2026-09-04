@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -44,6 +45,23 @@ def format_sourced_value(value: str, source: ConfigSource | str | None) -> str:
     return f"{value} ({label})"
 
 
+def _sub_cent_text(value: float) -> str:
+    """Render a positive sub-cent amount with every significant decimal.
+
+    Two significant digits past the leading zeros are kept and trailing
+    zeros dropped, so ``0.004`` reads ``0.004``, ``0.00001`` reads
+    ``0.00001`` and ``1e-9`` reads ``0.000000001`` instead of ``0.``.
+
+    Args:
+        value: Cap in USD, strictly between zero and one cent.
+
+    Returns:
+        The decimal text without a currency sign.
+    """
+    decimals = max(4, -math.floor(math.log10(value)) + 1)
+    return f"{value:.{decimals}f}".rstrip("0").rstrip(".")
+
+
 def format_max_cost_label(
     max_cost_usd: float | None,
     source: ConfigSource | str | None = None,
@@ -66,9 +84,7 @@ def format_max_cost_label(
     if max_cost_usd is None:
         value = "uncapped"
     elif 0 < max_cost_usd < _SUB_CENT:
-        # Eight decimals covers any cap a pricing table can produce; the
-        # trailing zeros go so the label reads as the number that was set.
-        value = f"${max_cost_usd:.8f}".rstrip("0")
+        value = f"${_sub_cent_text(max_cost_usd)}"
     else:
         value = f"${max_cost_usd:.2f}"
     return format_sourced_value(value, source)
