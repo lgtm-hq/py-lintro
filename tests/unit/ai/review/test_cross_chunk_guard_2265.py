@@ -87,6 +87,10 @@ def _finding(**overrides: Any) -> ReviewFinding:
         "cause": "The symbol moved.",
         "fix": "Update the caller.",
         "confidence": "high",
+        # A concrete mechanism, so the P1 evidence gate that runs before this
+        # guard in production would leave the finding at P1: the guard is the
+        # only thing that can move it.
+        "failure_scenario": "The caller passes the old keyword and raises TypeError.",
     }
     fields.update(overrides)
     return ReviewFinding(**fields)
@@ -665,8 +669,14 @@ index 3333333..4444444 100644
 """
 
 
-def _contradicting_response() -> AIResponse:
+def _contradicting_response(
+    *,
+    claim: str = "tests/test_a.py is untouched in this round.",
+) -> AIResponse:
     """Return a chunk response whose P1 contradicts the changed-file set.
+
+    Args:
+        claim: Evidence sentence the finding makes about another file.
 
     Returns:
         A parseable provider response carrying one contradicted P1.
@@ -681,7 +691,7 @@ def _contradicting_response() -> AIResponse:
                 "file": "src/a.py",
                 "line": 2,
                 "title": "Test never updated for the new value",
-                "description": "tests/test_a.py is untouched in this round.",
+                "description": claim,
                 "cause": "The chunk only carries the source file.",
                 "fix": "Update the test.",
                 "confidence": "high",
@@ -743,6 +753,63 @@ async def test_a_full_run_downgrades_a_contradicted_p1(tmp_path: Path) -> None:
     with patch(
         "lintro.ai.review.orchestrator.call_ai",
         new=AsyncMock(return_value=_contradicting_response()),
+    ):
+        result = await run_review_async(
+            context=context,
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                review=True,
+                transport=AITransport.API,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+        )
+
+    tagged = cross_chunk_contradictions(findings=result.findings)
+
+    assert_that(tagged).is_not_empty()
+    assert_that(tagged[0].severity).is_equal_to(Severity.P2)
+
+
+async def test_a_full_run_guards_a_claim_about_a_rename_source(tmp_path: Path) -> None:
+    """Finalize hands the guard rename sources, not just current paths."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/a.py",
+                status=ChangedFileStatus.MODIFIED,
+                additions=1,
+                deletions=0,
+            ),
+            ChangedFile(
+                path="tests/test_a.py",
+                status=ChangedFileStatus.RENAMED,
+                previous_path="tests/test_old_a.py",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff=_DIFF,
+        pr_metadata=None,
+        repo_root=str(tmp_path),
+    )
+    provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-6"
+    provider.name = "anthropic"
+    provider.capabilities.supports_sessions = False
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        new=AsyncMock(
+            return_value=_contradicting_response(
+                claim="tests/test_old_a.py is untouched in this round.",
+            ),
+        ),
     ):
         result = await run_review_async(
             context=context,
