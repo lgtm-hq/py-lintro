@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.142.0] - 2026-09-04
+
+### Added
+
+- **ai**: downgrade findings that claim a changed file is untouched (#2268) (1c5c81d)
+
 ## [0.141.4] - 2026-09-04
 
 ### Fixed
