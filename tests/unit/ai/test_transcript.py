@@ -255,7 +255,7 @@ async def test_cli_transport_logs_spawn_args_and_output(tmp_path: Path) -> None:
         result = await transport.run(
             ["/usr/bin/true", "--flag"],
             timeout=5.0,
-            cwd="/tmp",  # noqa: S108 -- inert cwd string; no file is created here
+            cwd="/tmp",
         )
 
     assert_that(result.stdout).is_equal_to("cli-out")

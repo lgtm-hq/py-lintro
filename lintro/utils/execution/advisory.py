@@ -227,9 +227,7 @@ def run_advisory_tools(
                 lintro_config=config,
             )
             results.append(tool.check(paths, check_options))
-        except (
-            Exception
-        ) as exc:  # noqa: BLE001 - swallow into ToolResult; later tools still run; the review command decides the exit code
+        except Exception as exc:
             logger.warning("[{}] advisory tool failed: {}", tool_name, exc)
             results.append(
                 ToolResult(

@@ -34,9 +34,7 @@ from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.review_state_codec import legacy_state_block
 
-_TEST_TOKEN = (
-    "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
-)
+_TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 _HEAD_SHA = "abc1234def5678"
 _COMMENT_ID = 101
 _THREAD_ID = "PRRT_thread_node"

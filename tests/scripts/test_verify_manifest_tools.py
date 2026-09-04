@@ -37,7 +37,7 @@ def test_tool_command_returns_manifest_version_command() -> None:
     module = _load_verify_manifest_tools_module()
 
     # Access private function for testing - module loaded dynamically via importlib
-    tool_command_fn = module._tool_command  # noqa: SLF001
+    tool_command_fn = module._tool_command
     cmd = tool_command_fn(
         "astro_check",
         {
@@ -54,7 +54,7 @@ def test_tool_command_rejects_missing_version_command() -> None:
     """verify-manifest-tools should raise when version_command is absent."""
     module = _load_verify_manifest_tools_module()
 
-    tool_command_fn = module._tool_command  # noqa: SLF001
+    tool_command_fn = module._tool_command
     assert_that(tool_command_fn).raises(ValueError).when_called_with(
         "astro_check",
         {"name": "astro_check", "install": {"type": "npm"}},
@@ -70,7 +70,7 @@ def test_clippy_versions_match_ignores_unobservable_patch() -> None:
     """
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("clippy", "1.97.1", "1.97.0")).is_true()
     assert_that(versions_match("clippy", "1.97.0", "1.97.0")).is_true()
 
@@ -79,7 +79,7 @@ def test_clippy_versions_mismatch_on_minor_drift() -> None:
     """Clippy still fails when the observable major.minor genuinely drifts."""
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("clippy", "1.97.1", "1.96.0")).is_false()
 
 
@@ -87,7 +87,7 @@ def test_non_clippy_versions_require_exact_match() -> None:
     """Non-clippy tools keep strict, patch-level version equality."""
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("ruff", "1.97.1", "1.97.1")).is_true()
     assert_that(versions_match("ruff", "1.97.1", "1.97.0")).is_false()
 
@@ -182,7 +182,7 @@ def test_parse_allow_missing_splits_and_dedupes() -> None:
     """--allow-missing values are comma-split, trimmed, and de-duplicated."""
     module = _load_verify_manifest_tools_module()
 
-    parse = module._parse_allow_missing  # noqa: SLF001
+    parse = module._parse_allow_missing
     assert_that(parse(None)).is_equal_to(set())
     assert_that(parse([])).is_equal_to(set())
     assert_that(parse(["terraform"])).is_equal_to({"terraform"})
@@ -325,8 +325,8 @@ def test_empty_allow_missing_leaves_behavior_unchanged(
     module = _load_verify_manifest_tools_module()
     # `git --version` -> "git version X.Y.Z"; declare that exact version so the
     # match succeeds regardless of the runner's git build.
-    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
-    actual = module._parse_version(output, "git")  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])
+    actual = module._parse_version(output, "git")
     manifest = _write_manifest(
         tmp_path,
         name="git",
@@ -343,7 +343,7 @@ def test_parse_allow_version_lag_splits_and_dedupes() -> None:
     """--allow-version-lag uses the same comma-split parsing as allow-missing."""
     module = _load_verify_manifest_tools_module()
 
-    parse = module._parse_allow_version_lag  # noqa: SLF001
+    parse = module._parse_allow_version_lag
     assert_that(parse(None)).is_equal_to(set())
     assert_that(parse(["astro_check, ruff", "ruff"])).is_equal_to(
         {"astro_check", "ruff"},
@@ -354,7 +354,7 @@ def test_is_image_older_than_manifest_ordering() -> None:
     """Numeric segment ordering distinguishes older / equal / newer images."""
     module = _load_verify_manifest_tools_module()
 
-    older = module._is_image_older_than_manifest  # noqa: SLF001
+    older = module._is_image_older_than_manifest
     assert_that(older(expected="7.1.3", actual="7.0.9")).is_true()
     assert_that(older(expected="7.1.3", actual="7.1.3")).is_false()
     assert_that(older(expected="7.1.0", actual="7.1.3")).is_false()
@@ -365,11 +365,11 @@ def test_version_tuple_stops_at_prerelease_tag() -> None:
     """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
     module = _load_verify_manifest_tools_module()
 
-    version_tuple = module._version_tuple  # noqa: SLF001
+    version_tuple = module._version_tuple
     assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
     assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
     # A pre-release build must not read as newer than its release.
-    older = module._is_image_older_than_manifest  # noqa: SLF001
+    older = module._is_image_older_than_manifest
     assert_that(older(expected="7.1.0", actual="7.1.0-rc.1")).is_false()
 
 
@@ -380,8 +380,8 @@ def test_allow_version_lag_older_image_passes_with_warning(
 ) -> None:
     """An allow-version-lag tool with an older installed version warns, not fails."""
     module = _load_verify_manifest_tools_module()
-    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
-    actual = module._parse_version(output, "git")  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])
+    actual = module._parse_version(output, "git")
     assert_that(actual).is_not_none()
     # Declare a version strictly newer than whatever git reports on this runner.
     parts = [int(p) for p in str(actual).split(".")]
@@ -484,7 +484,7 @@ def test_run_returns_timeout_code_with_captured_output(
     module = _load_verify_manifest_tools_module()
     _fake_timeout_run(module, monkeypatch, stdout=b"1.151.0\n")
 
-    code, output, timed_out = module._run(["semgrep", "--version"])  # noqa: SLF001
+    code, output, timed_out = module._run(["semgrep", "--version"])
 
     assert_that(code).is_equal_to(124)
     assert_that(output).is_equal_to("1.151.0")

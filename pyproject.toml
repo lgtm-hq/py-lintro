@@ -268,16 +268,183 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "COM", "N", "D", "DOC", "UP", "B", "C4", "SIM"]
+select = [
+  "E",
+  "F",
+  "W",
+  "I",
+  "COM",
+  "N",
+  "D",
+  "DOC",
+  "UP",
+  "B",
+  "C4",
+  "SIM",
+  "C90",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+  "RUF100",
+]
 ignore = []
 preview = true
 explicit-preview-rules = true
+
+# Structural thresholds (issue #2291). Ratchet plan: max-complexity 15 -> 12 -> 10.
+# Never raise these; the burn-down happens in the per-file baseline below.
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 12
+max-statements = 50
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["E501", "SIM117", "SIM105"]
 ".lintro/**/*.py" = ["E501"]
 "**/__init__.py" = ["D104"]
 "test_samples/**/*.py" = ["ALL"]
+
+# --- structural baseline (ratchet: delete lines, never add) ---
+# Files that violated C901 / PLR0912 / PLR0913 / PLR0915 when the families were
+# switched on (issue #2291). This is a burn-down list, not a policy: entries are
+# removed as the owning refactor issues (#2311, #2313, #1972, #1995) land, and
+# tests/unit/test_ruff_baseline.py fails if the count grows.
+"lintro/ai/apply.py" = ["C901", "PLR0912"]
+"lintro/ai/display/status.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/ai/doctor_checks.py" = ["PLR0912"]
+"lintro/ai/fallback.py" = ["PLR0913"]
+"lintro/ai/fix_context.py" = ["PLR0913"]
+"lintro/ai/fix.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/ai/interactive.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/ai/invoke.py" = ["PLR0913"]
+"lintro/ai/orchestrator.py" = ["PLR0912"]
+"lintro/ai/pipeline.py" = ["C901", "PLR0912", "PLR0913"]
+"lintro/ai/providers/base.py" = ["PLR0913"]
+"lintro/ai/providers/openai.py" = ["PLR0912"]
+"lintro/ai/refinement.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/ai/review/chunker/grouping.py" = ["C901"]
+"lintro/ai/review/chunker/shell_run_parse.py" = ["C901", "PLR0912"]
+"lintro/ai/review/context/pr_metadata.py" = ["PLR0912"]
+"lintro/ai/review/coverage.py" = ["PLR0913"]
+"lintro/ai/review/custom_agent_runner.py" = ["PLR0913"]
+"lintro/ai/review/finding_matcher.py" = ["PLR0915"]
+"lintro/ai/review/github_lifecycle.py" = ["PLR0913"]
+"lintro/ai/review/github_sticky.py" = ["PLR0913"]
+"lintro/ai/review/github.py" = ["PLR0913"]
+"lintro/ai/review/models/finding_record.py" = ["PLR0912"]
+"lintro/ai/review/orchestrator.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/ai/review/synthesis.py" = ["PLR0913"]
+"lintro/ai/summary.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/api/core.py" = ["PLR0913"]
+"lintro/api/pipeline.py" = ["PLR0913"]
+"lintro/cli_utils/commands/check.py" = ["PLR0913"]
+"lintro/cli_utils/commands/config.py" = ["PLR0915"]
+"lintro/cli_utils/commands/deps.py" = ["PLR0912"]
+"lintro/cli_utils/commands/doctor.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+]
+"lintro/cli_utils/commands/format.py" = ["PLR0913"]
+"lintro/cli_utils/commands/install.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+]
+"lintro/cli_utils/commands/list_tools.py" = ["PLR0915"]
+"lintro/cli_utils/commands/review.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+]
+"lintro/cli_utils/commands/setup.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/cli_utils/commands/test.py" = ["PLR0913"]
+"lintro/cli_utils/commands/versions.py" = ["PLR0912", "PLR0915"]
+"lintro/config/config_loader.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/config/config_validator.py" = ["C901", "PLR0912"]
+"lintro/formatters/styles/github.py" = ["PLR0912"]
+"lintro/licenses/ecosystems/npm.py" = ["C901", "PLR0912"]
+"lintro/parsers/black/black_parser.py" = ["PLR0912"]
+"lintro/parsers/osv_scanner/osv_scanner_parser.py" = ["C901", "PLR0912"]
+"lintro/parsers/pytest/format_parsers.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/core/update_channels.py" = ["PLR0912"]
+"lintro/tools/core/version_parsing.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/_ts_checker_execution.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/definitions/astro_check.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/bandit.py" = ["C901", "PLR0912", "PLR0913"]
+"lintro/tools/definitions/buf.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/mypy.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/oxfmt.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/definitions/oxlint.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/tools/definitions/prettier.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/pytest.py" = ["C901", "PLR0912"]
+"lintro/tools/definitions/ruff.py" = ["PLR0913"]
+"lintro/tools/definitions/spectral.py" = ["PLR0912"]
+"lintro/tools/definitions/stylelint.py" = ["PLR0912"]
+"lintro/tools/definitions/svelte_check.py" = ["PLR0912"]
+"lintro/tools/definitions/yamllint.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/implementations/pytest/collection.py" = ["PLR0912"]
+"lintro/tools/implementations/pytest/coverage_processor.py" = [
+  "C901",
+  "PLR0912",
+]
+"lintro/tools/implementations/pytest/output_parsers.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0915",
+]
+"lintro/tools/implementations/pytest/pytest_command_builder.py" = ["PLR0912"]
+"lintro/tools/implementations/pytest/pytest_option_validators.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+]
+"lintro/tools/implementations/ruff/check.py" = ["PLR0915"]
+"lintro/tools/implementations/ruff/commands.py" = ["PLR0912"]
+"lintro/tools/implementations/ruff/fix.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/utils/console/logger.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/utils/console/pre_execution_summary.py" = ["PLR0912"]
+"lintro/utils/display_helpers.py" = ["PLR0912"]
+"lintro/utils/doctor_report.py" = ["PLR0912"]
+"lintro/utils/environment/collectors.py" = ["PLR0912"]
+"lintro/utils/execution/parallel_executor.py" = ["PLR0913"]
+"lintro/utils/execution/run_renderer.py" = ["PLR0912", "PLR0913"]
+"lintro/utils/execution/tool_configuration.py" = [
+  "C901",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+]
+"lintro/utils/jsonc.py" = ["PLR0912"]
+"lintro/utils/native_parsers.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/utils/output/file_writer.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/utils/output/sarif/document.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/utils/path_filtering.py" = ["C901", "PLR0912"]
+"lintro/utils/post_checks.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/utils/project_detection.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/utils/result_formatters.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/utils/summary_tables.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/utils/tool_executor.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
+"lintro/utils/tsconfig.py" = ["PLR0912"]
+"lintro/watch/watcher.py" = ["PLR0913"]
+"scripts/ci/format-changelog.py" = ["C901", "PLR0912", "PLR0915"]
+"scripts/ci/format-security-comment.py" = ["C901", "PLR0912", "PLR0915"]
+"scripts/ci/site/fix-markdown-docs.py" = ["PLR0912"]
+"scripts/ci/site/migrate-docs-content.py" = ["C901", "PLR0912", "PLR0915"]
+"scripts/ci/verify-manifest-tools.py" = ["C901", "PLR0912", "PLR0915"]
+"tests/unit/ai/review/test_cross_chunk_synthesis_2269.py" = ["PLR0913"]
+"tests/unit/cli_utils/commands/test_doctor_command.py" = ["PLR0913"]
+"tests/unit/tools/conftest.py" = ["PLR0913"]
+"tests/unit/watch/test_runner.py" = ["PLR0913"]
+"tools/ascii_resizer/cli.py" = ["PLR0913"]
+# --- end structural baseline ---
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

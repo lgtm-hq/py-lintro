@@ -83,7 +83,7 @@ def test_built_wheel_imports() -> None:
             "import lintro",
             "import lintro.parsers",
             "from lintro.parsers import bandit",
-            "from lintro.parsers.actionlint.actionlint_parser import parse_actionlint_output",  # noqa: E501
+            "from lintro.parsers.actionlint.actionlint_parser import parse_actionlint_output",
             "from lintro.plugins import ToolRegistry; ToolRegistry.get('actionlint')",
             "from lintro.cli import cli",
         ]

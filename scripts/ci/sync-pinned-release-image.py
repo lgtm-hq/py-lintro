@@ -174,19 +174,18 @@ def _fetch_page(*, token: str, page: int) -> list[dict[str, Any]]:
         return []
     # The https:// scheme is asserted above, so no file:/custom scheme can be
     # opened; the URL is built from module constants, not from user input.
-    request = (
-        urllib.request.Request(  # noqa: S310 — HTTPS-only validated above  # nosec B310
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "py-lintro-pin-sync",
-            },
-        )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "py-lintro-pin-sync",
+        },
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+        # nosemgrep: dynamic-urllib-use-detected
+        with urllib.request.urlopen(  # nosec B310
             request,
             timeout=30,
         ) as response:

@@ -743,7 +743,7 @@ def locate_state_from_env(
             gh_api=gh_api,
             now=now,
         )
-    except Exception as exc:  # noqa: BLE001 - fail-safe empty state, never fail the job
+    except Exception as exc:
         _log_locate(f"locator exception: {type(exc).__name__}")
         return LocatedPrior(run_id=None)
 
@@ -1019,14 +1019,14 @@ def _http_do(
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return 0, b"refusing non-https artifact URL"
-    request = urllib.request.Request(  # noqa: S310 - scheme checked above
+    request = urllib.request.Request(
         url,
         data=body or None,
         method=method,
         headers=dict(headers),
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+        with urllib.request.urlopen(  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
             request,
             timeout=max(0.05, timeout),
         ) as response:
@@ -1239,7 +1239,7 @@ def upload_from_env(
             http_do=http_do,
             budget_seconds=budget_seconds,
         )
-    except Exception:  # noqa: BLE001 - fail-safe; never redden the review
+    except Exception:
         return False
 
 
@@ -1324,7 +1324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     seed_run_id=located.seed_run_id,
                     directory=Path(seed_dir_raw or DEFAULT_STATE_DIR),
                 )
-            except Exception as exc:  # noqa: BLE001 - fail-safe; never redden locate
+            except Exception as exc:
                 _log_locate(f"seed exception: {type(exc).__name__}")
     return 0
 

@@ -181,7 +181,7 @@ class TranscriptWriter:
                 retention=max(1, retention),
                 keep=self._path,
             )
-        except Exception as exc:  # noqa: BLE001 - never break AI calls
+        except Exception as exc:
             logger.debug(f"AI transcript init failed: {exc}")
             self._enabled = False
             self._path = None
@@ -256,7 +256,7 @@ class TranscriptWriter:
             line = json.dumps(event, ensure_ascii=False, default=str)
             with self._path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
-        except Exception as exc:  # noqa: BLE001 - never break AI calls
+        except Exception as exc:
             logger.debug(f"AI transcript write failed: {exc}")
 
 

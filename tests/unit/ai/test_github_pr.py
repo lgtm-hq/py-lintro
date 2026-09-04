@@ -21,11 +21,9 @@ from lintro.ai.integrations.github_pr import (
 )
 from lintro.ai.models import AIFixSuggestion, AISummary
 
-_TEST_TOKEN = (
-    "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
-)
+_TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 # Fake test fixture token, not a real credential
-_EMPTY_TOKEN = ""  # noqa: S105  # nosec B105
+_EMPTY_TOKEN = ""  # nosec B105
 
 
 @pytest.fixture

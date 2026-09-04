@@ -216,7 +216,7 @@ def _report_checkpoints(
             continue
         try:
             changed = diff_undo(state)
-        except Exception as exc:  # noqa: BLE001 - reporting must never fail a run
+        except Exception as exc:
             loguru_logger.debug(f"Checkpoint diff unavailable: {exc}")
             continue
         if not changed.strip():

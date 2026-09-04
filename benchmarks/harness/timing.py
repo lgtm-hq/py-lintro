@@ -128,7 +128,7 @@ def measure_command(
         raise ValueError("warmup must not be negative")
 
     for _ in range(warmup):
-        subprocess.run(  # noqa: S603 - command is caller-controlled, not shell  # nosec B603
+        subprocess.run(  # nosec B603
             command,
             cwd=cwd,
             env=env,
@@ -141,7 +141,7 @@ def measure_command(
     exit_codes: list[int] = []
     for _ in range(runs):
         start = time.perf_counter()
-        completed = subprocess.run(  # noqa: S603 - caller-controlled argv  # nosec B603
+        completed = subprocess.run(  # nosec B603
             command,
             cwd=cwd,
             env=env,

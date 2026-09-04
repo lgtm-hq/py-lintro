@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 __all__ = ["IdiomReviewEngine", "IdiomReviewMode"]
 
 
-def __getattr__(name: str) -> Any:  # noqa: ANN401 - module-level lazy re-export
+def __getattr__(name: str) -> Any:
     """Resolve lazily re-exported names on first access.
 
     Args:

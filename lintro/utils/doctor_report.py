@@ -545,7 +545,7 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         config = get_config(reload=True)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Any parse failure is a report line, not a crash.
         return None, [
             DoctorCheck(
@@ -579,7 +579,7 @@ def _config_checks() -> tuple[LintroConfig | None, list[DoctorCheck]]:
 
     try:
         warnings = validate_config_consistency()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # A broken native config must not abort the report.
         warnings = [f"consistency check failed: {exc}"]
 
@@ -752,7 +752,7 @@ def _ai_checks(*, config: LintroConfig | None) -> list[DoctorCheck]:
 
     try:
         results = check_ai_configuration(resolve_ai_config(config))
-    except Exception as exc:  # noqa: BLE001 - a probe that blew up is a report line
+    except Exception as exc:
         # A malformed ``ai:`` block or a provider whose presence check raises
         # must not take the whole report down with it: the caller asked what is
         # wrong with the environment, and this is an answer.

@@ -200,7 +200,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -269,7 +269,7 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -338,7 +338,7 @@ async def test_run_review_returns_partial_on_sigterm() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -408,7 +408,7 @@ async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -490,7 +490,7 @@ def test_run_review_writes_incremental_coverage_parts(
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -694,7 +694,7 @@ def test_incremental_checkpoint_keeps_this_run_findings(
         provider,
         user_prompt,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         # Key on the chunk's own diff line: every chunk prompt now lists all
         # changed files, so a file name alone no longer identifies the chunk.
         if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
@@ -924,7 +924,7 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
         provider,
         user_prompt,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         # Key on the chunk's own diff line: every chunk prompt now lists all
         # changed files, so a file name alone no longer identifies the chunk.
         if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
@@ -978,7 +978,7 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
         provider,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             kwargs.get("user_prompt", ""),
             system=kwargs.get("system_prompt"),
@@ -1036,7 +1036,7 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
         provider,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:

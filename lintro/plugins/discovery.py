@@ -91,7 +91,7 @@ def _module_names_from_package_scan() -> set[str]:
             for module in pkgutil.iter_modules(search_path)
             if not module.name.startswith("_")
         }
-    except Exception as e:  # noqa: BLE001 - scanning is best-effort, index wins
+    except Exception as e:
         logger.debug(f"Could not scan {BUILTIN_DEFINITIONS_PACKAGE!r}: {e}")
         return set()
 
@@ -177,7 +177,7 @@ def _plugins_mapping_from_yaml(path: Path) -> dict[str, Any]:
 
     try:
         data = _load_yaml_file(path)
-    except Exception as e:  # noqa: BLE001 - any read/parse failure fails closed
+    except Exception as e:
         raise _PluginConfigError(
             f"Could not read plugins config {path}: {e}",
         ) from e
@@ -554,7 +554,7 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
         logger.info(f"Loaded external plugin: {name} (from {origin})")
         return 1
 
-    except Exception as e:  # noqa: BLE001 - isolate any misbehaving plugin
+    except Exception as e:
         logger.warning(
             f"Failed to load plugin {ep.name!r}: {type(e).__name__}: {e}",
         )
@@ -629,7 +629,7 @@ def _advertised_plugin_tool_names() -> frozenset[str]:
     for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
         try:
             entry_points = importlib.metadata.entry_points(group=group)
-        except Exception as e:  # noqa: BLE001 - config loading must not abort
+        except Exception as e:
             # This runs inside config loading. A broken metadata backend (an
             # unreadable dist-info directory, a third-party finder raising)
             # must degrade to "no plugin names known", never take the whole

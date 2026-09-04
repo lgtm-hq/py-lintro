@@ -22,9 +22,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.review_state_codec import legacy_state_block
 
-_TEST_TOKEN = (
-    "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
-)
+_TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 
 
 def _reporter() -> MagicMock:

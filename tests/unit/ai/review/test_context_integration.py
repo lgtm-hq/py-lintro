@@ -35,7 +35,7 @@ def _run_git(
     """Run git in the test repo with a single security suppression."""
     kwargs.setdefault("cwd", git_repo.path)
     check = kwargs.pop("check", False)
-    return subprocess.run(  # nosec B603  # noqa: S603 - argv is assembled from test fixture paths only; shell=False; exercises real git in a temp repo, not user input
+    return subprocess.run(  # nosec B603
         [git_repo.git_bin, *args],
         check=check,
         **kwargs,

@@ -126,7 +126,7 @@ class WatchRunner:
                 "render_summary": False,
             }
             exit_code = self.run_tools(**execution_options)
-        except Exception as exc:  # noqa: BLE001 - watch mode must survive a batch
+        except Exception as exc:
             self.emit(f"  Error: {type(exc).__name__}: {exc}")
             self._last_exit_code = 1
             return 1

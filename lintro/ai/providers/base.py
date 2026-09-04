@@ -32,8 +32,8 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.providers.response import AIResponse  # noqa: F401
-from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
+from lintro.ai.providers.response import AIResponse
+from lintro.ai.providers.stream_result import AIStreamResult
 
 if TYPE_CHECKING:
     from lintro.ai.json_response import CliSchemaRequest
@@ -250,7 +250,7 @@ class BaseAIProvider(ABC):
                         "created on a dead or idle foreign event loop; "
                         "pool reclaimed by garbage collection.",
                     )
-            except Exception as exc:  # noqa: BLE001 - best-effort teardown
+            except Exception as exc:
                 logger.debug(
                     f"Ignoring error while closing {self._provider_name} "
                     f"SDK client: {exc}",
@@ -436,7 +436,7 @@ class BaseAIProvider(ABC):
                 )
             try:
                 return await cli.probe_liveness(provider_name=self._provider_name)
-            except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+            except Exception as exc:
                 # Same contract as the API branch below: this method promises a
                 # classified result, so an unexpected probe failure must not
                 # escape as a traceback to `lintro doctor` or the contract suite.
@@ -461,7 +461,7 @@ class BaseAIProvider(ABC):
                 max_tokens=1,
                 timeout=timeout,
             )
-        except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+        except Exception as exc:
             return liveness_from_error(
                 provider=self._provider_name,
                 transport=transport,

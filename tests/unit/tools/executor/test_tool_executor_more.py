@@ -47,7 +47,7 @@ def _stub_logger(monkeypatch: pytest.MonkeyPatch) -> None:
         def __getattr__(
             self,
             name: str,
-        ) -> Callable[..., None]:  # noqa: D401 - test stub
+        ) -> Callable[..., None]:
             def _(*a: Any, **k: Any) -> None:
                 return None
 
@@ -80,7 +80,7 @@ def test_get_tools_to_run_unknown_tool_raises(monkeypatch: pytest.MonkeyPatch) -
     try:
         _ = tc.get_tools_to_run(tools="notatool", action="check")
         raise AssertionError("Expected ValueError for unknown tool")
-    except ValueError as e:  # noqa: PT017
+    except ValueError as e:
         assert_that(str(e)).contains("Unknown tool")
 
 
@@ -111,7 +111,7 @@ def test_get_tools_to_run_fmt_with_cannot_fix_raises(
         def can_fix(self) -> bool:
             return self._definition.can_fix
 
-        def set_options(self, **kwargs: Any) -> None:  # noqa: D401
+        def set_options(self, **kwargs: Any) -> None:
             return None
 
     # Ensure we resolve a tool instance with can_fix False
@@ -126,7 +126,7 @@ def test_get_tools_to_run_fmt_with_cannot_fix_raises(
     try:
         _ = tc.get_tools_to_run(tools="bandit", action="fmt")
         raise AssertionError("Expected ValueError for non-fix tool in fmt")
-    except ValueError as e:  # noqa: PT017
+    except ValueError as e:
         assert_that(str(e)).contains("does not support formatting")
 
 
