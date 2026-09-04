@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.142.1] - 2026-09-04
+
+### Fixed
+
+- **ai**: make cursor workspace trust a required provider argument with AIConfig as the
+  only default (#2285) (6155cf0)
+
 ## [0.142.0] - 2026-09-04
 
 ### Added
