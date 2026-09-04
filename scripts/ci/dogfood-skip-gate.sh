@@ -198,20 +198,18 @@ set -e
 # is a night with no coverage that a bounded retry can still answer. Only a
 # completed check writes these outputs, so their absence IS the no-verdict
 # signal — nothing here can be forged by a killed run. Only the checker's two
-# verdict codes count as "completed": 2 (report/allowlist error) and a
-# docker-side kill such as 143 leave both outputs absent so the retry and the
-# classifier see a missing verdict, not a fabricated failed one.
+# verdict codes publish a status: 2 (report/allowlist error) and a docker-side
+# kill such as 143 leave status absent so the retry predicate (status == '')
+# and the classifier see a missing verdict, not a fabricated failed one. The
+# raw exit code is still published for those, so the shared infra classifier
+# can tell a SIGTERM (143, absorbed as a kill) from a configuration error (2,
+# which stays action-required).
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	case "${gate_exit_code}" in
-	0)
-		printf 'status=passed\n' >>"${GITHUB_OUTPUT}"
-		printf 'exit-code=0\n' >>"${GITHUB_OUTPUT}"
-		;;
-	1)
-		printf 'status=failed\n' >>"${GITHUB_OUTPUT}"
-		printf 'exit-code=1\n' >>"${GITHUB_OUTPUT}"
-		;;
+	0) printf 'status=passed\n' >>"${GITHUB_OUTPUT}" ;;
+	1) printf 'status=failed\n' >>"${GITHUB_OUTPUT}" ;;
 	esac
+	printf 'exit-code=%s\n' "${gate_exit_code}" >>"${GITHUB_OUTPUT}"
 fi
 
 exit "${gate_exit_code}"

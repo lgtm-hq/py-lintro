@@ -355,12 +355,13 @@ def test_non_verdict_checker_exit_publishes_no_verdict(
     checker_exit_code: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the checker's 0/1 verdict codes publish status and exit-code.
+    """Only the checker's 0/1 verdict codes publish a status.
 
     A report/allowlist error (2) or a docker-side kill (143) reaching the
-    publish step must leave both outputs absent, so the nightly retry (which
+    publish step must leave ``status`` absent, so the nightly retry (which
     requires an empty status) and the classifier see a missing verdict rather
-    than a fabricated failed one (#2246).
+    than a fabricated failed one (#2246). The raw exit code is still published
+    so the shared infra classifier can absorb 143 and keep 2 action-required.
     """
     report = tmp_path / "results.json"
     _write_report(report)
@@ -385,7 +386,7 @@ def test_non_verdict_checker_exit_publishes_no_verdict(
     assert_that(result.returncode).is_equal_to(int(checker_exit_code))
     written = output_path.read_text()
     assert_that(written).does_not_contain("status=")
-    assert_that(written).does_not_contain("exit-code=")
+    assert_that(written).contains(f"exit-code={checker_exit_code}")
 
 
 def test_configuration_error_publishes_no_verdict(tmp_path: Path) -> None:

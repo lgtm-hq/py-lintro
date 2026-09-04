@@ -3646,6 +3646,36 @@ def test_dogfood_nightly_skip_gate_publishes_and_retries_its_verdict() -> None:
     assert_that(condition).contains("needs.dogfood-skip-gate.outputs.status == ''")
 
 
+def test_dogfood_nightly_skip_gate_retry_is_a_lockstep_copy() -> None:
+    """The skip-gate retry must run exactly what the primary ran (#2246).
+
+    GitHub has no job-level retry, so the retry job is a copy of the primary;
+    every input that decides what the gate checks (egress allowlist, image,
+    timeout budget, the gate script invocation) must stay identical or the
+    retry answers a different question than the attempt it retries.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    gate = nightly["jobs"]["dogfood-skip-gate"]
+    retry = nightly["jobs"]["dogfood_skip_gate_retry"]
+
+    def _facts(job: dict[str, Any]) -> dict[str, Any]:
+        harden = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        return {
+            "timeout-minutes": job.get("timeout-minutes"),
+            "allowed-endpoints": harden["with"]["allowed-endpoints"].split(),
+            "egress-policy": harden["with"].get("egress-policy"),
+            "image": (check.get("env") or {}).get("LINTRO_IMAGE"),
+            "run": check["run"],
+        }
+
+    assert_that(_facts(retry)).is_equal_to(_facts(gate))
+
+
 def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     """notify-failure consumes the effective post-retry verdict (#2246).
 
@@ -3670,19 +3700,19 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     )
     # Both attempts of both retried jobs must reach the classifier.
     env = step["env"]
-    for key in (
-        "LINT_RESULT",
-        "LINT_STATUS",
-        "LINT_EXIT_CODE",
-        "LINT_TIMEOUT_FLAKE",
-        "LINT_RETRY_RESULT",
-        "SKIP_GATE_RESULT",
-        "SKIP_GATE_STATUS",
-        "SKIP_GATE_RETRY_RESULT",
-        "SKIP_GATE_RETRY_STATUS",
-        "VERIFY_RESULT",
-    ):
-        assert_that(env).contains_key(key)
+    for prefix in ("LINT", "LINT_RETRY"):
+        for suffix in (
+            "RESULT",
+            "STATUS",
+            "EXIT_CODE",
+            "TIMEOUT_FLAKE",
+            "TIMED_OUT_TOOLS",
+        ):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    for prefix in ("SKIP_GATE", "SKIP_GATE_RETRY"):
+        for suffix in ("RESULT", "STATUS", "EXIT_CODE"):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    assert_that(env).contains_key("VERIFY_RESULT")
     # The classifier reuses the PR path's signatures instead of copying them.
     checkout = next(
         item

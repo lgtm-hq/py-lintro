@@ -318,6 +318,41 @@ def test_double_no_verdict_without_a_kill_demands_action(
     assert_that(decision.annotation).is_empty()
 
 
+def test_skip_gate_sigterm_twice_is_a_coverage_gap(module: ModuleType) -> None:
+    """A skip gate killed by SIGTERM on both attempts pings without action.
+
+    The gate script publishes ``exit-code=143`` with no status on a docker
+    side kill, which the shared classifier already accepts as infra, so two
+    of them are the same coverage gap as two lint kills.
+    """
+    decision = _decide(
+        module,
+        SKIP_GATE_RESULT="failure",
+        SKIP_GATE_EXIT_CODE="143",
+        SKIP_GATE_RETRY_RESULT="failure",
+        SKIP_GATE_RETRY_EXIT_CODE="143",
+    )
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.action_required).is_false()
+
+
+def test_skip_gate_configuration_error_twice_demands_action(
+    module: ModuleType,
+) -> None:
+    """A checker configuration error is deterministic and never absorbed."""
+    decision = _decide(
+        module,
+        SKIP_GATE_RESULT="failure",
+        SKIP_GATE_EXIT_CODE="2",
+        SKIP_GATE_RETRY_RESULT="failure",
+        SKIP_GATE_RETRY_EXIT_CODE="2",
+    )
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.action_required).is_true()
+
+
 def test_partial_outputs_are_unclassifiable_and_ping(module: ModuleType) -> None:
     """A half-written verdict is never absorbed — absence of proof is not proof."""
     decision = _decide(
