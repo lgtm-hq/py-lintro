@@ -53,6 +53,9 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
       - RUNNING_IN_DOCKER=1
+      # A wrapped tool missing from the tools image is a build regression, not
+      # a reason to skip its integration tests (#465).
+      - LINTRO_TOOLS_IMAGE=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
       # This service runs tests/integration only, so its coverage is far below
