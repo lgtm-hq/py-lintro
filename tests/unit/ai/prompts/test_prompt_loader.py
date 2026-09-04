@@ -57,6 +57,14 @@ _CONSTANT_TO_TEMPLATE: dict[str, tuple[object, tuple[str, ...]]] = {
         review,
         ("review", "adversarial_sweep.md"),
     ),
+    "REVIEW_SYNTHESIS_SYSTEM_PROMPT": (
+        review,
+        ("review", "synthesis_system.md"),
+    ),
+    "REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE": (
+        review,
+        ("review", "synthesis_user.md"),
+    ),
 }
 
 _EXPECTED_TEMPLATE_PATHS: tuple[str, ...] = tuple(

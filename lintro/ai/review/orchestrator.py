@@ -138,6 +138,7 @@ from lintro.ai.review.synthesis import (
     run_synthesis_pass,
     should_run_synthesis,
 )
+from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
@@ -1018,10 +1019,11 @@ def run_review(
 def guard_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
     """Return every path the cross-chunk guard treats as changed by the PR.
 
-    Current paths plus rename and copy sources: a chunk-local claim that a
-    rename's old path was never touched contradicts the diff just as a claim
-    about the new path does. This list is only for the guard; custom-agent
-    scoping keys on post-rename paths, whose diff sections exist.
+    One implementation, re-exported. It lives in
+    :mod:`lintro.ai.review.synthesis_prompt` because the synthesis pass needs
+    the same list and the dependency only runs one way — this module imports
+    the pass, which imports that module — so the reverse import would close a
+    cycle.
 
     Args:
         context: Collected review context.
@@ -1029,12 +1031,7 @@ def guard_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
     Returns:
         Changed paths and rename/copy sources, in changed-file order.
     """
-    return tuple(
-        path
-        for file in context.changed_files
-        for path in (file.path, file.previous_path)
-        if path
-    )
+    return guarded_changed_paths(context=context)
 
 
 async def run_review_async(
@@ -1353,6 +1350,10 @@ async def run_review_async(
         # Only the completed path runs it: a review already stopped by a cost
         # cap or a timeout must not spend another call.
         if should_run_synthesis(config=synthesis, chunks_reviewed=len(partials)):
+            # ``should_run_synthesis`` already rejected a None config; bind it
+            # so the type checker knows that too.
+            synthesis_config = synthesis
+            assert synthesis_config is not None  # noqa: S101
             with timings.phase(name=ReviewPhase.SYNTHESIS):
                 synthesis_pass = await run_synthesis_pass(
                     context=context,
@@ -1360,8 +1361,7 @@ async def run_review_async(
                     existing_findings=filtered_findings,
                     provider=provider,
                     ai_config=effective_ai_config,
-                    # ``should_run_synthesis`` already rejected a None config.
-                    config=synthesis,  # type: ignore[arg-type]
+                    config=synthesis_config,
                     policy=review_sensitivity,
                     budget=budget,
                     repo_root=repo_root,

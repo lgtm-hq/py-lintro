@@ -321,10 +321,12 @@ def _merge_pair(
         cause=current.cause or prior.cause,
         fix=current.fix or prior.fix,
         confidence=current.confidence or prior.confidence,
-        # Provenance belongs to the first sighting: a cross-chunk finding
-        # stays attributed to the synthesis pass even on a later round
-        # where an ordinary chunk happened to report it too.
-        origin=prior.origin or current.origin,
+        # Provenance belongs to the first sighting and is set only when a
+        # record is created: a cross-chunk finding stays attributed to the
+        # synthesis pass even on a later round where an ordinary chunk
+        # reported it too, and — symmetrically — a chunk-first record is not
+        # retroactively re-attributed to the synthesis pass by a later round.
+        origin=prior.origin,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED

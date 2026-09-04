@@ -37,10 +37,15 @@ class SynthesisOutcome:
         Returns:
             The ``synthesis`` block: ``enabled`` is always ``True`` because
             the block is emitted only when the pass ran, alongside the number
-            of findings it contributed and whether its input was truncated.
+            of findings it contributed, whether its input was truncated, and
+            whether it failed. ``failed`` is carried explicitly because
+            ``findings_added: 0`` alone cannot tell a pass that found nothing
+            from one that could not answer, and a consumer must not have to
+            cross-reference ``coverage_degradations`` to tell them apart.
         """
         return {
             "enabled": True,
             "findings_added": self.findings_added,
             "truncated": self.truncated,
+            "failed": self.failed,
         }

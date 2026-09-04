@@ -374,7 +374,11 @@ That is recorded and surfaced rather than left silent:
   excluded from `findings_cap_applied`, which only ever reports a real per-call ceiling.
   A chunk that ran under the cap and then retried after output exhaustion contributes
   two entries with the same `chunk_index`. `findings_coverage_complete` is the derived
-  "nothing was capped" boolean.
+  "no coverage degradation of any kind" boolean: **any** entry in
+  `coverage_degradations` makes it false, including a synthesis pass that was truncated
+  or did not complete. `findings_cap_applied` is the narrower signal and stays `null`
+  for a run degraded only by the synthesis pass, because no per-call ceiling was in
+  force.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
@@ -485,9 +489,16 @@ How it behaves when enabled:
 - It runs only when the round actually used more than one chunk. A single-chunk run has
   no boundary to reason across and is never charged for the extra call.
 - Its input is bounded by the same per-call diff-token budget the chunk calls were
-  planned against. If the whole PR does not fit, the files that more than one chunk
-  referenced go in first — those are the seams the pass exists to inspect — and the rest
-  follow in path order until the budget is spent.
+  planned against, and the budget covers the **whole prompt**: the changed-file list and
+  the per-chunk digest are rendered and charged first, and the diff takes only what they
+  leave over. A digest too large for the budget sheds its already-reported finding
+  lines, largest chunk first, before the per-chunk file lines are touched. If the whole
+  PR does not fit, the files that more than one chunk referenced go in first — those are
+  the seams the pass exists to inspect — and the rest follow in path order until the
+  budget is spent. The first file that does not fit ends the selection: a cross-chunk
+  file is cut into the remaining budget and kept, a non-priority one is dropped, and
+  nothing follows either way, so the diff never jumps out of one file mid-hunk into
+  another. Anything cut or dropped sets `truncated`.
 - **Its findings pass every filter a chunk finding passes**, in this order: the **P1
   evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
   with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
@@ -508,19 +519,36 @@ How it behaves when enabled:
 
 What it adds to the surfaces:
 
-- A `synthesis` phase span in the timings block above, so its cost and wall-clock delta
-  per round reads off the existing surfaces.
-- One shared note — `Cross-chunk synthesis added 1 cross-file finding.` — on the
-  terminal, the GitHub review body's run-stats block, and the sticky's `This run` table.
-  It is rendered only when the pass ran.
+- A `synthesis` phase span in the timings block (see _Review phase timings_ below), so
+  its cost and wall-clock delta per round reads off the existing surfaces. The phase is
+  absent entirely from a round where the pass did not run.
+- One shared note on the terminal, the GitHub review body's run-stats block, and the
+  sticky's `This run` table, rendered only when the pass ran. Its wording follows the
+  outcome: `Cross-chunk synthesis added 1 cross-file finding.` is the one-finding form,
+  and the sentence also has plural (`added 3 cross-file findings`), empty
+  (`found no cross-file inconsistencies`), and failed
+  (`did not complete; the chunk findings below are unaffected`) forms, plus a trailing
+  sentence about the truncated input when the pass saw only part of the diff.
 - A `synthesis` block at the root of `--output json`, present only when the pass ran:
 
   ```json
-  { "synthesis": { "enabled": true, "findings_added": 1, "truncated": false } }
+  {
+    "synthesis": {
+      "enabled": true,
+      "findings_added": 1,
+      "truncated": false,
+      "failed": false
+    }
+  }
   ```
 
   `findings_added` is what survived the cap and the dedupe, not what the model returned.
-  `truncated` means the pass saw only part of the diff.
+  `truncated` means the pass saw only part of the diff — its whole prompt (the
+  changed-file list, the per-chunk digest, and the diff together) is fitted to one token
+  budget, so a large digest shrinks the diff rather than overrunning the context window.
+  `failed` distinguishes a pass that could not answer from one that found nothing, which
+  `findings_added: 0` alone cannot. The same block is on the MCP `lintro_review` payload
+  root, and MCP findings carry `"origin": "synthesis"` too.
 
 - `"origin": "synthesis"` on each finding the pass contributed, in the JSON `findings`
   list and in the persisted state blob. The key is absent on every ordinary chunk
@@ -572,6 +600,7 @@ error stickies). `--output-format json` carries the full breakdown in a top-leve
       { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
       { "name": "provider", "seconds": 250.0, "occurrences": 1 },
       { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
+      { "name": "synthesis", "seconds": 12.4, "occurrences": 1 },
       { "name": "validation", "seconds": 0.1, "occurrences": 1 }
     ],
     "chunks": [
@@ -600,6 +629,9 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `synthesis` is the optional cross-chunk pass (see _Cross-chunk synthesis_ above). It
+  is off by default and only runs on a multi-chunk round, so the phase is absent from
+  most runs; when it is absent the round made no extra call.
 - `validation` is the post-merge tail of the run: provider session teardown and progress
   callbacks, then the pass that decides what survives (context-finding rejection,
   coverage and resume bookkeeping, flag reconciliation). A slow session close therefore

@@ -11,10 +11,13 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_SYNTHESIS_SYSTEM_PROMPT,
+    REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
     format_checklist_table_for_prompt,
+    format_chunk_summaries_for_prompt,
     format_deferred_scope_section,
     format_external_review_section,
     format_lint_results_section,
@@ -24,6 +27,9 @@ from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.chunk_summary import ChunkSummary
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.verdict import VERDICT_LABELS
 
 _USER_PROMPT_KWARGS = {
@@ -218,6 +224,17 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
             diff="diff body",
             changed_files="- a.py",
         ),
+        REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
+            pr_title="Test PR",
+            pr_summary="Summary text",
+            boundary=boundary,
+            changed_file_count=1,
+            changed_files="- `a.py` (modified, +1/-0)",
+            chunk_summaries="Piece 1 reviewed: `a.py`",
+            truncation_note="",
+            diff="diff body",
+            max_findings=5,
+        ),
     ]
     for template_render in renders:
         assert_that(template_render).contains(f"<{boundary}>")
@@ -335,3 +352,107 @@ def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
     assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
+
+
+def _digest_finding(
+    *,
+    title: str = "Signature drift",
+    occurrences: tuple[FindingOccurrence, ...] = (),
+) -> ReviewFinding:
+    """Build a finding for the chunk-digest formatter tests.
+
+    Args:
+        title: Finding title.
+        occurrences: Locations the pattern was reported at.
+
+    Returns:
+        A P2 finding at ``pkg/api.py:12``.
+    """
+    return ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="pkg/api.py",
+        line=12,
+        title=title,
+        description="body",
+        cause="cause",
+        fix="fix",
+        confidence="high",
+        occurrences=occurrences,
+    )
+
+
+def test_chunk_summaries_render_a_sentinel_when_empty() -> None:
+    """No chunk digest renders one sentinel line, never an empty span."""
+    assert_that(format_chunk_summaries_for_prompt(summaries=())).is_equal_to(
+        "- (no chunk summaries)",
+    )
+
+
+def test_chunk_summaries_mark_a_chunk_that_reported_nothing() -> None:
+    """A clean chunk says so, so silence never reads as a missing digest."""
+    rendered = format_chunk_summaries_for_prompt(
+        summaries=(ChunkSummary(chunk_id=1, files=("pkg/api.py",), findings=()),),
+    )
+
+    assert_that(rendered).contains("Piece 1 reviewed: `pkg/api.py`")
+    assert_that(rendered).contains("already reported: (nothing)")
+
+
+def test_chunk_summaries_render_severity_location_and_title() -> None:
+    """A reported finding is recognizable from severity, location, and title."""
+    rendered = format_chunk_summaries_for_prompt(
+        summaries=(
+            ChunkSummary(
+                chunk_id=2,
+                files=("pkg/api.py",),
+                findings=(_digest_finding(),),
+            ),
+        ),
+    )
+
+    assert_that(rendered).contains("already reported: P2 pkg/api.py:12 — Signature")
+    assert_that(rendered).does_not_contain("body")
+
+
+def test_chunk_summaries_list_every_occurrence_of_a_finding() -> None:
+    """Secondary locations are named, so "do not restate" covers them too."""
+    rendered = format_chunk_summaries_for_prompt(
+        summaries=(
+            ChunkSummary(
+                chunk_id=1,
+                files=("pkg/api.py",),
+                findings=(
+                    _digest_finding(
+                        occurrences=(
+                            FindingOccurrence(file="pkg/api.py", line=12),
+                            FindingOccurrence(file="pkg/other.py", line=40),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert_that(rendered).contains("pkg/api.py:12 (also pkg/other.py:40)")
+
+
+def test_synthesis_prompt_pair_never_demands_a_checklist() -> None:
+    """The findings-only pass is never told to answer the review checklist."""
+    user_prompt = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
+        pr_title="Test PR",
+        pr_summary="Summary text",
+        boundary="CODE_BLOCK_test1234",
+        changed_file_count=1,
+        changed_files="- `a.py` (modified, +1/-0)",
+        chunk_summaries="Piece 1 reviewed: `a.py`",
+        truncation_note="",
+        diff="diff body",
+        max_findings=5,
+    )
+    pair = f"{REVIEW_SYNTHESIS_SYSTEM_PROMPT}\n{user_prompt}"
+
+    assert_that(REVIEW_SYSTEM).contains("Complete every checklist item")
+    assert_that(pair).does_not_contain("Complete every checklist item")
+    assert_that(pair.lower()).does_not_contain("checklist item")
+    assert_that(REVIEW_SYNTHESIS_SYSTEM_PROMPT).contains("empty `findings` array")

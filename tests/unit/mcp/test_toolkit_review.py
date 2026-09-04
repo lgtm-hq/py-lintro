@@ -852,3 +852,62 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
     # #2003: an empty run is trivially complete and carries the same key.
     assert_that(payload["findings_coverage_complete"]).is_true()
     assert_that(calls).is_empty()
+
+
+def test_mcp_findings_carry_synthesis_provenance_only_when_set() -> None:
+    """A synthesized finding is attributable on the MCP envelope too (#2269)."""
+    from dataclasses import replace as dataclass_replace
+
+    from lintro.ai.review.enums.finding_origin import FindingOrigin
+    from lintro.mcp.toolkits.review import _finding_to_dict
+
+    chunk_finding = _result().findings[0]
+    synthesized = dataclass_replace(chunk_finding, origin=FindingOrigin.SYNTHESIS)
+
+    chunk_payload = _finding_to_dict(finding=chunk_finding)
+    synthesized_payload = _finding_to_dict(finding=synthesized)
+
+    assert_that(chunk_payload).does_not_contain_key("origin")
+    assert_that(synthesized_payload["origin"]).is_equal_to("synthesis")
+
+
+def test_mcp_payload_carries_the_synthesis_block_only_when_the_pass_ran() -> None:
+    """The tool result exposes the same ``synthesis`` block CLI JSON does."""
+    from dataclasses import replace as dataclass_replace
+
+    from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+    from lintro.mcp.toolkits.review import _BudgetPolicy, _review_payload
+
+    budget = _BudgetPolicy(
+        requested_usd=None,
+        configured_usd=1.0,
+        effective_usd=1.0,
+        clamped=False,
+    )
+    without = _review_payload(result=_result(), budget=budget)
+
+    base = _result()
+    with_pass = _review_payload(
+        result=dataclass_replace(
+            base,
+            metadata=dataclass_replace(
+                base.metadata,
+                synthesis=SynthesisOutcome(
+                    findings_added=1,
+                    truncated=True,
+                    failed=False,
+                ),
+            ),
+        ),
+        budget=budget,
+    )
+
+    assert_that(without).does_not_contain_key("synthesis")
+    assert_that(with_pass["synthesis"]).is_equal_to(
+        {
+            "enabled": True,
+            "findings_added": 1,
+            "truncated": True,
+            "failed": False,
+        },
+    )

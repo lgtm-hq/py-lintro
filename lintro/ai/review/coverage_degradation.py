@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -67,7 +68,15 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # Rows are per limit event, not per chunk: a capped chunk that also
     # retried contributes two rows with one chunk_index. Count chunks by
     # distinct index and never let the row count inflate the denominator.
-    affected = {item.chunk_index for item in degradations}
+    # A whole-run degradation carries the synthesis sentinel rather than a
+    # real chunk index, so it must not be counted as a chunk either: without
+    # this, a single-chunk run whose synthesis pass was truncated would read
+    # as "1 of 2 chunks".
+    affected = {
+        item.chunk_index
+        for item in degradations
+        if item.chunk_index != SYNTHESIS_CHUNK_INDEX
+    }
     total = max(metadata.chunks_total, len(affected))
 
     clauses: list[str] = []

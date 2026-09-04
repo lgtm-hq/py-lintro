@@ -341,6 +341,15 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
     assert_that(cli_kwargs["ai_config"].provider).is_equal_to(
         mcp_kwargs["ai_config"].provider,
     )
+    # #2269: forwarding the same kwarg name is not parity — both adapters must
+    # forward the same *value*, read from the same project config section.
+    assert_that(cli_kwargs["synthesis"]).is_equal_to(mcp_kwargs["synthesis"])
+    assert_that(cli_kwargs["synthesis"].enabled).is_equal_to(
+        mcp_kwargs["synthesis"].enabled,
+    )
+    assert_that(cli_kwargs["synthesis"].max_findings).is_equal_to(
+        mcp_kwargs["synthesis"].max_findings,
+    )
 
 
 # --- error mapping parity -----------------------------------------------------

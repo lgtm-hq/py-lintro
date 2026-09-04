@@ -18,6 +18,7 @@ from lintro.ai.review.verdict import VERDICT_LABELS
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.chunk_summary import ChunkSummary
+    from lintro.ai.review.models.review_finding import ReviewFinding
 
 __all__ = [
     "CHUNK_FILE_MARKER",
@@ -33,6 +34,7 @@ __all__ = [
     "REVIEW_OUTPUT_RULES_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SCHEMA_REMINDER_TEMPLATE",
+    "REVIEW_SYNTHESIS_SYSTEM_PROMPT",
     "REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE",
     "REVIEW_SYSTEM",
     "REVIEW_USER_PROMPT_TEMPLATE",
@@ -82,6 +84,11 @@ REVIEW_GENERATE_QUESTIONS_TEMPLATE = load_prompt_template(
 REVIEW_ADVERSARIAL_SWEEP_TEMPLATE = load_prompt_template(
     "review",
     "adversarial_sweep.md",
+)
+
+REVIEW_SYNTHESIS_SYSTEM_PROMPT = load_prompt_template(
+    "review",
+    "synthesis_system.md",
 )
 
 REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE = load_prompt_template(
@@ -191,13 +198,40 @@ def format_pr_changed_files_for_prompt(
     )
 
 
+def _chunk_summary_finding_line(*, finding: ReviewFinding) -> str:
+    """Render one already-reported finding as a digest line.
+
+    Carries every location the finding covers, not only its primary one: the
+    digest is what the "do not restate anything already reported" rule keys
+    off, so a secondary occurrence left out of the line is a location the
+    synthesis pass is free to report again.
+
+    Args:
+        finding: A finding one chunk already reported.
+
+    Returns:
+        One indented digest line — severity, primary location, any further
+        locations, and the title. Never the finding's prose.
+    """
+    locations = [
+        f"{occurrence.file}:{occurrence.line}"
+        for occurrence in finding.all_occurrences
+        if f"{occurrence.file}:{occurrence.line}" != f"{finding.file}:{finding.line}"
+    ]
+    also = f" (also {', '.join(locations)})" if locations else ""
+    return (
+        f"  - already reported: {finding.severity} "
+        f"{finding.file}:{finding.line}{also} — {finding.title}"
+    )
+
+
 def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> str:
     """Format the per-chunk digest the cross-chunk synthesis pass reasons over.
 
     One block per chunk: the files that chunk reviewed, and one line per
     finding it already reported. The finding lines exist so the pass can be
     told not to restate them, so they carry only what makes a finding
-    recognizable — severity, location, title — and never its prose.
+    recognizable — severity, every location, title — and never its prose.
 
     Args:
         summaries: Per-chunk digests in chunk order.
@@ -214,8 +248,7 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
         lines = [f"Piece {summary.chunk_id} reviewed: {files}"]
         if summary.findings:
             lines.extend(
-                f"  - already reported: {finding.severity} "
-                f"{finding.file}:{finding.line} — {finding.title}"
+                _chunk_summary_finding_line(finding=finding)
                 for finding in summary.findings
             )
         else:

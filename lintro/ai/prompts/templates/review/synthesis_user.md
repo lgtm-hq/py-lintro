@@ -55,7 +55,8 @@ Every finding must name the file and line of the SIDE THAT IS WRONG, and its
 
 Output JSON only, no prose, no code fence:
 
-{{"findings": [{{"severity": "P1|P2|P3", "category": "logic-bug",
+{{"findings": [{{"severity": "P1|P2|P3",
+"category": "logic-bug|silent-failure|integration|test-gap|contract-drift|security|breaking-change|code-smell",
 "file": "path/to/file.py", "line": 12, "title": "one line",
 "description": "what disagrees with what, naming both files",
 "cause": "which change made them disagree",

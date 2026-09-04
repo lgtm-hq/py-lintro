@@ -143,12 +143,20 @@ class ReviewMetadata:
 
     @property
     def findings_coverage_complete(self) -> bool:
-        """Return whether the run asked the model for an unlimited finding set.
+        """Return whether the run's finding depth was limited in any way.
+
+        "Complete" means the run recorded no coverage degradation of any kind
+        — not a per-chunk findings cap, not a tightened output-exhaustion
+        retry, and not a cross-chunk synthesis pass that was truncated or did
+        not complete (#2269). Any entry in ``coverage_degradations`` makes
+        this false, including a whole-run one that carries no per-call
+        ceiling; ``findings_cap_applied`` is the narrower signal that stays
+        ``None`` for a run degraded only by the synthesis pass.
 
         Returns:
-            True when no chunk ran under a findings cap or a tightened
-            output-exhaustion retry. ``partial`` is a separate axis: a run can
-            be complete in coverage depth and still have stopped early.
+            True when ``coverage_degradations`` is empty. ``partial`` is a
+            separate axis: a run can be complete in coverage depth and still
+            have stopped early.
         """
         return not self.coverage_degradations
 

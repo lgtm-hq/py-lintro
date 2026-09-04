@@ -6,18 +6,21 @@ which files, how much diff, and what happens when the whole PR does not fit —
 lives on its own and can be tested without a provider.
 
 The budget reused here is the same per-call diff-token budget the chunk calls
-were planned against, so the extra call can never be the one prompt in a run
-that overruns the context window.
+were planned against, and it is spent against the *whole* prompt — the
+changed-file list and the per-chunk digest are rendered and charged first, and
+the diff takes only what they leave over — so the extra call can never be the
+one prompt in a run that overruns the context window.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.prompts.review import (
+    REVIEW_SYNTHESIS_SYSTEM_PROMPT,
     REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE,
-    REVIEW_SYSTEM,
     format_changed_files_for_prompt,
     format_chunk_summaries_for_prompt,
 )
@@ -31,9 +34,11 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "SynthesisPromptPlan",
     "build_synthesis_prompt",
     "cross_chunk_paths",
     "guarded_changed_paths",
+    "plan_synthesis_prompt",
     "select_synthesis_diff",
 ]
 
@@ -41,11 +46,16 @@ __all__ = [
 def guarded_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
     """Return every path the cross-chunk guard treats as changed by the PR.
 
-    A local twin of ``orchestrator.guard_changed_paths``. The synthesis pass
-    needs the same list to guard its own findings before they are capped and
-    deduplicated, and importing it from the orchestrator would close an import
-    cycle: the orchestrator imports :mod:`lintro.ai.review.synthesis`, which
-    imports this module. The two are pinned to the same result by a test.
+    Current paths plus rename and copy sources: a chunk-local claim that a
+    rename's old path was never touched contradicts the diff just as a claim
+    about the new path does. This list is only for the guard; custom-agent
+    scoping keys on post-rename paths, whose diff sections exist.
+
+    The single implementation. It lives here rather than in the orchestrator
+    because the dependency only runs one way — the orchestrator imports
+    :mod:`lintro.ai.review.synthesis`, which imports this module, so the
+    reverse import would close a cycle. ``orchestrator.guard_changed_paths``
+    is a thin re-export of this function.
 
     Args:
         context: Collected review context.
@@ -106,12 +116,18 @@ def select_synthesis_diff(
 ) -> tuple[str, bool]:
     """Choose the diff text the synthesis prompt embeds, within budget.
 
-    Reuses the same per-call diff-token budget the chunk calls were planned
-    against, so the extra call cannot be the one prompt in the run that
-    overruns the context window. When the whole PR fits, it is sent whole.
-    When it does not, the files that more than one chunk referenced go in
-    first — those are the seams the pass exists to inspect — and the remaining
-    files follow in path order until the budget is spent.
+    Takes whatever the whole prompt's other spans left over, so the extra
+    call cannot be the one prompt in the run that overruns the context
+    window. When the whole PR fits, it is sent whole. When it does not, the
+    files that more than one chunk referenced go in first — those are the
+    seams the pass exists to inspect — and the remaining files follow in path
+    order until the budget is spent.
+
+    The first file that does not fit ends the selection. A cross-chunk file
+    is cut into whatever budget is left and kept, because half a seam is
+    still the seam; a non-priority one is simply dropped. Either way nothing
+    follows it, so the model never reads a diff that jumps out of one file
+    mid-hunk and straight into another.
 
     Args:
         context: Collected review diff context.
@@ -139,6 +155,7 @@ def select_synthesis_diff(
     ordered = [path for path in priority if path in per_file]
     ordered.extend(path for path in sorted(per_file) if path not in set(ordered))
 
+    priority_paths = set(priority)
     kept: list[str] = []
     spent = 0
     truncated = False
@@ -150,22 +167,135 @@ def select_synthesis_diff(
             spent += cost
             continue
         truncated = True
-        if not kept:
-            # Even the highest-priority file overruns the budget on its own.
-            # A cut section still shows the model the change it must reason
-            # about; an empty prompt shows it nothing.
-            text, _cut = truncate_to_budget(section, budget)
+        remaining = budget - spent
+        # A cross-chunk file is a seam this pass exists to inspect, so a cut
+        # section still shows the model the change it must reason about; an
+        # empty prompt shows it nothing. The same holds for the very first
+        # file when even it overruns the whole budget on its own.
+        if remaining > 0 and (path in priority_paths or not kept):
+            text, _cut = truncate_to_budget(section, remaining)
             kept.append(text)
-            spent = budget
+        # Never let a lower-priority file follow a cut one: the diff would
+        # then jump from half a file straight into another, and the model
+        # cannot tell where the gap is.
+        break
     return "".join(kept), truncated
+
+
+@dataclass(frozen=True, slots=True)
+class SynthesisPromptPlan:
+    """Every untrusted span of the synthesis prompt, already fitted to budget.
+
+    Built in one place so the budget is spent against the whole prompt rather
+    than the diff alone: the changed-file list and the per-chunk digest are
+    rendered first and charged against the same ceiling, and only what they
+    leave over is offered to the diff.
+
+    Attributes:
+        changed_files: Rendered whole-PR changed-file list. Never trimmed —
+            the prompt's "do not claim a file was never updated" rule is only
+            sound while this list is complete.
+        chunk_digest: Rendered per-chunk digest, with finding lines dropped
+            from the largest chunks first when it alone overruns the budget.
+        diff: Diff text selected by :func:`select_synthesis_diff`.
+        truncated: True when any span was cut or dropped, so the run can
+            record that the pass saw less than the whole PR.
+    """
+
+    changed_files: str
+    chunk_digest: str
+    diff: str
+    truncated: bool
+
+
+def _trim_chunk_digest(
+    *,
+    summaries: Sequence[ChunkSummary],
+    budget: int,
+) -> tuple[str, bool]:
+    """Render the per-chunk digest, shedding finding lines until it fits.
+
+    Which files each chunk reviewed is what makes the pass's answer
+    attributable to a chunk boundary at all, so the per-chunk file lines are
+    the last thing to go. The already-reported finding lines only suppress
+    restatements, so they are shed first, and from the largest chunks first
+    because those cost the most for the least marginal suppression.
+
+    Args:
+        summaries: Per-chunk digests in chunk order.
+        budget: Token ceiling the rendered digest must fit.
+
+    Returns:
+        Tuple of ``(digest_text, truncated)``.
+    """
+    text = format_chunk_summaries_for_prompt(summaries=summaries)
+    if estimate_tokens(text) <= budget:
+        return text, False
+
+    trimmed = list(summaries)
+    while any(summary.findings for summary in trimmed):
+        widest = max(
+            range(len(trimmed)),
+            key=lambda index: (len(trimmed[index].findings), -index),
+        )
+        trimmed[widest] = replace(trimmed[widest], findings=())
+        text = format_chunk_summaries_for_prompt(summaries=trimmed)
+        if estimate_tokens(text) <= budget:
+            return text, True
+
+    # Even the file lines alone overrun the budget. A cut digest still tells
+    # the model which chunk boundary it is reasoning across; an empty one
+    # tells it nothing.
+    cut, _was_cut = truncate_to_budget(text, max(budget, 1))
+    return cut, True
+
+
+def plan_synthesis_prompt(
+    *,
+    context: ReviewContext,
+    summaries: Sequence[ChunkSummary],
+    diff_budget: int,
+) -> SynthesisPromptPlan:
+    """Fit the whole synthesis prompt — not only its diff — into one budget.
+
+    The digest and the changed-file list are rendered first and their tokens
+    reserved, so a run with many chunks and many already-reported findings
+    shrinks the diff rather than silently overrunning the context window.
+
+    Args:
+        context: Collected review diff context.
+        summaries: Per-chunk digests in chunk order.
+        diff_budget: Token budget available for the prompt's untrusted spans.
+
+    Returns:
+        The fitted plan. ``truncated`` is True when the digest was trimmed or
+        the diff selection dropped or cut a file.
+    """
+    budget = max(diff_budget, 1)
+    changed_files = format_changed_files_for_prompt(files=list(context.changed_files))
+    digest_budget = max(budget - estimate_tokens(changed_files), 1)
+    chunk_digest, digest_truncated = _trim_chunk_digest(
+        summaries=summaries,
+        budget=digest_budget,
+    )
+    reserve = estimate_tokens(changed_files) + estimate_tokens(chunk_digest)
+    diff, diff_truncated = select_synthesis_diff(
+        context=context,
+        summaries=summaries,
+        diff_budget=max(budget - reserve, 1),
+    )
+    return SynthesisPromptPlan(
+        changed_files=changed_files,
+        chunk_digest=chunk_digest,
+        diff=diff,
+        truncated=digest_truncated or diff_truncated,
+    )
 
 
 def build_synthesis_prompt(
     *,
     context: ReviewContext,
-    summaries: Sequence[ChunkSummary],
-    diff: str,
-    truncated: bool,
+    plan: SynthesisPromptPlan,
     max_findings: int,
 ) -> tuple[str, str]:
     """Build the system and user prompts for the synthesis pass.
@@ -175,11 +305,14 @@ def build_synthesis_prompt(
     the extra call sits behind the same secret-redaction choke point as every
     chunk call.
 
+    The system prompt is the pass's own, not the chunk system prompt: this
+    call is asked for findings only and is never given a checklist, so a
+    system prompt that mandates one would demand output the user template
+    forbids.
+
     Args:
         context: Collected review diff context.
-        summaries: Per-chunk digests in chunk order.
-        diff: Diff text selected by :func:`select_synthesis_diff`.
-        truncated: Whether that selection dropped or cut any file.
+        plan: Prompt spans already fitted to the pass's token budget.
         max_findings: Ceiling written into the prompt's output rules.
 
     Returns:
@@ -191,7 +324,7 @@ def build_synthesis_prompt(
         "\nNote: the diff below is only part of this PR — it was cut to fit a "
         "token budget. The changed-file list above is complete; the diff is "
         "not. Say nothing about a file whose diff you cannot see.\n"
-        if truncated
+        if plan.truncated
         else ""
     )
     user_prompt = REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
@@ -200,15 +333,15 @@ def build_synthesis_prompt(
         boundary=make_boundary_marker(),
         changed_file_count=len(context.changed_files),
         changed_files=redact_prompt_text(
-            text=format_changed_files_for_prompt(files=list(context.changed_files)),
+            text=plan.changed_files,
             source="changed files",
         ),
         chunk_summaries=redact_prompt_text(
-            text=format_chunk_summaries_for_prompt(summaries=summaries),
+            text=plan.chunk_digest,
             source="chunk summaries",
         ),
         truncation_note=truncation_note,
-        diff=redact_prompt_text(text=diff, source="diff"),
+        diff=redact_prompt_text(text=plan.diff, source="diff"),
         max_findings=max_findings,
     )
-    return REVIEW_SYSTEM, user_prompt
+    return REVIEW_SYNTHESIS_SYSTEM_PROMPT, user_prompt

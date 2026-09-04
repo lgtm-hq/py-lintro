@@ -871,3 +871,40 @@ def test_unknown_degradation_reason_still_renders_a_clause(
 
     assert_that(text).starts_with("1 other limit applied (novel_limit).")
     assert_that(text[0]).is_not_equal_to(".")
+
+
+def test_synthesis_degradation_is_never_counted_as_a_chunk() -> None:
+    """The whole-run sentinel stays out of the "X of Y chunks" denominator."""
+    from lintro.ai.review.coverage_degradation import describe_coverage_degradations
+    from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
+    from lintro.ai.review.models.review_metadata import ReviewMetadata
+
+    metadata = ReviewMetadata(
+        model="m",
+        provider="p",
+        context_window=1,
+        depth=1,
+        chunks_total=1,
+        chunks_current=1,
+        files_reviewed=1,
+        files_total=1,
+        checklist_items=0,
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+                chunk_index=0,
+                findings_cap=25,
+            ),
+            CoverageDegradation(
+                reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+                chunk_index=SYNTHESIS_CHUNK_INDEX,
+                findings_cap=0,
+            ),
+        ),
+    )
+
+    text = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(text).contains("1 of 1 chunk ran under a 25-finding per-call cap")
+    assert_that(text).does_not_contain("of 2 chunks")
+    assert_that(text).contains("saw only part of the diff")

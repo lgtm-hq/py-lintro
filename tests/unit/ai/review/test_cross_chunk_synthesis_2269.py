@@ -10,6 +10,8 @@ degrades rather than fails when the pass cannot do its job.
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +23,10 @@ from rich.console import Console
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
+from lintro.ai.prompts.review import (
+    format_changed_files_for_prompt,
+    format_chunk_summaries_for_prompt,
+)
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.display import render_review_terminal
@@ -28,14 +34,17 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.enums.finding_origin import FindingOrigin
+from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
 from lintro.ai.review.github_render import format_synthesis_note_line
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.chunk_summary import ChunkSummary
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -43,13 +52,16 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     cross_chunk_paths,
     guarded_changed_paths,
+    plan_synthesis_prompt,
     select_synthesis_diff,
 )
 from lintro.ai.review.timings import ReviewPhase
+from lintro.ai.token_budget import estimate_tokens
 from lintro.config.review_config import ReviewConfig, ReviewSynthesisConfig
 
 _SIGNATURE_DIFF = (
@@ -178,6 +190,12 @@ def _mock_provider() -> MagicMock:
     return provider
 
 
+#: Usage counters every mocked provider call reports. Named so a test can
+#: assert what one extra call adds without repeating the arithmetic.
+_RESPONSE_INPUT_TOKENS = 100
+_RESPONSE_OUTPUT_TOKENS = 50
+
+
 def _response(*, content: str) -> AIResponse:
     """Wrap raw text as a provider response.
 
@@ -190,8 +208,8 @@ def _response(*, content: str) -> AIResponse:
     return AIResponse(
         content=content,
         model="claude-sonnet-4-20250514",
-        input_tokens=100,
-        output_tokens=50,
+        input_tokens=_RESPONSE_INPUT_TOKENS,
+        output_tokens=_RESPONSE_OUTPUT_TOKENS,
         cost_estimate=0.01,
         provider="anthropic",
     )
@@ -206,6 +224,8 @@ def _run(
     synthesis_error: Exception | None = None,
     chunk_calls: list[str] | None = None,
     synthesis_calls: list[str] | None = None,
+    strictness: ReviewStrictness | None = None,
+    synthesis_diff_budget: int | None = None,
 ) -> Any:
     """Run a review with the chunk and synthesis provider calls mocked apart.
 
@@ -220,6 +240,10 @@ def _run(
         synthesis_error: Exception the synthesis call raises instead.
         chunk_calls: Optional sink recording each chunk prompt.
         synthesis_calls: Optional sink recording each synthesis prompt.
+        strictness: Optional sensitivity preset for the whole run.
+        synthesis_diff_budget: Optional token budget forced onto the synthesis
+            prompt planner, so a fixture PR small enough to fit any real
+            budget can still exercise the truncation path end to end.
 
     Returns:
         The review result.
@@ -238,14 +262,33 @@ def _run(
             raise synthesis_error
         return _response(content=synthesis_content or _synthesis_payload())
 
-    with (
-        patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
-            return_value=chunks if chunks is not None else _two_chunks(),
-        ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
-        patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
-    ):
+    def _forced_plan(*, context: Any, summaries: Any, diff_budget: int) -> Any:
+        return plan_synthesis_prompt(
+            context=context,
+            summaries=summaries,
+            diff_budget=synthesis_diff_budget or diff_budget,
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "lintro.ai.review.orchestrator.resolve_review_chunks",
+                return_value=chunks if chunks is not None else _two_chunks(),
+            ),
+        )
+        stack.enter_context(
+            patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        )
+        stack.enter_context(
+            patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
+        )
+        if synthesis_diff_budget is not None:
+            stack.enter_context(
+                patch(
+                    "lintro.ai.review.synthesis.plan_synthesis_prompt",
+                    side_effect=_forced_plan,
+                ),
+            )
         return run_review(
             context if context is not None else _pr_context(),
             provider=provider,
@@ -258,6 +301,11 @@ def _run(
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
             classifications=[],
+            sensitivity=(
+                None
+                if strictness is None
+                else resolve_sensitivity_policy(strictness=strictness)
+            ),
             synthesis=synthesis,
         )
 
@@ -420,9 +468,11 @@ def test_cross_file_finding_surfaces_tagged_and_counted() -> None:
     assert_that(finding.origin).is_equal_to(FindingOrigin.SYNTHESIS)
 
     payload = review_result_to_dict(result=result)
-    assert_that(payload["synthesis"]).is_equal_to(
-        {"enabled": True, "findings_added": 1, "truncated": False},
-    )
+    synthesis_block = payload["synthesis"]
+    assert_that(synthesis_block["enabled"]).is_true()
+    assert_that(synthesis_block["findings_added"]).is_equal_to(1)
+    assert_that(synthesis_block["truncated"]).is_false()
+    assert_that(synthesis_block["failed"]).is_false()
     assert_that(payload["findings"][0]["origin"]).is_equal_to("synthesis")
 
     note = format_synthesis_note_line(metadata=result.metadata)
@@ -434,13 +484,25 @@ def test_cross_file_finding_surfaces_tagged_and_counted() -> None:
 
 def test_synthesis_records_its_own_phase_span() -> None:
     """Cost and wall-clock land on the existing #2148 timing surfaces."""
+    baseline = _run(synthesis=None)
     result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
 
     timings = result.metadata.timings
     assert_that(timings).is_not_none()
     names = [span.name for span in timings.phases]
     assert_that(names).contains(ReviewPhase.SYNTHESIS.value)
-    assert_that(result.metadata.token_usage["total"]).is_equal_to(450)
+    assert_that(
+        [span.name for span in baseline.metadata.timings.phases],
+    ).does_not_contain(
+        ReviewPhase.SYNTHESIS.value,
+    )
+    # The pass is exactly one extra call, so the run's totals grow by exactly
+    # what that call reported — never by a literal copied from the fixture.
+    assert_that(result.metadata.token_usage["total"]).is_equal_to(
+        baseline.metadata.token_usage["total"]
+        + _RESPONSE_INPUT_TOKENS
+        + _RESPONSE_OUTPUT_TOKENS,
+    )
 
 
 def test_synthesis_prompt_names_every_changed_file_and_each_chunk() -> None:
@@ -786,6 +848,9 @@ def test_unparseable_response_degrades_the_run_instead_of_ending_it() -> None:
 
     assert_that(_outcome(result=result).failed).is_true()
     assert_that(_outcome(result=result).findings_added).is_equal_to(0)
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+    reasons = [item.reason for item in result.metadata.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
     note = format_synthesis_note_line(metadata=result.metadata)
     assert_that(note).contains("did not complete")
 
@@ -852,23 +917,26 @@ def test_select_synthesis_diff_keeps_shared_files_first_when_over_budget() -> No
     assert_that(diff).contains("pkg/caller.py")
 
 
-def test_truncated_input_is_recorded_and_declared_in_the_prompt() -> None:
-    """A cut input marks coverage degraded and warns the model about it."""
+def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
+    """A cut input warns the model that the diff it was given is partial.
+
+    Scope is the prompt text only. That a cut input also degrades the run's
+    recorded coverage is asserted end to end by
+    :func:`test_a_truncated_pass_degrades_coverage_end_to_end`.
+    """
     context = _pr_context()
-    diff, truncated = select_synthesis_diff(
+    plan = plan_synthesis_prompt(
         context=context,
         summaries=(),
         diff_budget=len(_SIGNATURE_DIFF) // 4 + 1,
     )
     _system, user_prompt = build_synthesis_prompt(
         context=context,
-        summaries=(),
-        diff=diff,
-        truncated=truncated,
+        plan=plan,
         max_findings=5,
     )
 
-    assert_that(truncated).is_true()
+    assert_that(plan.truncated).is_true()
     assert_that(user_prompt).contains("only part of this PR")
 
 
@@ -907,11 +975,416 @@ def test_unknown_synthesis_key_is_rejected() -> None:
 # --- (h) package exports ------------------------------------------------------
 
 
-def test_new_models_and_enums_are_exported() -> None:
-    """The new value objects reach callers through the package namespaces."""
+def test_new_value_objects_construct_and_serialize_from_the_package() -> None:
+    """The new value objects are usable through the package namespaces."""
     from lintro.ai.review import enums, models
 
-    assert_that(enums.FindingOrigin).is_same_as(FindingOrigin)
-    assert_that(models.ChunkSummary).is_same_as(ChunkSummary)
-    assert_that(enums.__all__).contains("FindingOrigin")
-    assert_that(models.__all__).contains("ChunkSummary", "SynthesisOutcome")
+    summary = models.ChunkSummary(
+        chunk_id=1,
+        files=("pkg/api.py",),
+        findings=(),
+    )
+    outcome = models.SynthesisOutcome(findings_added=2, truncated=True, failed=False)
+
+    assert_that(summary.files).is_equal_to(("pkg/api.py",))
+    assert_that(outcome.to_dict()).is_equal_to(
+        {
+            "enabled": True,
+            "findings_added": 2,
+            "truncated": True,
+            "failed": False,
+        },
+    )
+    assert_that(str(enums.FindingOrigin.SYNTHESIS)).is_equal_to("synthesis")
+
+
+# --- (i) the whole prompt is budgeted, not only the diff ----------------------
+
+
+def _sized_diff(*, path: str, lines: int) -> str:
+    """Build a per-file diff section of a controlled size.
+
+    Args:
+        path: Repository-relative path the section is for.
+        lines: How many added lines the hunk carries.
+
+    Returns:
+        A unified-diff section for one file.
+    """
+    body = "".join(f"+line {index} in {path}\n" for index in range(lines))
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"--- a/{path}\n+++ b/{path}\n"
+        f"@@ -0,0 +1,{lines} @@\n{body}"
+    )
+
+
+def _wide_summaries(
+    *,
+    chunks: int,
+    findings_per_chunk: int,
+) -> tuple[ChunkSummary, ...]:
+    """Build a digest big enough to matter against a prompt budget.
+
+    Args:
+        chunks: How many chunk digests to build.
+        findings_per_chunk: How many already-reported findings each carries.
+
+    Returns:
+        Per-chunk digests in chunk order.
+    """
+    return tuple(
+        ChunkSummary(
+            chunk_id=chunk_id,
+            files=(f"pkg/module_{chunk_id}.py",),
+            findings=tuple(
+                ReviewFinding(
+                    severity=Severity.P2,
+                    category="logic-bug",
+                    file=f"pkg/module_{chunk_id}.py",
+                    line=index + 1,
+                    title=f"Reported issue {chunk_id}.{index} in a long title",
+                    description="",
+                    cause="",
+                    fix="",
+                    confidence="medium",
+                )
+                for index in range(findings_per_chunk)
+            ),
+        )
+        for chunk_id in range(1, chunks + 1)
+    )
+
+
+def test_the_digest_is_charged_against_the_prompt_budget() -> None:
+    """A large digest shrinks the diff instead of overrunning the budget."""
+    context = _pr_context()
+    summaries = _wide_summaries(chunks=6, findings_per_chunk=3)
+    digest = format_chunk_summaries_for_prompt(summaries=summaries)
+    changed_files = format_changed_files_for_prompt(files=list(context.changed_files))
+    # Room for the digest and the file list, and almost nothing else — the
+    # whole PR diff would fit this budget on its own.
+    budget = estimate_tokens(digest) + estimate_tokens(changed_files) + 2
+
+    unbudgeted, unbudgeted_truncated = select_synthesis_diff(
+        context=context,
+        summaries=summaries,
+        diff_budget=budget,
+    )
+    plan = plan_synthesis_prompt(
+        context=context,
+        summaries=summaries,
+        diff_budget=budget,
+    )
+    _system, user_prompt = build_synthesis_prompt(
+        context=context,
+        plan=plan,
+        max_findings=5,
+    )
+
+    # The diff alone fits this budget; the whole prompt does not.
+    assert_that(unbudgeted_truncated).is_false()
+    assert_that(unbudgeted).is_equal_to(context.unified_diff)
+    assert_that(plan.truncated).is_true()
+    assert_that(len(plan.diff)).is_less_than(len(context.unified_diff))
+    assert_that(plan.chunk_digest).is_equal_to(digest)
+    assert_that(user_prompt).contains("Piece 6 reviewed")
+
+
+def test_a_digest_over_the_whole_budget_sheds_its_finding_lines() -> None:
+    """The widest chunk loses its reported-finding lines first."""
+    context = _pr_context()
+    wide = _wide_summaries(chunks=2, findings_per_chunk=8)
+    summaries = (wide[0], replace(wide[1], findings=wide[1].findings[:1]))
+    # Exactly enough for the digest that remains once the widest chunk's
+    # finding lines are gone, and not a token more.
+    after_shedding = format_chunk_summaries_for_prompt(
+        summaries=(replace(summaries[0], findings=()), summaries[1]),
+    )
+    changed_files = format_changed_files_for_prompt(files=list(context.changed_files))
+    budget = estimate_tokens(changed_files) + estimate_tokens(after_shedding)
+
+    plan = plan_synthesis_prompt(
+        context=context,
+        summaries=summaries,
+        diff_budget=budget,
+    )
+
+    assert_that(plan.truncated).is_true()
+    assert_that(plan.chunk_digest).is_equal_to(after_shedding)
+    # The chunk file lines are the last thing to go, and the narrower chunk
+    # keeps its findings.
+    assert_that(plan.chunk_digest).contains("Piece 1 reviewed")
+    assert_that(plan.chunk_digest).contains("Piece 2 reviewed")
+    assert_that(plan.chunk_digest).contains("Reported issue 2.0")
+    assert_that(plan.chunk_digest).does_not_contain("Reported issue 1.7")
+
+
+# --- (j) the diff selection stops at the first file that does not fit ---------
+
+
+def _three_file_context(*, big_lines: int) -> ReviewContext:
+    """Build a PR whose middle file is too big for a tight budget.
+
+    Args:
+        big_lines: How many lines the oversized file's hunk carries.
+
+    Returns:
+        A three-file review context.
+    """
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="pkg/a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="pkg/b.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="pkg/z.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=(
+            _sized_diff(path="pkg/a.py", lines=2)
+            + _sized_diff(path="pkg/b.py", lines=big_lines)
+            + _sized_diff(path="pkg/z.py", lines=1)
+        ),
+        pr_metadata=None,
+    )
+
+
+def _summaries_for(*, paths: tuple[str, ...]) -> tuple[ChunkSummary, ...]:
+    """Build two chunk digests that both reference every given path.
+
+    Args:
+        paths: Paths to make cross-chunk.
+
+    Returns:
+        Two digests, so every named path counts as referenced twice.
+    """
+    return (
+        ChunkSummary(chunk_id=1, files=paths, findings=()),
+        ChunkSummary(chunk_id=2, files=paths, findings=()),
+    )
+
+
+def test_a_priority_file_that_does_not_fit_is_cut_and_kept() -> None:
+    """Half a seam is still the seam, and nothing may follow the cut."""
+    context = _three_file_context(big_lines=40)
+    summaries = _summaries_for(paths=("pkg/a.py", "pkg/b.py"))
+    small = _sized_diff(path="pkg/a.py", lines=2)
+    big = _sized_diff(path="pkg/b.py", lines=40)
+    budget = estimate_tokens(small) + estimate_tokens(big) // 2
+
+    diff, truncated = select_synthesis_diff(
+        context=context,
+        summaries=summaries,
+        diff_budget=budget,
+    )
+
+    assert_that(truncated).is_true()
+    assert_that(diff).contains("pkg/a.py")
+    # The over-budget priority file is present, but only in part.
+    assert_that(diff).contains("+line 0 in pkg/b.py")
+    assert_that(diff).does_not_contain("+line 39 in pkg/b.py")
+    # No lower-priority file follows a cut one.
+    assert_that(diff).does_not_contain("pkg/z.py")
+
+
+def test_a_non_priority_file_that_does_not_fit_ends_the_selection() -> None:
+    """A dropped file stops the walk rather than letting a later one in."""
+    context = _three_file_context(big_lines=40)
+    small = _sized_diff(path="pkg/a.py", lines=2)
+
+    diff, truncated = select_synthesis_diff(
+        context=context,
+        summaries=(),
+        diff_budget=estimate_tokens(small) + 2,
+    )
+
+    assert_that(truncated).is_true()
+    assert_that(diff).contains("pkg/a.py")
+    assert_that(diff).does_not_contain("pkg/b.py")
+    assert_that(diff).does_not_contain("pkg/z.py")
+
+
+# --- (k) truncation reaches the run's recorded coverage -----------------------
+
+
+def test_a_truncated_pass_degrades_coverage_end_to_end() -> None:
+    """A pass that saw part of the diff says so on every derived surface."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_diff_budget=1,
+    )
+
+    reasons = [item.reason for item in result.metadata.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_TRUNCATED)
+    assert_that(_outcome(result=result).truncated).is_true()
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.partial).is_false()
+
+    payload = review_result_to_dict(result=result)
+    assert_that(payload["synthesis"]["truncated"]).is_true()
+    assert_that(payload["synthesis"]["failed"]).is_false()
+    assert_that(payload["findings_coverage_complete"]).is_false()
+    note = format_synthesis_note_line(metadata=result.metadata)
+    assert_that(note).contains("only part of the diff")
+
+
+# --- (l) the sensitivity policy applies to synthesized findings ---------------
+
+
+def test_the_sensitivity_policy_can_drop_a_synthesized_finding() -> None:
+    """A preset that drops a band drops it for this pass too."""
+    doc_nit = _synthesis_payload(
+        findings=[
+            {
+                "severity": "P3",
+                "category": "contract-drift",
+                "file": "docs/guide.md",
+                "line": 4,
+                "title": "Docs still describe the old signature",
+                "description": (
+                    "pkg/api.py changed the signature; the docs were not "
+                    "updated in lockstep."
+                ),
+                "cause": "signature change",
+                "fix": "update the docs",
+                "confidence": "medium",
+            },
+        ],
+    )
+
+    focused = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=doc_nit,
+        strictness=ReviewStrictness.FOCUSED,
+    )
+    balanced = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=doc_nit,
+        strictness=ReviewStrictness.BALANCED,
+    )
+
+    assert_that(_outcome(result=balanced).findings_added).is_equal_to(1)
+    assert_that(_outcome(result=focused).findings_added).is_equal_to(0)
+    assert_that(
+        [finding.origin for finding in focused.findings],
+    ).does_not_contain(FindingOrigin.SYNTHESIS)
+
+
+# --- (m) origin provenance in the state blob and across rounds ---------------
+
+
+def _record(*, origin: FindingOrigin | None) -> FindingRecord:
+    """Build a tracked record for the origin codec tests.
+
+    Args:
+        origin: Provenance to stamp, or ``None`` for a chunk finding.
+
+    Returns:
+        An open record for ``pkg/caller.py``.
+    """
+    return FindingRecord(
+        fingerprint=fingerprint_for(
+            file="pkg/caller.py",
+            category="logic-bug",
+            title="Caller passes retries positionally",
+        ),
+        severity=Severity.P2,
+        category="logic-bug",
+        title="Caller passes retries positionally",
+        file="pkg/caller.py",
+        line=1,
+        status=FindingStatus.OPEN,
+        origin=origin,
+    )
+
+
+def _decoded(*, payload: dict[str, Any]) -> FindingRecord:
+    """Decode a state-blob mapping, failing the test when it is unusable.
+
+    Args:
+        payload: One finding's mapping from the state blob.
+
+    Returns:
+        The parsed record.
+    """
+    record = FindingRecord.from_dict(payload)
+    if record is None:
+        pytest.fail("the record did not decode from its own serialized form")
+    return record
+
+
+def test_a_synthesis_origin_round_trips_through_the_state_blob() -> None:
+    """The provenance a run recorded survives being persisted and reread."""
+    record = _record(origin=FindingOrigin.SYNTHESIS)
+
+    payload = record.to_dict()
+    restored = _decoded(payload=payload)
+
+    assert_that(payload["origin"]).is_equal_to("synthesis")
+    assert_that(restored.origin).is_equal_to(FindingOrigin.SYNTHESIS)
+
+
+def test_a_record_without_an_origin_stays_originless() -> None:
+    """An ordinary chunk finding never gains a key or an origin."""
+    record = _record(origin=None)
+
+    payload = record.to_dict()
+    restored = _decoded(payload=payload)
+
+    assert_that(payload).does_not_contain_key("origin")
+    assert_that(restored.origin).is_none()
+
+
+def test_an_unrecognized_origin_label_decodes_to_none_and_is_dropped() -> None:
+    """A label this version does not know degrades to a chunk finding."""
+    payload = {**_record(origin=None).to_dict(), "origin": "from-the-future"}
+
+    restored = _decoded(payload=payload)
+
+    assert_that(restored.origin).is_none()
+    assert_that(restored.to_dict()).does_not_contain_key("origin")
+
+
+def test_a_synthesis_record_keeps_its_origin_when_a_chunk_reports_it_next() -> None:
+    """Provenance belongs to the first sighting, not the latest one."""
+    prior = ReviewState(findings=(_record(origin=FindingOrigin.SYNTHESIS),))
+    chunk_finding = ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="pkg/caller.py",
+        line=3,
+        title="Caller passes retries positionally",
+        description="reported by a chunk this round",
+        cause="c",
+        fix="f",
+        confidence="medium",
+    )
+
+    match = match_findings(previous=prior, findings=(chunk_finding,), round_number=2)
+
+    carried = [record for record in match.records if record.file == "pkg/caller.py"]
+    assert_that(carried).is_length(1)
+    assert_that(carried[0].origin).is_equal_to(FindingOrigin.SYNTHESIS)
+
+
+def test_a_chunk_record_is_not_re_attributed_by_a_later_synthesis_hit() -> None:
+    """The reverse holds too: a chunk-first record stays originless."""
+    prior = ReviewState(findings=(_record(origin=None),))
+    synthesized = ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="pkg/caller.py",
+        line=3,
+        title="Caller passes retries positionally",
+        description="reported by the synthesis pass this round",
+        cause="c",
+        fix="f",
+        confidence="medium",
+        origin=FindingOrigin.SYNTHESIS,
+    )
+
+    match = match_findings(previous=prior, findings=(synthesized,), round_number=2)
+
+    carried = [record for record in match.records if record.file == "pkg/caller.py"]
+    assert_that(carried).is_length(1)
+    assert_that(carried[0].origin).is_none()

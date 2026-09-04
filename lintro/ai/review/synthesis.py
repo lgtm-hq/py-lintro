@@ -39,7 +39,10 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.finding_matcher import fingerprint_for
 from lintro.ai.review.finding_parser import parse_findings
-from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.coverage_degradation import (
+    SYNTHESIS_CHUNK_INDEX,
+    CoverageDegradation,
+)
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.sensitivity import filter_findings_by_policy
@@ -47,7 +50,7 @@ from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     guarded_changed_paths,
-    select_synthesis_diff,
+    plan_synthesis_prompt,
 )
 
 if TYPE_CHECKING:
@@ -65,11 +68,6 @@ __all__ = [
     "run_synthesis_pass",
     "should_run_synthesis",
 ]
-
-#: ``chunk_index`` stamped on a synthesis coverage degradation. The pass is not
-#: a chunk, so it takes a sentinel rather than borrowing a real chunk's index
-#: and inflating that chunk's degradation count on the #2003 surfaces.
-SYNTHESIS_CHUNK_INDEX = -1
 
 #: ``findings_cap`` stamped on a synthesis coverage degradation. The synthesis
 #: reasons are excluded from ``ReviewMetadata.findings_cap_applied``, so this
@@ -286,7 +284,8 @@ async def run_synthesis_pass(
         budget: Session cost budget tracker.
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
-        diff_budget: Token budget available for embedded diff content.
+        diff_budget: Token budget the whole prompt must fit — the digest,
+            the changed-file list, and the diff together.
 
     Returns:
         The pass result. Any failure — a budget stop, a provider error, an
@@ -294,16 +293,15 @@ async def run_synthesis_pass(
         degradation, never as an exception: the chunk findings stand and the
         run stays complete for them.
     """
-    diff, truncated = select_synthesis_diff(
+    plan = plan_synthesis_prompt(
         context=context,
         summaries=summaries,
         diff_budget=diff_budget,
     )
+    truncated = plan.truncated
     system_prompt, user_prompt = build_synthesis_prompt(
         context=context,
-        summaries=summaries,
-        diff=diff,
-        truncated=truncated,
+        plan=plan,
         max_findings=config.max_findings,
     )
     try:
@@ -321,6 +319,16 @@ async def run_synthesis_pass(
         # Deliberately broad: this pass is additive, so nothing it can raise —
         # a cost-cap stop, a provider error, a timeout — may be allowed to
         # turn a completed review into a failed or partial one.
+        #
+        # A cost-cap stop *during this call* is therefore recorded as
+        # SYNTHESIS_FAILED and nothing else: the run stays complete and
+        # non-partial, and ``stopped_reason`` stays empty. That is deliberate
+        # and not a lost budget signal. ``partial`` means planned review work
+        # was left undone, and by the time this call is made every chunk has
+        # already been reviewed — the only thing the cap cost the run is the
+        # optional cross-file sweep, which is exactly what the degradation
+        # says. Re-raising here would downgrade a finished review to a partial
+        # one over an extra call it was never required to make.
         logger.opt(exception=True).warning(
             "The cross-chunk synthesis pass failed; keeping the chunk "
             "findings and marking coverage degraded.",
