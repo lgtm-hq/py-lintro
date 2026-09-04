@@ -18,6 +18,7 @@ from pathspec import GitIgnoreSpec
 
 from lintro._tool_versions import TOOL_VERSIONS
 from lintro.enums.tool_name import ToolName
+from tests.integration._tools import TOOLS_IMAGE_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -871,6 +872,30 @@ def test_test_ci_reusables_never_path_skip() -> None:
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
+
+
+def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
+    """The Docker side declares the exact variable the gate reads (#465).
+
+    ``LINTRO_TOOLS_IMAGE`` is what turns a missing wrapped tool from a skip
+    into a failure. Its name lives in Python as
+    ``tests.integration._tools.TOOLS_IMAGE_ENV`` but has to be repeated as a
+    plain string in the Dockerfile and in docker-compose.yml, which neither
+    can import. A rename on one side would silently degrade the required
+    Docker integration check back to a rubber stamp, so pin all three.
+    """
+    switch = f"{TOOLS_IMAGE_ENV}=1"
+
+    dockerfile = (_REPO_ROOT / "docker" / "tools.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    assert_that(dockerfile).described_as("docker/tools.Dockerfile").contains(switch)
+
+    compose = yaml.safe_load(
+        (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+    )
+    environment = compose["services"]["test-integration"]["environment"]
+    assert_that(environment).described_as("test-integration service").contains(switch)
 
 
 def test_test_ci_matrix_collects_the_integration_suite() -> None:

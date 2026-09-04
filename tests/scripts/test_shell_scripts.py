@@ -254,6 +254,10 @@ def test_resolve_pipeline_relevance_never_skips_integration_relevant_paths(
     would turn the required gate into a rubber stamp for exactly the changes
     it exists to catch (#465).
 
+    Scoped to the deny-by-default path classification: a verified version-bump
+    PR still resolves pipeline=false through the RELEASE_BUMP override (#1362),
+    which this test deliberately does not set.
+
     Args:
         diff_repo: Fixture repository with a seed base commit.
         tmp_path: Pytest-provided temporary directory.

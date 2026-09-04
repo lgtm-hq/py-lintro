@@ -4,8 +4,11 @@ These started life in ``tests/unit`` but their outcome depends on what the
 machine happens to have installed — a Homebrew symlink under
 ``/usr/local/bin``, a bash that can run the installer, a lintro run over a
 real directory. That made the unit suite non-deterministic on a developer
-laptop (#2315), so they live here instead, where the tools image gives them a
-fixed environment (#465).
+laptop (#2315), so they live here instead (#465).
+
+They run both on the hosted matrix and inside the tools image; nothing here
+needs a wrapped tool. Any assertion added later that does need one must gate
+on ``tests.integration._tools.require_tool``.
 """
 
 from __future__ import annotations

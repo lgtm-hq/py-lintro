@@ -37,7 +37,10 @@ from typing import NoReturn
 import pytest
 from packaging.version import Version
 
-#: Environment variable that flips the gate from "skip" to "fail".
+#: Environment variable that flips the gate from "skip" to "fail". The name is
+#: repeated as a plain string in ``docker/tools.Dockerfile`` and in the
+#: ``test-integration`` service of ``docker-compose.yml``, which cannot import
+#: it; ``tests/unit/test_workflow_wiring.py`` pins all three together.
 TOOLS_IMAGE_ENV = "LINTRO_TOOLS_IMAGE"
 
 #: Default timeout, in seconds, for a tool's version probe.

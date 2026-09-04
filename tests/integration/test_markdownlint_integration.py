@@ -45,7 +45,9 @@ def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
     cmd_base = find_markdownlint_cmd()
     # The module-level require_command gate already proved this resolves;
     # the assert only narrows the Optional for the type checker.
-    assert cmd_base is not None  # noqa: S101 - type narrowing, not a test assertion  # nosec B101 - narrowing only
+    assert (
+        cmd_base is not None
+    )  # noqa: S101 - type narrowing, not a test assertion  # nosec B101 - narrowing only
     # Use relative path from repo root to match lintro's behavior
     repo_root = Path(__file__).parent.parent.parent
     # Resolve to absolute path first if it's relative
