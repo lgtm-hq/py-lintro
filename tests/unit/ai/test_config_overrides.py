@@ -606,6 +606,7 @@ def test_format_sourced_value_annotates_known_sources() -> None:
         (0.0001, "$0.0001 (flag)"),
         (0.00001, "$0.00001 (flag)"),
         (1e-9, "$0.000000001 (flag)"),
+        (0.009999, "$0.009999 (flag)"),
         (0.0, "$0.00 (flag)"),
         (0.01, "$0.01 (flag)"),
         (2.5, "$2.50 (flag)"),

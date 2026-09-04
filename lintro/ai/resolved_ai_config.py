@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums.config_source import ConfigSource
@@ -48,9 +48,9 @@ def format_sourced_value(value: str, source: ConfigSource | str | None) -> str:
 def _sub_cent_text(value: float) -> str:
     """Render a positive sub-cent amount with every significant decimal.
 
-    Two significant digits past the leading zeros are kept and trailing
-    zeros dropped, so ``0.004`` reads ``0.004``, ``0.00001`` reads
-    ``0.00001`` and ``1e-9`` reads ``0.000000001`` instead of ``0.``.
+    The parsed digits are kept verbatim and trailing zeros dropped, so
+    ``0.004`` reads ``0.004``, ``0.00001`` reads ``0.00001``, ``1e-9`` reads
+    ``0.000000001`` and ``0.009999`` never rounds up to ``0.01``.
 
     Args:
         value: Cap in USD, strictly between zero and one cent.
@@ -58,8 +58,9 @@ def _sub_cent_text(value: float) -> str:
     Returns:
         The decimal text without a currency sign.
     """
-    decimals = max(4, -math.floor(math.log10(value)) + 1)
-    return f"{value:.{decimals}f}".rstrip("0").rstrip(".")
+    # ``Decimal(str(value))`` keeps exactly the digits that were parsed, so
+    # ``0.009999`` cannot round up to a one-cent label.
+    return format(Decimal(str(value)), "f").rstrip("0").rstrip(".")
 
 
 def format_max_cost_label(
