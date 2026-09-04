@@ -740,10 +740,20 @@ def review_command(
         # Evaluated before the provider is constructed, so a converged round
         # costs nothing at all. ``--full`` is the always-available escape
         # hatch that forces a round from CI or a manual dispatch.
+        #
+        # The resume ledger (#2154) is consulted alongside the run window: a
+        # flagged file or an unserved group/import invalidation is work the
+        # next round owes, and ``resume.py`` would queue it on a real round.
+        # Skipping would drop it silently rather than deferring it, and the
+        # score cannot see it — a round can finish complete and quiet while
+        # still queueing a flag for the round after.
         decision = evaluate_convergence(
             runs=prior_state.runs,
             threshold=lintro_config.review.convergence.threshold,
             stable_rounds=lintro_config.review.convergence.stable_rounds,
+            pending_resume_work=bool(
+                prior_state.flagged_files or prior_state.pending_invalidations,
+            ),
         )
         if decision.converged:
             _finish_converged_review(

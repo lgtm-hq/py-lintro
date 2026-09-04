@@ -350,6 +350,7 @@ def evaluate_convergence(
     runs: tuple[RunRecord, ...],
     threshold: float | None,
     stable_rounds: int,
+    pending_resume_work: bool = False,
 ) -> ConvergenceDecision:
     """Decide, in code, whether another review round would be redundant.
 
@@ -359,13 +360,22 @@ def evaluate_convergence(
             ``None`` — or any value that is not a finite, non-negative
             number — disables the stop rule entirely.
         stable_rounds: How many consecutive quiet rounds are required.
+        pending_resume_work: True when the resume ledger (#2154) still owes
+            the next round work — a model-flagged file to re-read, or a
+            group/import invalidation never served. A quiet score says the
+            findings stopped moving; it says nothing about files nobody has
+            looked at yet, and skipping would drop that work silently rather
+            than deferring it. The ``partial``/``coverage_limited`` guard
+            below does not cover this: a round can finish complete and still
+            queue a flag for the next one.
 
     Returns:
         The decision, carrying the trajectory either way so callers can
         render the signal without re-deriving it. ``converged`` is False
         whenever the rule is disabled, too few rounds exist, any run in the
         window lacks a score, any run in the window was ``partial`` or
-        ``coverage_limited``, or any score reaches the threshold.
+        ``coverage_limited``, the resume ledger has pending work, or any
+        score reaches the threshold.
     """
     trajectory = score_trajectory(runs=runs)
     threshold = _readable_threshold(threshold=threshold)
@@ -383,8 +393,15 @@ def evaluate_convergence(
         return ConvergenceDecision(threshold=threshold, trajectory=trajectory)
     scores = [run.convergence_score for run in window]
     degraded = any(run.partial or run.coverage_limited for run in window)
+    # ``bool`` is an ``int`` subclass, so a ``True`` that reached a record
+    # in memory would otherwise read as the very quiet score 1.0. Decoding
+    # already drops booleans (``_optional_score``); this closes the same door
+    # on the in-memory path, where the rule must never arm by accident.
     quiet = all(
-        score is not None and math.isfinite(score) and 0.0 <= score < threshold
+        score is not None
+        and not isinstance(score, bool)
+        and math.isfinite(score)
+        and 0.0 <= score < threshold
         for score in scores
     )
     # ``score`` stays unset when the latest window run was never measured, or
@@ -395,7 +412,7 @@ def evaluate_convergence(
     if latest is not None and not (math.isfinite(latest) and latest >= 0.0):
         latest = None
     return ConvergenceDecision(
-        converged=quiet and not degraded,
+        converged=quiet and not degraded and not pending_resume_work,
         round_number=window[-1].round + 1,
         score=latest,
         threshold=threshold,

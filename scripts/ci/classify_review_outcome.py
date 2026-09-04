@@ -175,7 +175,12 @@ class ReviewOutcome(StrEnum):
         A skipped-because-converged round produced no review either, but it
         is a decision rather than a failure: it must not carry the
         "treat the diff as un-reviewed, fall back to CodeRabbit/Greptile"
-        advice, and it must not redden the check.
+        advice.
+
+        This controls that fallback copy and the ``::error`` annotation only
+        — it is not the readiness gate. A CONVERGED report is never
+        "unavailable", yet it still exits 1 when the last real round left
+        open P1 findings (see :func:`_converged_report`).
 
         Returns:
             True only for the outcomes where a review was wanted and could
@@ -210,17 +215,24 @@ class OutcomeReport:
 def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
     """Return whether a review envelope lists any P1 finding.
 
+    Questions are excluded even when the model labelled one P1, matching
+    ``ReviewResult.has_p1_findings`` and ``derive_verdict`` on the lintro
+    side: an open question is a request for information, not a defect claim,
+    and the two P1 gates must not disagree about what blocks.
+
     Args:
         payload: Decoded review JSON object.
 
     Returns:
-        True when any finding severity is ``P1``.
+        True when any non-question finding severity is ``P1``.
     """
     findings = payload.get("findings")
     if not isinstance(findings, list):
         return False
     for item in findings:
         if not isinstance(item, Mapping):
+            continue
+        if str(item.get("kind") or "").lower().endswith("question"):
             continue
         severity = str(item.get("severity") or "").upper()
         if severity in {"P1", "SEVERITY.P1"}:
@@ -335,6 +347,36 @@ def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
+def _converged_open_p1(*, converged: dict[str, Any]) -> int | None:
+    """Read the open-P1 count off a converged envelope, or report it unusable.
+
+    A numeric string or a whole-valued float is accepted — those are shapes a
+    JSON producer can legitimately emit for a count. A boolean, a fraction, a
+    negative, a missing key, or anything else is not a count, and is reported
+    as unusable rather than silently degraded to zero.
+
+    Args:
+        converged: The ``converged`` mapping from the review JSON envelope.
+
+    Returns:
+        The count, or ``None`` when the field cannot be read as one.
+    """
+    raw = converged.get("open_p1")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, float):
+        return int(raw) if raw.is_integer() and raw >= 0 else None
+    if isinstance(raw, str):
+        try:
+            parsed = int(raw.strip())
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
 def _converged_report(
     *,
     converged: dict[str, Any],
@@ -351,10 +393,29 @@ def _converged_report(
     """
     round_number = converged.get("round", 0)
     stable_rounds = converged.get("stable_rounds", 0)
-    open_p1 = converged.get("open_p1", 0)
-    open_p1 = (
-        open_p1 if isinstance(open_p1, int) and not isinstance(open_p1, bool) else 0
-    )
+    open_p1 = _converged_open_p1(converged=converged)
+    if open_p1 is None:
+        # The count is the whole readiness gate for a skipped round. An
+        # unreadable one cannot be assumed to mean "nothing blocking": that
+        # would turn a malformed envelope into a green check, which is the
+        # silent pass this module exists to prevent. Fail closed and say so.
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "converged envelope is unreadable — open_p1 is "
+                    f"{converged.get('open_p1')!r}, not a count"
+                ),
+            ),
+            detail=(
+                "lintro wrote a convergence stop-rule envelope whose open_p1 "
+                "field is missing or not a non-negative integer, so the "
+                "readiness gate for the skipped round cannot be evaluated."
+            ),
+            exit_code=1,
+            transport=transport,
+        )
     blocking = f"; {open_p1} open P1 still blocking" if open_p1 > 0 else ""
     return OutcomeReport(
         outcome=ReviewOutcome.CONVERGED,
@@ -594,12 +655,21 @@ def classify(
             transport=transport,
         )
 
-    # A converged round is checked first: it produces no coverage and no
+    # A converged round is checked early: it produces no coverage and no
     # error envelope at all, so every later branch would have to guess at a
     # review that deliberately never ran.
-    converged = _parse_converged_envelope(text=output)
-    if converged is not None:
-        return _converged_report(converged=converged, transport=transport)
+    #
+    # Not, however, ahead of a hard failure. The stop rule exits 0 or 1 and
+    # never 2, so status 2 alongside a converged envelope means something
+    # broke *after* the envelope was printed — a failed sticky post, a
+    # crashing later step. The failure is the news; reporting the skip would
+    # bury it behind a green-looking outcome, which is exactly the silent
+    # pass this module exists to prevent. Let the error branches below own
+    # that case.
+    if status != REVIEW_STATUS_ERROR:
+        converged = _parse_converged_envelope(text=output)
+        if converged is not None:
+            return _converged_report(converged=converged, transport=transport)
 
     # A persist envelope wins over the wrapper exit status. ``wait`` reports
     # 143 when the runner SIGTERMs the step after lintro already wrote
@@ -781,8 +851,13 @@ def main(*, argv: list[str] | None = None) -> int:
         argv: Optional argument vector (defaults to ``sys.argv[1:]``).
 
     Returns:
-        Exit code for the wrapper: ``0`` when a review was produced, ``1``
-        otherwise.
+        Exit code for the wrapper. ``0`` means the diff is not blocked: either
+        a review was produced with nothing blocking, or the convergence stop
+        rule deliberately skipped the round and the last real round left
+        nothing open. ``1`` means blocked or un-reviewed — including a
+        converged skip carrying ``open_p1 > 0``, which is red precisely
+        because skipping must never relax the readiness gate. Exit ``0`` is
+        therefore not a promise that a review ran.
     """
     parser = argparse.ArgumentParser(description="Classify an AI review run.")
     parser.add_argument(

@@ -179,8 +179,11 @@ Advisory tools under `lintro review`:
 | `--tool-options`           | `tool:option=value` overrides, as in `chk`                           |
 
 Advisory findings never affect the exit code unless `--fail-on-findings` is passed, and
-they never contribute to the `chk` health score. With `--output json`, they appear under
-an additive `advisory` key so existing consumers of the review JSON keep working.
+they never contribute to the `chk` health score. One exception: a round short-circuited
+by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
+before the advisory tools run at all, so `--fail-on-findings` is inert on that
+invocation. With `--output json`, they appear under an additive `advisory` key so
+existing consumers of the review JSON keep working.
 
 `idiom-review` offers two modes:
 
@@ -577,9 +580,11 @@ What it adds to the surfaces:
 
 ### Review convergence (deterministic re-review stop)
 
-Every push re-reviews the whole diff, so a long-lived PR pays for round after round that
-re-reports the same open findings. Convergence scoring ends that treadmill in code —
-never by asking the model.
+File-level resume already spares a long-lived PR from re-reading files it has covered at
+HEAD, but every round still re-reports the findings that are already open and already on
+the board — so a PR that has stopped moving keeps paying for rounds that say the same
+thing. Convergence scoring ends that remaining treadmill in code — never by asking the
+model.
 
 Each round scores the findings still open after it:
 
@@ -627,19 +632,31 @@ provider is constructed, so a converged round costs nothing:
 - A `partial` or coverage-limited round can never count toward the streak: a low score
   from a round that never looked properly is not evidence of stability. Rounds persisted
   before scoring existed carry no score and are likewise not evidence.
+- Pending resume work blocks the skip too. If the last round left a model-flagged file
+  to re-read, or a group/import invalidation it never served, the next round runs even
+  when the score says quiet: a quiet score means the findings stopped moving, not that
+  every file has been looked at. Skipping would drop that queued work rather than defer
+  it.
+- The stop rule is a `lintro review` (CLI) feature. The MCP `lintro_review` tool does
+  not read `review.convergence.threshold` and always reviews — it is a single-shot tool
+  call with no persisted round history of its own to converge over.
 - A converged skip is a short-circuit of the whole command, not just the review round:
   it returns before the advisory tools (`idiom-review` and friends) run, so
-  `--fail-on-findings` always has nothing to evaluate on that invocation and never
-  contributes to the exit code. The last real round's advisory result stands; run
-  `lintro review --full` to re-run the advisory tail. This is deliberate — the skip
-  exists to spend nothing.
+  `--fail-on-findings` is inert on that invocation and never contributes to its exit
+  code. Nothing is inherited from the last round — a later invocation does not carry the
+  earlier one's advisory exit; the advisory tools simply do not run again until a round
+  does. Run `lintro review --full` to force the round and its advisory tail. This is
+  deliberate: the skip exists to spend nothing.
 - A converged skip exits 0 unless the last real round left an open P1, in which case it
   exits 1 exactly as that round did: skipping never relaxes the readiness gate. The JSON
   envelope reports the count as `converged.open_p1`.
 - `review.convergence.threshold` must be greater than zero; scores are non-negative, so
   a zero threshold could never be met and is rejected by config validation.
-- `lintro review --full` always forces a round, so a manual dispatch or ChatOps
-  re-review is never blocked by the rule.
+- `lintro review --full` is the _only_ thing that breaks the skip. The rule is evaluated
+  from persisted state, not from what triggered the run, so a `synchronize` push, a
+  manual `workflow_dispatch`, and a ChatOps re-review are all skipped just the same
+  unless the invocation passes `--full`. A dispatch that must review has to pass it
+  explicitly — this repo's own dogfood wrapper does not.
 
 **Disabled by default.** With `threshold` unset — the default — behavior is identical to
 a build without the feature: every round reviews.

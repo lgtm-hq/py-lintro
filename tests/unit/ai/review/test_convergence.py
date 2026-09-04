@@ -778,6 +778,59 @@ def test_an_unusable_in_memory_score_never_reaches_the_decision(
     assert_that(decision.to_dict()["score"]).is_none()
 
 
+def test_pending_resume_work_refuses_to_converge() -> None:
+    """A quiet score does not attest that every file has been looked at.
+
+    ``carry_unserved_flags`` keeps a model-flagged path whose file was not
+    covered, and ``pending_invalidations_for`` keeps unserved group/import
+    re-reads. A round can finish complete *and* quiet while queueing either
+    for the next round, so the partial/coverage_limited guard does not cover
+    this — skipping would drop that work rather than deferring it (#2099).
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=0.5),
+        RunRecord(round=2, convergence_score=0.5),
+    )
+
+    without = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+    with_pending = evaluate_convergence(
+        runs=runs,
+        threshold=3.0,
+        stable_rounds=2,
+        pending_resume_work=True,
+    )
+
+    # The window is otherwise identical, so the ledger is the only difference.
+    assert_that(without.converged).is_true()
+    assert_that(with_pending.converged).is_false()
+    # The signal is still rendered: the round is deferred, not hidden.
+    assert_that(with_pending.trajectory).is_equal_to(without.trajectory)
+
+
+def test_a_boolean_score_never_reads_as_a_quiet_round() -> None:
+    """``True`` must not arm the rule as the very quiet score 1.0.
+
+    ``bool`` is an ``int`` subclass. Decoding already drops booleans, so this
+    guards the in-memory path, where a rule that skips reviews must never
+    switch itself on by accident.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=True),
+        RunRecord(round=2, convergence_score=True),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_false()
+
+
+def test_a_boolean_score_is_dropped_on_decode() -> None:
+    """The decode path refuses a boolean the same way the config does."""
+    decoded = RunRecord.from_dict({"round": 1, "convergence_score": True})
+
+    assert_that(decoded.convergence_score).is_none()
+
+
 def test_stamp_refuses_a_decision_without_a_measured_score() -> None:
     """The stamp never renders a fabricated 0.00 for an unset value."""
     from lintro.ai.review.models.convergence_decision import ConvergenceDecision

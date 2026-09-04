@@ -14,6 +14,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.cli_utils.commands import review as review_module
@@ -409,6 +410,147 @@ def test_a_score_equal_to_the_threshold_still_reviews(
     # Constructing the provider is not the same as reviewing: assert the round
     # really ran, matching the partial sibling above (#2099 review).
     assert_that(review_calls["run_review"]).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    "ledger",
+    [
+        {"flagged_files": (FlaggedFile(path="a.py", reason="re-read"),)},
+        {"pending_invalidations": (("b.py", "group_invalidated"),)},
+    ],
+    ids=["model-flagged file", "unserved invalidation"],
+)
+def test_pending_resume_work_forces_a_round_despite_a_quiet_window(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+    ledger: dict[str, object],
+) -> None:
+    """Queued resume work is deferred by a skip, not dropped — so it blocks it.
+
+    The run window here is byte-identical to the one that converges in
+    ``test_a_quiet_streak_skips_the_round``; only the #2154 ledger differs. A
+    skip would leave the flagged or invalidated file unreviewed with nothing
+    left to queue it, because the skip writes no state of its own.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+        ledger: Pending resume-work slice under test.
+    """
+    del patched_review
+    quiet = _quiet_state(scores=(1.0, 0.5))
+    _with_prior_state(
+        monkeypatch=monkeypatch,
+        state=ReviewState(runs=quiet.runs, **ledger),  # type: ignore[arg-type]
+    )
+
+    CliRunner().invoke(review_command, [])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(1)
+    assert_that(review_calls["run_review"]).is_equal_to(1)
+
+
+def test_a_blocking_skip_still_stamps_the_board_before_it_exits(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exiting 1 must not leave the last board unbannered.
+
+    Posting and the open-P1 exit are otherwise covered by separate tests, so
+    an implementation that raised before posting would pass both. A red CI
+    check whose sticky never says why the round was skipped is the worst of
+    both: no review, and no explanation on the PR.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.enums.finding_status import FindingStatus
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_finding import Severity
+
+    del patched_review
+    quiet = _quiet_state(scores=(1.0, 0.5))
+    _with_prior_state(
+        monkeypatch=monkeypatch,
+        state=ReviewState(
+            runs=quiet.runs,
+            findings=(
+                FindingRecord(
+                    fingerprint="p1",
+                    severity=Severity.P1,
+                    status=FindingStatus.OPEN,
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
+    posted: list[dict[str, object]] = []
+
+    def _post(**kwargs: object) -> bool:
+        posted.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "lintro.ai.review.github.post_review_converged_to_github",
+        _post,
+    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+
+    result = CliRunner().invoke(review_command, ["--post"])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(0)
+    assert_that(posted).is_length(1)
+    assert_that(result.exit_code).is_equal_to(1)
+
+
+def test_a_converged_skip_ignores_an_open_p1_question(
+    patched_review: ReviewConvergenceConfig,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A question never blocks the skip, whatever severity it carries.
+
+    The sibling below pins the same window with a FINDING-kind P1 exiting 1;
+    this is the other half of that pair, so the two together show the gate
+    keys on kind rather than on severity alone.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        review_calls: Collaborator call counter.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.enums.finding_kind import FindingKind
+    from lintro.ai.review.enums.finding_status import FindingStatus
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_finding import Severity
+
+    del patched_review
+    quiet = _quiet_state(scores=(1.0, 0.5))
+    _with_prior_state(
+        monkeypatch=monkeypatch,
+        state=ReviewState(
+            runs=quiet.runs,
+            findings=(
+                FindingRecord(
+                    fingerprint="q1",
+                    severity=Severity.P1,
+                    status=FindingStatus.OPEN,
+                    kind=FindingKind.QUESTION,
+                ),
+            ),
+        ),
+    )
+
+    result = CliRunner().invoke(review_command, ["--output", "json"])
+
+    assert_that(review_calls["get_provider"]).is_equal_to(0)
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(_envelope(output=result.output)["converged"]["open_p1"]).is_equal_to(0)
 
 
 def test_a_converged_skip_keeps_an_open_p1_blocking(
