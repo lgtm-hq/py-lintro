@@ -16,7 +16,7 @@ from review_matrix.models.corpus import Corpus
 from review_matrix.models.matrix import MatrixSpec
 from review_matrix.models.metrics import EfficacyMetrics, MatrixReport
 from review_matrix.models.run import EvalRun
-from review_matrix.runner import run_to_dict, summarize_runs
+from review_matrix.runner import count_unknown_costs, run_to_dict, summarize_runs
 
 __all__ = ["build_report", "render_markdown", "report_to_dict"]
 
@@ -70,6 +70,7 @@ def build_report(
         agreement=agreement,
         efficacy=efficacy,
         total_cost_usd=summarize_runs(runs),
+        unknown_cost_runs=count_unknown_costs(runs),
     )
 
 
@@ -91,6 +92,25 @@ def report_to_dict(*, report: MatrixReport) -> dict[str, Any]:
     for entry, source in zip(payload["stability"], report.stability, strict=True):
         entry["verdicts"] = [str(verdict) for verdict in source.verdicts]
     return payload
+
+
+def _cost_line(*, report: MatrixReport) -> str:
+    """Render the total-spend line, flagging any unknown cost.
+
+    Args:
+        report: Report being rendered.
+
+    Returns:
+        The markdown bullet. When some runs recorded no readable cost, the
+        total is labelled a floor rather than presented as the whole spend.
+    """
+    total = f"- Total recorded cost: ${report.total_cost_usd:.2f}"
+    if not report.unknown_cost_runs:
+        return total
+    return (
+        f"{total} (at least: {report.unknown_cost_runs} run(s) recorded no "
+        f"readable cost)"
+    )
 
 
 def _rate(value: float | None) -> str:
@@ -212,7 +232,7 @@ def render_markdown(*, report: MatrixReport) -> str:
         f"- Corpus items: {len(report.item_ids)}",
         f"- Repeats per cell: {report.repeats}",
         f"- Runs recorded: {len(report.runs)}",
-        f"- Total recorded cost: ${report.total_cost_usd:.2f}",
+        _cost_line(report=report),
         "",
     ]
     lines.extend(_stability_table(report))

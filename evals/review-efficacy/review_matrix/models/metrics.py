@@ -116,7 +116,10 @@ class MatrixReport:
             pair, sorted by config id.
         efficacy: Per-config precision/recall, in matrix order. Empty when the
             corpus carries no labels.
-        total_cost_usd: Sum of every run's recorded cost.
+        total_cost_usd: Sum of every run's *known* cost. Runs whose cost
+            could not be read are excluded, not counted as zero.
+        unknown_cost_runs: How many runs recorded no readable cost, so the
+            total above is never mistaken for the complete spend.
     """
 
     matrix_version: int
@@ -129,3 +132,4 @@ class MatrixReport:
     agreement: tuple[AgreementMetrics, ...] = field(default_factory=tuple)
     efficacy: tuple[EfficacyMetrics, ...] = field(default_factory=tuple)
     total_cost_usd: float = 0.0
+    unknown_cost_runs: int = 0

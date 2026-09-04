@@ -28,6 +28,7 @@ from lintro.ai.config_overrides import (
     ENV_TRANSPORT,
 )
 from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.transport import DEFAULT_CLI_TIMEOUT
 
 HARNESS_ROOT = Path(__file__).resolve().parents[2] / "evals" / "review-efficacy"
 
@@ -422,9 +423,13 @@ def test_parse_matrix_applies_the_documented_defaults() -> None:
     spec = parse_matrix(document)
 
     assert_that(spec.repeats).is_equal_to(DEFAULT_REPEATS)
+    assert_that(spec.repeats).is_equal_to(3)
     assert_that(spec.depth).is_equal_to(DEFAULT_DEPTH)
+    assert_that(spec.depth).is_equal_to(1)
     assert_that(spec.timeout_seconds).is_equal_to(DEFAULT_TIMEOUT_SECONDS)
-    assert_that(spec.timeout_seconds).is_equal_to(1800.0)
+    # Pinned to the production symbol, not a copied literal: a CLI budget bump
+    # must fail here rather than leave the harness quietly below it.
+    assert_that(spec.timeout_seconds).is_equal_to(DEFAULT_CLI_TIMEOUT)
 
 
 def test_parse_corpus_prefers_an_item_repo_over_the_corpus_default() -> None:
@@ -467,3 +472,38 @@ def test_load_matrix_reports_malformed_yaml(tmp_path: Path) -> None:
 
     with pytest.raises(SpecError, match="cannot parse"):
         load_matrix(bad)
+
+
+def test_parse_matrix_keeps_an_explicit_projected_cost() -> None:
+    """An explicit projected_cost_usd is kept, not overwritten by the ceiling."""
+    spec = parse_matrix(MINIMAL_MATRIX)
+
+    assert_that(spec.configs[0].projected_cost_usd).is_equal_to(1.2)
+    assert_that(spec.configs[0].max_cost_usd).is_equal_to(3.0)
+
+
+def test_parse_corpus_rejects_an_item_without_a_pr_number() -> None:
+    """An item with no pr number cannot be reviewed, so it fails the loader."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    del document["items"][0]["pr"]
+
+    with pytest.raises(SpecError, match="'pr' must be an integer"):
+        parse_corpus(document)
+
+
+def test_parse_corpus_rejects_an_empty_item_list() -> None:
+    """A corpus with no items would make every metric vacuous."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"] = []
+
+    with pytest.raises(SpecError, match="'items' must be a non-empty list"):
+        parse_corpus(document)
+
+
+def test_parse_corpus_rejects_mapping_valued_expected_findings() -> None:
+    """expected_findings must be a list of labels, not a single mapping."""
+    document = json.loads(json.dumps(MINIMAL_CORPUS))
+    document["items"][0]["expected_findings"] = {"file": "a.py"}
+
+    with pytest.raises(SpecError, match="'expected_findings' must be a list"):
+        parse_corpus(document)

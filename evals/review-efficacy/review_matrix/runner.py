@@ -20,6 +20,7 @@ from review_matrix.spec_loader import SAFE_ID_PATTERN
 
 __all__ = [
     "RUNS_JSONL_NAME",
+    "count_unknown_costs",
     "ConfigSpend",
     "SpendPlan",
     "execute_matrix",
@@ -157,6 +158,27 @@ def _decode_payload(text: str) -> Mapping[str, Any] | None:
     return payload
 
 
+def _error_kind_from_payload(payload: Mapping[str, Any]) -> str | None:
+    """Return the machine-readable ``kind`` of a payload's error envelope.
+
+    Kept beside the prose diagnostic so ``runs.jsonl`` can be filtered by
+    failure class (auth, quota, provider unavailable) without parsing the
+    message.
+
+    Args:
+        payload: Decoded review payload.
+
+    Returns:
+        The envelope's ``kind``, or ``None`` when the payload carries no
+        error object.
+    """
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    kind = str(error.get("kind") or "").strip()
+    return kind or None
+
+
 def _error_from_payload(payload: Mapping[str, Any]) -> str | None:
     """Return the failure reason a payload carries, if it is not a review.
 
@@ -179,22 +201,28 @@ def _error_from_payload(payload: Mapping[str, Any]) -> str | None:
     return "payload carried no findings list"
 
 
-def _cost_from_payload(payload: Mapping[str, Any]) -> float:
+def _cost_from_payload(payload: Mapping[str, Any]) -> float | None:
     """Read the run's cost estimate from a review payload.
 
     Args:
         payload: Decoded review payload.
 
     Returns:
-        ``metadata.cost_estimate_usd``, or ``0.0`` when it is absent.
+        ``metadata.cost_estimate_usd``, or ``None`` when it is absent or
+        unreadable. ``None`` rather than ``0.0``: an unknown cost summed as
+        zero would silently understate what the matrix spent, which is the
+        one number an operator checks against their bill.
     """
     metadata = payload.get("metadata")
     if not isinstance(metadata, dict):
-        return 0.0
+        return None
+    raw = metadata.get("cost_estimate_usd")
+    if raw is None or isinstance(raw, bool):
+        return None
     try:
-        return float(metadata.get("cost_estimate_usd", 0.0))
+        return float(raw)
     except (TypeError, ValueError):
-        return 0.0
+        return None
 
 
 def _incomplete_reason(payload: Mapping[str, Any]) -> str | None:
@@ -378,6 +406,7 @@ def _run_to_record(
             elapsed_seconds=result.elapsed_seconds,
             exit_code=result.exit_code,
             error=error,
+            error_kind=_error_kind_from_payload(payload),
             output_path=output_path,
         )
     findings = findings_from_payload(payload)
@@ -460,6 +489,7 @@ def run_to_dict(*, run: EvalRun) -> dict[str, Any]:
         "cost_usd": run.cost_usd,
         "exit_code": run.exit_code,
         "error": run.error,
+        "error_kind": run.error_kind,
         "output_path": run.output_path,
     }
 
@@ -533,12 +563,28 @@ def execute_matrix(
 
 
 def summarize_runs(runs: Sequence[EvalRun]) -> float:
-    """Return the total recorded cost of a set of runs.
+    """Return the total *known* cost of a set of runs.
+
+    Runs whose cost could not be read are skipped rather than counted as
+    zero; :func:`count_unknown_costs` reports how many, so a total is never
+    read as complete when part of the spend is unknown.
 
     Args:
         runs: Runs to total.
 
     Returns:
-        Sum of every run's ``cost_usd``.
+        Sum of every run's ``cost_usd`` that is not ``None``.
     """
-    return sum(run.cost_usd for run in runs)
+    return sum(run.cost_usd for run in runs if run.cost_usd is not None)
+
+
+def count_unknown_costs(runs: Sequence[EvalRun]) -> int:
+    """Return how many runs recorded no readable cost.
+
+    Args:
+        runs: Runs to inspect.
+
+    Returns:
+        Number of runs whose ``cost_usd`` is ``None``.
+    """
+    return sum(1 for run in runs if run.cost_usd is None)

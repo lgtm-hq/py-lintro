@@ -25,8 +25,10 @@ from review_matrix.invoker import (
 )
 from review_matrix.models.corpus import Corpus, CorpusItem
 from review_matrix.models.matrix import MatrixConfig, MatrixSpec
+from review_matrix.models.run import EvalRun
 from review_matrix.runner import (
     RUNS_JSONL_NAME,
+    count_unknown_costs,
     execute_matrix,
     plan_spend,
     render_spend_plan,
@@ -962,3 +964,97 @@ def test_execute_matrix_scores_a_partially_parseable_findings_list(
 
     assert_that(runs[0].status).is_equal_to(RunStatus.OK)
     assert_that(runs[0].findings).is_length(1)
+
+
+def test_execute_matrix_records_an_unreadable_cost_as_unknown(
+    tmp_path: Path,
+) -> None:
+    """An unreadable cost is None, never a zero that understates the bill.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["metadata"]["cost_estimate_usd"] = "not a number"
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].cost_usd).is_none()
+    assert_that(count_unknown_costs(runs)).is_equal_to(len(runs))
+    assert_that(summarize_runs(runs)).is_equal_to(0.0)
+
+
+def test_summarize_runs_skips_unknown_costs() -> None:
+    """A known cost is totalled; an unknown one is counted, not summed."""
+    known = EvalRun(
+        config_id="config-a",
+        item_id="pr-1",
+        repeat=1,
+        status=RunStatus.OK,
+        verdict=ReviewVerdict.READY,
+        cost_usd=0.25,
+    )
+    unknown = EvalRun(
+        config_id="config-a",
+        item_id="pr-1",
+        repeat=2,
+        status=RunStatus.OK,
+        verdict=ReviewVerdict.READY,
+        cost_usd=None,
+    )
+
+    assert_that(summarize_runs([known, unknown])).is_equal_to(0.25)
+    assert_that(count_unknown_costs([known, unknown])).is_equal_to(1)
+
+
+def test_execute_matrix_keeps_the_error_kind_machine_readable(
+    tmp_path: Path,
+) -> None:
+    """The envelope's kind is journalled as a field, not only inside prose.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    envelope = json.dumps(
+        {"error": {"kind": "auth_failed", "message": "no credential"}},
+    )
+    invoker = _RecordingInvoker(stdout=envelope, exit_code=2)
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    record = json.loads(
+        (tmp_path / RUNS_JSONL_NAME).read_text(encoding="utf-8").splitlines()[0],
+    )
+    assert_that(runs[0].status).is_equal_to(RunStatus.FAILED)
+    assert_that(runs[0].error_kind).is_equal_to("auth_failed")
+    assert_that(record["error_kind"]).is_equal_to("auth_failed")
+
+
+def test_a_clean_run_carries_no_error_kind(tmp_path: Path) -> None:
+    """error_kind is None for every outcome that is not an error envelope.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    invoker = _RecordingInvoker(stdout=make_payload(titles=("Off by one",)))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].error_kind).is_none()

@@ -57,7 +57,15 @@ provider:
 - `LINTRO_AI_MAX_COST_USD`
 
 There is no code-side provider wiring in the harness, so a matrix run measures the
-shipped CLI rather than a harness-specific path through it. Provider credentials come
+shipped CLI rather than a harness-specific path through it.
+
+Two shared knobs do travel as flags, because no env override exists for them: `--depth`
+and `--timeout`, both from `matrix.yaml` and identical for every cell so neither can
+confound a cross-config comparison. Note what the timeout means: it overrides
+`ai.api_timeout`, which sits above the built-in per-transport default (api 60s, cli
+1800s). The committed `1800` therefore matches the cli cell's own budget but _lengthens_
+the api cells past the 60s they would get by default, so eval timings are not directly
+comparable to a default `lintro review` on an api transport. Provider credentials come
 from your environment as usual, and `ai.review` must be enabled in the checkout's
 `.lintro-config.yaml`.
 

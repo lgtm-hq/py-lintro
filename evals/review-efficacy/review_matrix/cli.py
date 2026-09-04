@@ -60,8 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite",
         action="store_true",
         help=(
-            "Reuse an existing run directory, clearing the reports and any "
-            "run payloads a previous execution left in it."
+            "Reuse an existing run directory, clearing this matrix's own "
+            "artifacts in it: report.json, report.md, the run journal, and "
+            "the run payloads under each config id in the matrix. Files it "
+            "does not recognize, including payloads from a config id no "
+            "longer in the matrix, are left in place."
         ),
     )
     parser.add_argument(
