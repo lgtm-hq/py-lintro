@@ -33,6 +33,7 @@ from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
     "FINGERPRINT_LENGTH",
+    "count_blocking_findings",
     "derive_verdict",
     "fingerprint_for",
     "match_findings",
@@ -125,6 +126,32 @@ def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
     if Severity.P3 in severities:
         return ReviewVerdict.NITS_ONLY
     return ReviewVerdict.READY
+
+
+def count_blocking_findings(*, findings: Iterable[FindingRecord]) -> int:
+    """Count the open findings that block merge readiness.
+
+    The single definition of "blocking" shared by :func:`derive_verdict` and
+    every surface that has to report the same thing in a number rather than a
+    verdict — notably the converged-skip envelope and its sticky banner
+    (#2099). Keeping one predicate is the point: a copy that drifted would let
+    the board and the verdict disagree about what is holding a PR.
+
+    Args:
+        findings: Tracked finding records; resolved records are ignored.
+
+    Returns:
+        Number of open, non-question P1 records. Questions are excluded for
+        the same reason :func:`derive_verdict` excludes them — an open
+        question is a request for information, not a defect claim.
+    """
+    return sum(
+        1
+        for record in findings
+        if record.status is FindingStatus.OPEN
+        and not record.is_question
+        and record.severity is Severity.P1
+    )
 
 
 def _normalized_occurrences(

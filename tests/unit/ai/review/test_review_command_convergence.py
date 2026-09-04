@@ -86,7 +86,7 @@ def patched_review(
 
     def _count_run_review(*_args: object, **_kwargs: object) -> MagicMock:
         review_calls["run_review"] += 1
-        raise AssertionError("the round should have been short-circuited")
+        raise _RoundRanError
 
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
     monkeypatch.setattr(review_module, "get_config", lambda: config)
@@ -124,6 +124,29 @@ def patched_review(
     monkeypatch.setattr(review_module, "get_provider", _count_provider)
     monkeypatch.setattr(review_module, "run_review", _count_run_review)
     return convergence
+
+
+class _RoundRanError(Exception):
+    """Raised by the ``run_review`` stub to mark that a round really started.
+
+    A distinct type, not a bare ``AssertionError``: ``CliRunner.invoke``
+    swallows every exception by default, so a stub that aborted with a
+    generic error would be indistinguishable from a ``TypeError`` raised by a
+    changed ``run_review`` signature, or from a crash immediately after entry.
+    ``_assert_round_ran`` checks for this type specifically, so only a real
+    call through the real seam satisfies a still-reviews test (#2099 review).
+    """
+
+
+def _assert_round_ran(*, result: object, review_calls: dict[str, int]) -> None:
+    """Assert the command actually reached ``run_review`` and aborted there.
+
+    Args:
+        result: ``CliRunner`` result from the invocation.
+        review_calls: Collaborator call counter.
+    """
+    assert_that(review_calls["run_review"]).is_equal_to(1)
+    assert_that(result.exception).is_instance_of(_RoundRanError)  # type: ignore[attr-defined]
 
 
 def _with_prior_state(
@@ -198,9 +221,9 @@ def test_a_single_quiet_round_still_reviews(
     del patched_review
     _with_prior_state(monkeypatch=monkeypatch, state=_quiet_state(scores=(9.0, 0.5)))
 
-    CliRunner().invoke(review_command, [])
+    result = CliRunner().invoke(review_command, [])
 
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 def test_the_rule_is_disabled_by_default(
@@ -241,9 +264,9 @@ def test_full_forces_a_round_through_the_stop_rule(
     del patched_review
     _with_prior_state(monkeypatch=monkeypatch, state=_quiet_state(scores=(1.0, 0.5)))
 
-    CliRunner().invoke(review_command, ["--full"])
+    result = CliRunner().invoke(review_command, ["--full"])
 
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 def test_json_output_emits_the_converged_envelope(
@@ -298,9 +321,9 @@ def test_a_degraded_prior_round_still_reviews(
     )
     _with_prior_state(monkeypatch=monkeypatch, state=state)
 
-    CliRunner().invoke(review_command, [])
+    result = CliRunner().invoke(review_command, [])
 
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 def test_post_loads_state_for_the_pr_detected_from_ci(
@@ -377,12 +400,10 @@ def test_a_coverage_limited_prior_round_still_reviews(
     )
     _with_prior_state(monkeypatch=monkeypatch, state=state)
 
-    CliRunner().invoke(review_command, [])
+    result = CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["get_provider"]).is_equal_to(1)
-    # Constructing the provider is not the same as reviewing: assert the round
-    # really ran, matching the partial sibling above (#2099 review).
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 def test_a_score_equal_to_the_threshold_still_reviews(
@@ -404,12 +425,10 @@ def test_a_score_equal_to_the_threshold_still_reviews(
         state=_quiet_state(scores=(threshold, threshold)),
     )
 
-    CliRunner().invoke(review_command, [])
+    result = CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["get_provider"]).is_equal_to(1)
-    # Constructing the provider is not the same as reviewing: assert the round
-    # really ran, matching the partial sibling above (#2099 review).
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 @pytest.mark.parametrize(
@@ -446,10 +465,10 @@ def test_pending_resume_work_forces_a_round_despite_a_quiet_window(
         state=ReviewState(runs=quiet.runs, **ledger),  # type: ignore[arg-type]
     )
 
-    CliRunner().invoke(review_command, [])
+    result = CliRunner().invoke(review_command, [])
 
     assert_that(review_calls["get_provider"]).is_equal_to(1)
-    assert_that(review_calls["run_review"]).is_equal_to(1)
+    _assert_round_ran(result=result, review_calls=review_calls)
 
 
 def test_a_blocking_skip_still_stamps_the_board_before_it_exits(

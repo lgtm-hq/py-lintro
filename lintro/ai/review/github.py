@@ -26,6 +26,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.finding_matcher import (
+    count_blocking_findings,
     fingerprint_for,
     match_findings,
     normalize_file_path,
@@ -822,7 +823,10 @@ def post_review_converged_to_github(
         return False
     body = render_state_sticky(
         state=prior_state,
-        banner=format_convergence_banner(decision=decision),
+        banner=format_convergence_banner(
+            decision=decision,
+            open_p1=count_blocking_findings(findings=prior_state.findings),
+        ),
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )

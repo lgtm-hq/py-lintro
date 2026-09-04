@@ -235,14 +235,25 @@ def score_trajectory(*, runs: tuple[RunRecord, ...]) -> tuple[float, ...]:
     a long-lived PR's trajectory starts where measurement did rather than
     fabricating zeros for history.
 
+    Unusable scores are skipped on the same footing. Decoding already drops a
+    non-finite, negative or boolean value (``_optional_score``), but the
+    trajectory is also built from in-memory records, and it is rendered on the
+    sticky and serialized into the JSON envelope — a ``NaN`` reaching either
+    would print as a nonsense chart point and make the payload invalid JSON.
+
     Args:
         runs: Retained run records, oldest first.
 
     Returns:
-        The recorded scores in round order.
+        The usable recorded scores in round order.
     """
     return tuple(
-        run.convergence_score for run in runs if run.convergence_score is not None
+        run.convergence_score
+        for run in runs
+        if run.convergence_score is not None
+        and not isinstance(run.convergence_score, bool)
+        and math.isfinite(run.convergence_score)
+        and run.convergence_score >= 0.0
     )
 
 
@@ -284,10 +295,14 @@ def format_convergence_stamp(*, decision: ConvergenceDecision) -> str:
         For example ``converged at round 5 (score 1.20 < threshold 3.00)``.
 
     Raises:
-        ValueError: When the decision carries no measured score or threshold,
-            so a fabricated ``0.00`` can never be rendered.
+        ValueError: When the decision did not converge, or carries no
+            measured score or threshold. A non-converged decision still
+            populates ``score``, ``threshold`` and ``round_number`` so
+            callers can render the stability signal, so checking those alone
+            would let a mistaken caller stamp "converged at round N" onto a
+            round that is about to run.
     """
-    if decision.score is None or decision.threshold is None:
+    if not decision.converged or decision.score is None or decision.threshold is None:
         msg = "only a converged decision with a measured score can be stamped"
         raise ValueError(msg)
     return (

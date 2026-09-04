@@ -1140,21 +1140,21 @@ def test_an_unreadable_open_p1_fails_the_skip_gate_closed(
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected_exit"),
-    [("2", 1), (2.0, 1), ("0", 0), (0.0, 0)],
-    ids=["numeric string blocks", "whole float blocks", "string zero", "float zero"],
+    ("raw", "reported"),
+    [("2", True), (2.0, True), ("0", False), (0.0, False)],
+    ids=["numeric string", "whole float", "string zero", "float zero"],
 )
 def test_a_numeric_open_p1_is_read_as_a_count(
     classifier: ModuleType,
     raw: object,
-    expected_exit: int,
+    reported: bool,
 ) -> None:
     """A count a JSON producer spelled as a string or float is still a count.
 
     Args:
         classifier: Loaded classifier module.
         raw: ``open_p1`` value under test.
-        expected_exit: Exit code the count should produce.
+        reported: Whether the headline should name leftover P1s.
     """
     payload = json.loads(_converged_envelope())
     payload[CONVERGED_ENVELOPE_KEY]["open_p1"] = raw
@@ -1166,7 +1166,8 @@ def test_a_numeric_open_p1_is_read_as_a_count(
     )
 
     assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONVERGED)
-    assert_that(report.exit_code).is_equal_to(expected_exit)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that("open P1" in report.headline).is_equal_to(reported)
 
 
 def test_a_hard_failure_after_the_skip_envelope_is_not_hidden_by_it(
@@ -1202,13 +1203,18 @@ def test_a_hard_failure_after_the_skip_envelope_is_not_hidden_by_it(
     assert_that(report.outcome.review_unavailable).is_true()
 
 
-def test_a_blocking_skip_reddens_main_end_to_end(
+def test_a_skip_with_leftover_p1s_surfaces_them_through_main_end_to_end(
     classifier: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The open-P1 skip is pinned through main()/_emit, not just classify().
+    """The leftover count reaches the annotation and summary, not just classify().
+
+    Exit stays 0 — the check does not redden for findings on either path — so
+    the annotation and job summary are the only places a reader can learn
+    that something is still open. If the count silently vanished from them,
+    the skip really would look clean.
 
     Args:
         classifier: Loaded classifier module.
@@ -1226,10 +1232,11 @@ def test_a_blocking_skip_reddens_main_end_to_end(
     )
     out = capsys.readouterr().out
 
-    assert_that(code).is_equal_to(1)
-    assert_that(out).contains("2 open P1 still blocking")
+    assert_that(code).is_equal_to(0)
+    assert_that(out).contains("skipped: 2 open P1 findings remain")
+    assert_that(out).does_not_contain("::error")
     summary = summary_file.read_text(encoding="utf-8")
-    assert_that(summary).contains("2 open P1 still blocking")
+    assert_that(summary).contains("skipped: 2 open P1 findings remain")
     # A skip is a decision, not an outage: never the fall-back-to-CodeRabbit copy.
     assert_that(summary).does_not_contain("CodeRabbit")
 
@@ -1278,10 +1285,16 @@ def test_a_p1_question_does_not_redden_the_recovered_review(
     assert_that(report.headline).contains("no P1 findings")
 
 
-def test_converged_skip_with_an_open_p1_keeps_the_check_red(
+def test_converged_skip_with_an_open_p1_reports_but_does_not_redden(
     classifier: ModuleType,
 ) -> None:
-    """The classifier mirrors the CLI: an open P1 left in force still exits 1.
+    """Leftover P1s are named on the headline, not turned into a red check.
+
+    The check reports a REVIEWED round's P1 findings without reddening for
+    them (``test_review_with_findings_still_passes``), so a skipped round
+    must not be stricter about the same findings than the round that found
+    them. The readiness gate is informational at check level on both paths —
+    which is exactly why the count has to be visible in the headline.
 
     Args:
         classifier: Loaded classifier module.
@@ -1293,6 +1306,40 @@ def test_converged_skip_with_an_open_p1_keeps_the_check_red(
     )
 
     assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONVERGED)
-    assert_that(report.exit_code).is_equal_to(1)
-    assert_that(report.headline).contains("2 open P1 still blocking")
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("skipped: 2 open P1 findings remain")
+    # A skip is a decision, not an outage: never the fall-back advice.
     assert_that(report.outcome.review_unavailable).is_false()
+
+
+def test_a_single_leftover_p1_is_named_in_the_singular(
+    classifier: ModuleType,
+) -> None:
+    """The headline reads as English for the common one-finding case.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_converged_envelope(open_p1=1),
+        transport="cli",
+    )
+
+    assert_that(report.headline).contains("skipped: 1 open P1 finding remain")
+
+
+def test_a_clean_skip_says_nothing_about_p1s(classifier: ModuleType) -> None:
+    """With nothing open the headline carries no leftover clause at all.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_converged_envelope(open_p1=0),
+        transport="cli",
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).does_not_contain("open P1")

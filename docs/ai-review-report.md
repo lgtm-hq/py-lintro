@@ -27,8 +27,11 @@ first, then directly changed, then model-flagged, then group/import-invalidated 
 `--full` discards carried coverage for one run, and is also the only flag that forces a
 round past the
 [convergence stop rule](ai-features.md#review-convergence-deterministic-re-review-stop)
-once it has fired. `--max-cost-usd uncapped` lifts a flag/env cap. Overlay `0` is
-rejected; use `uncapped` or a positive value.
+once it has fired — later pushes stay skipped until a `--full` run records a fresh
+score. A skipped round's banner names any open P1 findings the last reviewed round left
+behind; like a reviewed round's P1s, they do not redden the check.
+`--max-cost-usd uncapped` lifts a flag/env cap. Overlay `0` is rejected; use `uncapped`
+or a positive value.
 
 ## Update in place
 

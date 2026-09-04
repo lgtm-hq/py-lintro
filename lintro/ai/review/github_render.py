@@ -417,20 +417,35 @@ def format_convergence_note(*, trajectory: tuple[float, ...]) -> str:
     )
 
 
-def format_convergence_banner(*, decision: ConvergenceDecision) -> str:
+def format_convergence_banner(
+    *,
+    decision: ConvergenceDecision,
+    open_p1: int = 0,
+) -> str:
     """Render the blockquote stamped on the sticky for a short-circuited round.
 
     Args:
         decision: The converged decision that skipped the round.
+        open_p1: Open, non-question P1 findings the last real round left in
+            force. Named on the banner when non-zero: the skip does not
+            redden the CI check for them (a reviewed round does not either),
+            so the board is where a reader has to be able to see that
+            something is still outstanding.
 
     Returns:
-        A blockquote naming the round, the score, and the threshold, plus how
-        to force a round anyway.
+        A blockquote naming the round, the score, the threshold, any P1
+        findings still open, and how to force a round anyway.
     """
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = (
+        f" Skipped: {open_p1} open P1 {noun} remain from the last reviewed " "round."
+        if open_p1 > 0
+        else ""
+    )
     return (
         f"> 🔁 **Converged** — {format_convergence_stamp(decision=decision)} "
         f"over {decision.stable_rounds} consecutive rounds. No provider call "
-        "was made this round. Re-run with `--full` to review again."
+        f"was made this round.{remaining} Re-run with `--full` to review again."
     )
 
 

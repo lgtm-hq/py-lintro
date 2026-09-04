@@ -11,10 +11,12 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
 * **converged** -- the deterministic convergence stop rule (#2099) skipped the
   round before any provider call, because the last N rounds all scored below
   the configured threshold. Nothing was reviewed, but nothing needed to be, and
-  the reason is stated rather than implied by a silent pass. Green *unless* the
-  last real round left open P1 findings: skipping never relaxes the readiness
-  gate, so a skip carrying ``open_p1 > 0`` goes red with exit 1, exactly as the
-  round that found them did.
+  the reason is stated rather than implied by a silent pass. Green, including
+  when the last real round left open P1 findings: a REVIEWED round reports P1s
+  without reddening (see the exit-code contract below), and a skipped round is
+  not stricter about the same findings than the round that found them. The
+  count is never hidden, though -- ``open_p1`` stays on the envelope and the
+  headline says "skipped: N open P1 findings remain".
 * **not reviewed** -- no credential, a dead credential, a depleted balance, or an
   unreachable provider. The check goes red with a visible reason. It is
   deliberately *not* a required check, so a billing condition is loud without
@@ -178,9 +180,10 @@ class ReviewOutcome(StrEnum):
         advice.
 
         This controls that fallback copy and the ``::error`` annotation only
-        — it is not the readiness gate. A CONVERGED report is never
-        "unavailable", yet it still exits 1 when the last real round left
-        open P1 findings (see :func:`_converged_report`).
+        — it is not the readiness gate. There is no readiness gate at check
+        level: open P1 findings are reported and never reddened, on a
+        REVIEWED round and on a CONVERGED skip alike. Both name the count and
+        exit 0; the merge decision is the reviewer's, not this check's.
 
         Returns:
             True only for the outcomes where a review was wanted and could
@@ -389,7 +392,8 @@ def _converged_report(
         transport: Active transport named on the headline.
 
     Returns:
-        Green report naming the round that was skipped and why.
+        Green report naming the round that was skipped, why, and how many
+        open P1 findings the last real round left behind.
     """
     round_number = converged.get("round", 0)
     stable_rounds = converged.get("stable_rounds", 0)
@@ -416,20 +420,26 @@ def _converged_report(
             exit_code=1,
             transport=transport,
         )
-    blocking = f"; {open_p1} open P1 still blocking" if open_p1 > 0 else ""
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = f"; skipped: {open_p1} open P1 {noun} remain" if open_p1 > 0 else ""
     return OutcomeReport(
         outcome=ReviewOutcome.CONVERGED,
         headline=_with_transport(
             transport=transport,
             headline=(
                 f"converged — round {round_number} skipped after "
-                f"{stable_rounds} stable rounds{blocking}"
+                f"{stable_rounds} stable rounds{remaining}"
             ),
         ),
         detail=str(converged.get("detail") or ""),
-        # A skip never relaxes the readiness gate: the CLI exits 1 when the
-        # last real round left an open P1, and the check mirrors that.
-        exit_code=1 if open_p1 > 0 else 0,
+        # Exit 0 even with open P1s, mirroring a REVIEWED round: this check
+        # reports P1 findings without reddening for them (see the exit-code
+        # contract in scripts/ci/run-ai-review.sh), and a skipped round must
+        # not be stricter about the same findings than the round that found
+        # them. The readiness gate is informational at check level on both
+        # paths, so the count is named in the headline instead of hidden
+        # behind an exit code.
+        exit_code=0,
         transport=transport,
     )
 
@@ -851,13 +861,15 @@ def main(*, argv: list[str] | None = None) -> int:
         argv: Optional argument vector (defaults to ``sys.argv[1:]``).
 
     Returns:
-        Exit code for the wrapper. ``0`` means the diff is not blocked: either
-        a review was produced with nothing blocking, or the convergence stop
-        rule deliberately skipped the round and the last real round left
-        nothing open. ``1`` means blocked or un-reviewed — including a
-        converged skip carrying ``open_p1 > 0``, which is red precisely
-        because skipping must never relax the readiness gate. Exit ``0`` is
-        therefore not a promise that a review ran.
+        Exit code for the wrapper. ``0`` means the review question was
+        answered: a review ran, or the convergence stop rule deliberately
+        skipped the round. Open P1 findings do not change that on either
+        path — they are reported in the headline and summary, never reddened,
+        because this check is informational and not required. ``1`` means no
+        review was produced at all (no credential, dead credential, depleted
+        balance, unreachable provider, a lintro-side failure, or an
+        unreadable envelope). Exit ``0`` is therefore not a promise that a
+        review ran, and exit ``1`` is never about findings.
     """
     parser = argparse.ArgumentParser(description="Classify an AI review run.")
     parser.add_argument(

@@ -330,12 +330,12 @@ def _parse_evidence_style(value: Any) -> EvidenceStyle:
         The parsed style, defaulting to :data:`EvidenceStyle.DIFF_LOCAL` when
         absent or unrecognized. A v2 record carries no such key, and the
         default is the *highest* likelihood in the convergence score, so a
-        missing label can never deflate a PR toward an early stop.
+        missing label can never deflate a PR toward an early stop. Parsing
+        goes through :meth:`EvidenceStyle.coerce`, the same helper the
+        model-response normalizer uses, so the blob decoder and the parser
+        cannot drift apart on whitespace, case, or the unknown-label default.
     """
-    try:
-        return EvidenceStyle(str(value).lower())
-    except ValueError:
-        return EvidenceStyle.DIFF_LOCAL
+    return EvidenceStyle.coerce(value)
 
 
 def _parse_status(value: Any) -> FindingStatus:

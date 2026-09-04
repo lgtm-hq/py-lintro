@@ -136,10 +136,7 @@ def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
         unknown label falls back to the unchipped default rather than
         asserting an evidence basis the model did not claim.
     """
-    try:
-        return EvidenceStyle(str(raw).strip().lower())
-    except ValueError:
-        return EvidenceStyle.DIFF_LOCAL
+    return EvidenceStyle.coerce(raw)
 
 
 def parse_findings(

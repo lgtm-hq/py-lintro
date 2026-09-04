@@ -647,9 +647,16 @@ provider is constructed, so a converged round costs nothing:
   earlier one's advisory exit; the advisory tools simply do not run again until a round
   does. Run `lintro review --full` to force the round and its advisory tail. This is
   deliberate: the skip exists to spend nothing.
-- A converged skip exits 0 unless the last real round left an open P1, in which case it
-  exits 1 exactly as that round did: skipping never relaxes the readiness gate. The JSON
-  envelope reports the count as `converged.open_p1`.
+- A converged skip reports the open P1 findings the last real round left in force, and
+  treats them exactly as a reviewed round does. The CLI exits 1 locally — the same exit
+  a round that found them produces — while the CI check stays **green** on both paths:
+  `scripts/ci/classify_review_outcome.py` reports P1 findings without reddening (see the
+  exit-code contract in `scripts/ci/run-ai-review.sh`), and a skipped round is never
+  stricter about the same findings than the round that found them. The readiness gate is
+  informational at check level, so the count is surfaced rather than hidden behind an
+  exit code: `converged.open_p1` in the JSON envelope,
+  `skipped: N open P1 findings remain` in the check headline, and the same sentence on
+  the sticky's converged banner.
 - `review.convergence.threshold` must be greater than zero; scores are non-negative, so
   a zero threshold could never be met and is rejected by config validation.
 - `lintro review --full` is the _only_ thing that breaks the skip. The rule is evaluated
@@ -657,6 +664,12 @@ provider is constructed, so a converged round costs nothing:
   manual `workflow_dispatch`, and a ChatOps re-review are all skipped just the same
   unless the invocation passes `--full`. A dispatch that must review has to pass it
   explicitly — this repo's own dogfood wrapper does not.
+- **A skip persists across later pushes.** Because a skipped round writes no state, the
+  next push re-reads the same quiet trajectory and reaches the same decision: new
+  commits do not restart scoring, and the PR stays skipped until a `--full` run records
+  a fresh score. That is the intended behavior for a PR that has stopped moving, but it
+  does mean enabling a threshold is not a per-push setting — plan on `--full` being the
+  way back to reviewing.
 
 **Disabled by default.** With `threshold` unset — the default — behavior is identical to
 a build without the feature: every round reviews.

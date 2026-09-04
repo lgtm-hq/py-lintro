@@ -66,13 +66,11 @@ from lintro.ai.review.custom_agents import (
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
-from lintro.ai.review.enums.finding_kind import FindingKind
-from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.finding_matcher import count_blocking_findings
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
-from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import (
@@ -210,10 +208,21 @@ def _finish_converged_review(
     wanted. Context collection and ``--with-lint`` have already run by this
     point, so "costs nothing" means no provider call, not literally no work.
 
-    The exit contract is the same one a real round uses: 0 when nothing open
-    blocks, 1 when the last real round left an open P1. Questions never block,
-    matching :func:`~lintro.ai.review.finding_matcher.derive_verdict` and
-    ``ReviewResult.has_p1_findings``.
+    The process exit contract is the same one a real round uses:
+    :func:`~lintro.ai.review.finding_matcher.count_blocking_findings` — open,
+    non-question P1s — mirroring ``ReviewResult.has_p1_findings`` and
+    :func:`~lintro.ai.review.finding_matcher.derive_verdict`, which share that
+    predicate. Questions never block.
+
+    That exit is a local signal only. The CI check does *not* redden for open
+    P1s on either path: ``scripts/ci/classify_review_outcome.py`` reports a
+    REVIEWED round's P1 findings and a converged skip's leftovers alike, and
+    exits 0 for both (see the exit-code contract in
+    ``scripts/ci/run-ai-review.sh``). The readiness gate is informational at
+    check level, so the count is surfaced — on the sticky banner, in the JSON
+    envelope's ``open_p1``, and in the classifier headline — rather than
+    being hidden behind an exit code that would make a skip stricter than the
+    round that found the findings.
 
     Args:
         decision: The converged decision that skipped the round.
@@ -226,7 +235,8 @@ def _finish_converged_review(
 
     Raises:
         SystemExit: Always. ``0`` for a clean skip; ``1`` when the last real
-            round left an open P1, so the skip never relaxes that gate.
+            round left an open P1 — the same local exit a round that found
+            them produces, and equally not a CI failure.
     """
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_converged_to_github
@@ -238,10 +248,11 @@ def _finish_converged_review(
                 repo=effective_repo,
                 prior_state=prior_state,
             )
-    # A skipped round changes nothing about what is open, so it must not
-    # relax the readiness gate either: an open P1 left by the last real round
-    # still fails the process exactly as that round did.
-    open_p1 = _open_blocking_findings(prior_state=prior_state)
+    # A skipped round changes nothing about what is open, so it reports the
+    # same local exit a real round would: an open P1 left by the last real
+    # round still exits 1 here, exactly as that round did. The CI check
+    # greens both alike and names the count instead (see the docstring).
+    open_p1 = count_blocking_findings(findings=prior_state.findings)
     if output_format == "json":
         click.echo(
             render_convergence_outcome_json(decision=decision, open_p1=open_p1),
@@ -259,24 +270,6 @@ def _finish_converged_review(
             )
         click.echo("   Re-run with --full to force another round.")
     raise SystemExit(1 if open_p1 else 0)
-
-
-def _open_blocking_findings(*, prior_state: ReviewState) -> int:
-    """Count the open P1 findings a skipped round leaves in force.
-
-    Args:
-        prior_state: Persisted state from the last real round.
-
-    Returns:
-        Number of open, non-question P1 findings.
-    """
-    return sum(
-        1
-        for record in prior_state.findings
-        if record.status is FindingStatus.OPEN
-        and record.kind is not FindingKind.QUESTION
-        and record.severity is Severity.P1
-    )
 
 
 def _advisory_failure_error(results: list[ToolResult]) -> AIError:

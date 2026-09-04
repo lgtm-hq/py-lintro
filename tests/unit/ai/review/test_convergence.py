@@ -693,6 +693,40 @@ def test_carried_finding_scores_on_its_original_likelihood() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "raw",
+    ["  speculative  ", "SPECULATIVE", "Speculative\n"],
+    ids=["padded", "uppercase", "trailing newline"],
+)
+def test_a_padded_evidence_label_decodes_to_its_real_member(raw: str) -> None:
+    """Whitespace and case must not silently re-score a finding.
+
+    The blob decoder and the model-response normalizer share one parser, so
+    neither can drift on trimming: a padded ``speculative`` that fell back to
+    ``diff_local`` would score at the highest likelihood instead of the
+    lowest, inflating the round score by a factor of 2.5 on that finding.
+
+    Args:
+        raw: Raw persisted label under test.
+    """
+    record = FindingRecord.from_dict(
+        {
+            "fingerprint": "a" * 16,
+            "severity": "P2",
+            "category": "logic-bug",
+            "confidence": "high",
+            "status": "open",
+            "evidence_style": raw,
+        },
+    )
+
+    assert record is not None
+    assert_that(record.evidence_style).is_equal_to(EvidenceStyle.SPECULATIVE)
+    assert_that(score_records(records=(record,))).is_not_equal_to(
+        score_records(records=(_record(evidence_style=EvidenceStyle.DIFF_LOCAL),)),
+    )
+
+
 def test_a_v2_record_without_an_evidence_style_scores_at_diff_local() -> None:
     """An upgraded blob scores rather than raising on the missing key.
 
@@ -829,6 +863,55 @@ def test_a_boolean_score_is_dropped_on_decode() -> None:
     decoded = RunRecord.from_dict({"round": 1, "convergence_score": True})
 
     assert_that(decoded.convergence_score).is_none()
+
+
+def test_stamp_refuses_a_decision_that_did_not_converge() -> None:
+    """A round that will still run can never be stamped as converged.
+
+    A non-converged decision still carries ``score``, ``threshold`` and
+    ``round_number`` so surfaces can render the stability signal — so
+    checking only those would let a mistaken caller write "converged at
+    round N" onto a board for a round that is about to review.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=5.0),
+        RunRecord(round=2, convergence_score=5.0),
+    )
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    # Everything the old guard checked is present; only `converged` is False.
+    assert_that(decision.converged).is_false()
+    assert_that(decision.score).is_not_none()
+    assert_that(decision.threshold).is_not_none()
+    with pytest.raises(ValueError, match="converged decision"):
+        format_convergence_stamp(decision=decision)
+
+
+@pytest.mark.parametrize(
+    "bad_score",
+    [float("nan"), float("inf"), float("-inf"), -1.0, True],
+    ids=["nan", "inf", "-inf", "negative", "boolean"],
+)
+def test_the_trajectory_omits_unusable_scores(bad_score: float) -> None:
+    """A corrupt score never reaches the rendered chart or the JSON payload.
+
+    The trajectory is built from in-memory records as well as decoded ones,
+    and it is both rendered on the sticky and serialized into the envelope —
+    a NaN would print as a nonsense point and make the payload invalid JSON.
+
+    Args:
+        bad_score: Unusable score value under test.
+    """
+    runs = (
+        RunRecord(round=1, convergence_score=1.0),
+        RunRecord(round=2, convergence_score=bad_score),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(score_trajectory(runs=runs)).is_equal_to((1.0,))
+    assert_that(decision.trajectory).is_equal_to((1.0,))
+    assert_that(decision.to_dict()["trajectory"]).is_equal_to([1.0])
 
 
 def test_stamp_refuses_a_decision_without_a_measured_score() -> None:

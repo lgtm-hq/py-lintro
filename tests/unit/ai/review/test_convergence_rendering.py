@@ -252,6 +252,31 @@ def test_the_converged_banner_stamps_the_board_it_re_renders(
         assert_that(body).contains(record.title)
 
 
+def test_the_banner_names_open_p1_findings_the_skip_leaves_behind() -> None:
+    """The board is where leftover blockers stay visible on a skipped round.
+
+    The CI check does not redden for open P1s on either path — a reviewed
+    round does not either — so if the banner stayed silent about them, a skip
+    really would look clean.
+    """
+    decision = evaluate_convergence(
+        runs=(
+            RunRecord(round=1, convergence_score=1.0),
+            RunRecord(round=2, convergence_score=0.5),
+        ),
+        threshold=3.0,
+        stable_rounds=2,
+    )
+
+    banner = format_convergence_banner(decision=decision, open_p1=2)
+    singular = format_convergence_banner(decision=decision, open_p1=1)
+    clean = format_convergence_banner(decision=decision, open_p1=0)
+
+    assert_that(banner).contains("Skipped: 2 open P1 findings remain")
+    assert_that(singular).contains("Skipped: 1 open P1 finding remain")
+    assert_that(clean).does_not_contain("open P1")
+
+
 def test_the_converged_banner_names_the_streak_that_earned_the_stop() -> None:
     """A reader can tell how much evidence the stop rule had."""
     runs = (
