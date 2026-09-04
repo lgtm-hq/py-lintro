@@ -887,3 +887,78 @@ def test_execute_matrix_validates_ids_before_spending(tmp_path: Path) -> None:
         )
 
     assert_that(calls).is_empty()
+
+
+def test_execute_matrix_validates_every_id_before_any_spend(tmp_path: Path) -> None:
+    """An unsafe id in a later config aborts before the first config spends.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    calls: list[str] = []
+
+    def _record(
+        *,
+        config: MatrixConfig,
+        item: CorpusItem,
+        spec: MatrixSpec,
+    ) -> InvocationResult:
+        """Record that a paid invocation happened.
+
+        Args:
+            config: Matrix cell being exercised.
+            item: Corpus item being reviewed.
+            spec: Matrix specification.
+
+        Returns:
+            A canned invocation result.
+        """
+        del item, spec
+        calls.append(config.config_id)
+        return InvocationResult(
+            exit_code=0,
+            stdout=make_payload(titles=("Off by one",)),
+            stderr="",
+            elapsed_seconds=1.0,
+        )
+
+    spec = replace(SPEC, configs=(CONFIG_A, replace(CONFIG_B, config_id="../escape")))
+
+    with pytest.raises(ValueError, match="unsafe config id"):
+        execute_matrix(
+            spec=spec,
+            corpus=CORPUS,
+            output_dir=tmp_path,
+            invoker=_record,
+        )
+
+    assert_that(calls).is_empty()
+    assert_that(list(tmp_path.iterdir())).is_empty()
+
+
+def test_execute_matrix_scores_a_partially_parseable_findings_list(
+    tmp_path: Path,
+) -> None:
+    """A list where only some entries parse keeps the entries that did.
+
+    Documented deliberately: the harness scores what the run actually
+    reported. Dropping the whole run would discard a paid result over one
+    malformed row, while the surviving findings are exactly what a matcher
+    would have paired anyway.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    payload = json.loads(make_payload(titles=("Off by one",)))
+    payload["findings"].append("not a mapping")
+    invoker = _RecordingInvoker(stdout=json.dumps(payload))
+
+    runs = execute_matrix(
+        spec=SPEC,
+        corpus=CORPUS,
+        output_dir=tmp_path,
+        invoker=invoker,
+    )
+
+    assert_that(runs[0].status).is_equal_to(RunStatus.OK)
+    assert_that(runs[0].findings).is_length(1)

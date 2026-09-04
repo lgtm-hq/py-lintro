@@ -14,10 +14,13 @@ version: 1
 # anything: two runs can only ever score a flip rate of 0.0 or 1.0.
 repeats: 3
 
-# Shared review knobs. Held constant across configs so depth and timeout
-# never confound a cross-config comparison.
+# Shared review knobs, forwarded as `lintro review --depth` / `--timeout`
+# by review_matrix/invoker.py, and held constant across configs so neither
+# knob confounds a cross-config comparison. 1800s matches the CLI transport's
+# built-in per-chunk budget: --timeout overrides ai.api_timeout, so a smaller
+# value would shorten the cli cell's budget rather than extend it.
 depth: 1
-timeout_seconds: 900
+timeout_seconds: 1800
 
 # Every model id must be one its own provider accepts. The anthropic and
 # openai ids are registered under those providers in lintro/ai/registry.py, so

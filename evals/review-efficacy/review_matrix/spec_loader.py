@@ -39,7 +39,12 @@ MIN_DEPTH = 1
 MAX_DEPTH = 3
 
 DEFAULT_DEPTH = 1
-DEFAULT_TIMEOUT_SECONDS = 900.0
+#: ``--timeout`` overrides ``ai.api_timeout``, which sits above the
+#: built-in per-transport default (api 60s, cli 1800s). A smaller value
+#: would *lower* the CLI per-chunk budget that scripts/ci/run-ai-review.sh
+#: keeps at 1800s so a large chunk can finish, so the harness default
+#: matches it rather than undercutting it.
+DEFAULT_TIMEOUT_SECONDS = 1800.0
 DEFAULT_REPEATS = 3
 
 

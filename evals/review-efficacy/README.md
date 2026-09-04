@@ -83,14 +83,18 @@ cost are what differ between two otherwise identical runs.
 
 Add `expected_findings` to a corpus item to bring it into the efficacy table. All four
 fields are required — `severity` has no default, because it is what the expected verdict
-is derived from:
+is derived from. `category` is part of the fingerprint, so it must be one a real review
+emits: a `ReviewCategory` value (`logic-bug`, `silent-failure`, `integration`,
+`test-gap`, `contract-drift`, `security`, `breaking-change`, `code-smell`,
+`architecture`). A category no review reports can never match, and the label would
+silently count as a permanent miss:
 
 ```yaml
 - id: pr-1928
   pr: 1928
   expected_findings:
     - file: lintro/ai/review/orchestrator.py
-      category: correctness
+      category: logic-bug
       title: Cost cap is checked after the request is issued
       severity: P1
 ```
@@ -106,10 +110,12 @@ against a mocked invoker. No test in that directory touches a provider or the ne
 Those tests only run from a repository checkout: `evals/` is pruned from the wheel and
 sdist, so an installed copy of lintro has no harness for them to import.
 
-The harness root is spelled in exactly three places, and all three must agree when the
-directory moves:
+Two files spell the harness root literally and must be updated together if the directory
+moves:
 
 - `pyproject.toml` — `mypy_path = ["evals/review-efficacy"]`
 - `tests/evals/conftest.py` — puts the root on `sys.path` before the tests import
   `review_matrix`
-- `evals/review-efficacy/run_matrix.py` — the same bootstrap for the entry point
+
+`evals/review-efficacy/run_matrix.py` also bootstraps `sys.path`, but it derives the
+root from `__file__` and so needs no edit on a move.

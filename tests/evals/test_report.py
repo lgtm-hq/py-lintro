@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from assertpy import assert_that
@@ -228,3 +229,44 @@ def test_cli_reports_a_malformed_matrix(tmp_path: Path) -> None:
     exit_code = main(["--matrix", str(bad), "--corpus", str(bad)])
 
     assert_that(exit_code).is_equal_to(2)
+
+
+def test_render_markdown_omits_the_agreement_table_for_one_config() -> None:
+    """With a single config there is no pair to agree, so the section is gone.
+
+    The table is omitted only here: two configs that shared no comparable run
+    still get a table, of n/a rows.
+    """
+    spec = replace(SPEC, configs=(SPEC.configs[0],))
+
+    report = build_report(spec=spec, corpus=_corpus(labeled=False), runs=_runs())
+
+    assert_that(report.agreement).is_empty()
+    assert_that(render_markdown(report=report)).does_not_contain(
+        "Cross-config agreement",
+    )
+
+
+def test_report_to_dict_leaves_unmeasurable_rates_null() -> None:
+    """An unmeasurable rate serializes as null, never as a fabricated 0.0."""
+    single = EvalRun(
+        config_id="config-a",
+        item_id="pr-1",
+        repeat=1,
+        status=RunStatus.OK,
+        verdict=ReviewVerdict.READY,
+    )
+
+    report = build_report(
+        spec=SPEC,
+        corpus=_corpus(labeled=False),
+        runs=(single,),
+    )
+    payload = json.loads(json.dumps(report_to_dict(report=report)))
+
+    stability = next(
+        entry for entry in payload["stability"] if entry["config_id"] == "config-a"
+    )
+    assert_that(stability["compared_pairs"]).is_equal_to(0)
+    assert_that(stability["verdict_flip_rate"]).is_none()
+    assert_that(stability["mean_jaccard"]).is_none()

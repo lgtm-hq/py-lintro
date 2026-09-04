@@ -144,7 +144,11 @@ def build_env(
     Every ambient ``LINTRO_AI_*`` variable is dropped first. A developer shell
     exporting ``LINTRO_AI_ENABLED``, ``LINTRO_AI_REVIEW`` or
     ``LINTRO_AI_TRANSCRIPT`` would otherwise silently change what a cell
-    measures, and the config's own four overrides would not overwrite it.
+    measures. The strip is safe for the master switches because
+    :attr:`~review_matrix.models.matrix.MatrixConfig.env_overrides` pins
+    ``LINTRO_AI_ENABLED=1`` and ``LINTRO_AI_REVIEW=1`` itself, so a cell turns
+    the review on from its own overlay rather than inheriting it — which is
+    what makes it runnable against this repo's committed ``ai.enabled: false``.
 
     Args:
         config: Matrix cell whose overrides are applied.
@@ -154,7 +158,8 @@ def build_env(
     Returns:
         A new environment mapping. Every non-``LINTRO_AI_*`` variable is
         preserved (``PATH``, provider credentials, ``GITHUB_TOKEN``); the only
-        ``LINTRO_AI_*`` variables present are this config's own overrides.
+        ``LINTRO_AI_*`` variables present are this config's own overrides,
+        which include the two master switches.
     """
     source = os.environ if base_env is None else base_env
     env = {

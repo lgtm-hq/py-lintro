@@ -410,7 +410,12 @@ def test_parse_matrix_rejects_a_depth_the_review_cli_would_refuse(
 
 
 def test_parse_matrix_applies_the_documented_defaults() -> None:
-    """Omitted repeats, depth and timeout fall back to the DEFAULT_* values."""
+    """Omitted repeats, depth and timeout fall back to the DEFAULT_* values.
+
+    The timeout is pinned to the literal as well as the constant: ``--timeout``
+    overrides ``ai.api_timeout``, so a default below the CLI transport's
+    1800s per-chunk budget would shorten a cli cell rather than extend it.
+    """
     document = json.loads(json.dumps(MINIMAL_MATRIX))
     document.pop("repeats")
 
@@ -419,6 +424,7 @@ def test_parse_matrix_applies_the_documented_defaults() -> None:
     assert_that(spec.repeats).is_equal_to(DEFAULT_REPEATS)
     assert_that(spec.depth).is_equal_to(DEFAULT_DEPTH)
     assert_that(spec.timeout_seconds).is_equal_to(DEFAULT_TIMEOUT_SECONDS)
+    assert_that(spec.timeout_seconds).is_equal_to(1800.0)
 
 
 def test_parse_corpus_prefers_an_item_repo_over_the_corpus_default() -> None:

@@ -167,7 +167,13 @@ def main(
     if not args.confirm_spend:
         return 0
 
-    stamp = args.stamp or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    # Defaulted only when the flag was omitted: ``--stamp ""`` is an
+    # authoring error, not a request for a timestamp.
+    stamp = (
+        datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        if args.stamp is None
+        else args.stamp
+    )
     if not validate_stamp(stamp):
         print(
             f"error: --stamp must be a single directory name (got {stamp!r})",

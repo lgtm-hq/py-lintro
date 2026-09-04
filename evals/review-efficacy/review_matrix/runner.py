@@ -247,14 +247,17 @@ def _has_usable_findings(
     cannot read, so it must never be scored as a zero-finding review.
 
     Args:
-        payload: Decoded review payload.
+        payload: Decoded review payload, already known by
+            :func:`_error_from_payload` to carry a ``findings`` list.
         parsed: Findings :func:`findings_from_payload` recovered from it.
 
     Returns:
         ``True`` when the list is empty or at least one entry parsed.
     """
+    # ``_error_from_payload`` has already returned for anything but a list,
+    # so the only question left is whether a non-empty list parsed.
     raw = payload.get("findings")
-    if not isinstance(raw, list) or not raw:
+    if not raw:
         return True
     return bool(parsed)
 
@@ -482,10 +485,12 @@ def execute_matrix(
 ) -> tuple[EvalRun, ...]:
     """Run every (config, item, repeat) cell and persist each result.
 
-    Cells are executed config-major so a matrix aborted part-way still has
-    complete repeat sets for the configs it reached, and each record is
-    appended to ``runs.jsonl`` as it is produced, so an abort keeps every
-    result the matrix already paid for.
+    Every config and item id is validated before the first invocation, so an
+    unsafe id can never follow spend on an earlier cell. Cells are then
+    executed config-major so a matrix aborted part-way still has complete
+    repeat sets for the configs it reached, and each record is appended to
+    ``runs.jsonl`` as it is produced, so an abort keeps every result the
+    matrix already paid for.
 
     Args:
         spec: Matrix specification.
@@ -497,12 +502,15 @@ def execute_matrix(
         Every run record, in execution order.
     """
     invoke: ReviewInvoker = run_review_cli if invoker is None else invoker
+    # One pass over the whole matrix before the first paid invocation: an
+    # unsafe id in the last config must not be discovered after the first
+    # config has already spent.
+    for config in spec.configs:
+        for item in corpus.items:
+            _require_safe_ids(config=config, item=item)
     runs: list[EvalRun] = []
     for config in spec.configs:
         for item in corpus.items:
-            # Checked before the first paid invocation: an id that cannot be a
-            # path segment must abort the matrix before it spends, not after.
-            _require_safe_ids(config=config, item=item)
             for repeat in range(1, spec.repeats + 1):
                 result = invoke(config=config, item=item, spec=spec)
                 output_path = _persist(

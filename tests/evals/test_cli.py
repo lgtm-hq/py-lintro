@@ -213,7 +213,7 @@ def test_cli_exits_one_when_nothing_is_comparable(
 
 @pytest.mark.parametrize(
     "stamp",
-    ["/absolute", "../escape", "nested/stamp", ".", "..", "trailing/"],
+    ["/absolute", "../escape", "nested/stamp", ".", "..", "trailing/", ""],
 )
 def test_cli_rejects_a_stamp_that_is_not_a_directory_name(
     tmp_path: Path,
