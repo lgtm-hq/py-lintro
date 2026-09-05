@@ -13,7 +13,7 @@ from lintro.tools.implementations.pytest.collection import (
     get_parallel_workers_from_preset,
 )
 from lintro.tools.implementations.pytest.coverage_source import (
-    coverage_source_configured,
+    resolve_coverage_sources,
 )
 from lintro.tools.implementations.pytest.markers import check_plugin_installed
 
@@ -168,11 +168,14 @@ def add_coverage_options(cmd: list[str], options: dict[str, Any]) -> None:
         or coverage_threshold is not None
     )
     if needs_coverage:
-        # Prefer bare --cov when the project declares a coverage source, so the
-        # configured source applies instead of sweeping tests/ and scripts/ into
-        # the percentage. Projects without such a declaration keep --cov=.,
-        # because bare --cov would otherwise measure every imported module.
-        cmd.append("--cov" if coverage_source_configured() else "--cov=.")
+        # Pass the project's configured coverage sources explicitly, so the
+        # percentage covers the project's own code rather than tests/ and
+        # scripts/. A bare --cov would express the same intent, but pytest-cov
+        # declares it with nargs="?" and would swallow the following test path
+        # as its source, so every source is spelled out as --cov=<source>.
+        # Projects that declare no source keep the historical --cov=.
+        sources = resolve_coverage_sources() or ["."]
+        cmd.extend(f"--cov={source}" for source in sources)
 
     # Add coverage HTML report
     if coverage_html:

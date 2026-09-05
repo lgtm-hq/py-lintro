@@ -209,6 +209,17 @@ run_tests() {
 	# Always pass workers to ensure explicit control via LINTRO_PYTEST_WORKERS
 	tool_opts="${tool_opts},pytest:workers=${workers}"
 
+	# Coverage floor. The project floor in [tool.coverage.report] fail_under is
+	# calibrated against the full unit suite, so a run that exercises only a
+	# subset (the Docker integration run, a single test file) would fail it while
+	# still reporting and uploading coverage. Set LINTRO_COVERAGE_THRESHOLD to
+	# override it for such runs (0 disables the gate); leave it unset to keep the
+	# project floor.
+	if [ -n "${LINTRO_COVERAGE_THRESHOLD:-}" ]; then
+		echo -e "${YELLOW}Coverage threshold overridden: ${LINTRO_COVERAGE_THRESHOLD}${NC}"
+		tool_opts="${tool_opts},pytest:coverage_threshold=${LINTRO_COVERAGE_THRESHOLD}"
+	fi
+
 	# Add pytest-sugar for enhanced CI output (if available)
 	if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
 		if python -c "import pytest_sugar" 2>/dev/null; then

@@ -1,12 +1,15 @@
-"""Detection of a project-declared coverage source configuration.
+"""Resolution of a project-declared coverage source configuration.
 
-``pytest --cov`` with no value tells ``pytest-cov`` to measure whatever
-``coverage.py`` is configured to measure, which is only useful when the project
-declares a source. Without such a declaration ``coverage.py`` measures every
-imported module, including installed dependencies, so lintro keeps emitting
-``--cov=.`` there to preserve the historical "measure this project" behaviour.
+``lintro test`` runs against arbitrary projects, so it cannot assume the
+project measures itself. Emitting ``--cov=.`` sweeps ``tests/`` and ``scripts/``
+into the percentage, while a bare ``--cov`` is worse: ``pytest-cov`` declares it
+with ``nargs="?"``, so the next positional argument (a test path) is swallowed as
+the coverage source. This module resolves the sources the project actually
+declares so the builder can emit an explicit ``--cov=<source>`` per source, which
+is unambiguous regardless of argument order, and fall back to ``--cov=.`` when
+the project declares nothing.
 
-Detection mirrors ``coverage.py``'s own configuration selection: candidate files
+Resolution mirrors ``coverage.py``'s own configuration selection: candidate files
 are tried in a fixed order (``COVERAGE_RCFILE`` or ``.coveragerc``, then
 ``.coveragerc.toml``, ``setup.cfg``, ``tox.ini`` and ``pyproject.toml``), the
 first one carrying any coverage settings is the active configuration, and only
@@ -121,36 +124,53 @@ def _sections_for(path: Path, our_file: bool) -> dict[str, Mapping[str, object]]
     return _ini_sections(path=path, our_file=our_file)
 
 
-def _declares_source(sections: Mapping[str, Mapping[str, object]]) -> bool:
-    """Return whether a config file's ``run`` section names a source.
+def _coerce_sources(value: object) -> list[str]:
+    """Normalise a raw ``source`` option value into a list of sources.
+
+    Args:
+        value: Raw option value from a TOML table or an INI section.
+
+    Returns:
+        list[str]: Non-empty source entries, in declaration order.
+    """
+    if isinstance(value, str):
+        # coverage.py splits INI list options on newlines and commas.
+        raw = [part for chunk in value.splitlines() for part in chunk.split(",")]
+    elif isinstance(value, (list, tuple)):
+        raw = [str(entry) for entry in value]
+    else:
+        return []
+    return [entry.strip() for entry in raw if entry.strip()]
+
+
+def _declared_sources(sections: Mapping[str, Mapping[str, object]]) -> list[str]:
+    """Return the sources a config file's ``run`` section names.
 
     Args:
         sections: Recognised coverage sections by bare name.
 
     Returns:
-        bool: True when a non-empty source option is present.
+        list[str]: Declared sources, in ``_SOURCE_KEYS`` order.
     """
     run = sections.get("run")
     if run is None:
-        return False
+        return []
+    sources: list[str] = []
     for key in _SOURCE_KEYS:
-        value = run.get(key)
-        if isinstance(value, str):
-            if value.strip():
-                return True
-        elif value:
-            return True
-    return False
+        for entry in _coerce_sources(value=run.get(key)):
+            if entry not in sources:
+                sources.append(entry)
+    return sources
 
 
-def coverage_source_configured(root: str | Path | None = None) -> bool:
-    """Detect whether the active ``coverage.py`` configuration declares a source.
+def resolve_coverage_sources(root: str | Path | None = None) -> list[str]:
+    """Resolve the sources the active ``coverage.py`` configuration declares.
 
     Args:
         root: Directory to resolve configuration from. Defaults to the cwd.
 
     Returns:
-        bool: True when the active configuration declares a coverage source.
+        list[str]: Declared coverage sources, empty when none are configured.
     """
     base = Path(root) if root is not None else Path.cwd()
     rcfile = os.environ.get("COVERAGE_RCFILE")
@@ -168,5 +188,5 @@ def coverage_source_configured(root: str | Path | None = None) -> bool:
         sections = _sections_for(path=path, our_file=our_file)
         if not sections:
             continue
-        return _declares_source(sections=sections)
-    return False
+        return _declared_sources(sections=sections)
+    return []
