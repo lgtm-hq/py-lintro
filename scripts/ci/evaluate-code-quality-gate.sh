@@ -5,6 +5,12 @@
 # Selects the effective dogfooding lint attempt (retry when it ran) and writes
 # normalized upstream values for assert-required-check.sh.
 #
+# This script only normalizes; the pass/fail verdict is written by
+# run-code-quality-gate.sh. When neither attempt produced a lint verdict the
+# normalized values carry that through (empty status/exit-code, or exit-code
+# 143), and the gate fails closed with passed=false and infra-flake=true
+# (#2296).
+#
 # Required environment variables:
 #   DOCKER_BUILD_RESULT
 #   PRIMARY_LINT_RESULT
@@ -125,7 +131,10 @@ effective_timed_out_tools="$(sanitize_timed_out_tools "${PRIMARY_LINT_TIMED_OUT_
 # cancelled, empty outputs): otherwise a primary that reported failed/1 would be
 # replaced by an absorbable retry result and the real failure would be masked
 # (Greptile P1 on #1650). When the primary already flaked too, we prefer the
-# retry as the later of two non-verdicts (both get absorbed, infra-flake=true).
+# retry as the later of two non-verdicts. Since #2296 that terminal case is
+# fail-closed rather than absorbed: run-code-quality-gate.sh writes
+# passed=false / status=no-verdict / infra-flake=true and the required check
+# goes red until the auto-rerun produces a real verdict.
 if [[ "${RETRY_LINT_RESULT:-}" == "success" || "${RETRY_LINT_RESULT:-}" == "failure" ]]; then
 	if [[ "${RETRY_LINT_RESULT}" == "success" ]] ||
 		reports_genuine_lint_failure "${RETRY_LINT_STATUS:-}" "${RETRY_LINT_EXIT_CODE:-}" ||

@@ -111,8 +111,17 @@ jobs:
       #      89692290242), which no default signature matched. Scoped to the
       #      registry URL on purpose: a bare "context deadline exceeded"
       #      would swallow genuine timeouts elsewhere.
+      # 5.   Fail-closed code-quality gate (#2296). The dogfooding lint job
+      #      losing its runner already matches the built-in shutdown
+      #      signatures, but since #2296 the 🚦 Code Quality Gate job goes red
+      #      on its own too, and a run whose only failed job is the gate would
+      #      otherwise match nothing. Matched as a fixed-string substring of
+      #      the line scripts/ci/assert-required-check.sh prints (which also
+      #      carries a ::error:: prefix and a (result=...) suffix), and never
+      #      printed for a genuine lint verdict, which reports status=failed.
       signatures: |-
         fetching ambient OIDC credentials
         retrieving ID token
         reading ID token
         Get "https://registry-1.docker.io/v2/": context deadline exceeded
+        No lint verdict (runner loss); auto-rerun will retry

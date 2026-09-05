@@ -58,6 +58,13 @@ required):
 - `tests/unit/plugins/test_entry_point_plugins.py::test_list_tools_shows_origin_for_builtin_and_external`
   can fail under `pytest -n auto` due to plugin-registry cross-test pollution; it passes
   when run on its own. Not an environment problem.
+- **The required `lintro-code-quality` check fails closed (#2296).** If the dogfooding
+  lint job is killed, cancelled, or times out it produces no lint verdict, and the gate
+  goes **red** with `status=no-verdict` / `infra-flake=true` rather than absorbing the
+  noise. A red check whose job summary says "No lint verdict (runner loss); auto-rerun
+  will retry" is runner loss, not a lint violation — `auto-rerun-on-infra-failure.yml`
+  reruns it up to three times. Do not "fix" that red by re-greening the gate: wait for
+  the rerun, or find out why the runner keeps dying.
 - The interpreter is the system Python (3.12); `requires-python` is `>=3.11`.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
