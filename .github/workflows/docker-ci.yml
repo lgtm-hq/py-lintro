@@ -72,6 +72,19 @@ concurrency:
 
 env:
   CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
+  # Fork PRs cannot pull a CI-tagged image (fork builds are never pushed to
+  # GHCR), so every dogfooding surface falls back to the newest published
+  # release. THE ONLY PIN SITE IN THIS FILE — the four consumers below read
+  # it, two through `env` directly and two through
+  # `needs.docker-build.outputs.fork-fallback-image` (the `env` context is
+  # not available in `jobs.<id>.with`, so a reusable-workflow input has to
+  # come through a job output). Do not hand-edit: run
+  # `scripts/ci/sync-pinned-release-image.py`, which rewrites this line and
+  # the dogfood-nightly.yml sites as one set. The tag rides alongside the
+  # digest so the pinned release is readable and Renovate has a version to
+  # bump (see the customManager in renovate.json).
+  LINTRO_FORK_FALLBACK_IMAGE: >-
+    ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
 
 jobs:
   # Required-check-safe replacement for on.<event>.paths (see header
@@ -249,6 +262,8 @@ jobs:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     outputs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
+      # See the "Publish fork-fallback image pin" step below.
+      fork-fallback-image: ${{ steps.fork-fallback.outputs.image }}
     steps:
       - name: Harden Runner
         # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
@@ -298,6 +313,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
         run: scripts/ci/detect-fork-pr.sh
+      # Republishes the workflow-level pin as a job output so the
+      # reusable-workflow callers can reach it (`env` is not an available
+      # context in `jobs.<id>.with`). Written from a step rather than
+      # interpolated straight into `outputs:` so the value cannot be empty:
+      # an empty middle operand is falsy in the consumers' ternary and would
+      # silently select a ci- tag that fork runs never push.
+      - name: Publish fork-fallback image pin
+        id: fork-fallback
+        run: echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"
       - name: Free disk space (fork fallback)
         if: >-
           needs.changes.outputs.pipeline != 'false' &&
@@ -426,7 +450,7 @@ jobs:
         if: needs.changes.outputs.pipeline == 'false'
         env:
           SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
-        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(Docker build)"
+        run: 'echo "skipped: $SKIP_REASON (Docker build)"'
 
   dogfooding-lint:
     needs: [changes, docker-build]
@@ -505,12 +529,12 @@ jobs:
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
       # fork-built image via the tarball path.
-      # Pinned release digest for the fork path. Renovate bumps this and
-      # every other pin site (here and in dogfood-nightly.yml) as one set —
-      # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
+      # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE pin at
+      # the top of this file, republished as a docker-build output because
+      # `env` is not available in `jobs.<id>.with`.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29'
+        needs.docker-build.outputs.fork-fallback-image
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
@@ -609,11 +633,11 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
-          # Pinned release digest for the fork path; bumped as one set by
-          # Renovate together with the other pin sites.
+          # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE
+          # pin at the top of this file.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29'
+            env.LINTRO_FORK_FALLBACK_IMAGE
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-changed-files.sh
       - name: Upload linting report
@@ -746,11 +770,11 @@ jobs:
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
-          # Pinned release digest for the fork path; bumped as one set by
-          # Renovate together with the other pin sites.
+          # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE
+          # pin at the top of this file.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29'
+            env.LINTRO_FORK_FALLBACK_IMAGE
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
           # Full-repo runs download the reusable workflow's report. Changed
           # scope deliberately leaves this unset: that job publishes only the
@@ -839,12 +863,12 @@ jobs:
       allowed-endpoints-mode: append
       # Same image selection as dogfooding-lint: CI-built image for
       # same-repo PRs, pinned release digest for forks (no CI push).
-      # Pinned release digest for the fork path. Renovate bumps this and
-      # every other pin site (here and in dogfood-nightly.yml) as one set —
-      # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
+      # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE pin at
+      # the top of this file, republished as a docker-build output because
+      # `env` is not available in `jobs.<id>.with`.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29'
+        needs.docker-build.outputs.fork-fallback-image
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Rolls the effective dogfooding result up into a single required-check
@@ -1123,7 +1147,7 @@ jobs:
         if: needs.changes.outputs.pipeline == 'false'
         env:
           SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
-        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(security audit)"
+        run: 'echo "skipped: $SKIP_REASON (security audit)"'
       - name: Run security audit
         id: audit
         if: needs.changes.outputs.pipeline != 'false'
@@ -1262,8 +1286,7 @@ jobs:
         if: needs.changes.outputs.pipeline == 'false'
         env:
           SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
-        run: >-
-          scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(integration tests)"
+        run: 'echo "skipped: $SKIP_REASON (integration tests)"'
       - name: Smoke Test Docker Image
         if: needs.changes.outputs.pipeline != 'false'
         run: ./scripts/docker/docker-build-test.sh

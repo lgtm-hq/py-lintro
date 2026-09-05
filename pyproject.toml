@@ -440,7 +440,6 @@ max-statements = 50
 "lintro/watch/watcher.py" = ["PLR0913"]
 "scripts/ci/format-changelog.py" = ["C901", "PLR0912", "PLR0915"]
 "scripts/ci/format-security-comment.py" = ["C901", "PLR0912", "PLR0915"]
-"scripts/ci/site/fix-markdown-docs.py" = ["PLR0912"]
 "scripts/ci/site/migrate-docs-content.py" = ["C901", "PLR0912", "PLR0915"]
 "scripts/ci/verify-manifest-tools.py" = ["C901", "PLR0912", "PLR0915"]
 "tests/unit/ai/review/test_cross_chunk_synthesis_2269.py" = ["PLR0913"]
@@ -526,6 +525,13 @@ python_version = "3.11"
 # The offline eval harness (#2147) is repo-only tooling, not a package: its
 # root has to be on the search path for ``review_matrix`` imports to resolve.
 mypy_path = ["evals/review-efficacy"]
+# Pin the incremental cache to one location (#2297). A bare ".mypy_cache" is
+# mypy's default and is still resolved against the process cwd, so it would
+# not stop an invocation started outside the repo root from scattering a cache
+# into that subdirectory. $MYPY_CONFIG_FILE_DIR expands to the directory
+# holding this file, which anchors the cache to the repo root from any cwd.
+# .gitignore keeps them untracked either way; this stops them being created.
+cache_dir = "$MYPY_CONFIG_FILE_DIR/.mypy_cache"
 strict = true
 ignore_missing_imports = false
 warn_unused_ignores = true

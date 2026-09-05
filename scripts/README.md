@@ -106,9 +106,6 @@ Scripts for GitHub Actions workflows and continuous integration.
 
 | Script                                      | Purpose                                                                                                                          | Usage                                                                                                                      |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `coverage-manager.sh`                       | Unified coverage ops (extract/badge/comment/threshold)                                                                           | `./scripts/utils/coverage-manager.sh --help`                                                                               |
-| `ci-log.sh`                                 | Generic CI logging utility for workflow status messages                                                                          | `./scripts/ci/ci-log.sh <message>`                                                                                         |
-| `ci-post-pr-comment.sh`                     | Post comments to PRs using GitHub API                                                                                            | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                                                |
 | `post-pr-delete-previous.sh`                | Delete previous PR comments by marker                                                                                            | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                           |
 | `lintro-report-generate.sh`                 | Generate comprehensive Lintro reports                                                                                            | `./scripts/ci/lintro-report-generate.sh`                                                                                   |
 | `pull-lintro-image.sh`                      | Pull lintro Docker image from GHCR and log digest                                                                                | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                |
@@ -121,9 +118,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `smoke-test-ai-tools.sh`                    | Run every baked agent CLI in the ai-tools staging image                                                                          | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                                                     |
 | `cosign-sign-images.sh`                     | Sign promoted image digests with Cosign keyless OIDC                                                                             | `./scripts/ci/cosign-sign-images.sh --help`                                                                                |
 | `coverage-badge-update.sh`                  | Generate and update coverage badge                                                                                               | `./scripts/ci/coverage-badge-update.sh --help`                                                                             |
-| `sbom-generate.sh`                          | Generate and export SBOMs via bomctl                                                                                             | `./scripts/ci/sbom-generate.sh --help`                                                                                     |
 | `egress-audit-lite.sh`                      | Audit reachability of allowed endpoints                                                                                          | `./scripts/ci/egress-audit-lite.sh --help`                                                                                 |
-| `detect-changes.sh`                         | Detect repo diffs and set has_changes output                                                                                     | `./scripts/ci/detect-changes.sh --help`                                                                                    |
 | `detect-fork-pr.sh`                         | Detect fork PRs and set `is-fork` output for conditional steps                                                                   | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                                                                   |
 | `resolve-pipeline-relevance.sh`             | Resolve heavy-pipeline path relevance and set `pipeline` output                                                                  | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                                                        |
 | `release-bump-only.sh`                      | Classify automated version-bump PRs via diff allowlist (#1362)                                                                   | `./scripts/ci/release-bump-only.sh --help`                                                                                 |
@@ -206,7 +201,6 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | `preview-pages-local.sh`        | Build Pages-like dist with optional local coverage bundles | `./scripts/ci/site/preview-pages-local.sh --help`        |
 | `prepare-lychee-action-args.sh` | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help` |
 | `migrate-docs-content.py`       | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`  |
-| `fix-markdown-docs.py`          | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`     |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
@@ -265,15 +259,12 @@ Shared utilities and helper scripts.
 | `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history      | `python scripts/utils/merge_pr_comment.py --help`                       |
 | `extract-coverage.py`                | Extract coverage from XML files                       | `python scripts/utils/extract-coverage.py`                              |
 | `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID       | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
-| `extract-version.py`                 | Print `version=X.Y.Z` from TOML                       | `python scripts/utils/extract-version.py`                               |
 | `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker   | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
-| `generate_docs.py`                   | Generate documentation from docstrings                | `python scripts/utils/generate_docs.py`                                 |
 | `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)      | `./scripts/utils/install-ai-tools.sh --help`                            |
 | `install-semgrep.sh`                 | Install lockfile-pinned semgrep into an isolated venv | `./scripts/utils/install-semgrep.sh --help`                             |
 | `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)     | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
 | `install.sh`                         | Install Lintro with dependencies                      | `./scripts/utils/install.sh`                                            |
 | `json_encode_body.py`                | JSON encode comment body for GitHub API requests      | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
-| `update-version.py`                  | Update version in pyproject.toml                      | `python scripts/utils/update-version.py <version>`                      |
 | `utils.sh`                           | Shared utilities for other scripts                    | Sourced by other scripts                                                |
 | `bootstrap-env.sh`                   | Bootstrap CI env with uv and tools                    | `./scripts/utils/bootstrap-env.sh [--dry-run] [--verbose] --help`       |
 | `install-uv.sh`                      | Install uv from GitHub Releases                       | `./scripts/utils/install-uv.sh [--dry-run] [--verbose]`                 |
@@ -355,50 +346,6 @@ export TEST_PASSED=100 TEST_FAILED=0 TEST_TOTAL=100
 
 `test-ci.yml` uses lgtm-ci `reusable-test-python.yml` for coverage PR comments. The JSON
 format uses single-space after colons for compatibility with grep-based parsers.
-
-#### `sbom-generate.sh`
-
-Generate and export SBOMs using `bomctl` with optional merge and multiple output formats
-(CycloneDX/SPDX). Supports dry-run planning. The script requires the `bomctl` binary to
-be installed (no container fallback).
-
-Features:
-
-- Fetch from GitHub dependency graph (public repos) via `bomctl fetch`
-- Import local SBOM files and optionally merge them
-- Export CycloneDX (1.5/1.6) JSON/XML and SPDX 2.3 JSON files
-- Dry-run mode to preview actions; optional `--netrc` for private repos
-
-Usage:
-
-```bash
-# Show help
-./scripts/ci/sbom-generate.sh --help
-
-# Basic: fetch current repo and export CycloneDX 1.5 JSON to dist/sbom/
-./scripts/ci/sbom-generate.sh
-
-# Multiple formats and XML encoding for CycloneDX
-./scripts/ci/sbom-generate.sh \
-  --format cyclonedx-1.6 --format spdx-2.3 \
-  --encoding xml \
-  --output-dir dist/sbom
-
-# Import additional SBOMs and merge
-./scripts/ci/sbom-generate.sh \
-  --skip-fetch \
-  --import sboms/app.cdx.json \
-  --import sboms/image.cdx.json \
-  --alias combined --name lintro-sbom
-
-# Dry run to preview commands
-./scripts/ci/sbom-generate.sh --dry-run
-```
-
-Notes:
-
-- For private GitHub repos, use `--netrc` with a configured `~/.netrc`.
-- Outputs are written under `dist/sbom/` by default.
 
 ### Docker Scripts
 
