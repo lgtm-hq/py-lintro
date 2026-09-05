@@ -848,6 +848,9 @@ class StandaloneBuilder(CommandBuilder):
     TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
         "golangci_lint": "golangci-lint",
+        # Registry name and manifest name both map to the same binary.
+        "import-linter": "lint-imports",
+        "import_linter": "lint-imports",
         "dotenv_linter": "dotenv-linter",
         "pip_audit": "pip-audit",
     }
@@ -869,6 +872,7 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.GITLEAKS,
                     ToolName.GOLANGCI_LINT,
                     ToolName.HADOLINT,
+                    ToolName.IMPORT_LINTER,
                     ToolName.OSV_SCANNER,
                     ToolName.PIP_AUDIT,
                     ToolName.SHELLCHECK,

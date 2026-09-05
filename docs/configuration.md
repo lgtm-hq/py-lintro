@@ -1474,6 +1474,55 @@ skip-checking-short-docstrings = true
 - `check-arg-order`: Verify argument order matches signature
 - `skip-checking-short-docstrings`: Skip single-line docstrings
 
+#### import-linter Configuration {#import-linter}
+
+**Tool:** [import-linter](https://github.com/seddonym/import-linter) (binary
+`lint-imports`) — checks architectural import contracts for a Python package.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install import-linter`
+
+**File:** `pyproject.toml` (also reads `.importlinter` and `setup.cfg`)
+
+```toml
+[tool.importlinter]
+root_package = "mypkg"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = ["mypkg.api", "mypkg.services", "mypkg.storage"]
+
+[[tool.importlinter.contracts]]
+name = "CLI must not be imported by the core"
+type = "forbidden"
+source_modules = ["mypkg.core"]
+forbidden_modules = ["mypkg.cli"]
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: the tool runs **once** per invocation against the whole import graph,
+  regardless of how many files were passed.
+- Configuration is discovered by walking upward from the given paths; the tool then runs
+  from the config file's directory so the root package is importable.
+- A project with no import-linter configuration reports a clean result rather than an
+  error, so the tool is safe to leave enabled.
+- Check-only. `lintro format` never runs import-linter.
+
+**Available `--tool-options`:**
+
+- `timeout`: Seconds to allow the graph build and contract check (default: 60)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools import-linter
+```
+
+Contract syntax and every contract type are documented upstream at
+<https://import-linter.readthedocs.io/en/stable/contract_types/>.
+
 ### Frontend Tools
 
 #### Prettier Configuration

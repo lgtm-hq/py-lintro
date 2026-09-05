@@ -85,6 +85,7 @@ full = [
   "ruff>=0.15.9",
   "black>=26.3.1",
   "bandit>=1.9.4",
+  "import-linter>=2.15",
   "mypy>=1.19.1",
   "pydoclint>=0.8.3",
   "yamllint>=1.37.1",
@@ -190,6 +191,7 @@ packages = [
   "lintro.parsers.hadolint",
   "lintro.parsers.html_validate",
   "lintro.parsers.idiom_review",
+  "lintro.parsers.import_linter",
   "lintro.parsers.markdownlint",
   "lintro.parsers.pytest",
   "lintro.parsers.ruff",
@@ -421,6 +423,12 @@ constraint-dependencies = [
   # (GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j)
   "urllib3>=2.7.0",
 ]
+
+# import-linter (#2289). The root package is declared so `lint-imports` can
+# build lintro's import graph; the contract set is deliberately empty here so
+# adding the tool is behaviour-neutral. Contracts land in #2290.
+[tool.importlinter]
+root_package = "lintro"
 
 [tool.pydoclint]
 style = "google"
