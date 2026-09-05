@@ -451,8 +451,9 @@ jobs:
     with:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🛠️ Dogfooding Lint'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the
@@ -603,8 +604,9 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           # Must stay in sync with the dogfooding-lint lintro-tool-options
           # above: identical tool coverage is the contract of changed mode.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
           # Pinned release digest for the fork path; bumped as one set by
@@ -739,8 +741,9 @@ jobs:
         id: skips
         env:
           # Same tool coverage as the dogfooding run so skip behaviour matches.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
           # Pinned release digest for the fork path; bumped as one set by
@@ -784,8 +787,9 @@ jobs:
     with:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🛠️ Dogfooding Lint (retry)'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # The reusable's enforcing harden-runner step consumes this input
       # verbatim (the preset+append merge is only exposed as an output), so the

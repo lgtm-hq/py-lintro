@@ -45,8 +45,9 @@ jobs:
     with:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🌙 Nightly Dogfooding Lint'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -92,8 +93,9 @@ jobs:
     with:
       tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -232,8 +234,9 @@ jobs:
         id: skips
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
@@ -331,8 +334,9 @@ jobs:
         id: skips
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
