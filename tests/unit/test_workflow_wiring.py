@@ -3171,15 +3171,34 @@ def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
     for expression in expressions:
         # No consumer may carry its own literal digest again.
         assert_that(expression).described_as(expression).does_not_contain("sha256:")
-        # The fork-vs-same-repo selection the pin exists for must survive: the
-        # pin is the fork branch, the run-scoped CI tag the same-repo branch.
-        # Without this, an always-pin or always-CI regression would pass.
-        assert_that(expression).described_as(expression).contains(
-            "needs.docker-build.outputs.is-fork == 'true'",
+        # The fork-vs-same-repo selection the pin exists for must survive,
+        # including its polarity: the pin is the `&&` branch (fork) and the
+        # run-scoped CI tag the `||` branch (same repo). Asserting only that
+        # both fragments appear would accept an inverted ternary, which would
+        # hand fork PRs a ci- tag that fork runs never push.
+        collapsed = " ".join(expression.split())
+        condition = "needs.docker-build.outputs.is-fork == 'true'"
+        ci_tag = "format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id)"
+        assert_that(collapsed).described_as(expression).contains(condition)
+        assert_that(collapsed).described_as(expression).contains(ci_tag)
+        pin_token = next(
+            token
+            for token in (
+                "needs.docker-build.outputs.fork-fallback-image",
+                "env.LINTRO_FORK_FALLBACK_IMAGE",
+            )
+            if token in collapsed
         )
-        assert_that(expression).described_as(expression).contains(
-            "format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id)",
-        )
+        # condition ... && <pin> ... || <ci tag>
+        assert_that(collapsed.index(condition)).described_as(
+            expression,
+        ).is_less_than(collapsed.index(pin_token))
+        assert_that(collapsed.index(pin_token)).described_as(
+            expression,
+        ).is_less_than(collapsed.index("||"))
+        assert_that(collapsed.index("||")).described_as(
+            expression,
+        ).is_less_than(collapsed.index(ci_tag))
 
 
 def test_pinned_release_image_manager_covers_both_workflows() -> None:
