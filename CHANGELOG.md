@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.2] - 2026-09-05
+
+### Changed
+
+- **ci**: make coverage blocking repo-side (#2321) (e6a6dd7)
+
+### Fixed
+
+- **post-checks**: honour --tool-options for post-check tools (#2357) (30f341a)
+
 ## [0.147.1] - 2026-09-05
 
 ### Changed
