@@ -34,7 +34,6 @@ from lintro.config.lintro_config import (
     LintroToolConfig,
     OutputConfig,
     ReviewConfig,
-    ScoreConfig,
     WatchConfig,
 )
 from lintro.enums.validation_code import ValidationCode
@@ -49,7 +48,7 @@ except ImportError:  # pragma: no cover - enforced by packaging
 # schema rather than hand-copied: every ``LintroConfig`` field (minus the
 # loader-populated ``config_path``) plus the sections that live in the config
 # file but are parsed by other loaders. Hand-maintained lists drifted from the
-# loader and warned about valid ``score:``/``output:``/``plugins:`` sections.
+# loader and warned about valid ``output:``/``plugins:`` sections.
 KNOWN_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
     (set(LintroConfig.model_fields) - {"config_path"})
     | set(EXTERNALLY_HANDLED_SECTIONS)
@@ -67,7 +66,6 @@ KNOWN_TOOL_KEYS: frozenset[str] = frozenset(LintroToolConfig.model_fields)
 
 # Recognized keys within the remaining typed sections.
 KNOWN_REVIEW_KEYS: frozenset[str] = frozenset(ReviewConfig.model_fields)
-KNOWN_SCORE_KEYS: frozenset[str] = frozenset(ScoreConfig.model_fields)
 KNOWN_OUTPUT_KEYS: frozenset[str] = frozenset(OutputConfig.model_fields)
 KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
 
@@ -75,7 +73,7 @@ KNOWN_WATCH_KEYS: frozenset[str] = frozenset(WatchConfig.model_fields)
 # type guard. YAML spells an empty section as ``enforce:`` which deserializes
 # to ``None``, so these must be checked up front or the parser raises
 # ``AttributeError`` out of the validator instead of reporting the problem.
-# ``ai``/``review``/``score``/``output`` are excluded on purpose: their parsers
+# ``ai``/``review``/``output`` are excluded on purpose: their parsers
 # accept ``None`` as "absent" and raise a descriptive ``ValueError`` otherwise.
 MAPPING_SECTIONS: tuple[str, ...] = (
     "enforce",
@@ -534,7 +532,6 @@ def _check_raw_pyproject_lintro(
         "execution": KNOWN_EXECUTION_KEYS,
         "enforce": KNOWN_ENFORCE_KEYS,
         "review": KNOWN_REVIEW_KEYS,
-        "score": KNOWN_SCORE_KEYS,
         "output": KNOWN_OUTPUT_KEYS,
         "watch": KNOWN_WATCH_KEYS,
     }
@@ -658,7 +655,6 @@ def _schema_check_normalized(
 
         for section, known in (
             ("review", KNOWN_REVIEW_KEYS),
-            ("score", KNOWN_SCORE_KEYS),
             ("output", KNOWN_OUTPUT_KEYS),
             ("watch", KNOWN_WATCH_KEYS),
         ):

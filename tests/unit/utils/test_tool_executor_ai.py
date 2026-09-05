@@ -336,24 +336,6 @@ def test_ai_exception_propagates(monkeypatch, fake_logger):
     assert_that(_run_pipeline).raises(RuntimeError).when_called_with()
 
 
-def test_fail_under_still_forces_failure_after_ai_clears_run(
-    monkeypatch,
-    fake_logger,
-):
-    """The score gate can still fail a run that AI left at exit code 0."""
-    lintro_config = _ai_enabled_config()
-    _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
-
-    def _runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
-        _fix_results_in_place(all_results)
-        return AIOutcome(ran=True, force_failure=False)
-
-    _install_ai_layer(monkeypatch, _runner)
-    monkeypatch.setattr(run_aggregation, "determine_exit_code", lambda **_kw: 0)
-
-    assert_that(_run_pipeline(fail_under=101.0)).is_equal_to(1)
-
-
 def test_ai_status_lines_reach_the_summary(monkeypatch, fake_logger):
     """The pipeline renders AI status rows into the configuration summary."""
     lintro_config = _ai_enabled_config()

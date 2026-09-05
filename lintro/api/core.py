@@ -99,8 +99,6 @@ def check(
     yes: bool = False,
     ai_fix: bool = False,
     transport: str | None = None,
-    score: bool = False,
-    fail_under: float | None = None,
 ) -> LintroResult:
     """Check files for issues using the specified tools.
 
@@ -125,8 +123,6 @@ def check(
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Generate AI fix suggestions.
         transport: Override AI transport (``api`` or ``cli``).
-        score: Print only the health score, suppressing the summary.
-        fail_under: Exit non-zero if the health score is below this value.
 
     Returns:
         LintroResult: Structured result carrying the aggregated exit code.
@@ -155,8 +151,6 @@ def check(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
-        score=score,
-        fail_under=fail_under,
     )
     return LintroResult(action="check", exit_code=exit_code)
 
@@ -376,15 +370,13 @@ def check_run(
     yes: bool = False,
     ai_fix: bool = False,
     transport: str | None = None,
-    score: bool = False,
-    fail_under: float | None = None,
     ai_enabled: bool = True,
 ) -> RunArtifact:
     """Check files and return the full run artifact.
 
     Result-returning counterpart to :func:`check` (issue #1823). Identical
     behaviour and options; the difference is that callers get every tool
-    result, the totals, and the health score instead of only an exit code.
+    result, the totals, and the severity tallies instead of only an exit code.
 
     Args:
         paths: File/directory paths to check. Defaults to the current directory.
@@ -407,8 +399,6 @@ def check_run(
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Generate AI fix suggestions.
         transport: Override AI transport (``api`` or ``cli``).
-        score: Print only the health score, suppressing the summary.
-        fail_under: Exit non-zero if the health score is below this value.
         ai_enabled: Whether post-execution AI enhancement may run.
 
     Returns:
@@ -436,8 +426,6 @@ def check_run(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
-        score=score,
-        fail_under=fail_under,
         ai_enabled=ai_enabled,
     )
 

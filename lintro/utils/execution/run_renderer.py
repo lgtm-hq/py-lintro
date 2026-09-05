@@ -372,7 +372,8 @@ def _render_stdout_document(
             total_fixed=artifact.total_fixed,
             total_remaining=artifact.total_remaining,
             exit_code=artifact.exit_code,
-            health_score=artifact.health.to_dict() if artifact.health else None,
+            severity_counts=artifact.severity_counts,
+            severity_delta=artifact.severity_delta,
         )
         if ctx.profile:
             from lintro.profiling.report import build_profile_data
@@ -458,17 +459,39 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
                 color="green",
             )
 
-    # Always-on health score line at the end of a check run.
-    if artifact.action == Action.CHECK and artifact.health is not None:
-        health = artifact.health
-        tier_color = {
-            "great": "green",
-            "needs-work": "yellow",
-            "critical": "red",
-        }.get(health.tier.label, "cyan")
+    # Always-on severity counts and count delta at the end of a check run.
+    if artifact.action == Action.CHECK:
+        _render_severity_summary(artifact, logger=logger)
+
+
+def _render_severity_summary(artifact: RunArtifact, *, logger: Any) -> None:
+    """Print the severity-count line and, when known, the count delta.
+
+    Replaces the 0-100 health score deleted in issue #1739. Counts say what
+    the run found; the delta says how that changed since the previous run in
+    this workspace, coloured by direction of improvement (fewer is better).
+
+    Args:
+        artifact: The completed run artifact.
+        logger: Console logger used for the two lines.
+    """
+    from lintro.utils.severity_counts import (
+        counts_color,
+        delta_color,
+        format_counts_line,
+        format_delta_line,
+    )
+
+    counts = artifact.severity_counts
+    logger.console_output(
+        text=format_counts_line(counts),
+        color=counts_color(counts),
+    )
+    delta = artifact.severity_delta
+    if delta is not None:
         logger.console_output(
-            text=f"Health score: {health.score}/100 ({health.tier.label})",
-            color=tier_color,
+            text=format_delta_line(delta),
+            color=delta_color(delta),
         )
 
 
@@ -592,6 +615,31 @@ def _write_run_files(
         warn_func(f"Warning: Failed to clean up old runs: {e}")
 
 
+def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None:
+    """Store this check run's severity counts for the next run to compare.
+
+    Only ``check`` runs record a baseline: ``fmt`` and ``test`` measure
+    something else, and letting them overwrite the baseline would make the
+    next check's delta compare two different populations.
+
+    Args:
+        artifact: The completed run artifact.
+        ctx: Shared run context; supplies the run-log directory.
+    """
+    if artifact.action != Action.CHECK:
+        return
+
+    from lintro.utils.severity_baseline import (
+        resolve_log_root,
+        write_severity_baseline,
+    )
+
+    log_root = resolve_log_root(ctx.output_manager)
+    if log_root is None:
+        return
+    write_severity_baseline(log_root, artifact.severity_counts)
+
+
 def render_run(
     artifact: RunArtifact,
     *,
@@ -620,12 +668,9 @@ def render_run(
     if artifact.early_exit:
         return
 
-    health_score = artifact.health_score
+    _record_severity_baseline(artifact, ctx=ctx)
 
     if not artifact.tool_results:
-        # Empty result set (e.g. all tools skipped) still needs numeric stdout.
-        if ctx.score_only:
-            print(health_score)
         return
 
     from lintro.enums.group_by import GroupBy, normalize_group_by
@@ -634,16 +679,12 @@ def render_run(
     if normalize_group_by(ctx.group_by) == GroupBy.CATEGORY:
         enrich_tool_results_with_categories(artifact.tool_results)
 
-    if ctx.score_only:
-        # Score-only wins over JSON/SARIF so stdout stays a bare number.
-        print(health_score)
-    else:
-        _render_stdout_document(
-            artifact,
-            ctx=ctx,
-            output_format=output_format,
-            ai_enrichment=ai_enrichment,
-        )
+    _render_stdout_document(
+        artifact,
+        ctx=ctx,
+        output_format=output_format,
+        ai_enrichment=ai_enrichment,
+    )
 
     # Route warnings to stderr (loguru) for clean-stdout formats so plain-text
     # messages don't corrupt the JSON/SARIF/CSV/Markdown document on stdout.

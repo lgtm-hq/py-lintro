@@ -33,7 +33,6 @@ from lintro.config.review_config import (
     ReviewChecklistItemConfig,
     ReviewConfig,
 )
-from lintro.config.score_config import ScoreConfig
 from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.exceptions.errors import ConfigurationError
@@ -313,7 +312,6 @@ _SECTION_FIELD_OWNERS: dict[str, type[BaseModel]] = {
     "execution": ExecutionConfig,
     "output": OutputConfig,
     "review": ReviewConfig,
-    "score": ScoreConfig,
 }
 _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
 
@@ -877,34 +875,6 @@ def _parse_output_config(data: Any) -> OutputConfig:
     return OutputConfig(**filtered)
 
 
-def _parse_score_config(data: Any) -> ScoreConfig:
-    """Parse the health score configuration section.
-
-    Args:
-        data: Raw ``score`` section from config.
-
-    Returns:
-        ScoreConfig: Parsed score configuration.
-
-    Raises:
-        ValueError: When the score section is not a mapping.
-    """
-    if not data:
-        return ScoreConfig()
-    if not isinstance(data, dict):
-        msg = f"score config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
-    known_fields = set(ScoreConfig.model_fields.keys())
-    unknown = set(data.keys()) - known_fields
-    if unknown:
-        logger.warning(
-            "Unknown score config keys ignored: {}",
-            ", ".join(sorted(unknown)),
-        )
-    filtered = {key: value for key, value in data.items() if key in known_fields}
-    return ScoreConfig(**filtered)
-
-
 def _parse_deps_config(data: Any) -> DepsConfig:
     """Parse the ``deps`` configuration section.
 
@@ -1034,7 +1004,6 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             "deps",
             "output",
             "review",
-            "score",
             "tool",
             "tools",
             "watch",
@@ -1104,7 +1073,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tools": {},
         "ai": {},
         "review": {},
-        "score": {},
         "output": {},
         "watch": {},
         "deps": {},
@@ -1191,8 +1159,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["ai"] = value
         elif key_lower == "review":
             result["review"] = value
-        elif key_lower == "score" and isinstance(value, dict):
-            result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
         elif key_lower == "watch":
@@ -1426,7 +1392,6 @@ def build_config_from_dict(
     # Stored verbatim: parsing belongs to the AI layer (issue #724).
     ai_config = data.get("ai") or {}
     review_config = _parse_review_config(data.get("review", {}))
-    score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
     watch_config = _parse_watch_config(data.get("watch", {}))
     deps_config = _parse_deps_config(data.get("deps", {}))
@@ -1438,7 +1403,6 @@ def build_config_from_dict(
         tools=tools_config,
         ai=ai_config,
         review=review_config,
-        score=score_config,
         output=output_config,
         watch=watch_config,
         deps=deps_config,

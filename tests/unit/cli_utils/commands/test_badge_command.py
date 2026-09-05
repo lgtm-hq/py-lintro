@@ -13,22 +13,22 @@ from click.testing import CliRunner
 from lintro.cli import cli
 from lintro.cli_utils.commands.badge import (
     badge_command,
-    resolve_health_score,
+    resolve_severity_counts,
 )
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
-from lintro.utils.health_score import HealthScore, ScoreTier, SeverityCounts
 
 
 def test_badge_markdown_default() -> None:
-    """Default output is a markdown shields.io image for the score."""
+    """Default output is a markdown shields.io image for the issue counts."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "84"])
+    result = runner.invoke(badge_command, ["--errors", "0"])
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output.strip()).is_equal_to(
-        "![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)",
+        "![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)",
     )
 
 
@@ -36,11 +36,27 @@ def test_badge_url_only() -> None:
     """``--url`` prints the bare shields.io URL."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "60", "--url"])
+    result = runner.invoke(badge_command, ["--warnings", "2", "--url"])
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output.strip()).is_equal_to(
-        "https://img.shields.io/badge/lintro-60%2F100-yellow",
+        "https://img.shields.io/badge/lintro-2%20warnings-yellow",
+    )
+
+
+def test_badge_message_lists_each_severity_found() -> None:
+    """A mixed run names every severity that has a non-zero count."""
+    runner = CliRunner()
+
+    result = runner.invoke(
+        badge_command,
+        ["--errors", "3", "--warnings", "1", "--info", "5", "--url"],
+    )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output.strip()).is_equal_to(
+        "https://img.shields.io/badge/"
+        "lintro-3%20errors%2C%201%20warning%2C%205%20info-red",
     )
 
 
@@ -48,29 +64,34 @@ def test_badge_style_flat() -> None:
     """``--style flat`` appends the shields style query parameter."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "84", "--style", "flat", "--url"])
+    result = runner.invoke(
+        badge_command,
+        ["--errors", "0", "--style", "flat", "--url"],
+    )
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output.strip()).is_equal_to(
-        "https://img.shields.io/badge/lintro-84%2F100-brightgreen?style=flat",
+        "https://img.shields.io/badge/lintro-0%20issues-brightgreen?style=flat",
     )
 
 
 def test_badge_json_output() -> None:
-    """``--json`` emits score, tier, color, url, and markdown."""
+    """``--json`` emits the counts, message, color, url, and markdown."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "40", "--json"])
+    result = runner.invoke(badge_command, ["--errors", "4", "--json"])
 
     assert_that(result.exit_code).is_equal_to(0)
     payload = json.loads(result.output)
-    assert_that(payload["score"]).is_equal_to(40)
-    assert_that(payload["tier"]).is_equal_to("critical")
+    assert_that(payload["counts"]).is_equal_to(
+        {"error": 4, "warning": 0, "info": 0, "total": 4},
+    )
+    assert_that(payload["message"]).is_equal_to("4 errors")
     assert_that(payload["color"]).is_equal_to("red")
     assert_that(payload["url"]).is_equal_to(
-        "https://img.shields.io/badge/lintro-40%2F100-red",
+        "https://img.shields.io/badge/lintro-4%20errors-red",
     )
-    assert_that(payload["markdown"]).starts_with("![Lintro Score](")
+    assert_that(payload["markdown"]).starts_with("![Lintro Issues](")
 
 
 def test_badge_registered_on_cli() -> None:
@@ -83,57 +104,55 @@ def test_badge_registered_on_cli() -> None:
     assert_that(result.output.lower()).contains("shields")
 
 
-def test_resolve_health_score_uses_override() -> None:
+def test_resolve_severity_counts_uses_override() -> None:
     """An explicit override skips the live check API."""
     with patch("lintro.cli_utils.commands.badge.api.check_run") as mock_check:
-        score = resolve_health_score(score_override=77, paths=())
+        counts = resolve_severity_counts(
+            override=SeverityCounts(errors=7),
+            paths=(),
+        )
 
-    assert_that(score).is_equal_to(77)
+    assert_that(counts.errors).is_equal_to(7)
     mock_check.assert_not_called()
 
 
-def _scored_artifact(*, score: int = 88) -> RunArtifact:
-    """Build a scored run artifact for badge tests.
+def _counted_artifact(*, errors: int = 0, warnings: int = 0) -> RunArtifact:
+    """Build a completed run artifact for badge tests.
 
     Args:
-        score: Health score to embed on the artifact.
+        errors: ERROR-severity count to embed on the artifact.
+        warnings: WARNING-severity count to embed on the artifact.
 
     Returns:
-        RunArtifact: Artifact with a real health score.
+        RunArtifact: Artifact carrying real severity counts.
     """
     return RunArtifact(
-        health=HealthScore(
-            score=score,
-            tier=ScoreTier.GREAT,
-            counts=SeverityCounts(),
-            weighted_penalty=0.0,
-        ),
+        severity_counts=SeverityCounts(errors=errors, warnings=warnings),
         tool_results=[
             ToolResult(name="ruff", success=True, skipped=False),
         ],
     )
 
 
-def test_resolve_health_score_runs_check_when_needed() -> None:
-    """Without an override, a score-only API check is invoked."""
-    artifact = _scored_artifact()
+def test_resolve_severity_counts_runs_check_when_needed() -> None:
+    """Without an override, a quiet API check supplies the counts."""
+    artifact = _counted_artifact(errors=2, warnings=1)
 
     with patch(
         "lintro.cli_utils.commands.badge.api.check_run",
         return_value=artifact,
     ) as mock_check:
-        score = resolve_health_score(score_override=None, paths=(".",))
+        counts = resolve_severity_counts(override=None, paths=(".",))
 
-    assert_that(score).is_equal_to(88)
+    assert_that(counts.total).is_equal_to(3)
     mock_check.assert_called_once()
-    assert_that(mock_check.call_args.kwargs["score"]).is_true()
     assert_that(mock_check.call_args.kwargs["no_log"]).is_true()
     assert_that(mock_check.call_args.kwargs["ai_enabled"]).is_false()
     assert_that(mock_check.call_args.kwargs["paths"]).is_equal_to(["."])
 
 
-def test_resolve_health_score_rejects_early_exit() -> None:
-    """An unscored early-exit run must not become a 0/100 badge."""
+def test_resolve_severity_counts_rejects_early_exit() -> None:
+    """An early-exit run must not become a zero-issue badge."""
     artifact = RunArtifact(early_exit=True, exit_code=1)
 
     with patch(
@@ -141,16 +160,16 @@ def test_resolve_health_score_rejects_early_exit() -> None:
         return_value=artifact,
     ):
         with pytest.raises(click.ClickException):
-            resolve_health_score(score_override=None, paths=())
+            resolve_severity_counts(override=None, paths=())
 
 
-def test_badge_live_score_prints_markdown_only() -> None:
-    """Without ``--score``, CLI output is the badge markdown (no leaked score)."""
+def test_badge_live_run_prints_markdown_only() -> None:
+    """Without an override, CLI output is only the badge markdown."""
     runner = CliRunner()
-    artifact = _scored_artifact(score=88)
+    artifact = _counted_artifact(errors=1)
 
     def _fake_check_run(**_kwargs: object) -> RunArtifact:
-        print("88")
+        print("noise from the run")
         return artifact
 
     with patch(
@@ -161,9 +180,9 @@ def test_badge_live_score_prints_markdown_only() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output.strip()).is_equal_to(
-        "![Lintro Score](https://img.shields.io/badge/lintro-88%2F100-brightgreen)",
+        "![Lintro Issues](https://img.shields.io/badge/lintro-1%20error-red)",
     )
-    assert_that(result.output).does_not_contain("88\n")
+    assert_that(result.output).does_not_contain("noise from the run")
 
 
 def test_badge_live_early_exit_prints_no_badge() -> None:
@@ -181,11 +200,11 @@ def test_badge_live_early_exit_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-def test_badge_rejects_score_out_of_range() -> None:
-    """Click rejects ``--score`` values outside 0-100."""
+def test_badge_rejects_negative_count() -> None:
+    """Click rejects negative count overrides."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "101"])
+    result = runner.invoke(badge_command, ["--errors", "-1"])
 
     assert_that(result.exit_code).is_not_equal_to(0)
 
@@ -194,21 +213,16 @@ def test_badge_rejects_json_and_url_together() -> None:
     """``--json`` and ``--url`` are mutually exclusive."""
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", "84", "--json", "--url"])
+    result = runner.invoke(badge_command, ["--errors", "0", "--json", "--url"])
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output.lower()).contains("not both")
 
 
-def test_resolve_health_score_rejects_all_skipped_run() -> None:
-    """An all-skipped run must not publish a perfect 100 badge."""
+def test_resolve_severity_counts_rejects_all_skipped_run() -> None:
+    """An all-skipped run must not publish a zero-issue badge."""
     artifact = RunArtifact(
-        health=HealthScore(
-            score=100,
-            tier=ScoreTier.GREAT,
-            counts=SeverityCounts(),
-            weighted_penalty=0.0,
-        ),
+        severity_counts=SeverityCounts(),
         tool_results=[
             ToolResult(
                 name="ruff",
@@ -224,12 +238,12 @@ def test_resolve_health_score_rejects_all_skipped_run() -> None:
         return_value=artifact,
     ):
         with pytest.raises(click.ClickException):
-            resolve_health_score(score_override=None, paths=())
+            resolve_severity_counts(override=None, paths=())
 
 
-def test_resolve_health_score_rejects_no_files_found_run() -> None:
-    """A run that executed but matched no files must not publish 100."""
-    artifact = _scored_artifact(score=100)
+def test_resolve_severity_counts_rejects_no_files_found_run() -> None:
+    """A run that executed but matched no files must not publish a badge."""
+    artifact = _counted_artifact()
     artifact.tool_results = [
         ToolResult(
             name="ruff",
@@ -256,13 +270,13 @@ def test_resolve_health_score_rejects_no_files_found_run() -> None:
         return_value=artifact,
     ):
         with pytest.raises(click.ClickException):
-            resolve_health_score(score_override=None, paths=())
+            resolve_severity_counts(override=None, paths=())
 
 
 def test_badge_live_no_files_found_prints_no_badge() -> None:
     """Empty-path live checks exit non-zero and print no shields snippet."""
     runner = CliRunner()
-    artifact = _scored_artifact(score=100)
+    artifact = _counted_artifact()
     artifact.tool_results = [
         ToolResult(
             name="ruff",
@@ -282,23 +296,23 @@ def test_badge_live_no_files_found_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-def test_resolve_health_score_accepts_filter_empty_with_post_checks() -> None:
+def test_resolve_severity_counts_accepts_filter_empty_with_post_checks() -> None:
     """A filter-empty main phase is usable when a post-check inspected files."""
-    artifact = _scored_artifact(score=88)
+    artifact = _counted_artifact(warnings=4)
     artifact.main_phase_empty_due_to_filter = True
 
     with patch(
         "lintro.cli_utils.commands.badge.api.check_run",
         return_value=artifact,
     ):
-        score = resolve_health_score(score_override=None, paths=())
+        counts = resolve_severity_counts(override=None, paths=())
 
-    assert_that(score).is_equal_to(88)
+    assert_that(counts.warnings).is_equal_to(4)
 
 
-def test_resolve_health_score_rejects_all_timeout_run() -> None:
-    """An all-timeout run must not publish a perfect 100 badge."""
-    artifact = _scored_artifact(score=100)
+def test_resolve_severity_counts_rejects_all_timeout_run() -> None:
+    """An all-timeout run must not publish a zero-issue badge."""
+    artifact = _counted_artifact()
     artifact.tool_results = [
         ToolResult(
             name="ruff",
@@ -314,19 +328,14 @@ def test_resolve_health_score_rejects_all_timeout_run() -> None:
         return_value=artifact,
     ):
         with pytest.raises(click.ClickException):
-            resolve_health_score(score_override=None, paths=())
+            resolve_severity_counts(override=None, paths=())
 
 
 def test_badge_live_all_skipped_prints_no_badge() -> None:
     """Skipped-only live checks exit non-zero and print no shields snippet."""
     runner = CliRunner()
     artifact = RunArtifact(
-        health=HealthScore(
-            score=100,
-            tier=ScoreTier.GREAT,
-            counts=SeverityCounts(),
-            weighted_penalty=0.0,
-        ),
+        severity_counts=SeverityCounts(),
         tool_results=[
             ToolResult(
                 name="ruff",
@@ -361,7 +370,7 @@ def test_badge_style_query_keeps_hyphens(style: str) -> None:
 
     result = runner.invoke(
         badge_command,
-        ["--score", "84", "--style", style, "--url"],
+        ["--errors", "0", "--style", style, "--url"],
     )
 
     assert_that(result.exit_code).is_equal_to(0)
@@ -369,42 +378,28 @@ def test_badge_style_query_keeps_hyphens(style: str) -> None:
     assert_that(result.output).does_not_contain("%2D")
 
 
-def test_badge_style_flat_square_keeps_hyphen() -> None:
-    """Hyphenated shields styles are not percent-encoded."""
-    runner = CliRunner()
-
-    result = runner.invoke(
-        badge_command,
-        ["--score", "84", "--style", "flat-square", "--url"],
-    )
-
-    assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output.strip()).is_equal_to(
-        "https://img.shields.io/badge/lintro-84%2F100-brightgreen?style=flat-square",
-    )
-
-
 @pytest.mark.parametrize(
-    ("score", "color_fragment"),
+    ("args", "color_fragment"),
     [
-        ("100", "brightgreen"),
-        ("75", "brightgreen"),
-        ("74", "yellow"),
-        ("50", "yellow"),
-        ("49", "red"),
-        ("0", "red"),
+        (["--errors", "0"], "brightgreen"),
+        (["--info", "1"], "yellow"),
+        (["--warnings", "3"], "yellow"),
+        (["--errors", "1", "--warnings", "9"], "red"),
     ],
 )
-def test_badge_color_thresholds(score: str, color_fragment: str) -> None:
-    """Badge color tracks the documented tier thresholds.
+def test_badge_color_follows_the_worst_severity(
+    args: list[str],
+    color_fragment: str,
+) -> None:
+    """Badge color is green when clean, red on any error, else yellow.
 
     Args:
-        score: Override score passed to the CLI.
+        args: Count override options passed to the CLI.
         color_fragment: Expected shields.io color token in the URL.
     """
     runner = CliRunner()
 
-    result = runner.invoke(badge_command, ["--score", score, "--url"])
+    result = runner.invoke(badge_command, [*args, "--url"])
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains(color_fragment)

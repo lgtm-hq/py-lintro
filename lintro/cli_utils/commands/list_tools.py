@@ -57,7 +57,7 @@ def _tool_capabilities(
 
     Advisory AI finders report ``review`` rather than ``check``: they are
     excluded from ``lintro chk`` so their nondeterministic findings never
-    gate deterministic checks or the health score (#1308).
+    gate deterministic checks or their issue counts (#1308).
 
     Args:
         tool_name: Registered tool name.

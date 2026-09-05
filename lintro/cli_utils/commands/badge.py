@@ -1,4 +1,10 @@
-"""``lintro badge`` command for shields.io health-score badges."""
+"""``lintro badge`` command for shields.io issue-count badges.
+
+The badge used to publish the 0-100 health score. Issue #1739 deleted that
+score because it had no size normalization, so the command was retargeted
+rather than removed: it now publishes the run's severity counts, which mean
+the same thing in every repository.
+"""
 
 from __future__ import annotations
 
@@ -6,20 +12,14 @@ import io
 import json
 import re
 from contextlib import redirect_stdout
+from urllib.parse import quote
 
 import click
 
 from lintro.api import core as api
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
-from lintro.utils.health_score import (
-    MAX_SCORE,
-    MIN_SCORE,
-    build_shields_badge_markdown,
-    build_shields_badge_url,
-    shields_color_for_tier,
-    tier_for_score,
-)
 
 _SHIELDS_STYLES: tuple[str, ...] = (
     "flat",
@@ -28,6 +28,13 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "for-the-badge",
     "social",
 )
+
+# shields.io colour tokens. A clean run is bright green, warnings and info
+# findings are yellow, and any error is red — the same three-way split the old
+# score tiers used, now driven by what was actually found.
+COLOR_CLEAN: str = "brightgreen"
+COLOR_WARNINGS: str = "yellow"
+COLOR_ERRORS: str = "red"
 
 # Real wrapper messages vary: "No files found to check.", "No Astro files to
 # check.", "No .py/.pyi files found to check.".
@@ -54,63 +61,174 @@ def _result_checked_any_files(result: ToolResult) -> bool:
     return _NO_FILES_CHECKED_RE.search(text) is None
 
 
-def _live_score_is_usable(artifact: RunArtifact) -> bool:
-    """Return whether a live check produced a badge-worthy score.
+def _live_counts_are_usable(artifact: RunArtifact) -> bool:
+    """Return whether a live check produced badge-worthy counts.
 
     Args:
         artifact: Completed check run.
 
     Returns:
-        bool: ``True`` when at least one tool inspected files and a health
-        score was computed. Empty, all-skipped, timed-out, and early-exit
-        runs are not usable public quality signals. A filter-empty main
-        phase is still usable when post-checks produced a real result.
+        bool: ``True`` when at least one tool inspected files. Empty,
+        all-skipped, timed-out, and early-exit runs are not usable public
+        quality signals. A filter-empty main phase is still usable when
+        post-checks produced a real result.
     """
-    if artifact.early_exit or artifact.health is None:
+    if artifact.early_exit:
         return False
     return any(_result_checked_any_files(result) for result in artifact.tool_results)
 
 
-def resolve_health_score(
-    *,
-    score_override: int | None,
-    paths: tuple[str, ...],
-) -> int:
-    """Resolve the project health score for badge generation.
-
-    When ``score_override`` is set, that value is returned directly (useful for
-    tests and CI snippets). Otherwise a check is run via :func:`api.check_run`
-    and the score is read from the :class:`~lintro.models.core.run_artifact.RunArtifact`
-    (issue #1823) rather than re-parsing stdout.
+def badge_color(counts: SeverityCounts) -> str:
+    """Return the shields.io colour token for a set of severity counts.
 
     Args:
-        score_override: Explicit score to use instead of running tools.
-        paths: Paths to check when computing a live score.
+        counts: Severity tallies the badge reports.
 
     Returns:
-        int: Health score in ``[0, 100]``.
+        str: ``brightgreen`` for a clean run, ``red`` when any error was
+        found, and ``yellow`` when only warnings or info issues remain.
+    """
+    if counts.errors:
+        return COLOR_ERRORS
+    if counts.total:
+        return COLOR_WARNINGS
+    return COLOR_CLEAN
+
+
+def badge_message(counts: SeverityCounts) -> str:
+    """Return the human-readable badge message for a set of severity counts.
+
+    Args:
+        counts: Severity tallies the badge reports.
+
+    Returns:
+        str: ``"0 issues"`` for a clean run, otherwise a per-severity summary
+        listing only the severities that were found, such as
+        ``"3 errors, 1 warning"``.
+    """
+    if not counts.total:
+        return "0 issues"
+    parts = [
+        f"{value} {noun if value == 1 else noun + 's'}"
+        for value, noun in (
+            (counts.errors, "error"),
+            (counts.warnings, "warning"),
+        )
+        if value
+    ]
+    if counts.info:
+        parts.append(f"{counts.info} info")
+    return ", ".join(parts)
+
+
+def build_shields_badge_url(
+    counts: SeverityCounts,
+    *,
+    style: str | None = None,
+) -> str:
+    """Build a shields.io static badge URL for a run's severity counts.
+
+    Args:
+        counts: Severity tallies the badge reports.
+        style: Optional shields.io style (e.g. ``flat``); omitted when
+            ``None``.
+
+    Returns:
+        str: Absolute shields.io badge URL.
+    """
+    message = quote(badge_message(counts), safe="")
+    url = f"https://img.shields.io/badge/lintro-{message}-{badge_color(counts)}"
+    if style:
+        url = f"{url}?style={quote(style, safe='-')}"
+    return url
+
+
+def build_shields_badge_markdown(
+    counts: SeverityCounts,
+    *,
+    style: str | None = None,
+    alt_text: str = "Lintro Issues",
+) -> str:
+    """Build a markdown image snippet for a severity-count shields.io badge.
+
+    Args:
+        counts: Severity tallies the badge reports.
+        style: Optional shields.io style forwarded to the URL builder.
+        alt_text: Alt text for the markdown image.
+
+    Returns:
+        str: Markdown such as
+        ``![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)``.
+    """
+    return f"![{alt_text}]({build_shields_badge_url(counts, style=style)})"
+
+
+def resolve_severity_counts(
+    *,
+    override: SeverityCounts | None,
+    paths: tuple[str, ...],
+) -> SeverityCounts:
+    """Resolve the severity counts the badge reports.
+
+    When ``override`` is set, those counts are returned directly (useful for
+    tests and CI snippets). Otherwise a check is run via :func:`api.check_run`
+    and the counts are read from the
+    :class:`~lintro.models.core.run_artifact.RunArtifact` (issue #1823) rather
+    than re-parsing stdout.
+
+    Args:
+        override: Explicit counts to use instead of running tools.
+        paths: Paths to check when counting live.
+
+    Returns:
+        SeverityCounts: Counts for the badge.
 
     Raises:
-        click.ClickException: If the live check exits before a score is
-            produced, or no tool actually executed (empty / all-skipped).
+        click.ClickException: If the live check exits before producing
+            counts, or no tool actually executed (empty / all-skipped).
     """
-    if score_override is not None:
-        return score_override
+    if override is not None:
+        return override
 
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         artifact = api.check_run(
             paths=list(paths) if paths else None,
             no_log=True,
-            score=True,
             ai_enabled=False,
         )
-    if not _live_score_is_usable(artifact):
+    if not _live_counts_are_usable(artifact):
         raise click.ClickException(
-            "Could not determine a usable health score because the check "
+            "Could not determine usable issue counts because the check "
             "exited early, was empty, or all tools were skipped.",
         )
-    return artifact.health_score
+    return artifact.severity_counts
+
+
+def _counts_override(
+    *,
+    errors: int | None,
+    warnings: int | None,
+    info: int | None,
+) -> SeverityCounts | None:
+    """Build the explicit counts requested on the command line, if any.
+
+    Args:
+        errors: Value of ``--errors``, or ``None`` when not passed.
+        warnings: Value of ``--warnings``, or ``None`` when not passed.
+        info: Value of ``--info``, or ``None`` when not passed.
+
+    Returns:
+        SeverityCounts | None: The override when at least one option was
+        given (unset severities count as zero), otherwise ``None``.
+    """
+    if errors is None and warnings is None and info is None:
+        return None
+    return SeverityCounts(
+        errors=errors or 0,
+        warnings=warnings or 0,
+        info=info or 0,
+    )
 
 
 @click.command("badge")
@@ -134,32 +252,48 @@ def resolve_health_score(
     help="Print badge metadata as JSON.",
 )
 @click.option(
-    "--score",
-    "score_override",
-    type=click.IntRange(MIN_SCORE, MAX_SCORE),
+    "--errors",
+    type=click.IntRange(min=0),
     default=None,
-    help="Use this score instead of running a check (0-100).",
+    help="Use this error count instead of running a check.",
+)
+@click.option(
+    "--warnings",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Use this warning count instead of running a check.",
+)
+@click.option(
+    "--info",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Use this info count instead of running a check.",
 )
 def badge_command(
     paths: tuple[str, ...],
     style: str | None,
     url_only: bool,
     json_output: bool,
-    score_override: int | None,
+    errors: int | None,
+    warnings: int | None,
+    info: int | None,
 ) -> None:
-    """Generate a shields.io markdown badge for the project health score.
+    """Generate a shields.io markdown badge for the project's issue counts.
 
-    Runs a score-only check on the given paths (default ``.``) unless
-    ``--score`` supplies an override. Prints a markdown image by default;
-    use ``--url`` for the bare URL or ``--json`` for structured output.
+    Runs a check on the given paths (default ``.``) unless an explicit count
+    option supplies the numbers. Prints a markdown image by default; use
+    ``--url`` for the bare URL or ``--json`` for structured output.
     \u000c
 
     Args:
-        paths: File/directory paths to score; empty means the current directory.
+        paths: File/directory paths to check; empty means the current
+            directory.
         style: Optional shields.io style query parameter.
         url_only: Emit only the badge URL.
-        json_output: Emit JSON with score, tier, color, url, and markdown.
-        score_override: Explicit score that skips running tools.
+        json_output: Emit JSON with the counts, colour, url, and markdown.
+        errors: Explicit ERROR count that skips running tools.
+        warnings: Explicit WARNING count that skips running tools.
+        info: Explicit INFO count that skips running tools.
 
     Raises:
         click.UsageError: If ``--json`` and ``--url`` are passed together.
@@ -167,17 +301,18 @@ def badge_command(
     if json_output and url_only:
         raise click.UsageError("Use --json or --url, not both.")
 
-    score = resolve_health_score(score_override=score_override, paths=paths)
-    tier = tier_for_score(score)
-    color = shields_color_for_tier(tier)
-    url = build_shields_badge_url(score, style=style)
-    markdown = build_shields_badge_markdown(score, style=style)
+    counts = resolve_severity_counts(
+        override=_counts_override(errors=errors, warnings=warnings, info=info),
+        paths=paths,
+    )
+    url = build_shields_badge_url(counts, style=style)
+    markdown = build_shields_badge_markdown(counts, style=style)
 
     if json_output:
         payload = {
-            "score": score,
-            "tier": tier.label,
-            "color": color,
+            "counts": counts.to_dict(),
+            "message": badge_message(counts),
+            "color": badge_color(counts),
             "url": url,
             "markdown": markdown,
         }

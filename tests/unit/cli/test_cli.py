@@ -278,7 +278,7 @@ def test_cli_has_badge_command(cli_runner: CliRunner) -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains(
-        "Generate a shields.io markdown badge for the project health score.",
+        "Generate a shields.io markdown badge for the project's issue counts.",
     )
 
 

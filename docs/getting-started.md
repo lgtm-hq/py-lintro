@@ -511,8 +511,8 @@ lintro check --output-format grid --group-by code
 Add `--profile` to `check` or `format` to see how long each main-phase tool took.
 Executors always record those timings (including under parallel execution); the flag
 only controls whether they are rendered. Post-checks are omitted. The table is human and
-JSON only — `--score` and csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row
-is the sum of per-tool seconds, not parallel wall-clock.
+JSON only — csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row is the sum of
+per-tool seconds, not parallel wall-clock.
 
 ```bash
 # Show a per-tool timing table with optimization suggestions

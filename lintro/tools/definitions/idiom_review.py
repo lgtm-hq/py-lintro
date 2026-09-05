@@ -10,7 +10,7 @@ detected by a syntax-matching linter. Two modes are offered:
   across files, invisible to any per-file linter.
 
 The tool is classified :attr:`~lintro.enums.execution_class.ExecutionClass.ADVISORY`,
-so it never runs under ``lintro chk`` (and never feeds the health score).
+so it never runs under ``lintro chk`` (and never feeds its issue counts).
 ``lintro review`` is its home verb; see :mod:`lintro.utils.execution.advisory`.
 
 The tool ships disabled by default via the ``enabled: False`` option in
@@ -91,7 +91,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             # Advisory: nondeterministic AI findings never run under ``chk``
-            # and never feed the health score (#1308).
+            # and never feed its issue counts (#1308).
             execution_class=ExecutionClass.ADVISORY,
             file_patterns=IDIOM_REVIEW_FILE_PATTERNS,
             priority=IDIOM_REVIEW_PRIORITY,

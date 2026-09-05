@@ -71,16 +71,16 @@ def test_installer_dry_run_simulates_spectral_verification() -> None:
         "skipped=False with empty output and no 'no files found to check' "
         "marker. badge.py's _result_checked_any_files reads that text "
         "heuristically, so that one result makes an empty scan look like a "
-        "real 100/100 run. Product gap, not a test defect: the badge command "
-        "publishes a perfect score for a directory nothing inspected."
+        "real clean run. Product gap, not a test defect: the badge command "
+        "publishes a zero-issue badge for a directory nothing inspected."
     ),
 )
 def test_badge_empty_directory_does_not_publish(tmp_path: Path) -> None:
-    """A real empty directory must not publish a 100/100 badge.
+    """A real empty directory must not publish a zero-issue badge.
 
     Unmocked companion to the two mocked cases in
     ``tests/unit/cli_utils/commands/test_badge_command.py``: those pin the
-    contract at ``resolve_health_score``, this one drives the whole pipeline
+    contract at ``resolve_severity_counts``, this one drives the whole pipeline
     over a directory with nothing in it.
 
     The xfail above is conditional and ``strict``: it fires only where

@@ -7,7 +7,7 @@
   :attr:`~lintro.enums.execution_class.ExecutionClass.ADVISORY`, such as
   ``idiom-review``. Those used to run under ``lintro chk``; because their
   findings are nondeterministic opinions rather than rule violations they
-  moved here, so ``chk`` stays deterministic and its health score stays
+  moved here, so ``chk`` stays deterministic and its issue counts stay
   stable across identical runs (#1308).
 
 Advisory findings are scoped to the review's changed files (or ``--path``)

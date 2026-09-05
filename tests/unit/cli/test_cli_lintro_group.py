@@ -109,8 +109,6 @@ def test_invoke_with_comma_separated_commands() -> None:
             ai_fix=False,
             ignore_conflicts=False,
             transport=None,
-            score=False,
-            fail_under=None,
             no_art=False,
             profile=False,
         )

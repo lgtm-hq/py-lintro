@@ -72,7 +72,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/cli_utils/commands/install.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/cli_utils/commands/list_tools.py": ("PLR0915",),
     "lintro/cli_utils/commands/review.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
-    "lintro/cli_utils/commands/setup.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/cli_utils/commands/test.py": ("PLR0913",),
     "lintro/cli_utils/commands/versions.py": ("PLR0912", "PLR0915"),
     "lintro/config/config_loader.py": ("C901", "PLR0912", "PLR0915"),

@@ -9,7 +9,6 @@ from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.output_config import OutputConfig
 from lintro.config.review_config import ReviewConfig
-from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
 from lintro.config.watch_config import WatchConfig
 
@@ -21,7 +20,6 @@ __all__ = [
     "LintroToolConfig",
     "OutputConfig",
     "ReviewConfig",
-    "ScoreConfig",
     "WatchConfig",
 ]
 
@@ -66,7 +64,6 @@ class LintroConfig(BaseModel):
             parses it into ``AIConfig`` via ``resolve_ai_config`` so that
             core config never imports the AI package (issue #724).
         review: Diff review command configuration (checklist items).
-        score: Health score weights and scale (0-100 metric).
         output: Console output presentation settings (e.g. ASCII art toggle).
         watch: Watch-mode (``lintro watch``) defaults.
         deps: Dependency version policy configuration.
@@ -86,7 +83,6 @@ class LintroConfig(BaseModel):
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
     ai: dict[str, Any] = Field(default_factory=dict)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
-    score: ScoreConfig = Field(default_factory=ScoreConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     deps: DepsConfig = Field(default_factory=DepsConfig)

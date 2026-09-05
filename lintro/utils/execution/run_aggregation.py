@@ -1,4 +1,4 @@
-"""Aggregation, scoring, and exit-code resolution for a completed run.
+"""Aggregation, severity tallying, and exit-code resolution for a run.
 
 Turns raw tool results into the
 :class:`~lintro.models.core.run_artifact.RunArtifact` the render phase
@@ -38,9 +38,8 @@ def finalize_artifact(
     total_fixed: int,
     total_remaining: int,
     main_phase_empty_due_to_filter: bool,
-    fail_under: float | None,
 ) -> RunArtifact:
-    """Score the run and resolve its exit code into a :class:`RunArtifact`.
+    """Tally the run and resolve its exit code into a :class:`RunArtifact`.
 
     Args:
         ctx: Shared run context.
@@ -50,15 +49,17 @@ def finalize_artifact(
         total_remaining: Aggregated remaining count.
         main_phase_empty_due_to_filter: Whether post-check filtering emptied
             the main phase.
-        fail_under: Optional health-score gate; a score strictly below this
-            forces exit code 1.
 
     Returns:
         RunArtifact: The completed artifact for the render phase.
     """
     from pathlib import Path
 
-    from lintro.utils.health_score import health_score_for_results
+    from lintro.utils.severity_baseline import (
+        read_severity_baseline,
+        resolve_log_root,
+    )
+    from lintro.utils.severity_counts import count_severities
 
     exit_code = int(
         determine_exit_code(
@@ -70,21 +71,18 @@ def finalize_artifact(
         ),
     )
 
-    # Compute the deterministic 0-100 health score from the aggregated results.
-    health = health_score_for_results(
-        all_results,
-        getattr(ctx.lintro_config, "score", None),
-    )
-
-    # CI gate: fail the run when the score falls below the requested threshold.
-    if fail_under is not None and health.score < fail_under:
-        exit_code = DEFAULT_EXIT_CODE_FAILURE
+    # Tally what the run actually found, and read the previous run's tally so
+    # the renderer can report an exact count delta (issue #1739).
+    severity_counts = count_severities(all_results)
+    log_root = resolve_log_root(ctx.output_manager)
+    previous_counts = read_severity_baseline(log_root) if log_root else None
 
     return RunArtifact(
         tool_results=all_results,
         action=ctx.action,
         workspace_root=Path.cwd(),
-        health=health,
+        severity_counts=severity_counts,
+        previous_severity_counts=previous_counts,
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
@@ -101,25 +99,27 @@ def refresh_artifact(
     fail_under: float | None = None,
     force_failure: bool = False,
 ) -> RunArtifact:
-    """Re-aggregate and re-score an artifact whose results were mutated.
+    """Re-aggregate and re-tally an artifact whose results were mutated.
 
     Used after a post-execution consumer (today: the AI layer) has changed the
     tool results in place. The exit code is recomputed from the fresh totals,
-    then raised to 1 when the consumer demands failure — before the
-    ``fail_under`` gate, so the score gate can still fail a run the consumer
-    left at 0.
+    then raised to 1 when the consumer demands failure.
 
     Args:
         artifact: The artifact whose results were mutated. Its
             ``main_phase_empty_due_to_filter`` state is carried over so the
             exit code is resolved exactly as it was on the first pass.
         ctx: Shared run context.
-        fail_under: Optional health-score gate.
+        fail_under: Ignored. Accepted only so the AI layer's
+            :func:`lintro.ai.interface.enhance_artifact` keeps calling this
+            without a signature break; the health-score gate it drove was
+            deleted in issue #1739. Removed by issue #2360.
         force_failure: Whether the consumer requires a non-zero exit code.
 
     Returns:
         RunArtifact: A refreshed artifact carrying the new totals and exit code.
     """
+    del fail_under
     total_issues, total_fixed, total_remaining = aggregate_tool_results(
         artifact.tool_results,
         ctx.action,
@@ -131,7 +131,6 @@ def refresh_artifact(
         total_fixed=total_fixed,
         total_remaining=total_remaining,
         main_phase_empty_due_to_filter=artifact.main_phase_empty_due_to_filter,
-        fail_under=fail_under,
     )
     if force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE

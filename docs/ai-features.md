@@ -163,10 +163,10 @@ and cost-budget controls.
 > ```
 >
 > Why: advisory findings are opinions produced by a nondeterministic model. Letting them
-> share `chk` meant two identical runs could disagree, the `--fail-under` health-score
-> gate could move on model mood rather than on regressions, and every contributor paid
-> API latency and dollars on a command meant to be reflexive and offline. Your
-> `tools.idiom-review` config section is unchanged — only the invoking verb moved.
+> share `chk` meant two identical runs could disagree, its reported issue counts could
+> move on model mood rather than on regressions, and every contributor paid API latency
+> and dollars on a command meant to be reflexive and offline. Your `tools.idiom-review`
+> config section is unchanged — only the invoking verb moved.
 
 Advisory tools under `lintro review`:
 
@@ -179,7 +179,7 @@ Advisory tools under `lintro review`:
 | `--tool-options`           | `tool:option=value` overrides, as in `chk`                           |
 
 Advisory findings never affect the exit code unless `--fail-on-findings` is passed, and
-they never contribute to the `chk` health score. One exception: a round short-circuited
+they never contribute to the `chk` issue counts. One exception: a round short-circuited
 by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
 before the advisory tools run at all, so `--fail-on-findings` is inert on that
 invocation. With `--output json`, they appear under an additive `advisory` key so
