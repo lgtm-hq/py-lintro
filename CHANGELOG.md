@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.1] - 2026-09-05
+
+### Changed
+
+- **quality**: ratcheting duplicate-code gate on tool definitions (#2354) (9f45637)
+
+### Fixed
+
+- **ci**: allow hosted-runner watchdog egress on long-running jobs (#2353) (8162c56)
+
 ## [0.147.0] - 2026-09-05
 
 ### Added
