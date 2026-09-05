@@ -20,9 +20,12 @@ matter how the files are rearranged. The first is the golden suite added by
 [#2298](https://github.com/lgtm-hq/py-lintro/issues/2298) under
 `tests/unit/ai/review/golden/`. The second is this ADR.
 
-The invariants below are not new decisions. Each already holds in the code on `main`;
-recording them here makes them reviewable as a checklist rather than rediscoverable by
-reading a 3,000-line module.
+Invariants 1-4 and 7 below are not new decisions: each already holds in the code on
+`main`, and recording them here makes them reviewable as a checklist rather than
+rediscoverable by reading a 3,000-line module. Invariants 5 and 6 are the _ownership
+boundaries_ Phase 1 is asked to record ahead of the phases that establish them — the
+current state is stated explicitly in each, so neither can be mistaken for a property
+that already holds.
 
 ## Decision
 
@@ -54,15 +57,15 @@ that bypasses this function.
 That guard is owned by [#2290](https://github.com/lgtm-hq/py-lintro/issues/2290), not by
 the review suite, and is named here so the review decomposition does not reinvent it.
 
-**5. Provider lifetime belongs to the run, not the adapter.** Today CLI and MCP each
-build their own provider and neither closes it; Phase 5
+**5. Provider lifetime belongs to the run, not the adapter (target).** Today CLI and MCP
+each build their own provider and neither calls `aclose()`; Phase 5
 ([#2302](https://github.com/lgtm-hq/py-lintro/issues/2302)) moves ownership into the run
 session so `aclose()` is called exactly once, including on failure and cancellation and
 including the per-agent providers in `custom_agent_runner.py`. Until then, no second
 lifecycle abstraction may be added.
 
-**6. Config is resolved once per invocation.** `resolve_ai_config` is the single
-resolver; post-resolution ad hoc override paths are debt that Phase 2
+**6. Config is resolved once per invocation (target).** `resolve_ai_config` is the
+intended single resolver; post-resolution ad hoc override paths are debt that Phase 2
 ([#2299](https://github.com/lgtm-hq/py-lintro/issues/2299)) removes rather than a
 pattern to copy. Security-relevant caps stay monotonic: an invocation may lower a
 configured cap, never raise it.

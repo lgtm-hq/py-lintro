@@ -152,13 +152,12 @@ def _normalize_metadata(*, metadata: ReviewMetadata) -> ReviewMetadata:
     Returns:
         Metadata whose volatile fields carry fixed placeholder values.
     """
-    return replace(
-        metadata,
-        timestamp="<timestamp>",
-        duration_seconds=-1.0,
-        phase_timings=dict.fromkeys(sorted(metadata.phase_timings), -1.0),
-        timings=None,
-    )
+    replacements = {
+        **VOLATILE_METADATA_SENTINELS,
+        # The keys are run-dependent, so only the values can be sentinelled.
+        "phase_timings": dict.fromkeys(sorted(metadata.phase_timings), -1.0),
+    }
+    return replace(metadata, **replacements)
 
 
 def test_run_review_result_matches_golden() -> None:
