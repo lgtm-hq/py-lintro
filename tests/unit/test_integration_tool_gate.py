@@ -17,6 +17,7 @@ from assertpy import assert_that
 
 from tests.integration import _tools
 from tests.integration._tools import (
+    LAUNCHER_TIMEOUT_SECONDS,
     NO_MIN_VERSION,
     MissingToolError,
     enforced_minimum,
@@ -61,6 +62,7 @@ def _fake_run(
     returncode: int,
     stdout: str = "",
     exc: BaseException | None = None,
+    calls: list[tuple[list[str], dict[str, Any]]] | None = None,
 ) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Build a process-execution replacement with a fixed outcome.
 
@@ -68,20 +70,24 @@ def _fake_run(
         returncode: Exit code the fake probe reports.
         stdout: Text the fake probe writes to stdout.
         exc: Exception to raise instead of returning, when given.
+        calls: List that each invocation's ``(argv, kwargs)`` is appended to,
+            so tests can assert the probe wiring and not just its verdict.
 
     Returns:
         A callable with :func:`tests.integration._tools._run`'s signature.
     """
+    if calls is None:
+        calls = []
 
     def _execute(
         command: Sequence[str],
         **kwargs: Any,
     ) -> subprocess.CompletedProcess[str]:
-        """Return a canned completed process.
+        """Record the invocation and return a canned completed process.
 
         Args:
-            command: Command argv (recorded only).
-            **kwargs: Ignored keyword arguments.
+            command: Command argv.
+            **kwargs: Probe keyword arguments (``timeout``, ``cwd``).
 
         Returns:
             A CompletedProcess carrying the configured outcome.
@@ -89,6 +95,7 @@ def _fake_run(
         Raises:
             exc: The configured exception, when one was given.
         """
+        calls.append((list(command), kwargs))
         if exc is not None:
             raise exc
         return subprocess.CompletedProcess(
@@ -233,25 +240,31 @@ def test_resolve_tool_command_falls_back_to_a_launcher(
 
 
 @pytest.mark.parametrize(
-    ("output", "expected"),
+    ("output", "tool", "expected"),
     [
-        ("rustfmt 1.8.0-stable (abc1234 2026-01-01)", "1.8.0"),
-        ("cargo-deny 0.14.3", "0.14.3"),
-        ("no version here", None),
+        ("rustfmt 1.8.0-stable (abc1234 2026-01-01)", "rustfmt", "1.8.0"),
+        ("cargo-deny 0.14.3", "cargo_deny", "0.14.3"),
+        # Two-part versions are real (taplo prints "taplo 25.1"); a private
+        # MAJOR.MINOR.PATCH regex here would read them as unparsable and
+        # silently drop the floor.
+        ("taplo 25.1", "taplo", "25.1"),
+        ("no version here", "ruff", None),
     ],
-    ids=["rustfmt", "cargo-deny", "unparsable"],
+    ids=["rustfmt", "cargo-deny", "two-part", "unparsable"],
 )
-def test_parse_version_extracts_the_first_semver(
+def test_parse_version_matches_lintros_own_parsing(
     output: str,
+    tool: str,
     expected: str | None,
 ) -> None:
-    """The first ``MAJOR.MINOR.PATCH`` run in the probe output wins.
+    """Version parsing is delegated to lintro so the gate cannot drift.
 
     Args:
         output: Combined probe output.
+        tool: Tool name, so tool-specific parsing rules apply.
         expected: Expected version string, or None.
     """
-    parsed = parse_version(output)
+    parsed = parse_version(output, tool=tool)
     assert_that(None if parsed is None else str(parsed)).is_equal_to(expected)
 
 
@@ -507,3 +520,136 @@ def test_unavailable_fails_inside_the_tools_image(
     """
     with pytest.raises(MissingToolError):
         unavailable("node_modules not found")
+
+
+def test_probe_passes_version_args_and_launcher_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """The probe runs the requested argv, with the launcher timeout on fallback.
+
+    Guards the wiring itself: dropping ``version_args`` or the longer
+    launcher timeout would otherwise leave every assertion in this file
+    passing.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("bunx",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="svelte-check 9.9.9\n", calls=calls),
+    )
+
+    require_tool(
+        "svelte-check",
+        version_args=("--version", "--json"),
+        launchers=(("bunx",),),
+    )
+
+    assert_that(calls).is_length(1)
+    argv, kwargs = calls[0]
+    assert_that(argv).is_equal_to(["bunx", "svelte-check", "--version", "--json"])
+    assert_that(kwargs["timeout"]).is_equal_to(LAUNCHER_TIMEOUT_SECONDS)
+
+
+def test_require_command_applies_the_same_version_floor(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """A plugin-resolved CLI below lintro's floor skips like require_tool.
+
+    stylelint, html-validate, markdownlint-cli2 and spectral are gated
+    through require_command; without the floor they would replay the
+    shellcheck 0.9.0 failure mode on the hosted matrix.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("stylelint",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="0.0.1\n"),
+    )
+
+    mark = require_command("stylelint", ["stylelint"])
+
+    assert_that(mark.args[0]).is_true()
+    assert_that(mark.kwargs["reason"]).contains("stylelint")
+
+
+def test_require_command_fails_inside_the_image_when_unresolved(
+    inside_tools_image: None,
+) -> None:
+    """An unresolved plugin CLI is a hard failure inside the tools image.
+
+    Args:
+        inside_tools_image: Fixture setting the tools-image switch.
+    """
+    with pytest.raises(MissingToolError):
+        require_command("spectral", None)
+
+
+def test_version_lag_allowance_keeps_a_lagged_tool_running(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """LINTRO_ALLOW_VERSION_LAG keeps a below-floor module collecting.
+
+    CI sets it during a digest-pinned image bump so the plugins keep running
+    lagged binaries (#1582); skipping the module would discard exactly the
+    coverage the allowance preserves.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("shellcheck",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="ShellCheck\nversion: 0.0.1\n"),
+    )
+
+    monkeypatch.delenv(_tools.ALLOW_VERSION_LAG_ENV, raising=False)
+    assert_that(require_tool("shellcheck").args[0]).is_true()
+
+    monkeypatch.setenv(_tools.ALLOW_VERSION_LAG_ENV, "shellcheck,ruff")
+    assert_that(require_tool("shellcheck").args[0]).is_false()
+
+    monkeypatch.setenv(_tools.ALLOW_VERSION_LAG_ENV, "*")
+    assert_that(require_tool("shellcheck").args[0]).is_false()
+
+
+def test_missing_minimums_warn_instead_of_silently_dropping_floors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken minimums lookup warns rather than quietly disabling floors.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+
+    def _boom() -> dict[str, str]:
+        """Stand in for a lookup that raises.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError("manifest unreadable")
+
+    monkeypatch.setattr(
+        "lintro.tools.core.version_checking.get_minimum_versions",
+        _boom,
+    )
+    _tools._enforced_minimums.cache_clear()
+    try:
+        with pytest.warns(RuntimeWarning, match="enforced tool minimums"):
+            assert_that(_tools.enforced_minimum("shellcheck")).is_none()
+    finally:
+        _tools._enforced_minimums.cache_clear()

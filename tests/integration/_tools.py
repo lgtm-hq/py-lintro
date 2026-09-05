@@ -28,9 +28,9 @@ Modules needing several binaries pass a list::
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess  # nosec B404 - probes the tool under test; every call is shell=False
+import warnings
 from collections.abc import Sequence
 from functools import lru_cache
 from typing import NoReturn
@@ -55,8 +55,6 @@ LAUNCHER_TIMEOUT_SECONDS = 60.0
 #: ``--version`` output does not describe the tool being gated.
 NO_MIN_VERSION = "0"
 
-_VERSION_PATTERN = re.compile(r"(\d+\.\d+\.\d+)")
-
 
 @lru_cache(maxsize=1)
 def _enforced_minimums() -> dict[str, str]:
@@ -71,10 +69,49 @@ def _enforced_minimums() -> dict[str, str]:
         from lintro.tools.core.version_checking import get_minimum_versions
 
         return dict(get_minimum_versions())
-    except Exception:  # noqa: BLE001 - a broken lookup must not break collection
+    except Exception as exc:  # noqa: BLE001 - must not break collection
         # Fail open: with no floors every module keeps its absent-vs-present
         # gate, which is the behaviour that matters inside the tools image.
+        # Warn rather than fail silently — losing the floors quietly is the
+        # same class of silent pass this gate exists to remove.
+        warnings.warn(
+            f"could not read lintro's enforced tool minimums ({exc!r}); "
+            "integration modules will not apply version floors",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return {}
+
+
+#: Env var through which CI tells lintro to keep running binaries that lag
+#: the manifest during a digest-pinned image bump (#1582). Same contract as
+#: ``lintro.plugins.execution_preparation``.
+ALLOW_VERSION_LAG_ENV = "LINTRO_ALLOW_VERSION_LAG"
+
+
+def version_lag_allowed(name: str) -> bool:
+    """Report whether ``name`` may run despite lagging the manifest minimum.
+
+    Mirrors lintro's own ``LINTRO_ALLOW_VERSION_LAG`` contract: a
+    comma-separated tool list, or ``*`` for all. When CI has told the plugins
+    to keep running a lagged binary, this gate must not skip the module out
+    from under them, or the coverage the allowance exists to preserve is lost
+    anyway.
+
+    Args:
+        name: Tool name to check.
+
+    Returns:
+        True when the tool is allow-listed for version lag.
+    """
+    raw = (os.environ.get(ALLOW_VERSION_LAG_ENV) or "").strip()
+    if not raw:
+        return False
+    if raw == "*":
+        return True
+    return name.lower() in {
+        part.strip().lower() for part in raw.split(",") if part.strip()
+    }
 
 
 def enforced_minimum(name: str) -> str | None:
@@ -240,21 +277,64 @@ def tool_is_available(
     return resolved is not None
 
 
-def parse_version(output: str) -> Version | None:
-    """Extract the first ``MAJOR.MINOR.PATCH`` version from probe output.
+def tool_runs_for_lintro(
+    name: str,
+    *,
+    version_args: Sequence[str] = ("--version",),
+    pin: str | None = None,
+) -> bool:
+    """Report whether lintro would actually execute ``name`` here.
+
+    True only when the binary resolves *and* clears the same version floor
+    :func:`require_tool` applies, so callers reason about "the plugin will
+    run this" rather than the weaker "the binary exists".
+
+    Args:
+        name: Executable name of the tool.
+        version_args: Arguments that make the tool print its version.
+        pin: Lintro tool name to look the floor up under, when it differs.
+
+    Returns:
+        True when the tool resolves and is not below lintro's minimum.
+    """
+    resolved = resolve_tool_command(name, version_args=version_args)
+    if resolved is None:
+        return False
+    mark = _version_gate(
+        output=resolved[1],
+        shown=name,
+        tool=pin or name,
+        min_version=None,
+    )
+    return not mark.args[0]
+
+
+def parse_version(output: str, *, tool: str = "") -> Version | None:
+    """Extract a tool's version from its probe output.
+
+    Delegates to lintro's own parsing rather than re-implementing it: a
+    private regex here would drift from what ``verify_tool_version`` reads,
+    and this gate is only useful if it agrees with the plugin about which
+    version is installed.
 
     Args:
         output: Combined stdout/stderr of a version probe.
+        tool: Tool name, so tool-specific parsing rules apply.
 
     Returns:
         The parsed version, or None when the output carries no version.
     """
-    match = _VERSION_PATTERN.search(output)
-    if match is None:
-        return None
     try:
-        return Version(match.group(1))
-    except ValueError:  # pragma: no cover - regex already constrains the shape
+        from lintro.tools.core.version_parsing import (
+            extract_version_from_output,
+        )
+        from lintro.tools.core.version_parsing import (
+            parse_version as parse_version_string,
+        )
+
+        raw = extract_version_from_output(output, tool or "unknown")
+        return parse_version_string(raw) if raw else None
+    except Exception:  # noqa: BLE001 - an unknown tool name must not break collection
         return None
 
 
@@ -297,6 +377,57 @@ def gate(
     if not available and in_tools_image():
         raise MissingToolError(f"{reason} (running with {TOOLS_IMAGE_ENV}=1)")
     return pytest.mark.skipif(not available, reason=reason)
+
+
+def _version_gate(
+    *,
+    output: str,
+    shown: str,
+    tool: str,
+    min_version: str | None,
+) -> pytest.MarkDecorator:
+    """Decide a resolved tool's mark from its version.
+
+    A shortfall is always a skip, never a failure — see :func:`require_tool`.
+
+    Args:
+        output: Combined output of the tool's version probe.
+        shown: Name to use in the skip reason.
+        tool: Tool name used for the floor lookup and version parsing.
+        min_version: Explicit floor, or None to use lintro's enforced minimum.
+
+    Returns:
+        A mark suitable for assignment to ``pytestmark``.
+    """
+    floor = min_version if min_version is not None else enforced_minimum(tool)
+    if floor is None or floor == NO_MIN_VERSION:
+        return gate(available=True, reason=f"{shown} is available")
+
+    installed = parse_version(output, tool=tool)
+    if installed is None:
+        # Unparsable version: run the module. lintro's own verify_tool_version
+        # proceeds in this case rather than skipping, and inventing a skip here
+        # would reintroduce the silent pass this gate exists to remove.
+        return gate(available=True, reason=f"{shown} is available")
+    if installed >= Version(floor):
+        return gate(available=True, reason=f"{shown} >= {floor} is available")
+    if version_lag_allowed(tool):
+        # CI told the plugins to keep running this lagged binary during a
+        # digest-pinned image bump (#1582); skipping the module here would
+        # throw away exactly the coverage that allowance preserves.
+        return gate(
+            available=True,
+            reason=f"{shown} lags {floor} but is allowed via {ALLOW_VERSION_LAG_ENV}",
+        )
+    # Skip-only: a version shortfall must never fail the run, even inside the
+    # tools image.
+    return pytest.mark.skipif(
+        True,
+        reason=(
+            f"{shown} >= {floor} required, and lintro skips the tool below "
+            f"that (found: {installed})"
+        ),
+    )
 
 
 def require_tool(
@@ -352,26 +483,11 @@ def require_tool(
     if resolved is None:
         return gate(available=False, reason=f"{shown} is not installed or not runnable")
 
-    floor = min_version if min_version is not None else enforced_minimum(pin or name)
-    if floor is None or floor == NO_MIN_VERSION:
-        return gate(available=True, reason=f"{shown} is available")
-
-    installed = parse_version(resolved[1])
-    if installed is None:
-        # Unparsable version: run the module. lintro's own verify_tool_version
-        # proceeds in this case rather than skipping, and inventing a skip here
-        # would reintroduce the silent pass this gate exists to remove.
-        return gate(available=True, reason=f"{shown} is available")
-    if installed >= Version(floor):
-        return gate(available=True, reason=f"{shown} >= {floor} is available")
-    # Skip-only: see the note above on why a version shortfall must never
-    # fail the run, even inside the tools image.
-    return pytest.mark.skipif(
-        True,
-        reason=(
-            f"{shown} >= {floor} required, and lintro skips the tool below "
-            f"that (found: {installed})"
-        ),
+    return _version_gate(
+        output=resolved[1],
+        shown=shown,
+        tool=pin or name,
+        min_version=min_version,
     )
 
 
@@ -382,6 +498,8 @@ def require_command(
     version_args: Sequence[str] = ("--version",),
     timeout: float = LAUNCHER_TIMEOUT_SECONDS,
     cwd: str | None = None,
+    min_version: str | None = None,
+    pin: str | None = None,
 ) -> pytest.MarkDecorator:
     """Gate a test module on an explicitly resolved command prefix.
 
@@ -394,21 +512,30 @@ def require_command(
         version_args: Arguments that make the tool print its version.
         timeout: Seconds to wait for the version probe.
         cwd: Directory to run the probe from; None uses the current directory.
+        min_version: Lowest acceptable version. Defaults to the minimum
+            lintro enforces; pass :data:`NO_MIN_VERSION` to accept any.
+        pin: Lintro tool name to look the floor up under, when it differs
+            from ``name``.
 
     Returns:
         A mark suitable for assignment to ``pytestmark``.
     """
-    available = False
-    if command:
-        available = (
-            probe_command(
-                [*command, *version_args],
-                timeout=timeout,
-                cwd=cwd,
-            )
-            is not None
+    output = (
+        probe_command([*command, *version_args], timeout=timeout, cwd=cwd)
+        if command
+        else None
+    )
+    if output is None:
+        return gate(
+            available=False,
+            reason=f"{name} is not installed or not runnable",
         )
-    return gate(
-        available=available,
-        reason=f"{name} is not installed or not runnable",
+    # Same floor as require_tool: a below-minimum binary makes the plugin
+    # return a skipped ToolResult, so the module would assert on a tool that
+    # never ran (the shellcheck 0.9.0 failure mode, #465).
+    return _version_gate(
+        output=output,
+        shown=name,
+        tool=pin or name,
+        min_version=min_version,
     )

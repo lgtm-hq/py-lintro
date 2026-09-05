@@ -1002,9 +1002,12 @@ def test_test_ci_matrix_collects_the_integration_suite() -> None:
         assert_that(job["with"]["test-path"]).described_as(job_name).is_equal_to(
             "tests",
         )
+        # Assert the absence of *any* ignore, not just this path spelling:
+        # "--ignore=tests" or "--ignore tests/integration" would exclude the
+        # suite again while still passing a substring check for the path.
         assert_that(job["with"]["extra-args"]).described_as(
             job_name,
-        ).does_not_contain("tests/integration")
+        ).does_not_contain("--ignore", "tests/integration")
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
