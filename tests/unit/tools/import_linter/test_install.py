@@ -13,6 +13,8 @@ from lintro._tool_versions import get_tool_version
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_DOCKERFILE = _REPO_ROOT / "Dockerfile"
+_TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 
 
 def _modern_bash() -> str | None:
@@ -88,3 +90,27 @@ def test_supported_tools_lists_import_linter() -> None:
     script = _INSTALL_TOOLS.read_text(encoding="utf-8")
 
     assert_that(script).contains('"import-linter"')
+
+
+def test_tools_image_verifies_the_binary() -> None:
+    """``docker/tools.Dockerfile`` proves ``lint-imports`` is on the image PATH."""
+    text = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert_that(text).contains("lint-imports --version")
+
+
+def test_app_image_bridges_import_linter_until_the_next_tools_digest() -> None:
+    """The app image FROMs a digest-pinned tools base that predates this tool.
+
+    Until that digest is republished with ``lint-imports`` on PATH, the app
+    image must install it itself, or the manifest-vs-image gate
+    (``scripts/ci/verify-image-manifest-tools.sh``) fails with exit code 127
+    for ``import_linter``. This bridge is a no-op once the pinned digest
+    already carries the binary.
+    """
+    text = _DOCKERFILE.read_text(encoding="utf-8")
+    bridge_at = text.find("install-tools.sh --docker --tools ")
+
+    assert_that(bridge_at).is_not_equal_to(-1)
+    bridge_line = text[bridge_at : text.index("\n", bridge_at)]
+    assert_that(bridge_line).contains("import-linter")
