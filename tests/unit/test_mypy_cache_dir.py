@@ -55,8 +55,9 @@ def test_running_mypy_from_a_subdirectory_writes_no_nested_cache() -> None:
     target = workdir / "probe.py"
     target.write_text("x: int = 1\n", encoding="utf-8")
     nested_cache = workdir / ".mypy_cache"
+    anchored_cache = _REPO_ROOT / ".mypy_cache"
     try:
-        subprocess.run(  # nosec B603 - fixed argv, shell=False
+        result = subprocess.run(  # nosec B603 - fixed argv, shell=False
             [
                 sys.executable,
                 "-m",
@@ -71,6 +72,18 @@ def test_running_mypy_from_a_subdirectory_writes_no_nested_cache() -> None:
             text=True,
             check=False,
         )
+        # Prove mypy actually ran before trusting the absence below: a probe
+        # that never launched (missing module, bad argv) would write no cache
+        # anywhere and pass vacuously. mypy exits 0 (clean) or 1 (findings);
+        # anything else is a launch failure, not a verdict.
+        assert_that(result.returncode).described_as(
+            f"mypy did not run: {result.stderr}",
+        ).is_in(0, 1)
+        # Positive evidence: the cache landed at the anchored location...
+        assert_that(anchored_cache.is_dir()).described_as(
+            "mypy wrote no cache at the configured anchor",
+        ).is_true()
+        # ...and not beside the working directory.
         assert_that(nested_cache.exists()).described_as(
             "mypy scattered a cache into its working directory",
         ).is_false()
