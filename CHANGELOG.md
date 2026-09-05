@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.146.0] - 2026-09-05
+
+### Added
+
+- **tools**: add import-linter tool plugin (#2325) (da4f15f)
+
 ## [0.145.0] - 2026-09-05
 
 ### Added
