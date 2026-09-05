@@ -2,8 +2,9 @@
 
 ``tests/integration/_tools.py`` decides whether a missing wrapped tool skips a
 module or fails the run. These tests pin that decision without touching the
-real PATH: ``shutil.which`` and ``subprocess.run`` are monkeypatched, and the
-``LINTRO_TOOLS_IMAGE`` switch is set through ``monkeypatch.setenv``.
+real PATH: the helper's own ``_which`` and ``_run`` seams are monkeypatched —
+deliberately, so the stdlib :mod:`shutil` and :mod:`subprocess` are left alone
+— and the ``LINTRO_TOOLS_IMAGE`` switch is set through ``monkeypatch.setenv``.
 """
 
 from __future__ import annotations
@@ -653,3 +654,96 @@ def test_missing_minimums_warn_instead_of_silently_dropping_floors(
             assert_that(_tools.enforced_minimum("shellcheck")).is_none()
     finally:
         _tools._enforced_minimums.cache_clear()
+
+
+def test_require_tool_does_not_skip_inside_the_image_when_the_tool_works(
+    monkeypatch: pytest.MonkeyPatch,
+    inside_tools_image: None,
+) -> None:
+    """A working, new-enough tool collects normally inside the tools image.
+
+    The other inside-image cases all assert a skip or a raise, so a gate that
+    skipped unconditionally under ``LINTRO_TOOLS_IMAGE=1`` would satisfy them
+    and turn the required Docker run into hundreds of silent skips. This pins
+    the happy path so that mutation fails.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        inside_tools_image: Fixture setting the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("shellcheck",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="ShellCheck\nversion: 99.0.0\n"),
+    )
+
+    assert_that(require_tool("shellcheck").args[0]).is_false()
+    assert_that(require_command("shellcheck", ["shellcheck"]).args[0]).is_false()
+
+
+def test_version_lag_allowance_matches_hyphenated_executable_names(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """The lag allow-list folds ``-`` and ``_`` on both sides.
+
+    CI fills ``LINTRO_ALLOW_VERSION_LAG`` from the manifest names
+    (``html_validate``, ``golangci_lint``) while integration modules gate on
+    the executable spelling (``html-validate``). Without the fold, an
+    allow-listed lagging tool would still skip its module and discard exactly
+    the coverage the allowance preserves (#1582).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setenv(_tools.ALLOW_VERSION_LAG_ENV, "html_validate,golangci_lint")
+
+    assert_that(_tools.version_lag_allowed("html-validate")).is_true()
+    assert_that(_tools.version_lag_allowed("golangci-lint")).is_true()
+    assert_that(_tools.version_lag_allowed("html_validate")).is_true()
+    assert_that(_tools.version_lag_allowed("shellcheck")).is_false()
+
+    monkeypatch.setenv(_tools.ALLOW_VERSION_LAG_ENV, "html-validate")
+    assert_that(_tools.version_lag_allowed("html_validate")).is_true()
+
+
+def test_require_command_pin_applies_the_floor_to_a_renamed_executable(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """``pin`` makes the floor reachable when the binary is not the tool name.
+
+    ``markdownlint-cli2`` is the npm package; lintro registers the tool as
+    ``markdownlint``. Version parsing is keyed on lintro's tool name, so
+    without the pin the parse returns None, the floor is silently dropped and
+    an old CLI runs the module against a plugin that skipped the tool (#465).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("markdownlint-cli2",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(
+            returncode=0,
+            stdout="markdownlint-cli2 v0.0.1 (markdownlint v0.0.1)",
+        ),
+    )
+
+    assert_that(
+        parse_version("markdownlint-cli2 v0.0.1", tool="markdownlint-cli2"),
+    ).is_none()
+    assert_that(
+        require_command("markdownlint-cli2", ["markdownlint-cli2"]).args[0],
+    ).is_false()
+
+    mark = require_command(
+        "markdownlint-cli2",
+        ["markdownlint-cli2"],
+        pin="markdownlint",
+    )
+
+    assert_that(mark.args[0]).is_true()
+    assert_that(mark.kwargs["reason"]).contains("markdownlint-cli2", "0.0.1")

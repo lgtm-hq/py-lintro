@@ -98,6 +98,11 @@ def version_lag_allowed(name: str) -> bool:
     from under them, or the coverage the allowance exists to preserve is lost
     anyway.
 
+    CI fills the variable from the *manifest* names (``html_validate``,
+    ``osv_scanner``, ``golangci_lint``) while integration modules name the
+    *executable* (``html-validate``), so both sides are folded to the
+    underscore spelling — the same fold :func:`enforced_minimum` applies.
+
     Args:
         name: Tool name to check.
 
@@ -109,9 +114,12 @@ def version_lag_allowed(name: str) -> bool:
         return False
     if raw == "*":
         return True
-    return name.lower() in {
-        part.strip().lower() for part in raw.split(",") if part.strip()
+    keys = {
+        part.strip().lower().replace("-", "_")
+        for part in raw.split(",")
+        if part.strip()
     }
+    return name.lower().replace("-", "_") in keys
 
 
 def enforced_minimum(name: str) -> str | None:
