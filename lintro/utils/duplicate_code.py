@@ -41,6 +41,12 @@ PYLINT_TOOL_NAME: str = "pylint"
 #: Key holding the ratchet baseline in ``[tool.lintro.pylint]``.
 DUPLICATE_CODE_BASELINE_KEY: str = "duplicate_code_baseline"
 
+#: ``ToolResult.metadata`` marker the pylint plugin sets on a result built from
+#: a real pylint report. A run that analysed nothing — no Python files, or none
+#: under the configured ``include`` scope — carries no marker and yields no
+#: verdict, so "pylint had nothing to look at" is never read as "no clones".
+PYLINT_ANALYSED_METADATA_KEY: str = "pylint_analysed"
+
 
 @dataclass(frozen=True)
 class DuplicateCodeVerdict:
@@ -111,6 +117,21 @@ def is_duplicate_code_issue(issue: object) -> bool:
     return str(getattr(issue, "code", "")).upper() == DUPLICATE_CODE_MESSAGE_ID
 
 
+def _was_analysed(*, result: ToolResult) -> bool:
+    """Report whether a pylint result came from a real pylint report.
+
+    Args:
+        result: A pylint tool result from the run.
+
+    Returns:
+        bool: True when pylint actually analysed files and reported back.
+    """
+    if getattr(result, "skipped", False):
+        return False
+    metadata = result.metadata or {}
+    return bool(metadata.get(PYLINT_ANALYSED_METADATA_KEY, False))
+
+
 def _strip_duplicate_code_issues(*, result: ToolResult) -> int:
     """Remove duplicate-code findings from a tool result, in place.
 
@@ -150,13 +171,12 @@ def apply_duplicate_code_baseline(
 
     Returns:
         DuplicateCodeVerdict | None: The verdict, or None when pylint did not
-        run (there is nothing to judge, and no verdict to report).
+        analyse anything (there is nothing to judge, and no verdict to report).
     """
     pylint_results = [
         result
         for result in results
-        if str(result.name).lower() == PYLINT_TOOL_NAME
-        and not getattr(result, "skipped", False)
+        if str(result.name).lower() == PYLINT_TOOL_NAME and _was_analysed(result=result)
     ]
     if not pylint_results:
         return None

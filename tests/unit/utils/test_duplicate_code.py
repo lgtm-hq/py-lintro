@@ -8,6 +8,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_issue import PylintIssue
 from lintro.utils.duplicate_code import (
     DUPLICATE_CODE_BASELINE_KEY,
+    PYLINT_ANALYSED_METADATA_KEY,
     apply_duplicate_code_baseline,
     is_duplicate_code_issue,
     resolve_duplicate_code_baseline,
@@ -63,6 +64,7 @@ def _pylint_result(*issues: PylintIssue) -> ToolResult:
         success=not issues,
         issues_count=len(issues),
         issues=list(issues) or None,
+        metadata={PYLINT_ANALYSED_METADATA_KEY: True},
     )
 
 
@@ -179,4 +181,18 @@ def test_skipped_pylint_result_yields_no_verdict() -> None:
 
     assert_that(
         apply_duplicate_code_baseline(results=[skipped], baseline=34),
+    ).is_none()
+
+
+def test_unanalysed_pylint_result_yields_no_verdict() -> None:
+    """A scoped run that analysed nothing is not evidence of zero clones."""
+    nothing_to_do = ToolResult(
+        name="pylint",
+        success=True,
+        output="No Python files under the configured pylint include paths.",
+        issues_count=0,
+    )
+
+    assert_that(
+        apply_duplicate_code_baseline(results=[nothing_to_do], baseline=34),
     ).is_none()

@@ -76,6 +76,12 @@ PYLINT_NOTHING_TO_LINT: str = "No files to lint"
 #: ``tox.ini``.
 _INI_SECTION_PREFIX: str = "[pylint"
 
+#: ``ToolResult.metadata`` marker set only on a result built from a real pylint
+#: report. The duplicate-code gate (``lintro/utils/duplicate_code.py``) requires
+#: it before it reports a verdict, so a run that analysed nothing — no matching
+#: files, or none under ``include`` — cannot be read as "no duplication".
+PYLINT_ANALYSED_METADATA_KEY: str = "pylint_analysed"
+
 #: Message shown when every discovered file was filtered out by ``include``.
 PYLINT_NO_INCLUDED_FILES: str = (
     "No Python files under the configured pylint include paths."
@@ -492,6 +498,7 @@ class PylintPlugin(BaseToolPlugin):
             output=None,
             issues_count=len(issues),
             issues=issues if issues else None,
+            metadata={PYLINT_ANALYSED_METADATA_KEY: True},
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

@@ -12,6 +12,7 @@ from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_issue import PylintIssue
 from lintro.utils import post_checks
+from lintro.utils.duplicate_code import PYLINT_ANALYSED_METADATA_KEY
 
 
 @dataclass
@@ -59,6 +60,7 @@ def _duplicate_result(count: int) -> ToolResult:
         success=False,
         issues_count=count,
         issues=issues,
+        metadata={PYLINT_ANALYSED_METADATA_KEY: True},
     )
 
 

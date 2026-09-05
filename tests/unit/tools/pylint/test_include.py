@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.pylint import (
+    PYLINT_ANALYSED_METADATA_KEY,
     PYLINT_NO_INCLUDED_FILES,
     PylintPlugin,
     filter_included_files,
@@ -77,6 +78,9 @@ def test_include_scopes_the_command(
         result = pylint_plugin.check([str(configured_project)], {})
 
     assert_that(result.success).is_true()
+    assert_that(result.metadata).contains_entry(
+        {PYLINT_ANALYSED_METADATA_KEY: True},
+    )
     analysed = [arg for arg in run.call_args.kwargs["cmd"] if arg.endswith(".py")]
     assert_that(analysed).is_not_empty()
     for path in analysed:
@@ -108,6 +112,10 @@ def test_include_matching_nothing_is_a_clean_pass(
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_equal_to(PYLINT_NO_INCLUDED_FILES)
     assert_that(run.called).is_false()
+    # No marker: the duplicate-code gate must not read this as "no clones".
+    assert_that(result.metadata or {}).does_not_contain_key(
+        PYLINT_ANALYSED_METADATA_KEY,
+    )
 
 
 def test_gate_owned_options_are_accepted(pylint_plugin: PylintPlugin) -> None:
