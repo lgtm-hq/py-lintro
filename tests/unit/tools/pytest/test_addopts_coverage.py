@@ -193,8 +193,20 @@ def test_banner_reports_disabled_without_coverage_config(
     assert_that(banner).contains("Coverage: disabled")
 
 
-def test_zero_coverage_threshold_enables_collection() -> None:
-    """An explicit zero threshold enables coverage collection."""
+def test_zero_coverage_threshold_enables_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit zero threshold enables coverage collection.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
+    """
+    # An inherited COVERAGE_RCFILE is read as a specified config file, so clear
+    # it to keep the empty tmp_path the only source of coverage configuration.
+    monkeypatch.delenv("COVERAGE_RCFILE", raising=False)
+    monkeypatch.chdir(tmp_path)
     command: list[str] = []
 
     add_coverage_options(command, {"coverage_threshold": 0})

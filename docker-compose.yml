@@ -55,6 +55,11 @@ services:
       - RUNNING_IN_DOCKER=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
+      # This service runs tests/integration only, so its coverage is far below
+      # the project floor in [tool.coverage.report] fail_under, which is
+      # calibrated against the full unit suite. Report and upload coverage here,
+      # but do not gate on it; the unit suite keeps the floor.
+      - LINTRO_COVERAGE_THRESHOLD=${LINTRO_COVERAGE_THRESHOLD:-0}
       # Renovate tool bumps: allow plugins to run slightly-older baked binaries
       # until the tools-image digest catches up (#1582 / LINTRO_ALLOW_VERSION_LAG).
       - LINTRO_ALLOW_VERSION_LAG=${LINTRO_ALLOW_VERSION_LAG:-}

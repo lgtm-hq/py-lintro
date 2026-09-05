@@ -8,6 +8,10 @@ export default defineConfig({
       reporter: ['text', 'html', 'json-summary'],
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.astro', 'src/content/**'],
+      thresholds: {
+        lines: 82,
+        branches: 75,
+      },
     },
   },
 });
