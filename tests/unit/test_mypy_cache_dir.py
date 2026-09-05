@@ -43,50 +43,61 @@ def test_cache_dir_is_anchored_to_the_config_directory() -> None:
     assert_that(str(cache_dir)).is_equal_to(f"{_ANCHOR}/.mypy_cache")
 
 
-def test_running_mypy_from_a_subdirectory_writes_no_nested_cache() -> None:
-    """A non-root cwd must reuse the repo-root cache, not create its own.
+def test_running_mypy_from_a_subdirectory_writes_no_nested_cache(
+    tmp_path: Path,
+) -> None:
+    """A non-root cwd must write to the anchored cache, not create its own.
 
-    This is the behaviour the config exists for, so assert it end to end
-    rather than trusting the setting: run mypy from a scratch subdirectory of
-    the repo and require that no ``.mypy_cache`` appears beside it.
+    This is the behaviour the setting exists for, so assert it end to end
+    rather than trusting the string. The run is fully isolated in ``tmp_path``
+    — the repo's own ``cache_dir`` value is copied into a throwaway config so
+    the value under test stays authentic, while the cache it produces is
+    freshly created here. A shared repo-root cache could otherwise satisfy the
+    assertion without this invocation having written anything.
+
+    Args:
+        tmp_path: Isolated scratch root for the config, cwd and cache.
     """
-    workdir = _REPO_ROOT / "build" / "mypy-cache-probe"
-    workdir.mkdir(parents=True, exist_ok=True)
-    target = workdir / "probe.py"
-    target.write_text("x: int = 1\n", encoding="utf-8")
-    nested_cache = workdir / ".mypy_cache"
-    anchored_cache = _REPO_ROOT / ".mypy_cache"
-    try:
-        result = subprocess.run(  # nosec B603 - fixed argv, shell=False
-            [
-                sys.executable,
-                "-m",
-                "mypy",
-                "--config-file",
-                str(_PYPROJECT),
-                "--no-error-summary",
-                "probe.py",
-            ],
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        # Prove mypy actually ran before trusting the absence below: a probe
-        # that never launched (missing module, bad argv) would write no cache
-        # anywhere and pass vacuously. mypy exits 0 (clean) or 1 (findings);
-        # anything else is a launch failure, not a verdict.
-        assert_that(result.returncode).described_as(
-            f"mypy did not run: {result.stderr}",
-        ).is_in(0, 1)
-        # Positive evidence: the cache landed at the anchored location...
-        assert_that(anchored_cache.is_dir()).described_as(
-            "mypy wrote no cache at the configured anchor",
-        ).is_true()
-        # ...and not beside the working directory.
-        assert_that(nested_cache.exists()).described_as(
-            "mypy scattered a cache into its working directory",
-        ).is_false()
-    finally:
-        target.unlink(missing_ok=True)
-        workdir.rmdir()
+    cache_dir = str(_mypy_config()["cache_dir"])
+    config_dir = tmp_path / "anchor"
+    workdir = tmp_path / "work"
+    config_dir.mkdir()
+    workdir.mkdir()
+    config = config_dir / "pyproject.toml"
+    config.write_text(
+        f'[tool.mypy]\ncache_dir = "{cache_dir}"\n',
+        encoding="utf-8",
+    )
+    (workdir / "probe.py").write_text("x: int = 1\n", encoding="utf-8")
+
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--config-file",
+            str(config),
+            "--no-error-summary",
+            "probe.py",
+        ],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # Prove mypy ran before trusting any absence: a probe that never launched
+    # would write no cache anywhere and pass vacuously. mypy exits 0 (clean)
+    # or 1 (findings); anything else is a launch failure.
+    assert_that(result.returncode).described_as(
+        f"mypy did not run: {result.stderr}",
+    ).is_in(0, 1)
+    # The cache resolved against the config's directory, which did not exist
+    # before this run, so this is positive evidence and not a stale artifact.
+    assert_that((config_dir / ".mypy_cache").is_dir()).described_as(
+        "mypy wrote no cache at the configured anchor",
+    ).is_true()
+    # And nothing landed beside the working directory.
+    assert_that((workdir / ".mypy_cache").exists()).described_as(
+        "mypy scattered a cache into its working directory",
+    ).is_false()
