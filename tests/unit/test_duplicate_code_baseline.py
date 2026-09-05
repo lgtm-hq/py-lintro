@@ -6,11 +6,20 @@
 target owned by #2311, which is done when it reaches 0.
 
 Two guards live here. The configured baseline may never exceed the ceiling
-recorded when the gate landed, and — wherever pylint is installed, which
-includes CI — it must equal what pylint actually reports on the definitions
-package. Together they stop a baseline drifting above the truth (hiding new
-duplication) or below it (failing every run): a raise is only possible by
-raising the ceiling too, which is what review looks for.
+recorded when the gate landed — an exact, tool-free comparison between
+``pyproject.toml`` and this module's constant — and, wherever pylint is
+installed (which includes CI), what pylint actually reports on the definitions
+package must not be *above* the baseline.
+
+The live comparison is deliberately ``<=`` rather than ``==``. pylint's
+``R0801`` count is a property of the resolved toolchain as well as the code:
+the same tree reported 34 clone sets on one CI interpreter and 33 on another
+(#2365), so an equality assertion turns routine environment drift into a red
+required check. ``<=`` keeps the guard's purpose — a count that grows above the
+baseline still fails, so the baseline can never drift above the truth and hide
+new duplication — while a live count *below* the baseline is exactly what the
+ratchet is for: the prompt to lower the recorded number once the drop is
+reproducible rather than environment-dependent.
 """
 
 from __future__ import annotations
@@ -39,7 +48,9 @@ DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
 
 #: Ceiling on the baseline, recorded when the gate landed and deliberately not
 #: derived from the config. It may only go *down*: lower it in the pull request
-#: that removes duplication, never raise it. #2311 drives it to 0.
+#: that removes duplication, never raise it. #2311 drives it to 0. This one is
+#: compared exactly against ``pyproject.toml``; no tool runs, so no environment
+#: can move it.
 MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 34
 
 #: Minimum clone length pylint counts, from ``[tool.pylint.similarities]``.
@@ -134,16 +145,87 @@ def test_min_similarity_lines_is_not_relaxed() -> None:
     )
 
 
+def _over_baseline_message(*, count: int, baseline: int) -> str:
+    """Render the explanation shown when a live pylint count breaks the ratchet.
+
+    Args:
+        count: Number of ``R0801`` findings the live pylint run reported.
+        baseline: Baseline recorded in ``pyproject.toml``.
+
+    Returns:
+        str: The assertion description, spelling out the ratchet direction and
+        what to do when the live count is lower than the baseline instead.
+    """
+    return (
+        f"pylint reports {count} duplicate-code findings on {DEFINITIONS_PACKAGE} "
+        f"but the recorded baseline is {baseline}; the baseline may only shrink, "
+        "so remove the new duplication rather than raising the number (#2293). "
+        "A live count *below* the baseline never fails here — it is the prompt "
+        f"to lower {DUPLICATE_CODE_BASELINE_KEY} in pyproject.toml and "
+        "MAX_ALLOWED_DUPLICATE_CODE_BASELINE in this module, once the drop is "
+        "reproducible rather than environment-dependent (#2365)."
+    )
+
+
+def _assert_within_baseline(*, count: int, baseline: int) -> None:
+    """Assert a live pylint count has not risen above the baseline.
+
+    Args:
+        count: Number of ``R0801`` findings the live pylint run reported.
+        baseline: Baseline recorded in ``pyproject.toml``.
+    """
+    assert_that(count).described_as(
+        _over_baseline_message(count=count, baseline=baseline),
+    ).is_less_than_or_equal_to(baseline)
+
+
+@pytest.mark.parametrize(
+    "count",
+    [0, 1, 33, 34],
+    ids=["none", "one", "one-below-baseline", "at-baseline"],
+)
+def test_a_live_count_at_or_below_the_baseline_is_accepted(count: int) -> None:
+    """The live comparison passes for any count that has not grown.
+
+    Args:
+        count: Hypothetical live ``R0801`` count.
+    """
+    _assert_within_baseline(count=count, baseline=34)
+
+
+def test_a_live_count_above_the_baseline_is_rejected() -> None:
+    """The live comparison still fails when the count grows."""
+    with pytest.raises(AssertionError) as excinfo:
+        _assert_within_baseline(count=35, baseline=34)
+
+    assert_that(str(excinfo.value)).contains("may only shrink")
+
+
+def test_the_over_baseline_message_explains_both_directions() -> None:
+    """The failure text names the ratchet rule and the lower-count remedy."""
+    message = _over_baseline_message(count=35, baseline=34)
+
+    assert_that(message).contains(DUPLICATE_CODE_BASELINE_KEY)
+    assert_that(message).contains("MAX_ALLOWED_DUPLICATE_CODE_BASELINE")
+    assert_that(message).contains("*below* the baseline")
+
+
 @pytest.mark.skipif(
     shutil.which("pylint") is None,
     reason="pylint is not installed in this environment",
 )
-def test_baseline_matches_what_pylint_reports() -> None:
-    """The recorded baseline is the count pylint reports on the fixture set."""
+def test_pylint_reports_no_more_than_the_baseline() -> None:
+    """The live pylint count has not risen above the recorded baseline.
+
+    Not an equality check: the count depends on the resolved pylint/astroid
+    build as well as on the code (#2365), and only an *increase* means new
+    duplication. A lower count is the signal to lower the baseline.
+    """
     executable = shutil.which("pylint")
     assert executable is not None  # narrow type for mypy; guarded by skipif
     baseline = resolve_duplicate_code_baseline(config=_lintro_pylint_config())
+    assert baseline is not None  # narrow type for mypy; asserted above
 
     count = _measure_duplicate_code_count(pylint_executable=executable)
 
-    assert_that(count).is_equal_to(baseline)
+    _assert_within_baseline(count=count, baseline=baseline)

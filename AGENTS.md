@@ -108,7 +108,11 @@ fails the run only when the count is **higher** than the baseline. **The baselin
 only shrink** — lower it in the pull request that removes duplication, never raise it,
 and never raise `min-similarity-lines`. #2311 factors the definition template and is
 done when the number reaches 0; `tests/unit/test_duplicate_code_baseline.py` fails if
-the baseline grows or drifts from what pylint reports.
+the baseline grows above the ceiling recorded there, or if a live pylint run reports
+**more** findings than the baseline. That live check is `<=`, not `==`: the `R0801`
+count depends on the resolved pylint/astroid build as well as on the code (the same tree
+reported 34 on one CI interpreter and 33 on another, #2365), and a count below the
+baseline is the prompt to lower the baseline, not a failure.
 
 ## Docs site (optional secondary product)
 
