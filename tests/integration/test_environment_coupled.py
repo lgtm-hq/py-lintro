@@ -24,7 +24,11 @@ from click.testing import CliRunner
 from lintro.cli_utils.commands.badge import badge_command
 from lintro.enums.update_channel import UpdateChannel
 from lintro.tools.core.update_channels import detect_update_channel
-from tests.integration._tools import tool_is_available
+from tests.integration._tools import tool_runs_for_lintro
+
+# pytest does not chdir to the repository root, so the installer script
+# and its cwd must be resolved from this file rather than Path.cwd().
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_detect_update_channel_usr_local_bin_is_standalone() -> None:
@@ -41,12 +45,12 @@ def test_installer_dry_run_simulates_spectral_verification() -> None:
     result = subprocess.run(  # nosec B603 - fixed repository script and argv
         [
             "/bin/bash",
-            "scripts/utils/install-tools.sh",
+            str(_REPO_ROOT / "scripts" / "utils" / "install-tools.sh"),
             "--dry-run",
             "--tools",
             "spectral",
         ],
-        cwd=Path.cwd(),
+        cwd=_REPO_ROOT,
         env=environment,
         capture_output=True,
         text=True,
@@ -59,7 +63,7 @@ def test_installer_dry_run_simulates_spectral_verification() -> None:
 
 
 @pytest.mark.xfail(
-    tool_is_available("osv-scanner"),
+    tool_runs_for_lintro("osv-scanner"),
     strict=True,
     reason=(
         "osv_scanner bypasses lintro's file-discovery pipeline (it finds "
@@ -79,9 +83,12 @@ def test_badge_empty_directory_does_not_publish(tmp_path: Path) -> None:
     contract at ``resolve_health_score``, this one drives the whole pipeline
     over a directory with nothing in it.
 
-    The xfail above is conditional and ``strict``: where osv-scanner is
-    absent this must pass outright, and the day the gap is closed the XPASS
-    fails the suite so the marker has to be removed rather than rotting.
+    The xfail above is conditional and ``strict``: it fires only where
+    lintro would actually run osv-scanner (present *and* clearing its
+    version floor, since below that the plugin skips it and the gap does
+    not arise). Everywhere else this must pass outright, and the day the
+    gap is closed the XPASS fails the suite so the marker has to be
+    removed rather than rotting.
 
     Args:
         tmp_path: Pytest temporary directory fixture.

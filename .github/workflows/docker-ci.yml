@@ -1017,12 +1017,13 @@ jobs:
     # The gate has teeth since #465: inside the tools image the suite sets
     # LINTRO_TOOLS_IMAGE=1 (docker-compose.yml), so a wrapped tool missing
     # from the image FAILS its integration module instead of skipping it.
-    # That makes pipeline relevance load-bearing — every PR touching
+    # That makes pipeline relevance load-bearing — a PR touching code under
     # lintro/**, tests/**, docker/**, pyproject.toml or uv.lock must resolve
-    # pipeline=true. Deny-by-default classification already guarantees that
-    # (none of those paths is on the skip-list) and
-    # tests/scripts/test_shell_scripts.py pins it so the skip-list can never
-    # grow to swallow them.
+    # pipeline=true. Deny-by-default classification already gives that: the
+    # skip-list is '**/*.md', 'docs/**' and 'assets/**', so only the prose
+    # inside those trees (a tests/**/*.md, say) is skippable, never the code
+    # under them. tests/scripts/test_shell_scripts.py pins the code paths so
+    # the skip-list can never grow to swallow them.
     needs: [changes, docker-build]
     if: >-
       !cancelled() &&

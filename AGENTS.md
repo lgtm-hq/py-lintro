@@ -37,12 +37,14 @@ required):
   install prettier, hadolint, shellcheck, actionlint, oxlint, taplo, gitleaks,
   `markdownlint-cli2`, rustfmt/cargo, etc. `lintro check .` silently **skips** any tool
   missing from `PATH`, so it still passes without them. `tests/integration/**` behaves
-  the same way: every module gates on `tests/integration/_tools.py::require_tool`, which
-  runs the tool's version command and **skips** the module when it does not answer, so
-  the suite is green on a toolless machine. Inside the tools image
-  (`LINTRO_TOOLS_IMAGE=1`, set by `docker/tools.Dockerfile` and the `test-integration`
-  compose service) the same gate **fails** instead — a tool missing there is an image
-  regression (#465). Install the full set with
+  the same way: every module that drives a wrapped tool gates on
+  `tests/integration/_tools.py::require_tool`, which runs the tool's version command and
+  **skips** the module when it does not answer or when the binary is below the minimum
+  lintro enforces. Modules with a non-tool prerequisite are the exception and still need
+  it — `test_built_package.py` wants `python3.12-venv` (see below). Inside the tools
+  image (`LINTRO_TOOLS_IMAGE=1`, set by `docker/tools.Dockerfile` and the
+  `test-integration` compose service) the same gate **fails** instead — a tool missing
+  there is an image regression (#465). Install the full set with
   `./scripts/utils/install-tools.sh --local` (network-heavy; installs into
   `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin` and pulls a Rust toolchain). This is
   intentionally kept out of the update script.
