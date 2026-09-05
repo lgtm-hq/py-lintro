@@ -367,7 +367,10 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
         skip_step = skip_steps[0]
         # Inlined (#2297): ci-log.sh only ever ran `echo "$*"`.
         assert_that(skip_step["run"]).starts_with("echo ")
-        assert_that(skip_step["run"]).contains("$SKIP_REASON")
+        # Double-quoted, not bare: skip reasons contain spaces ("version-bump
+        # PR", "docs-only change"), so an unquoted expansion would word-split
+        # the reason across echo arguments.
+        assert_that(skip_step["run"]).contains('"skipped: $SKIP_REASON')
         assert_that(skip_step["env"]["SKIP_REASON"]).contains(
             "needs.changes.outputs.skip-reason",
         )
