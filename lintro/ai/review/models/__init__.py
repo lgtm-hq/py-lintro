@@ -9,6 +9,7 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.chunk_timing import ChunkTiming
 from lintro.ai.review.models.chunking_result import ChunkingResult
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.file_classification import FileClassification
@@ -41,6 +42,7 @@ __all__ = [
     "ChunkSummary",
     "ChunkTiming",
     "ChunkingResult",
+    "ConvergenceDecision",
     "CoverageDegradation",
     "FileAssessment",
     "FileClassification",

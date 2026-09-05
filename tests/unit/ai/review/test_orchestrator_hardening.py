@@ -289,6 +289,41 @@ def test_normalize_severity_minor_maps_to_p3() -> None:
     assert_that(normalize_severity(raw="minor")).is_equal_to(Severity.P3)
 
 
+def test_a_p1_question_does_not_fail_the_process() -> None:
+    """A question never blocks, whatever severity the model labelled it.
+
+    ``has_p1_findings`` is the process exit gate. It must agree with
+    ``derive_verdict`` and with the converged-skip gate, both of which have
+    always excluded questions — otherwise a round of P1 questions exits 1
+    while the converged skip that follows it exits 0 (#2099 review).
+    """
+    from dataclasses import replace
+
+    from lintro.ai.review.enums.finding_kind import FindingKind
+
+    findings = parse_findings(
+        raw_findings=[
+            {
+                "severity": "p1",
+                "title": "Why is this here?",
+                "file": "a.py",
+                "line": 1,
+                "failure_scenario": "boom",
+            },
+        ],
+    )
+    question = replace(findings[0], kind=FindingKind.QUESTION)
+    result = ReviewResult(
+        metadata=_placeholder_metadata(),
+        summary="s",
+        checklist=(),
+        findings=(question,),
+    )
+
+    assert_that(question.severity).is_equal_to(Severity.P1)
+    assert_that(result.has_p1_findings).is_false()
+
+
 def test_has_p1_findings_after_lowercase_normalization() -> None:
     """The exit gate fires when a lowercase 'p1' finding is normalized."""
     findings = parse_findings(

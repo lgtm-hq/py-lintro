@@ -26,6 +26,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.finding_matcher import (
+    count_blocking_findings,
     fingerprint_for,
     match_findings,
     normalize_file_path,
@@ -48,6 +49,7 @@ from lintro.ai.review.github_lifecycle import (
 from lintro.ai.review.github_render import (
     REGRESSED_TITLE_SUFFIX,
     _partition_findings,
+    format_convergence_banner,
     format_finding_comment,
     format_inline_post_cause,
     format_run_mechanics,
@@ -63,12 +65,14 @@ from lintro.ai.review.github_sticky import (
     matcher_reviewed_paths,
     parse_review_state,
     parse_review_state_v2,
+    render_state_sticky,
 )
 from lintro.ai.review.inline_fix import (
     finding_suggested_change,
     normalize_diff_path,
     plan_inline_fix,
 )
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
@@ -92,6 +96,7 @@ __all__ = [
     "format_run_mechanics",
     "parse_review_state",
     "parse_review_state_v2",
+    "post_review_converged_to_github",
     "post_review_error_to_github",
     "post_review_to_github",
     "sanitize_comment_text",
@@ -760,6 +765,68 @@ def post_review_error_to_github(
         provider=provider,
         metadata=metadata,
         prior_state=prior_state,
+        repo=repo or gh_reporter.repo or "",
+        pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
+    )
+    return _upsert_sticky(
+        reporter=gh_reporter,
+        body=body,
+        comment_id=comment_id,
+    )[0]
+
+
+def post_review_converged_to_github(
+    *,
+    decision: ConvergenceDecision,
+    pr_number: int | None = None,
+    repo: str | None = None,
+    reporter: GitHubPRReporter | None = None,
+    prior_state: ReviewState | None = None,
+) -> bool:
+    """Stamp the sticky comment for a round the stop rule short-circuited.
+
+    The board itself is re-rendered untouched from persisted state and the
+    convergence banner is written under the header, exactly as a failed round
+    is rendered (#1954): a skipped round produced no findings, so it must not
+    advance the round counter, edit tracked findings, or blank the board a
+    reviewer is still working from.
+
+    Args:
+        decision: The converged decision that skipped the round.
+        pr_number: Optional PR number override.
+        repo: Optional repository override (owner/name).
+        reporter: Optional preconfigured GitHub reporter.
+        prior_state: State already loaded for this invocation. When empty, the
+            sticky's own decoded state is used instead.
+
+    Returns:
+        True when posting succeeded; False when there is no PR context or no
+        recoverable prior state to re-render the board from.
+    """
+    gh_reporter = reporter or GitHubPRReporter(pr_number=pr_number, repo=repo)
+    if not gh_reporter.is_available():
+        logger.warning("GitHub PR context not available — skipping converged stamp")
+        return False
+    comment_id, sticky_state = _load_prior_state(reporter=gh_reporter)
+    if prior_state is None or not (
+        prior_state.coverage or prior_state.runs or prior_state.findings
+    ):
+        prior_state = sticky_state
+    if not prior_state.runs:
+        # Nothing recoverable to re-render: overwriting the live board with
+        # the empty-state page would erase the findings a reviewer is still
+        # working from, so leave the sticky untouched and say so.
+        logger.warning(
+            "No prior review state is recoverable — leaving the sticky "
+            "untouched instead of stamping a converged round over it",
+        )
+        return False
+    body = render_state_sticky(
+        state=prior_state,
+        banner=format_convergence_banner(
+            decision=decision,
+            open_p1=count_blocking_findings(findings=prior_state.findings),
+        ),
         repo=repo or gh_reporter.repo or "",
         pr_number=pr_number if pr_number is not None else gh_reporter.pr_number,
     )

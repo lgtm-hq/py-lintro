@@ -179,8 +179,11 @@ Advisory tools under `lintro review`:
 | `--tool-options`           | `tool:option=value` overrides, as in `chk`                           |
 
 Advisory findings never affect the exit code unless `--fail-on-findings` is passed, and
-they never contribute to the `chk` health score. With `--output json`, they appear under
-an additive `advisory` key so existing consumers of the review JSON keep working.
+they never contribute to the `chk` health score. One exception: a round short-circuited
+by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
+before the advisory tools run at all, so `--fail-on-findings` is inert on that
+invocation. With `--output json`, they appear under an additive `advisory` key so
+existing consumers of the review JSON keep working.
 
 `idiom-review` offers two modes:
 
@@ -574,6 +577,110 @@ What it adds to the surfaces:
 - A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
   _Review coverage completeness_ above) when the input was cut or the pass did not
   complete. The run stays complete for the chunk findings either way.
+
+### Review convergence (deterministic re-review stop)
+
+File-level resume already spares a long-lived PR from re-reading files it has covered at
+HEAD, but every round still re-reports the findings that are already open and already on
+the board — so a PR that has stopped moving keeps paying for rounds that say the same
+thing. Convergence scoring ends that remaining treadmill in code — never by asking the
+model.
+
+Each round scores the findings still open after it:
+
+```text
+score = floor + (ceiling - floor) × confidence × likelihood
+```
+
+| Input                         | Value                                                   |
+| ----------------------------- | ------------------------------------------------------- |
+| Severity band (floor–ceiling) | P1 `6.0`–`10.0` · P2 `3.0`–`6.0` · P3 `0.5`–`3.0`       |
+| Confidence multiplier         | `high` 1.0 · `medium` 0.6 · `low` 0.3 (absent ⇒ medium) |
+| Likelihood (`evidence_style`) | `diff_local` 1.0 · `cross_file` 0.8 · `speculative` 0.4 |
+| Systemic categories           | `contract-drift`, `breaking-change` ⇒ likelihood 1.0    |
+
+The round score is the **sum over the open findings**. Questions are excluded, exactly
+as they are excluded from the readiness verdict. Resolved findings contribute nothing,
+so a round that fixed everything scores `0.00`. For calibration: one high-confidence P1
+read straight off the diff scores `10.00`; one low-confidence P3 scores `1.25`.
+
+Every input is a field lintro already parses, so the score is a pure function of the
+tracked findings — no wall clock, no randomness, no extra provider call. The score and
+its trajectory are persisted per round in the review state (schema v3) and rendered
+under the sticky comment's `Findings` heading:
+
+```text
+Convergence score 1.25 · trajectory 12.40 → 4.50 → 1.25
+```
+
+**The short-circuit contract.** With `review.convergence.threshold` set, the next round
+is skipped when the last `review.convergence.stable_rounds` recorded scores are all
+_strictly_ below the threshold. The decision is made from persisted state before the
+provider is constructed, so a converged round costs nothing:
+
+- No provider call, no findings, no state write — the round counter, the tracked
+  findings, and the carried coverage stay exactly as the last real round left them, and
+  the next round that does run resumes from there.
+- The sticky comment is re-rendered from the last good board with a
+  `🔁 Converged — converged at round N (score X < threshold Y)` banner.
+- `--output json` emits a distinct envelope
+  (`{"outcome": "converged", "converged": {...}}`) that carries no `readiness_verdict`,
+  no `findings`, and no `partial` key. `scripts/ci/classify_review_outcome.py` reports
+  it as its own **converged** outcome — never as "reviewed, found nothing". Exit 0
+  unless `converged.open_p1` is greater than zero, in which case the skip exits 1 and
+  the check goes red; see the readiness-gate bullet below for the single exit contract.
+- A `partial` or coverage-limited round can never count toward the streak: a low score
+  from a round that never looked properly is not evidence of stability. Rounds persisted
+  before scoring existed carry no score and are likewise not evidence.
+- Pending resume work blocks the skip too. If the last round left a model-flagged file
+  to re-read, or a group/import invalidation it never served, the next round runs even
+  when the score says quiet: a quiet score means the findings stopped moving, not that
+  every file has been looked at. Skipping would drop that queued work rather than defer
+  it.
+- The stop rule is a `lintro review` (CLI) feature. The MCP `lintro_review` tool does
+  not read `review.convergence.threshold` and always reviews — it is a single-shot tool
+  call with no persisted round history of its own to converge over.
+- A converged skip is a short-circuit of the whole command, not just the review round:
+  it returns before the advisory tools (`idiom-review` and friends) run, so
+  `--fail-on-findings` is inert on that invocation and never contributes to its exit
+  code. Nothing is inherited from the last round — a later invocation does not carry the
+  earlier one's advisory exit; the advisory tools simply do not run again until a round
+  does. Run `lintro review --full` to force the round and its advisory tail. This is
+  deliberate: the skip exists to spend nothing.
+- A converged skip reports the open P1 findings the last real round left in force, and
+  treats them exactly as a reviewed round does. The CLI exits 1 locally — the same exit
+  a round that found them produces — while the CI check stays **green** on both paths:
+  `scripts/ci/classify_review_outcome.py` reports P1 findings without reddening (see the
+  exit-code contract in `scripts/ci/run-ai-review.sh`), and a skipped round is never
+  stricter about the same findings than the round that found them. The readiness gate is
+  informational at check level, so the count is surfaced rather than hidden behind an
+  exit code: `converged.open_p1` in the JSON envelope,
+  `skipped: N open P1 findings remain` in the check headline, and the same sentence on
+  the sticky's converged banner.
+- `review.convergence.threshold` must be greater than zero; scores are non-negative, so
+  a zero threshold could never be met and is rejected by config validation.
+- `lintro review --full` is the _only_ thing that breaks the skip. The rule is evaluated
+  from persisted state, not from what triggered the run, so a `synchronize` push, a
+  manual `workflow_dispatch`, and a ChatOps re-review are all skipped just the same
+  unless the invocation passes `--full`. A dispatch that must review has to pass it
+  explicitly — this repo's own dogfood wrapper does not.
+- **A skip persists across later pushes.** Because a skipped round writes no state, the
+  next push re-reads the same quiet trajectory and reaches the same decision: new
+  commits do not restart scoring, and the PR stays skipped until a `--full` run records
+  a fresh score. That is the intended behavior for a PR that has stopped moving, but it
+  does mean enabling a threshold is not a per-push setting — plan on `--full` being the
+  way back to reviewing.
+
+**Disabled by default.** With `threshold` unset — the default — behavior is identical to
+a build without the feature: every round reviews.
+
+```yaml
+# .lintro-config.yaml
+review:
+  convergence:
+    threshold: null # float > 0; null (default) disables the stop rule
+    stable_rounds: 2 # consecutive sub-threshold rounds required (int ≥ 1)
+```
 
 ### Review readiness verdict
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
@@ -110,7 +111,7 @@ class ReviewState:
         """
         payload: dict[str, Any] = {
             "schema_version": 3,
-            "version": 3,
+            "version": STATE_VERSION,
             "repo": self.repo,
             "pr_number": self.pr_number,
             "base_sha": self.base_sha,
@@ -166,7 +167,7 @@ class ReviewState:
         except (TypeError, ValueError):
             pr_number = None
         return cls(
-            version=3,
+            version=STATE_VERSION,
             runs=tuple(
                 RunRecord.from_dict(item)
                 for item in payload.get("runs") or []
