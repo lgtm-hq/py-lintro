@@ -73,16 +73,19 @@ sits above the cancellation branch, so even a run cancelled after lint failed st
 above the guard: `143` is `128 + SIGTERM`, assigned by the kernel when the runner kills
 the process, and lintro itself only ever exits `0` or `1` for a lint verdict. A
 SIGTERM'd run often writes a stale `status=failed` on its way out, so `143` overrides it
-and absorbs. Missing outputs are _not_ evidence of a flake and stay red; the bounded
-`dogfooding_lint_retry` job is the remedy for a runner that died before reporting.
+and is classified as infra rather than as a verdict (since #2296 that classification no
+longer greens the check — see below). Missing outputs are _not_ evidence of a flake and
+stay red; the bounded `dogfooding_lint_retry` job is the remedy for a runner that died
+before reporting.
 
 Fail-closed contract (#2296): classification is not absorption. A classified infra
 failure that produced **no lint verdict** — a cancelled or timed-out job, a SIGTERM
 `exit 143`, a tool-execution timeout — no longer greens the required check. The gate
 writes `passed=false`, `status=no-verdict`, `infra-flake=true` and exits 1, so
 `lintro-code-quality` goes red and `auto-rerun-on-infra-failure.yml` reruns the failed
-jobs (up to three attempts). The check turns green only when a rerun produces a real
-lint verdict. `infra-flake` is kept so the rerun bot, the job summary
+jobs (up to three reruns; the original run is attempt 1, so attempt 4 is the last
+eligible one). The check turns green only when a rerun produces a real lint verdict.
+`infra-flake` is kept so the rerun bot, the job summary
 (`summarize-code-quality-gate.sh`) and dashboards can tell "lint failed" apart from
 "lint did not run"; a red check with `status=no-verdict` is runner loss, not a
 violation.

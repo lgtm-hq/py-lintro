@@ -3449,10 +3449,25 @@ def test_code_quality_gate_explains_an_infra_flake_in_the_summary() -> None:
         for step in gate_job["steps"]
         if "summarize-code-quality-gate.sh" in str(step.get("run", ""))
     )
+    assert_that(str(summary_step["run"]).strip()).is_equal_to(
+        "scripts/ci/summarize-code-quality-gate.sh",
+    )
+
     condition = _normalize_github_expr(str(summary_step["if"]))
     assert_that(condition).contains("always()")
     assert_that(condition).contains("steps.gate.outputs.infra-flake == 'true'")
-    assert_that(summary_step["env"]).contains_key("GATE_STATUS")
+
+    # The script branches on GATE_STATUS and quotes MAX_RERUNS, and refuses to
+    # write anything unless GATE_INFRA_FLAKE is the literal 'true'. A missing
+    # key would silently fall back to a default and print the wrong story.
+    env = summary_step["env"]
+    assert_that(_normalize_github_expr(str(env["GATE_INFRA_FLAKE"]))).is_equal_to(
+        "${{ steps.gate.outputs.infra-flake }}",
+    )
+    assert_that(_normalize_github_expr(str(env["GATE_STATUS"]))).is_equal_to(
+        "${{ steps.gate.outputs.status }}",
+    )
+    assert_that(str(env["MAX_RERUNS"])).is_equal_to("3")
 
 
 # --- Release version-skew audit wiring (#1712) ------------------------------

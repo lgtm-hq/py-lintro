@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ def _run_script(
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/summarize-code-quality-gate.sh",
     ],
 )
 def test_code_quality_gate_scripts_expose_help(script: str) -> None:
@@ -1170,3 +1172,87 @@ def test_gate_summary_stops_promising_a_rerun_past_the_budget() -> None:
         assert_that(summary).contains("budget (3) is now exhausted")
     finally:
         Path(summary_path).unlink(missing_ok=True)
+
+
+_AUTO_RERUN_WORKFLOW = (
+    _REPO_ROOT / ".github" / "workflows" / "auto-rerun-on-infra-failure.yml"
+)
+
+
+def _auto_rerun_signatures() -> list[str]:
+    """Read the extra rerun signatures exactly as the reusable workflow gets them.
+
+    Returns:
+        The non-empty lines of the workflow's ``signatures`` block.
+    """
+    workflow = yaml.safe_load(_AUTO_RERUN_WORKFLOW.read_text(encoding="utf-8"))
+    block = workflow["jobs"]["rerun"]["with"]["signatures"]
+    return [line for line in block.splitlines() if line.strip()]
+
+
+def _matches_any_signature(*, log: str, signatures: list[str]) -> bool:
+    """Match a job log the way the rerun bot does, with a real ``grep -qF``.
+
+    Args:
+        log: Captured job-log text.
+        signatures: Fixed strings from the workflow's signature block.
+
+    Returns:
+        True when at least one signature matches the log.
+    """
+    return any(
+        subprocess.run(  # nosec B603 B607 - fixed argv, no shell, test-local input
+            ["grep", "-qF", "--", signature],
+            input=log,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+        for signature in signatures
+    )
+
+
+def test_auto_rerun_matches_a_real_no_verdict_gate_log() -> None:
+    """The rerun bot's own matcher must fire on the line the gate really prints.
+
+    The literal-containment test above pins the three copies of the sentence
+    against drift; this one closes the remaining gap by running
+    ``assert-required-check.sh`` for real and feeding its output to ``grep
+    -qF`` with the signatures parsed out of the workflow — the same matcher
+    lgtm-ci's reusable rerun applies to the failed job's log.
+    """
+    result = _run_script(
+        "scripts/ci/assert-required-check.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "",
+            "EXIT_CODE_OUTPUT": "143",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(
+        _matches_any_signature(
+            log=result.stdout + result.stderr,
+            signatures=_auto_rerun_signatures(),
+        ),
+    ).is_true()
+
+
+def test_auto_rerun_ignores_a_real_lint_failure_log() -> None:
+    """A genuine lint failure must never be rerun as if it were runner noise."""
+    result = _run_script(
+        "scripts/ci/assert-required-check.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(
+        _matches_any_signature(
+            log=result.stdout + result.stderr,
+            signatures=_auto_rerun_signatures(),
+        ),
+    ).is_false()
