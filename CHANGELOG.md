@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.145.0] - 2026-09-05
+
+### Added
+
+- **evals**: add a cross-provider review agreement matrix harness (#2276) (a4cb90c)
+
 ## [0.144.0] - 2026-09-05
 
 ### Added
