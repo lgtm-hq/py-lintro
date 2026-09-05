@@ -86,9 +86,14 @@ def test_doc_url_points_at_contract_types(
     Args:
         import_linter_plugin: Plugin under test.
     """
-    assert_that(import_linter_plugin.doc_url("Layered architecture")).is_equal_to(
-        DocUrlTemplate.IMPORT_LINTER,
-    )
+    url = import_linter_plugin.doc_url("Layered architecture")
+
+    assert_that(url).is_equal_to(DocUrlTemplate.IMPORT_LINTER)
+    # Assert the user-facing path too: the enum previously pointed at a
+    # ``contract_types.html`` URL that 404s, and enum equality alone would not
+    # have caught that regression.
+    assert_that(url).contains("contract_types")
+    assert_that(url).does_not_contain(".html")
 
 
 def test_doc_url_empty_code_returns_none(

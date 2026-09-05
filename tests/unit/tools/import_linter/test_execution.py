@@ -63,10 +63,13 @@ def test_check_clean_project_succeeds(
             import_linter_plugin,
             "_run_subprocess",
             return_value=(True, kept_output),
-        ),
+        ) as run,
     ):
         result = import_linter_plugin.check([str(project_with_contracts)], {})
 
+    # A discovery miss would take the no-config path and produce the same
+    # success/zero-issue shape, so assert the tool was actually invoked.
+    assert_that(run.called).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.issues).is_none()
@@ -202,6 +205,41 @@ def test_find_config_prefers_setup_cfg(tmp_path: Path) -> None:
     found = find_import_linter_config([str(tmp_path)])
 
     assert_that(found).is_equal_to(tmp_path / "setup.cfg")
+
+
+def test_find_config_order_matches_upstream(tmp_path: Path) -> None:
+    """Same-directory precedence follows import-linter's own reader order.
+
+    Upstream registers an ini reader (``setup.cfg`` then ``.importlinter``)
+    ahead of the toml reader (``pyproject.toml``) — see
+    ``importlinter.configuration`` and ``adapters.user_options``. Lintro must
+    pick the same file a bare ``lint-imports`` run would, or the two disagree
+    about which contracts apply.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.importlinter]\nroot_package = "pkg"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".importlinter").write_text(
+        "[importlinter]\nroot_package = pkg\n",
+        encoding="utf-8",
+    )
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_equal_to(
+        tmp_path / ".importlinter",
+    )
+
+    (tmp_path / "setup.cfg").write_text(
+        "[importlinter]\nroot_package = pkg\n",
+        encoding="utf-8",
+    )
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_equal_to(
+        tmp_path / "setup.cfg",
+    )
 
 
 def test_find_config_walks_upward_from_a_file(tmp_path: Path) -> None:

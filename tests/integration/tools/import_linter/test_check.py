@@ -68,6 +68,10 @@ def test_check_passes_when_contracts_are_kept(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    # Success plus zero issues is also the shape of a skip and of the no-config
+    # path, so prove the binary ran and really evaluated the contract.
+    assert_that(result.skipped).is_false()
+    assert_that(result.output).contains("1 kept, 0 broken")
 
 
 def test_check_without_any_config_is_clean_not_skipped(
@@ -91,6 +95,7 @@ def test_check_without_any_config_is_clean_not_skipped(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.skipped).is_false()
     assert_that(result.output).contains("No import-linter configuration found")
 
 

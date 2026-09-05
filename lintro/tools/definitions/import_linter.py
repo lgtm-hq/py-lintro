@@ -120,8 +120,12 @@ def find_import_linter_config(paths: list[str]) -> Path | None:
         paths: Input file or directory paths passed to the tool.
 
     Returns:
-        Path to the configuration file, or None when the project declares no
-        import contracts.
+        Path to the configuration file, or None when no import-linter config
+        section is found. Note the predicate is section *presence*, not a
+        non-empty contract list: a config declaring only ``root_package`` is
+        returned here and ``lint-imports`` runs against its zero contracts.
+        When several input paths resolve to different configs the first match
+        wins, in the order the paths were given.
     """
     for raw in paths:
         start = Path(raw).resolve()

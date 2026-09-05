@@ -58,8 +58,13 @@ IMPORT_LINTER_HOP_PATTERN = re.compile(
     r"(?:\s*\(l\.[^)]*\))?$",
 )
 
-# A heading underline such as "--------------------".
-IMPORT_LINTER_UNDERLINE_PATTERN = re.compile(r"^-{3,}$")
+# A heading underline such as "--------------------". import-linter underlines a
+# heading with exactly ``len(title)`` dashes (``print_heading`` in
+# ``importlinter.application.output``), so a contract named "IO" is underlined
+# with two dashes and one named "A" with a single dash. Any run of dashes must
+# therefore count, or short contract names would never be recognised as
+# headings and their chains would be filed under an empty contract name.
+IMPORT_LINTER_UNDERLINE_PATTERN = re.compile(r"^-+$")
 
 
 @dataclass
@@ -82,7 +87,7 @@ def _is_underline(line: str) -> bool:
         line: Raw output line.
 
     Returns:
-        True when the line consists only of three or more dashes.
+        True when the line consists only of dashes.
     """
     return bool(IMPORT_LINTER_UNDERLINE_PATTERN.match(line.strip()))
 

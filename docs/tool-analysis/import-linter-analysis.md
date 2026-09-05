@@ -86,6 +86,10 @@ produces three issues.
   rewrite automatically. `lintro format` never invokes import-linter.
 - **Requires an importable root package.** grimp imports the package to build the graph,
   so the project's dependencies must be installed in the environment Lintro runs in.
+- **`file` is a module path, not a file path.** A contract is broken by an import
+  relationship, not by a source line, so the `file` field carries a dotted module name
+  and `line` is `0`. Consumers that expect a filesystem path — SARIF artifact URIs,
+  editor links, AI fix-path resolution — will not resolve these issues to a source file.
 
 ## Usage Comparison
 
@@ -106,4 +110,7 @@ injects nothing into the contract set.
 - Start with a single `layers` contract over the top-level packages and add contracts as
   the boundaries stabilise.
 - Keep contracts in `pyproject.toml` alongside the rest of the tool configuration so
-  there is one place to look.
+  there is one place to look — but note the precedence above: if the project already has
+  a `setup.cfg` or `.importlinter` carrying an `[importlinter]` section, that file wins
+  and contracts added to `pyproject.toml` are never read. Move the whole configuration
+  rather than splitting it.

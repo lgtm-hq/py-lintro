@@ -331,3 +331,64 @@ mypkg.low is not allowed to import mypkg.high:
 """
 
     assert_that(parse_import_linter_output(truncated)).is_empty()
+
+
+@pytest.mark.parametrize("name", ["A", "IO", "DB"])
+def test_parse_recognizes_short_contract_names(name: str) -> None:
+    """A contract name shorter than three characters is still a heading.
+
+    import-linter underlines a heading with exactly ``len(title)`` dashes, so a
+    contract named "IO" is underlined with "--". Requiring three or more dashes
+    dropped the heading and filed the chain under an empty contract name.
+
+    Args:
+        name: Short contract name, underlined to its own length.
+    """
+    output = f"""\
+----------------
+Broken contracts
+----------------
+
+{name}
+{"-" * len(name)}
+
+pkg.a is not allowed to import pkg.b:
+
+-   pkg.a -> pkg.b (l.1)
+"""
+
+    issues = parse_import_linter_output(output)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to(name)
+    assert_that(issues[0].message).is_equal_to("pkg.a -> pkg.b")
+
+
+def test_parse_keeps_contract_names_apart_with_mixed_lengths() -> None:
+    """A short contract does not swallow the chains of the next contract."""
+    output = """\
+----------------
+Broken contracts
+----------------
+
+IO
+--
+
+pkg.a is not allowed to import pkg.b:
+
+-   pkg.a -> pkg.b (l.1)
+
+
+Layered architecture
+--------------------
+
+pkg.low is not allowed to import pkg.high:
+
+- pkg.low -> pkg.high (l.2)
+"""
+
+    issues = parse_import_linter_output(output)
+
+    assert_that([issue.code for issue in issues]).is_equal_to(
+        ["IO", "Layered architecture"],
+    )
