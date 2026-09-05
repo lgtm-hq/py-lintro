@@ -44,8 +44,8 @@ full check/format pipeline; put it in `tests/unit/` otherwise.
 
 ## Test markers
 
-Markers are declared in `pytest.ini` and enforced with `--strict-markers`, so an unknown
-marker fails the run. The available markers are:
+Markers are declared in `pyproject.toml` (`[tool.pytest.ini_options]`) and enforced with
+`--strict-markers`, so an unknown marker fails the run. The available markers are:
 
 | Marker                                                                             | Meaning                                         |
 | ---------------------------------------------------------------------------------- | ----------------------------------------------- |
@@ -118,9 +118,9 @@ parity test sets `tool.exclude_patterns = []` before checking a sample file).
 
 ## Coverage expectations
 
-Coverage is measured against the `lintro` package. `pytest.ini` configures
-`--cov=lintro` with term-missing, HTML, and XML reports. In CI the coverage job enforces
-a minimum: `coverage-threshold: 80` in
+Coverage is measured against the `lintro` package. `tox.ini` configures `--cov=lintro`
+with term-missing, HTML, and XML reports. In CI the coverage job enforces a minimum:
+`coverage-threshold: 80` in
 [`.github/workflows/test-ci.yml`](../.github/workflows/test-ci.yml). The architecture
 docs set a higher aspirational target (≥ 70% floor, 90% goal per
 [`architecture/README.md`](architecture/README.md)).

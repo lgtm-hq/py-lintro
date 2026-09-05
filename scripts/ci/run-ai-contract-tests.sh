@@ -111,9 +111,8 @@ echo "==> Tier ${TIER} contract tests in ${IMAGE}"
 # caller's checkout: without it a metadata drift would be resolved by silently
 # rewriting `uv.lock` there, where the gate should fail and say so instead.
 #
-# --maxfail=0 overrides pytest.ini's default of 3. Drift across three providers
-# can easily exceed that, and a gate that stops after the third failure reports
-# a partial picture the maintainer has to re-run to complete.
+# --maxfail=0 is explicit rather than inherited: drift across three providers
+# must be reported in full, whatever a future config change does to the default.
 docker "${docker_args[@]}" "$IMAGE" bash -euo pipefail -c "
 	uv sync --locked --extra ai --group dev --quiet
 	uv run --locked pytest tests/contract -m ${pytest_marker} -p no:randomly --maxfail=0 \\
