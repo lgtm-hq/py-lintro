@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess  # nosec B404 - probes the tool under test; every call is shell=False
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import NoReturn
 
 import pytest
@@ -50,7 +51,47 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: which may resolve and download the package before answering.
 LAUNCHER_TIMEOUT_SECONDS = 60.0
 
+#: Sentinel floor accepting any version, for the handful of tools whose
+#: ``--version`` output does not describe the tool being gated.
+NO_MIN_VERSION = "0"
+
 _VERSION_PATTERN = re.compile(r"(\d+\.\d+\.\d+)")
+
+
+@lru_cache(maxsize=1)
+def _enforced_minimums() -> dict[str, str]:
+    """Return the minimum versions lintro's plugins enforce at run time.
+
+    Returns:
+        Mapping of tool name (both hyphen and underscore spellings) to the
+        lowest version the plugin will run; empty when lintro cannot be
+        imported.
+    """
+    try:
+        from lintro.tools.core.version_checking import get_minimum_versions
+
+        return dict(get_minimum_versions())
+    except Exception:  # noqa: BLE001 - a broken lookup must not break collection
+        # Fail open: with no floors every module keeps its absent-vs-present
+        # gate, which is the behaviour that matters inside the tools image.
+        return {}
+
+
+def enforced_minimum(name: str) -> str | None:
+    """Look up the minimum version lintro enforces for ``name``.
+
+    Integration modules name the *executable* (``dotenv-linter``) while
+    lintro names the *tool* (``dotenv_linter``), so the underscore spelling
+    is tried as a fallback.
+
+    Args:
+        name: Tool or executable name (``shellcheck``, ``golangci-lint``).
+
+    Returns:
+        The enforced minimum, or None when lintro pins nothing for the name.
+    """
+    minimums = _enforced_minimums()
+    return minimums.get(name) or minimums.get(name.replace("-", "_"))
 
 
 class MissingToolError(RuntimeError):
@@ -266,18 +307,37 @@ def require_tool(
     min_version: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     label: str | None = None,
+    pin: str | None = None,
 ) -> pytest.MarkDecorator:
-    """Gate a test module on ``name`` being installed and runnable.
+    """Gate a test module on ``name`` being installed and usable.
+
+    Two distinct conditions, deliberately handled differently:
+
+    * **Absent or unrunnable** — a skip outside the tools image, a hard
+      failure inside it. That is the whole point of #465.
+    * **Present but older than the minimum lintro's plugins enforce** — a
+      skip everywhere, never a failure. Below that floor the plugin returns
+      a *skipped* ToolResult with ``issues_count=0``, so a module asserting
+      on real findings would fail against a tool that never ran. This is how
+      an ambient ``shellcheck`` on the hosted runner broke the suite. Version
+      drift inside the image is owned by the manifest gate, which tolerates
+      Renovate lag via ``--allow-version-lag`` (#1582); duplicating that
+      enforcement here would turn every tool bump into a red required check.
+
+    The floor defaults to whatever lintro itself enforces, so a module never
+    has to restate it and cannot drift from the plugin.
 
     Args:
         name: Executable name of the tool (e.g. ``"shellcheck"``).
         version_args: Arguments that make the tool print its version.
         launchers: Launcher prefixes to try when the bare binary fails.
-        min_version: Lowest acceptable version, as a string; when given, the
-            probe output must carry a version at least this high.
+        min_version: Lowest acceptable version. Defaults to the minimum
+            lintro enforces; pass :data:`NO_MIN_VERSION` to accept any.
         timeout: Seconds to wait for the bare binary's version probe.
         label: Name to use in the skip/failure message; defaults to ``name``.
             Set it where the binary and the tool differ (``cargo deny``).
+        pin: Lintro tool name to look the floor up under, when it differs
+            from the executable name (``cargo`` runs ``cargo_deny``).
 
     Returns:
         A mark suitable for assignment to ``pytestmark``.
@@ -291,17 +351,28 @@ def require_tool(
     )
     if resolved is None:
         return gate(available=False, reason=f"{shown} is not installed or not runnable")
-    if min_version is None:
+
+    floor = min_version if min_version is not None else enforced_minimum(pin or name)
+    if floor is None or floor == NO_MIN_VERSION:
         return gate(available=True, reason=f"{shown} is available")
+
     installed = parse_version(resolved[1])
-    if installed is None or installed < Version(min_version):
-        return gate(
-            available=False,
-            reason=(
-                f"{shown} >= {min_version} required (found: {installed or 'unknown'})"
-            ),
-        )
-    return gate(available=True, reason=f"{shown} >= {min_version} is available")
+    if installed is None:
+        # Unparsable version: run the module. lintro's own verify_tool_version
+        # proceeds in this case rather than skipping, and inventing a skip here
+        # would reintroduce the silent pass this gate exists to remove.
+        return gate(available=True, reason=f"{shown} is available")
+    if installed >= Version(floor):
+        return gate(available=True, reason=f"{shown} >= {floor} is available")
+    # Skip-only: see the note above on why a version shortfall must never
+    # fail the run, even inside the tools image.
+    return pytest.mark.skipif(
+        True,
+        reason=(
+            f"{shown} >= {floor} required, and lintro skips the tool below "
+            f"that (found: {installed})"
+        ),
+    )
 
 
 def require_command(

@@ -19,12 +19,11 @@ if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-_RUSTFMT_MIN_VERSION = "1.8.0"
-
-# rustfmt is driven through cargo by the plugin, so both must be present and
-# rustfmt must be recent enough for the flags the plugin passes.
+# rustfmt is driven through cargo by the plugin, so both must be present.
+# The version floor comes from lintro's own enforced minimum, so it cannot
+# drift from what the plugin will actually run.
 pytestmark = [
-    require_tool("rustfmt", min_version=_RUSTFMT_MIN_VERSION),
+    require_tool("rustfmt"),
     require_tool("cargo"),
 ]
 

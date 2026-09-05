@@ -17,7 +17,9 @@ from assertpy import assert_that
 
 from tests.integration import _tools
 from tests.integration._tools import (
+    NO_MIN_VERSION,
     MissingToolError,
+    enforced_minimum,
     in_tools_image,
     parse_version,
     require_command,
@@ -273,7 +275,30 @@ def test_require_tool_does_not_skip_when_the_tool_works(
     monkeypatch: pytest.MonkeyPatch,
     outside_tools_image: None,
 ) -> None:
-    """A working tool yields an inert mark so the module runs.
+    """A working, new-enough tool yields an inert mark so the module runs.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("shellcheck",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="ShellCheck\nversion: 99.0.0\n"),
+    )
+    mark = require_tool("shellcheck")
+    assert_that(mark.args[0]).is_false()
+
+
+def test_require_tool_runs_when_the_version_cannot_be_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """An unparsable version runs the module rather than skipping it.
+
+    lintro's own verify_tool_version proceeds when it cannot parse a version,
+    and inventing a skip here would reintroduce the silent pass this gate
+    exists to remove.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -284,7 +309,9 @@ def test_require_tool_does_not_skip_when_the_tool_works(
         _RUN_TARGET,
         _fake_run(returncode=0, stdout="ShellCheck - shell script analysis tool\n"),
     )
+
     mark = require_tool("shellcheck")
+
     assert_that(mark.args[0]).is_false()
 
 
@@ -307,7 +334,7 @@ def test_require_tool_enforces_a_minimum_version(
     monkeypatch: pytest.MonkeyPatch,
     outside_tools_image: None,
 ) -> None:
-    """A too-old tool is treated as unavailable.
+    """A too-old tool is gated off.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -321,6 +348,102 @@ def test_require_tool_enforces_a_minimum_version(
     mark = require_tool("rustfmt", min_version="1.8.0")
     assert_that(mark.args[0]).is_true()
     assert_that(mark.kwargs["reason"]).contains("1.8.0", "1.7.0")
+
+
+def test_require_tool_defaults_the_floor_to_what_lintro_enforces(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """An ambient tool below lintro's own minimum skips without being told.
+
+    Below that floor the plugin returns a skipped ToolResult with zero
+    issues, so a module asserting on findings would fail against a tool that
+    never ran — the hosted-runner shellcheck regression (#465).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    floor = enforced_minimum("shellcheck")
+    assert_that(floor).is_not_none()
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("shellcheck",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="ShellCheck\nversion: 0.0.1\n"),
+    )
+
+    mark = require_tool("shellcheck")
+
+    assert_that(mark.args[0]).is_true()
+    assert_that(mark.kwargs["reason"]).contains("shellcheck", str(floor), "0.0.1")
+
+
+def test_require_tool_never_fails_the_image_on_a_version_shortfall(
+    monkeypatch: pytest.MonkeyPatch,
+    inside_tools_image: None,
+) -> None:
+    """A too-old-but-present tool skips inside the image instead of raising.
+
+    Version drift inside the image is owned by the manifest gate, which
+    tolerates Renovate lag; failing here too would turn every tool bump into
+    a red required check.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        inside_tools_image: Fixture setting the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("shellcheck",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="ShellCheck\nversion: 0.0.1\n"),
+    )
+
+    mark = require_tool("shellcheck")
+
+    assert_that(mark.args[0]).is_true()
+
+
+def test_require_tool_accepts_any_version_under_the_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    outside_tools_image: None,
+) -> None:
+    """NO_MIN_VERSION opts out where the probe describes a different tool.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        outside_tools_image: Fixture clearing the tools-image switch.
+    """
+    monkeypatch.setattr(_WHICH_TARGET, _fake_which(present=("vue-tsc",)))
+    monkeypatch.setattr(
+        _RUN_TARGET,
+        _fake_run(returncode=0, stdout="Version 0.0.1\n"),
+    )
+
+    mark = require_tool("vue-tsc", min_version=NO_MIN_VERSION)
+
+    assert_that(mark.args[0]).is_false()
+
+
+@pytest.mark.parametrize(
+    ("name", "pinned"),
+    [("shellcheck", True), ("golangci-lint", True), ("git", False)],
+    ids=["underscore-free", "hyphenated", "unpinned"],
+)
+def test_enforced_minimum_resolves_executable_spellings(
+    name: str,
+    pinned: bool,
+) -> None:
+    """Executable names resolve to lintro's tool-name pins where they exist.
+
+    Args:
+        name: Executable name as an integration module spells it.
+        pinned: Whether lintro pins a minimum for that tool.
+    """
+    resolved = enforced_minimum(name)
+    if pinned:
+        assert_that(resolved).is_not_none()
+    else:
+        assert_that(resolved).is_none()
 
 
 def test_require_tool_accepts_a_new_enough_version(

@@ -19,15 +19,14 @@ if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-_CARGO_DENY_MIN_VERSION = "0.14.0"
-
 # cargo-deny ships as a cargo subcommand, so probing `cargo deny --version`
-# covers both the toolchain and the subcommand in one shot.
+# covers both the toolchain and the subcommand in one shot. The version floor
+# is looked up under the lintro tool name, not the `cargo` binary name.
 pytestmark = require_tool(
     "cargo",
     version_args=("deny", "--version"),
-    min_version=_CARGO_DENY_MIN_VERSION,
     label="cargo-deny",
+    pin="cargo_deny",
 )
 
 
