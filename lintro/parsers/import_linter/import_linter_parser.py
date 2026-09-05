@@ -133,7 +133,9 @@ def _flush(chain: _Chain, issues: list[ImportLinterIssue]) -> _Chain:
     Returns:
         A fresh, empty chain accumulator.
     """
-    if len(chain.modules) >= 2:
+    # _append_hop always adds importer and imported together, so a chain either
+    # holds nothing or at least two modules; there is no half-built state.
+    if chain.modules:
         issues.append(
             ImportLinterIssue(
                 file=chain.modules[0],
@@ -143,8 +145,6 @@ def _flush(chain: _Chain, issues: list[ImportLinterIssue]) -> _Chain:
                 message=" -> ".join(chain.modules),
             ),
         )
-    elif chain.modules:
-        logger.debug(f"Discarding incomplete import-linter chain: {chain.modules}")
     return _Chain(contract=chain.contract)
 
 

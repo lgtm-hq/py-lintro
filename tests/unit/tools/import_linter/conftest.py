@@ -82,7 +82,10 @@ def kept_output() -> str:
 
 @pytest.fixture
 def project_with_contracts(tmp_path: Path) -> Path:
-    """Create a project directory whose pyproject declares import contracts.
+    """Create a project whose pyproject has an import-linter section, no contracts.
+
+    This is the shape this repo dogfoods (``root_package`` only), which is also
+    the shape ``find_import_linter_config`` must recognise.
 
     Args:
         tmp_path: Pytest temporary directory.

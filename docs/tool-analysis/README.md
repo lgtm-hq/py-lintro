@@ -112,10 +112,12 @@ implementations with the core tools themselves.
 
 ### Python Import-Contract Checker
 
-- ✅ **Preserved**: All contract types, native config discovery, exit-code semantics
+- ✅ **Preserved**: All contract types, the native config filename order, and the native
+  exit-code meaning whenever a config is present (broken → issues, kept → clean)
 - ⚠️ **Limited**: Check-only (contract violations are design problems, not auto-fixable)
-- 🚀 **Enhanced**: Project-scoped single invocation, upward config discovery, clean
-  result when no contracts are declared
+- 🚀 **Enhanced**: Project-scoped single invocation, config discovery that walks up from
+  the input paths and parses the file to confirm a real section, and a clean result
+  where the native tool errors because no config file exists
 
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 

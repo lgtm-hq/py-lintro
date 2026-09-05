@@ -87,6 +87,9 @@ def test_check_runs_once_regardless_of_file_count(
     package = project_with_contracts / "pkg"
     for name in ("api.py", "services.py", "storage.py"):
         (package / name).write_text("", encoding="utf-8")
+    # Pass the files themselves, not just the root: a per-file implementation
+    # would invoke the tool three times here and this assertion would catch it.
+    paths = [str(package / name) for name in ("api.py", "services.py", "storage.py")]
 
     with (
         patch(_VERSION_PATCH, return_value=None),
@@ -96,10 +99,19 @@ def test_check_runs_once_regardless_of_file_count(
             return_value=(True, kept_output),
         ) as run,
     ):
-        import_linter_plugin.check([str(project_with_contracts)], {})
+        import_linter_plugin.check(paths, {})
 
     assert_that(run.call_count).is_equal_to(1)
     assert_that(run.call_args.kwargs["cwd"]).is_equal_to(str(project_with_contracts))
+    # check() must go through _build_command: the flags are part of the contract
+    # (no banner in parsed output, no cache directory written into the project).
+    cmd = run.call_args.kwargs["cmd"]
+    assert_that(cmd[0]).is_equal_to("lint-imports")
+    assert_that(cmd).contains("--no-logo", "--no-cache")
+    assert_that(cmd).contains(str(project_with_contracts / "pyproject.toml"))
+    # The discovered files are never appended to the command line.
+    for path in paths:
+        assert_that(cmd).does_not_contain(path)
 
 
 def test_check_without_configuration_is_clean(
@@ -221,6 +233,70 @@ def test_find_config_ignores_files_without_the_section(tmp_path: Path) -> None:
     (tmp_path / "setup.cfg").write_text("[metadata]\nname = pkg\n", encoding="utf-8")
     (tmp_path / ".importlinter").write_text(
         "[importlinter]\nroot_package = pkg\n",
+        encoding="utf-8",
+    )
+
+    found = find_import_linter_config([str(tmp_path)])
+
+    assert_that(found).is_equal_to(tmp_path / ".importlinter")
+
+
+def test_find_config_accepts_a_non_header_toml_table(tmp_path: Path) -> None:
+    """A ``tool.importlinter`` inline table is configuration too.
+
+    TOML can spell the same table several ways; ``lint-imports`` accepts an
+    inline ``importlinter = {...}`` under ``[tool]``, so discovery must not
+    depend on a literal ``[tool.importlinter]`` header line.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool]\nimportlinter = { root_package = "pkg" }\n',
+        encoding="utf-8",
+    )
+
+    found = find_import_linter_config([str(tmp_path)])
+
+    assert_that(found).is_equal_to(tmp_path / "pyproject.toml")
+
+
+def test_find_config_ignores_an_ordinary_pyproject(tmp_path: Path) -> None:
+    """A ``pyproject.toml`` with other tools is not import-linter configuration.
+
+    This is what makes "no configuration found is clean" safe to document: a
+    typical Python project is not mistaken for a configured one.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "pkg"\n\n[tool.ruff]\nline-length = 88\n',
+        encoding="utf-8",
+    )
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_none()
+
+
+def test_find_config_ignores_unparseable_toml(tmp_path: Path) -> None:
+    """A malformed ``pyproject.toml`` is skipped rather than raising.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "pyproject.toml").write_text("[tool.importlinter\n", encoding="utf-8")
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_none()
+
+
+def test_find_config_accepts_an_ini_contract_section(tmp_path: Path) -> None:
+    """``[importlinter:contract:...]`` marks a file as configuration.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / ".importlinter").write_text(
+        "[importlinter:contract:layers]\ntype = layers\n",
         encoding="utf-8",
     )
 

@@ -50,3 +50,27 @@ def kept_contract_project(tmp_path: Path) -> str:
     dst = tmp_path / "clean"
     shutil.copytree(CLEAN_SAMPLE, dst)
     return str(dst)
+
+
+@pytest.fixture
+def empty_contract_set_project(tmp_path: Path) -> str:
+    """Stage a project shaped like this repo's own dogfood configuration.
+
+    ``pyproject.toml`` carries ``[tool.importlinter]`` with ``root_package``
+    and **no** contracts — the configuration #2289 adds to lintro itself.
+
+    Args:
+        tmp_path: Pytest fixture providing a temporary directory.
+
+    Returns:
+        Path to the staged project root as a string.
+    """
+    project = tmp_path / "dogfood"
+    package = project / "cleanlayered"
+    package.mkdir(parents=True)
+    shutil.copy(CLEAN_SAMPLE / "cleanlayered" / "__init__.py", package / "__init__.py")
+    (project / "pyproject.toml").write_text(
+        '[tool.importlinter]\nroot_package = "cleanlayered"\n',
+        encoding="utf-8",
+    )
+    return str(project)

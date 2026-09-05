@@ -92,6 +92,44 @@ def test_supported_tools_lists_import_linter() -> None:
     assert_that(script).contains('"import-linter"')
 
 
+def test_install_block_stages_the_console_script_into_bin_dir() -> None:
+    """The load-bearing part of the install is staging ``lint-imports``.
+
+    ``install_python_package`` resolves and copies ``command -v "$package"``,
+    and the package name (``import-linter``) is not the console-script name
+    (``lint-imports``), so that helper silently stages nothing. The
+    import-linter block therefore has to stage the binary itself; without this
+    assertion, deleting that copy would leave the suite green.
+    """
+    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    block_at = script.find('install_python_package "import-linter"')
+    assert_that(block_at).is_not_equal_to(-1)
+    block = script[block_at : script.index("fi # import-linter", block_at)]
+
+    assert_that(block).contains("command -v lint-imports")
+    assert_that(block).contains('cp "$IMPORT_LINTER_BIN" "$BIN_DIR/lint-imports"')
+    assert_that(block).contains('chmod +x "$BIN_DIR/lint-imports"')
+
+
+def test_install_block_fails_when_the_console_script_is_absent() -> None:
+    """A pip install that yields no ``lint-imports`` must not report success.
+
+    Reporting success there would let the tools image build green and only
+    surface as ``binary_missing`` much later, in the manifest-vs-image gate.
+    """
+    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    block_at = script.find('install_python_package "import-linter"')
+    block = script[block_at : script.index("fi # import-linter", block_at)]
+
+    guard_at = block.find('if [ -z "$IMPORT_LINTER_BIN" ]')
+    exit_at = block.find("exit 1", guard_at)
+    success_at = block.find("import-linter installed successfully")
+    assert_that(guard_at).is_not_equal_to(-1)
+    assert_that(exit_at).is_not_equal_to(-1)
+    # The guard exits before the success message can be printed.
+    assert_that(exit_at).is_less_than(success_at)
+
+
 def test_tools_image_verifies_the_binary() -> None:
     """``docker/tools.Dockerfile`` proves ``lint-imports`` is on the image PATH."""
     text = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")

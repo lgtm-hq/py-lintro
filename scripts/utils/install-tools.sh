@@ -1595,9 +1595,14 @@ main() {
 			# The import-linter distribution installs a console script named
 			# lint-imports, so install_python_package (which stages by package
 			# name) cannot copy it into BIN_DIR. Stage it here by binary name.
+			# A successful pip install that yields no console script means the
+			# tool was not delivered, so fail instead of reporting success.
 			IMPORT_LINTER_BIN=$(command -v lint-imports 2>/dev/null || true)
-			if [ -n "$IMPORT_LINTER_BIN" ] && [ -f "$IMPORT_LINTER_BIN" ] &&
-				[ "$IMPORT_LINTER_BIN" != "$BIN_DIR/lint-imports" ]; then
+			if [ -z "$IMPORT_LINTER_BIN" ] || [ ! -f "$IMPORT_LINTER_BIN" ]; then
+				echo -e "${RED}✗ import-linter installed but lint-imports is not on PATH${NC}"
+				exit 1
+			fi
+			if [ "$IMPORT_LINTER_BIN" != "$BIN_DIR/lint-imports" ]; then
 				cp "$IMPORT_LINTER_BIN" "$BIN_DIR/lint-imports"
 				chmod +x "$BIN_DIR/lint-imports"
 				echo -e "${YELLOW}Copied lint-imports to $BIN_DIR${NC}"

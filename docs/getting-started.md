@@ -85,6 +85,9 @@ generator reads (#2176):
   `--tool-options`)
 - `yamllint` - YAML linter
 - `pydoclint` - Python docstring linter
+- `import-linter` - Python import-contract checker (binary `lint-imports`); it reports a
+  clean result when the project has no import-linter configuration, so it is safe to
+  leave enabled
 
 ### Optional External Tools
 
@@ -125,10 +128,6 @@ order and for what changed.
   (e.g. `.stylelintrc.json`) to enable linting
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
-- `import-linter` - Python import-contract checker, binary `lint-imports`; bundled in
-  the `full` extra (`uv pip install 'lintro[full]'`) and also installable on its own
-  with `pip install import-linter`. It reports a clean result when the project declares
-  no import contracts in `pyproject.toml`, `.importlinter` or `setup.cfg`
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
   `cargo install typos-cli`). A no-config default `lintro check` only selects it when a

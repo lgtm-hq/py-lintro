@@ -25,8 +25,14 @@ declared contract against it. The built-in contract types are:
 | `acyclic_siblings` | Sibling modules under a parent must not form an import cycle     |
 
 Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
-`setup.cfg` (`[importlinter]`). A broken contract exits with status 1; a clean run exits
-0, including when no contracts are declared at all.
+`setup.cfg` (`[importlinter]`). Native exit codes are:
+
+| Situation                          | Native `lint-imports` |
+| ---------------------------------- | --------------------- |
+| Contract broken                    | exit 1                |
+| Config present, contracts all kept | exit 0                |
+| Config present, **zero** contracts | exit 0                |
+| **No config file at all**          | error (non-zero)      |
 
 ## Lintro Implementation Analysis
 
@@ -43,13 +49,18 @@ Contracts live in `pyproject.toml` (`[tool.importlinter]`), `.importlinter`, or
   plugin ignores the discovered file list and invokes `lint-imports` a single time per
   run. File discovery on `*.py` only decides _whether_ the tool is relevant for the
   paths given.
-- **Config resolution walks upward.** The plugin looks for `setup.cfg`, `.importlinter`,
-  then `pyproject.toml` from each input path upward, mirroring how `lint-imports` itself
-  resolves configuration, and runs the tool from that file's directory so the root
-  package is importable.
-- **No configuration found is not a failure.** A project with no import contracts
-  reports a clean result instead of an error, so import-linter can stay enabled by
-  default.
+- **Config resolution walks upward.** The filename order — `setup.cfg`, `.importlinter`,
+  then `pyproject.toml` — is the same order `lint-imports` uses. What Lintro adds is the
+  _search_: it walks up from each input path rather than only looking in the process
+  working directory, and runs the tool from the directory of the file it finds so the
+  root package is importable. A candidate counts only when it really carries an
+  import-linter section (the TOML is parsed, not string-matched), so a project's
+  ordinary `pyproject.toml` is not mistaken for import-linter configuration.
+- **No configuration found is a clean result, not a failure.** This is a deliberate
+  divergence: the native tool errors when it can find no config file. Reporting clean
+  lets import-linter stay enabled by default for projects that declare no contracts.
+  This is a _different_ case from a config that exists with zero contracts — there the
+  native tool already exits 0 and Lintro simply passes that through.
 - **`--no-cache` is always passed** so a check never writes a cache directory into the
   project being linted, and `--no-logo` keeps the ASCII banner out of parsed output.
 

@@ -14,8 +14,11 @@ file list and runs a single time per invocation. Configuration lives in
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+from loguru import logger
 
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
@@ -39,9 +42,57 @@ IMPORT_LINTER_CONFIG_FILES: tuple[str, ...] = (
     "pyproject.toml",
 )
 
-#: Section header that marks a file as carrying import-linter configuration.
+#: INI section header that marks a file as carrying import-linter configuration.
+#: ``setup.cfg`` and ``.importlinter`` use ``[importlinter]`` for session options
+#: and ``[importlinter:contract:<id>]`` for each contract.
 _INI_SECTION: str = "[importlinter]"
-_TOML_SECTION: str = "[tool.importlinter]"
+_INI_CONTRACT_PREFIX: str = "[importlinter:"
+
+
+def _pyproject_declares_import_linter(config_path: Path) -> bool:
+    """Report whether a ``pyproject.toml`` carries a ``tool.importlinter`` table.
+
+    The file is parsed rather than scanned line by line: TOML can spell the
+    same table several ways (a ``[tool.importlinter]`` header, an inline
+    ``importlinter = {{ ... }}`` under ``[tool]``, quoted keys), and a textual
+    match silently misses the alternatives — reporting "no configuration" for a
+    project that ``lint-imports`` would happily check.
+
+    Args:
+        config_path: Path to a ``pyproject.toml``.
+
+    Returns:
+        True when the parsed document defines ``tool.importlinter``.
+    """
+    try:
+        with config_path.open("rb") as handle:
+            document = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        logger.debug(f"Could not read import-linter config from {config_path}: {exc}")
+        return False
+    tool_table = document.get("tool")
+    return isinstance(tool_table, dict) and "importlinter" in tool_table
+
+
+def _ini_declares_import_linter(config_path: Path) -> bool:
+    """Report whether an INI-style config declares an import-linter section.
+
+    Args:
+        config_path: Path to a ``setup.cfg`` or ``.importlinter`` file.
+
+    Returns:
+        True when the file carries ``[importlinter]`` or a contract section.
+    """
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.debug(f"Could not read import-linter config from {config_path}: {exc}")
+        return False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line == _INI_SECTION or line.startswith(_INI_CONTRACT_PREFIX):
+            return True
+    return False
 
 
 def _declares_import_linter(config_path: Path) -> bool:
@@ -53,12 +104,9 @@ def _declares_import_linter(config_path: Path) -> bool:
     Returns:
         True when the file contains the section import-linter reads.
     """
-    section = _TOML_SECTION if config_path.name == "pyproject.toml" else _INI_SECTION
-    try:
-        text = config_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return False
-    return any(line.strip() == section for line in text.splitlines())
+    if config_path.name == "pyproject.toml":
+        return _pyproject_declares_import_linter(config_path=config_path)
+    return _ini_declares_import_linter(config_path=config_path)
 
 
 def find_import_linter_config(paths: list[str]) -> Path | None:

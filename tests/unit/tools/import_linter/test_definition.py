@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.doc_url_template import DocUrlTemplate
+from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.import_linter import (
     IMPORT_LINTER_DEFAULT_PRIORITY,
@@ -25,13 +26,37 @@ def test_definition_metadata(import_linter_plugin: ImportLinterPlugin) -> None:
     definition = import_linter_plugin.definition
 
     assert_that(definition.name).is_equal_to("import-linter")
+    # The registry name normalizes onto the canonical ToolName member.
+    assert_that(definition.name.replace("-", "_")).is_equal_to(
+        ToolName.IMPORT_LINTER.value,
+    )
     assert_that(definition.can_fix).is_false()
     assert_that(definition.tool_type).is_equal_to(ToolType.LINTER)
     assert_that(definition.file_patterns).is_equal_to(["*.py"])
-    assert_that(definition.priority).is_equal_to(IMPORT_LINTER_DEFAULT_PRIORITY)
-    assert_that(definition.default_timeout).is_equal_to(IMPORT_LINTER_DEFAULT_TIMEOUT)
+    # Literal values, not the production constants, so a changed default is caught.
+    assert_that(definition.priority).is_equal_to(50)
+    assert_that(definition.default_timeout).is_equal_to(60)
+    assert_that(definition.default_options).is_equal_to({"timeout": 60})
     assert_that(definition.version_command).is_equal_to(["lint-imports", "--version"])
-    assert_that(definition.native_configs).contains("pyproject.toml")
+    # Every filename discovery accepts must be advertised: tool_configuration.py
+    # auto-includes an unmapped tool when a native config basename exists.
+    assert_that(definition.native_configs).is_equal_to(
+        ["pyproject.toml", ".importlinter", "setup.cfg"],
+    )
+
+
+def test_module_constants_match_the_definition(
+    import_linter_plugin: ImportLinterPlugin,
+) -> None:
+    """The exported constants stay in step with the definition they feed.
+
+    Args:
+        import_linter_plugin: Plugin under test.
+    """
+    definition = import_linter_plugin.definition
+
+    assert_that(IMPORT_LINTER_DEFAULT_PRIORITY).is_equal_to(definition.priority)
+    assert_that(IMPORT_LINTER_DEFAULT_TIMEOUT).is_equal_to(definition.default_timeout)
 
 
 def test_build_command_uses_resolved_config(

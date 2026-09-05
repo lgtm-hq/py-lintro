@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
 
 if TYPE_CHECKING:
@@ -47,6 +48,9 @@ def test_check_reports_the_broken_chain(
     assert_that(issue.message).is_equal_to(
         "layered.storage -> layered.helpers -> layered.compat -> layered.api",
     )
+    # BaseIssue defaults to WARNING, so a dropped override would pass unnoticed
+    # without this: a broken contract must surface as an error.
+    assert_that(issue.get_severity()).is_equal_to(SeverityLevel.ERROR)
 
 
 def test_check_passes_when_contracts_are_kept(
@@ -66,11 +70,15 @@ def test_check_passes_when_contracts_are_kept(
     assert_that(result.issues_count).is_equal_to(0)
 
 
-def test_check_without_contracts_is_clean(
+def test_check_without_any_config_is_clean_not_skipped(
     get_plugin: Callable[[str], BaseToolPlugin],
     tmp_path: Path,
 ) -> None:
     """A Python project with no import-linter config reports a clean result.
+
+    The native tool errors when it can find no config at all, so this asserts
+    Lintro's deliberate divergence, and asserts the *reason*: the run must be a
+    real clean result, not a silent skip that happens to look identical.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -83,3 +91,29 @@ def test_check_without_contracts_is_clean(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("No import-linter configuration found")
+
+
+def test_check_with_an_empty_contract_set_runs_the_tool(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    empty_contract_set_project: str,
+) -> None:
+    """The dogfood shape really runs the binary and reports zero contracts.
+
+    This repo enables import-linter with ``root_package`` and no contracts
+    (#2289; contracts land in #2290). That must be a genuine 0-kept/0-broken
+    run, not a skip — otherwise the tool would look green while never
+    executing, and #2290's contracts would land on an inert runner.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        empty_contract_set_project: Staged project with a contract-free config.
+    """
+    plugin = get_plugin("import-linter")
+    result = plugin.check([empty_contract_set_project], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.skipped).is_false()
+    # Proof the binary ran: only lint-imports emits the summary line.
+    assert_that(result.output).contains("0 kept, 0 broken")
