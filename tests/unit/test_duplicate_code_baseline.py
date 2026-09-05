@@ -5,10 +5,12 @@
 ``[tool.lintro.pylint] duplicate_code_baseline``. That number is a burn-down
 target owned by #2311, which is done when it reaches 0.
 
-Two guards live here: the configured baseline may never exceed the ceiling
-recorded when the gate landed, and it must still match what pylint actually
-reports on the definitions package — so a baseline can neither drift above the
-truth (hiding new duplication) nor below it (failing every run).
+Two guards live here. The configured baseline may never exceed the ceiling
+recorded when the gate landed, and — wherever pylint is installed, which
+includes CI — it must equal what pylint actually reports on the definitions
+package. Together they stop a baseline drifting above the truth (hiding new
+duplication) or below it (failing every run): a raise is only possible by
+raising the ceiling too, which is what review looks for.
 """
 
 from __future__ import annotations
@@ -75,7 +77,13 @@ def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
     Returns:
         int: Number of duplicate-code findings pylint reports.
     """
-    files = sorted(str(path) for path in (REPO_ROOT / DEFINITIONS_PACKAGE).glob("*.py"))
+    # rglob, not glob: the production include filter matches by path prefix,
+    # so a future subpackage would be analysed there and must be counted here.
+    files = sorted(
+        str(path)
+        for path in (REPO_ROOT / DEFINITIONS_PACKAGE).rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
     completed = subprocess.run(  # nosec B603 - fixed argv, no shell
         [
             pylint_executable,

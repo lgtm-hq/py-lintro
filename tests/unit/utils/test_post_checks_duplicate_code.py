@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_issue import PylintIssue
 from lintro.utils import post_checks
@@ -167,3 +168,39 @@ def test_gate_stays_quiet_in_json_mode(baseline_config: None) -> None:
     )
 
     assert_that(logger.lines).is_empty()
+
+
+def test_execute_post_checks_applies_the_gate_end_to_end(
+    baseline_config: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The public post-check entry point returns the gated totals.
+
+    Args:
+        baseline_config: Fixture configuring a baseline of two.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(post_checks, "load_post_checks_config", lambda: {})
+    monkeypatch.setattr(post_checks, "load_module_size_config", lambda: {})
+    logger = _RecordingLogger()
+    results = [_duplicate_result(3)]
+
+    total_issues, _total_fixed, _total_remaining = post_checks.execute_post_checks(
+        action=Action.CHECK,
+        paths=["lintro/utils"],
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        logger=logger,  # type: ignore[arg-type]
+        all_results=results,
+        total_issues=3,
+        total_fixed=0,
+        total_remaining=0,
+    )
+
+    assert_that(total_issues).is_equal_to(1)
+    assert_that(results[-1].name).is_equal_to("duplicate-code")
+    assert_that(results[-1].success).is_false()
