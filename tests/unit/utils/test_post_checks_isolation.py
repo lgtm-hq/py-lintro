@@ -113,11 +113,17 @@ class _SilentLogger:
 class _NoopConfigManager:
     """UnifiedConfigManager stub that leaves the tool untouched."""
 
-    def apply_config_to_tool(self, *, tool: object) -> None:
+    def apply_config_to_tool(
+        self,
+        *,
+        tool: object,
+        cli_overrides: dict[str, object] | None = None,
+    ) -> None:
         """No-op config application.
 
         Args:
             tool: The tool that would be configured (left untouched).
+            cli_overrides: Parsed ``--tool-options`` overrides (ignored).
         """
         return None
 

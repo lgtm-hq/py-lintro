@@ -655,6 +655,7 @@ def execute_run(
             total_fixed=total_fixed,
             total_remaining=total_remaining,
             diff_base=resolved_diff_base,
+            tool_option_dict=tool_option_dict,
         )
 
     # Dry-run: post-checks may append additional check-mode results. Restrict
