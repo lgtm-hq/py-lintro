@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
-    AINotAvailableError,  # noqa: F401 -- public re-export
+    AINotAvailableError,
     AIProviderRequiredError,
 )
 from lintro.ai.paths import resolve_workspace_root

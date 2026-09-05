@@ -82,8 +82,8 @@ class _FakeEngine:
         self,
         *,
         file_path: str,
-        source: str,  # noqa: ARG002
-        language: str = "python",  # noqa: ARG002
+        source: str,
+        language: str = "python",
     ) -> list[IdiomReviewIssue]:
         """Return canned per-file findings.
 

@@ -190,11 +190,11 @@ MANIFEST_EXEMPT: dict[str, str] = {
 # flags (infrastructure/type_checker/documentation) or tag security tools as
 # "linter". Documented under the epic-#1490 audit; align manifest + tool_type.
 TAGS_EXEMPT: dict[str, str] = {
-    "dotenv_linter": "manifest tags [linter,formatter] but tool_type=LINTER — TODO(#1495)",  # noqa: E501
+    "dotenv_linter": "manifest tags [linter,formatter] but tool_type=LINTER — TODO(#1495)",
     "actionlint": "manifest omits 'infrastructure' present in tool_type (#1490)",
     "astro-check": "manifest omits 'type_checker' present in tool_type (#1490)",
     "bandit": "manifest tags 'linter' but tool_type=SECURITY only (#1490)",
-    "cargo_deny": "manifest tags 'linter', omits 'infrastructure' vs tool_type (#1490)",  # noqa: E501
+    "cargo_deny": "manifest tags 'linter', omits 'infrastructure' vs tool_type (#1490)",
     "hadolint": "manifest omits 'infrastructure' present in tool_type (#1490)",
     "pydoclint": "manifest omits 'documentation' present in tool_type (#1490)",
     "sqlfluff": "manifest omits 'formatter' present in tool_type (#1490)",
@@ -207,7 +207,7 @@ TAGS_EXEMPT: dict[str, str] = {
 # never the effective one. pip-audit is the tracked example (#1506); align each
 # definition's priority with DEFAULT_TOOL_PRIORITIES.
 PRIORITY_EXEMPT: dict[str, str] = {
-    "pip_audit": "declares 90 but DEFAULT_TOOL_PRIORITIES lacks entry (eff. 50) — TODO(#1506)",  # noqa: E501
+    "pip_audit": "declares 90 but DEFAULT_TOOL_PRIORITIES lacks entry (eff. 50) — TODO(#1506)",
     "actionlint": "declares 40, DEFAULT_TOOL_PRIORITIES says 55 (#1490)",
     "astro-check": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
     "bandit": "declares 90, DEFAULT_TOOL_PRIORITIES says 45 (#1490)",
@@ -232,7 +232,7 @@ PRIORITY_EXEMPT: dict[str, str] = {
 
 # No install hint template in version_checking.py.
 INSTALL_HINT_EXEMPT: dict[str, str] = {
-    "idiom-review": "AI plugin installed via lintro[ai] extra, not an external binary (#1496)",  # noqa: E501
+    "idiom-review": "AI plugin installed via lintro[ai] extra, not an external binary (#1496)",
 }
 
 # No docs/tool-analysis/<tool>-analysis.md.
@@ -250,7 +250,7 @@ TOOL_ANALYSIS_EXEMPT: dict[str, str] = {
 
 # No dedicated docs/configuration.md section.
 CONFIGURATION_EXEMPT: dict[str, str] = {
-    "idiom-review": "not in configuration.md; documented under AI features — TODO(#1496)",  # noqa: E501
+    "idiom-review": "not in configuration.md; documented under AI features — TODO(#1496)",
     "cargo_audit": "no configuration.md section yet (#1490)",
     "rustfmt": "no configuration.md section yet (#1490)",
     "pytest": "only appears in the tool-ordering table, no dedicated section (#1490)",
@@ -283,7 +283,7 @@ INTEGRATION_TESTS_EXEMPT: dict[str, str] = {
     "clippy": "no integration test yet (#1490)",
     "hadolint": "no integration test yet (#1490)",
     "idiom-review": "AI plugin; no external-tool integration test (#1496)",
-    "pytest": "test runner exercised via the suite itself, no wrapper integration test (#1490)",  # noqa: E501
+    "pytest": "test runner exercised via the suite itself, no wrapper integration test (#1490)",
 }
 
 # No test_samples/tools/<lang>/<tool>/ directory named after the tool.

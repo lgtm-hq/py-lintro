@@ -53,6 +53,17 @@ required):
 - The interpreter is the system Python (3.12); `requires-python` is `>=3.11`.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
+## Structural lint thresholds
+
+Ruff enforces shape as well as style: `C90` (max-complexity 15), `PLR0913` (max-args 8),
+`PLR0912` (max-branches 12) and `PLR0915` (max-statements 50), plus `RUF100` so dead
+`# noqa` pragmas cannot accumulate. Functions that exceeded a threshold when the
+families were switched on are recorded as per-file ignores in `pyproject.toml` under the
+`# --- structural baseline ---` block. That block is a burn-down list owned by issues
+`#2311`, `#2313`, `#1972` and `#1995` — delete entries as the refactors land, never add
+one, and never raise a threshold. The guard test `tests/unit/test_ruff_baseline.py`
+fails if the baseline grows.
+
 ## Package layering (#2290)
 
 Two `import-linter` contracts in `[tool.importlinter]` enforce import direction:

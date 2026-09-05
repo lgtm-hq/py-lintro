@@ -39,7 +39,7 @@ from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
 
 try:
-    import tabulate as _tabulate_module  # noqa: F401
+    import tabulate as _tabulate_module
 
     TABULATE_AVAILABLE = True
     del _tabulate_module

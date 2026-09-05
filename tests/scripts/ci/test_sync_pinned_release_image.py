@@ -189,7 +189,7 @@ def test_every_pinned_site_is_declared(module: Any) -> None:
     """
     for relative_path, expected_sites in module.PINNED_SITES.items():
         text = (ROOT / relative_path).read_text(encoding="utf-8")
-        found = len(module._PIN_PATTERN.findall(text))  # noqa: SLF001
+        found = len(module._PIN_PATTERN.findall(text))
         assert_that(found).described_as(relative_path).is_equal_to(expected_sites)
 
 
@@ -255,7 +255,7 @@ def test_fetch_walks_pages_until_a_release_is_found(
 
     monkeypatch.setattr(module, "_fetch_page", _fake_page)
 
-    versions = module._fetch_package_versions("token")  # noqa: SLF001
+    versions = module._fetch_package_versions("token")
 
     assert_that(seen).is_equal_to([1, 2])
     assert_that(module.latest_published_release(versions)).is_equal_to(
@@ -288,6 +288,6 @@ def test_fetch_stops_once_a_release_is_in_hand(
 
     monkeypatch.setattr(module, "_fetch_page", _fake_page)
 
-    module._fetch_package_versions("token")  # noqa: SLF001
+    module._fetch_package_versions("token")
 
     assert_that(seen).is_equal_to([1])

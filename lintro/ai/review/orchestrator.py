@@ -1354,7 +1354,7 @@ async def run_review_async(
             # ``should_run_synthesis`` already rejected a None config; bind it
             # so the type checker knows that too.
             synthesis_config = synthesis
-            assert synthesis_config is not None  # noqa: S101
+            assert synthesis_config is not None
             with timings.phase(name=ReviewPhase.SYNTHESIS):
                 synthesis_pass = await run_synthesis_pass(
                     context=context,

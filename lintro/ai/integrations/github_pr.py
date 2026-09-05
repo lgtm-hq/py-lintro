@@ -281,7 +281,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -341,7 +343,9 @@ class GitHubPRReporter:
 
         req = self._authorized_request(url=url, method="GET")
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -381,7 +385,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -429,7 +435,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -472,7 +480,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -545,7 +555,9 @@ class GitHubPRReporter:
             content_type="application/json",
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -717,7 +729,9 @@ class GitHubPRReporter:
             logger.warning("Refusing non-HTTPS URL: {}", url)
             return None
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -802,7 +816,9 @@ class GitHubPRReporter:
             return GitHubApiResponse(message=f"refusing non-HTTPS URL: {url}")
 
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:

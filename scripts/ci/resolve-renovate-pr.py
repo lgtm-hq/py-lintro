@@ -96,7 +96,7 @@ def main() -> int:
     print(f"Resolved Renovate PR #{number}; candidate tag: {tag}")
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
-        with open(output, "a", encoding="utf-8") as output_file:  # noqa: PTH123
+        with open(output, "a", encoding="utf-8") as output_file:
             output_file.write(f"pr-number={number}\n")
             output_file.write(f"candidate-tag={tag}\n")
     return 0

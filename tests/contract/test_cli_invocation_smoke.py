@@ -66,7 +66,7 @@ def _build_provider(provider: AIProvider) -> BaseAIProvider:
     )
     try:
         return get_provider(config)
-    except Exception as exc:  # noqa: BLE001 - construction failure is a skip reason
+    except Exception as exc:
         unmet_precondition(f"{provider.value} provider could not be constructed: {exc}")
 
 
