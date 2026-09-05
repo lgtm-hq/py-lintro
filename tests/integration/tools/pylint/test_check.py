@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
 
 from lintro.parsers.pylint.pylint_issue import PylintIssue
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("pylint") is None,
-    reason="pylint not installed",
-)
+pytestmark = require_tool("pylint")
 
 
 def test_check_reports_exactly_one_duplicate_code_issue(
