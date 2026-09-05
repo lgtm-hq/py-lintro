@@ -69,9 +69,12 @@ required):
   compatibility matrix runs the suite on 3.11, 3.12, 3.13 and 3.14; the coverage job
   runs on 3.14 alone (`.github/workflows/test-ci.yml`).
 - **`[dependency-groups] dev` in `pyproject.toml` is the only dev dependency list**
-  (#2314). There is no `dev` or `test` extra; `uv sync --dev` (uv syncs the `dev` group
-  by default) installs everything the test suite and CI need. Extras are runtime-facing:
-  `full`, `tools`, `ai`, `mcp`, `typing`.
+  (#2314). There is no `dev` or `test` extra: `uv sync --dev` (uv syncs the `dev` group
+  by default) installs the test toolchain — pytest and its plugins, assertpy, ruff,
+  black, mypy, bandit, yamllint. Use **`uv sync --dev --extra full`** to match CI, which
+  requests `extras: 'full'` in `test-ci.yml`; the `full` extra adds the dogfooding
+  linters the group does not carry (pylint, pydoclint, import-linter). The remaining
+  extras are runtime-facing: `tools`, `ai`, `mcp`, `typing`.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds
