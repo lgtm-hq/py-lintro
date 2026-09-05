@@ -161,7 +161,8 @@ RUN echo "=== Verifying all tools ===" && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
+    pydoclint --version && pylint --version && ruff --version && \
+    semgrep --version && \
     pip-audit --version && lint-imports --version && \
     shellcheck --version && shfmt --version && spectral --version && \
     sqlfluff --version && \

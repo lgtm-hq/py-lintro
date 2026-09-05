@@ -88,6 +88,10 @@ generator reads (#2176):
 - `import-linter` - Python import-contract checker (binary `lint-imports`); it reports a
   clean result when the project has no import-linter configuration, so it is safe to
   leave enabled
+- `pylint` - Python static analyser. Lintro runs it project-scoped (one invocation over
+  every discovered file) so cross-module checkers such as `duplicate-code` (R0801) can
+  see the whole set. Configure it in `[tool.pylint.<section>]`; with no configuration
+  pylint's own defaults apply and overlap heavily with ruff
 
 ### Optional External Tools
 

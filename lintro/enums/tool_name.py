@@ -35,6 +35,7 @@ class ToolName(StrEnum):
     PIP_AUDIT = auto()
     PRETTIER = auto()
     PYDOCLINT = auto()
+    PYLINT = auto()
     PYTEST = auto()
     RUFF = auto()
     RUSTC = auto()

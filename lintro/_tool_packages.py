@@ -51,6 +51,7 @@ PYPI_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "mypy": ToolName.MYPY,
     "pip-audit": ToolName.PIP_AUDIT,
     "pydoclint": ToolName.PYDOCLINT,
+    "pylint": ToolName.PYLINT,
     "pytest": ToolName.PYTEST,
     "ruff": ToolName.RUFF,
     "semgrep": ToolName.SEMGREP,

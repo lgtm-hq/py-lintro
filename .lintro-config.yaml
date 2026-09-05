@@ -109,6 +109,14 @@ tools:
   import-linter:
     enabled: true
 
+  # Pylint - Python static analysis (config in pyproject.toml [tool.pylint];
+  # only duplicate-code/R0801 is enabled there). Deliberately off for now:
+  # #2292 adds the plugin, #2293 turns it on for `lintro` and `tests` together
+  # with the R0801 baseline. An unlisted tool defaults to enabled, so this
+  # entry has to be explicit.
+  pylint:
+    enabled: false
+
   # Pytest - Test runner (config in pyproject.toml [tool.pytest.ini_options])
   pytest:
     enabled: true

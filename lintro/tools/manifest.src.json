@@ -40,7 +40,8 @@
       "pydoclint",
       "semgrep",
       "pip_audit",
-      "import_linter"
+      "import_linter",
+      "pylint"
     ],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
@@ -344,6 +345,18 @@
       "tier": "tools",
       "category": "bundled",
       "version_command": ["pydoclint", "--version"],
+      "languages": ["python"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "pylint",
+      "install": {
+        "type": "pip",
+        "package": "pylint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pylint", "--version"],
       "languages": ["python"],
       "tags": ["linter"]
     },
