@@ -76,6 +76,61 @@ PYLINT_NOTHING_TO_LINT: str = "No files to lint"
 #: ``tox.ini``.
 _INI_SECTION_PREFIX: str = "[pylint"
 
+#: Message shown when every discovered file was filtered out by ``include``.
+PYLINT_NO_INCLUDED_FILES: str = (
+    "No Python files under the configured pylint include paths."
+)
+
+
+def _normalize_include_prefix(value: object) -> str:
+    """Normalize one ``include`` entry into a POSIX path prefix.
+
+    Args:
+        value: Raw entry from the ``include`` option.
+
+    Returns:
+        The prefix with backslashes folded to ``/`` and leading ``./`` and
+        surrounding ``/`` removed. Empty when the entry is blank.
+    """
+    text = str(value).strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text.strip("/")
+
+
+def filter_included_files(
+    *,
+    files: list[str],
+    prefixes: tuple[str, ...],
+) -> list[str]:
+    """Restrict discovered files to those under the configured include paths.
+
+    pylint has no built-in way to scope a project-wide run to a subtree while
+    still reading the project config, so the scoping is applied here. Paths are
+    matched as prefixes of each file path relative to the run's working
+    directory, so ``lintro/tools/definitions`` selects that package and nothing
+    else.
+
+    Args:
+        files: Discovered file paths, relative to the run's working directory.
+        prefixes: Normalized include prefixes. Empty means no filtering.
+
+    Returns:
+        The files under one of the prefixes, or all files when no prefix is
+        configured.
+    """
+    if not prefixes:
+        return files
+    kept: list[str] = []
+    for path in files:
+        normalized = _normalize_include_prefix(path)
+        if any(
+            normalized == prefix or normalized.startswith(f"{prefix}/")
+            for prefix in prefixes
+        ):
+            kept.append(path)
+    return kept
+
 
 def _toml_declares_pylint(config_path: Path) -> bool:
     """Report whether a TOML config carries a ``tool.pylint`` table.
@@ -228,6 +283,7 @@ class PylintPlugin(BaseToolPlugin):
                 "timeout": PYLINT_DEFAULT_TIMEOUT,
                 "disable": None,
                 "enable": None,
+                "include": None,
             },
             default_timeout=PYLINT_DEFAULT_TIMEOUT,
         )
@@ -236,6 +292,7 @@ class PylintPlugin(BaseToolPlugin):
         self,
         disable: str | list[str] | None = None,
         enable: str | list[str] | None = None,
+        include: str | list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Set pylint-specific options.
@@ -247,11 +304,35 @@ class PylintPlugin(BaseToolPlugin):
             enable: Messages/categories to enable, forwarded to ``--enable=``.
                 A pipe-separated ``--tool-options`` value arrives here as a
                 list.
-            **kwargs: Other tool options (e.g. ``timeout``).
+            include: Path prefixes the run is scoped to. Only discovered files
+                under one of them are analysed; everything else is dropped
+                before pylint is invoked. Unset means every discovered file.
+            **kwargs: Other tool options (e.g. ``timeout``). Keys owned by the
+                duplicate-code gate (``duplicate_code_baseline``) are accepted
+                and ignored here: they configure
+                ``lintro/utils/duplicate_code.py``, not the pylint command.
         """
-        options: dict[str, Any] = {"disable": disable, "enable": enable}
+        options: dict[str, Any] = {
+            "disable": disable,
+            "enable": enable,
+            "include": include,
+        }
         options = {key: value for key, value in options.items() if value is not None}
         super().set_options(**options, **kwargs)
+
+    def _include_prefixes(self) -> tuple[str, ...]:
+        """Return the normalized ``include`` prefixes for this invocation.
+
+        Returns:
+            Normalized, non-empty path prefixes. Empty when ``include`` is
+            unset, so the run is not scoped.
+        """
+        raw = self.options.get("include")
+        if raw is None:
+            return ()
+        values = raw if isinstance(raw, (list, tuple)) else [raw]
+        prefixes = (_normalize_include_prefix(value) for value in values)
+        return tuple(prefix for prefix in prefixes if prefix)
 
     def _build_check_command(
         self,
@@ -319,11 +400,22 @@ class PylintPlugin(BaseToolPlugin):
             # early_result is guaranteed to be ToolResult when should_skip=True
             return ctx.early_result  # type: ignore[return-value]
 
+        files = filter_included_files(
+            files=ctx.rel_files,
+            prefixes=self._include_prefixes(),
+        )
+        if not files:
+            return ToolResult(
+                name=self.definition.name,
+                success=True,
+                output=PYLINT_NO_INCLUDED_FILES,
+                issues_count=0,
+            )
+
         config_path = find_pylint_config(paths)
-        cmd = self._build_check_command(files=ctx.rel_files, config_path=config_path)
+        cmd = self._build_check_command(files=files, config_path=config_path)
         logger.debug(
-            f"[pylint] Running: {' '.join(cmd[:8])}... "
-            f"({len(ctx.rel_files)} files)",
+            f"[pylint] Running: {' '.join(cmd[:8])}... ({len(files)} files)",
         )
 
         try:

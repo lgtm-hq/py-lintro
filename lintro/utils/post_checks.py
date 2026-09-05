@@ -12,7 +12,17 @@ from lintro.enums.group_by import GroupBy, normalize_group_by
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
-from lintro.utils.config import load_module_size_config, load_post_checks_config
+from lintro.utils.config import (
+    load_lintro_tool_config,
+    load_module_size_config,
+    load_post_checks_config,
+)
+from lintro.utils.duplicate_code import (
+    DUPLICATE_CODE_GATE_NAME,
+    PYLINT_TOOL_NAME,
+    apply_duplicate_code_baseline,
+    resolve_duplicate_code_baseline,
+)
 from lintro.utils.module_size import (
     find_oversized_modules,
     resolve_module_size_settings,
@@ -79,6 +89,60 @@ def _run_module_size_gate(
             color="yellow",
         )
     logger.console_output(text="")
+
+
+def _run_duplicate_code_gate(
+    *,
+    all_results: list[ToolResult],
+    total_issues: int,
+    json_output_mode: bool,
+    logger: ThreadSafeConsoleLogger,
+) -> int:
+    """Run the duplicate-code ratchet gate over the run's pylint results.
+
+    Reads ``duplicate_code_baseline`` from ``[tool.lintro.pylint]``, removes the
+    ``R0801`` findings from the pylint result so this gate is their only
+    accounting, and appends a failing result when the count is above the
+    baseline. See ``lintro/utils/duplicate_code.py``.
+
+    Args:
+        all_results: Results collected during the run. Appended to, and the
+            pylint result is stripped of its duplicate-code findings.
+        total_issues: Current total issues count.
+        json_output_mode: Whether output is JSON (suppresses console notes).
+        logger: Logger instance for console output.
+
+    Returns:
+        int: The updated total issues count.
+    """
+    pylint_config = load_lintro_tool_config(PYLINT_TOOL_NAME)
+    baseline = resolve_duplicate_code_baseline(config=pylint_config)
+    if baseline is None:
+        return total_issues
+
+    verdict = apply_duplicate_code_baseline(results=all_results, baseline=baseline)
+    if verdict is None:
+        return total_issues
+
+    total_issues = max(total_issues - verdict.count, 0)
+    if not verdict.exceeded:
+        if not json_output_mode:
+            logger.console_output(text=verdict.message, color="green")
+        return total_issues
+
+    from lintro.models.core.tool_result import ToolResult as _ToolResult
+
+    all_results.append(
+        _ToolResult(
+            name=DUPLICATE_CODE_GATE_NAME,
+            success=False,
+            output=verdict.message,
+            issues_count=1,
+        ),
+    )
+    if not json_output_mode:
+        logger.console_output(text=verdict.message, color="red")
+    return total_issues + 1
 
 
 def execute_post_checks(
@@ -292,6 +356,15 @@ def execute_post_checks(
         paths=paths,
         exclude=exclude,
         include_venv=include_venv,
+        json_output_mode=json_output_mode,
+        logger=logger,
+    )
+
+    # Duplicate-code ratchet gate (issue #2293). Runs after the primary tools
+    # so it can judge the pylint result the run already produced.
+    total_issues = _run_duplicate_code_gate(
+        all_results=all_results,
+        total_issues=total_issues,
         json_output_mode=json_output_mode,
         logger=logger,
     )

@@ -71,18 +71,6 @@ interim:
       Interim only — remove once the tools-image bump and the Dockerfile
       `pip-audit --version` verification land so it can never regress silently.
 
-  # TODO(2293): pylint is wired up but deliberately not enabled yet, so it
-  # reports "disabled in config" rather than running. #2293 turns it on for
-  # `lintro` and `tests` together with the duplicate-code baseline.
-  - tool: pylint
-    reason_class: other
-    issue: 2293
-    rationale: >-
-      TODO(2293): #2292 adds the pylint plugin but leaves it disabled in
-      .lintro-config.yaml, because enabling it without the R0801 baseline
-      would fail dogfooding on 81 pre-existing findings. Interim only —
-      remove once #2293 enables it with that baseline.
-
   # TODO(1510): decide whether the repository should run raw tsc in dogfood CI
   # or keep delegating site TypeScript checks to astro-check/vue-tsc.
   - tool: tsc
