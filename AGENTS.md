@@ -53,6 +53,21 @@ required):
 - The interpreter is the system Python (3.12); `requires-python` is `>=3.11`.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
+## Package layering (#2290)
+
+Two `import-linter` contracts in `[tool.importlinter]` enforce import direction:
+**`core-does-not-import-ai`** (nothing outside `ai`, `mcp`, `cli_utils`, `api` may
+import `lintro.ai`) and **`layers`**, highest first — `cli_utils | mcp | api`, `ai`,
+`watch | profiling`, `plugins | tools`, `config`, `formatters | parsers`, `utils`,
+`models`, `enums`, `exceptions | licenses | deps`. Packages on one line may not import
+each other. Check with `uv run lintro chk . --tools import-linter`.
+
+**Ratchet rule.** Every current violation is an `ignore_imports` entry tagged with the
+issue that removes it. Entries may be **deleted, never added**, and a PR that closes a
+cycle deletes its entries. Lazy (function-body) imports are not a fix: `import-linter`
+and `scripts/ci/import_matrix.py` both count them, and
+`tests/unit/test_import_boundaries.py` pins the two-way cycle count.
+
 ## Docs site (optional secondary product)
 
 `apps/site` is an Astro + Pagefind docs site built with `bun`. After installing `just`,
