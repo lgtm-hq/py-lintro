@@ -155,6 +155,12 @@ system.
 <td>📦</td>
 </tr>
 <tr>
+<td><a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/pylint-3776AB?logo=python&logoColor=white" alt="pylint"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
+</tr>
+<tr>
 <td><a href="https://www.shellcheck.net/"><img src="https://img.shields.io/badge/ShellCheck-4EAA25?logo=gnubash&logoColor=white" alt="ShellCheck"></a></td>
 <td>🐚 Shell Scripts</td>
 <td>-</td>
@@ -382,7 +388,7 @@ uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
 
 # Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
-# pydoclint, yamllint)
+# pydoclint, pylint, yamllint)
 uv pip install 'lintro[full]'
 brew tap lgtm-hq/tap && brew install lintro-full
 

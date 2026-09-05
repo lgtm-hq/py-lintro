@@ -875,6 +875,7 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.IMPORT_LINTER,
                     ToolName.OSV_SCANNER,
                     ToolName.PIP_AUDIT,
+                    ToolName.PYLINT,
                     ToolName.SHELLCHECK,
                     ToolName.SHFMT,
                     ToolName.SEMGREP,

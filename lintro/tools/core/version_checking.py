@@ -177,6 +177,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: pip install pydoclint>={version} "
             "or uv add pydoclint>={version}"
         ),
+        "pylint": (
+            "Install via: pip install 'pylint>={version}' "
+            "or uv add 'pylint>={version}'"
+        ),
         "ruff": ("Install via: pip install ruff>={version} or uv add ruff>={version}"),
         "yamllint": (
             "Install via: pip install yamllint>={version} or uv add yamllint>={version}"

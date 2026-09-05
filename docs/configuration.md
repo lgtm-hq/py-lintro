@@ -1523,6 +1523,69 @@ lintro check . --tools import-linter
 Contract syntax and every contract type are documented upstream at
 <https://import-linter.readthedocs.io/en/stable/contract_types/>.
 
+#### pylint Configuration {#pylint}
+
+**Tool:** [pylint](https://github.com/pylint-dev/pylint) — Python static analyser.
+Lintro wires it in mainly for `duplicate-code` (`R0801`), the copy-paste detector no
+other bundled tool provides.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install pylint`
+
+**File:** pylint reads the first of these that declares pylint configuration, in this
+precedence order: `pylintrc`, `pylintrc.toml`, `.pylintrc`, `.pylintrc.toml`,
+`pyproject.toml`, `setup.cfg`, `tox.ini`. Lintro discovers the same file and passes it
+as `--rcfile`.
+
+```toml
+[tool.pylint.main]
+disable = ["all"]
+enable = ["duplicate-code"]
+jobs = 0
+
+[tool.pylint.similarities]
+min-similarity-lines = 12
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: every discovered file is passed to a **single** `pylint` invocation.
+  Cross-module checkers only see clones that appear in one run, so per-file execution
+  would silently miss every `R0801`.
+- Configuration is discovered by walking upward from the given paths and is passed as
+  `--rcfile`. With no pylint configuration anywhere above the paths, pylint's built-in
+  defaults apply — which overlap heavily with ruff, so configure it explicitly.
+- The `R0801` message body (the file list plus the duplicated source block) is preserved
+  verbatim; it is the only description of what is duplicated.
+- pylint's message category becomes the Lintro severity: `fatal`/`error` are ERROR,
+  `warning` and `refactor` (which includes `duplicate-code`) are WARNING, and
+  `convention`/`info` are INFO.
+- Check-only. `lintro format` never runs pylint.
+
+**Available `--tool-options`:**
+
+- `disable`: Message or category to disable, forwarded to `--disable=`. Commas separate
+  `--tool-options` entries, so several values are written pipe-separated
+  (`pylint:disable=C0114|R0801`)
+- `enable`: Message or category to enable, forwarded to `--enable=`. Several values are
+  written pipe-separated (`pylint:enable=duplicate-code|C0114`)
+- `timeout`: Seconds to allow the run (default: 900; a whole-repo pylint run is slow)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools pylint
+lintro check . --tools pylint --tool-options "pylint:disable=all,pylint:enable=duplicate-code"
+# Several message ids in one option: pipe-separated, because commas split entries
+lintro check . --tools pylint --tool-options "pylint:enable=duplicate-code|C0114"
+```
+
+Every message id and symbol is documented upstream at
+<https://pylint.readthedocs.io/en/stable/user_guide/messages/messages_overview.html>.
+
 ### Frontend Tools
 
 #### Prettier Configuration

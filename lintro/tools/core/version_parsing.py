@@ -57,6 +57,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.PIP_AUDIT,
     ToolName.PRETTIER,
     ToolName.PYDOCLINT,
+    ToolName.PYLINT,
     ToolName.RUSTC,
     ToolName.RUSTFMT,
     ToolName.SEMGREP,

@@ -69,6 +69,7 @@ This script installs:
   - Yamllint (YAML linter)
   - Hadolint (Dockerfile linter)
   - Import-linter (Python import-contract checker)
+  - Pylint (Python static analyser; duplicate-code)
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
@@ -176,7 +177,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc" "typos"
 	"vale" "vue-tsc" "yamllint"
@@ -1853,6 +1854,21 @@ main() {
 		fi
 	fi # pydoclint
 
+	if should_install "pylint"; then
+		# Install pylint (Python static analyser; duplicate-code checker)
+		echo -e "${BLUE}Installing pylint...${NC}"
+		PYLINT_VERSION=$(get_tool_version "pylint") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pylint==${PYLINT_VERSION}"
+		elif install_python_package "pylint" "$PYLINT_VERSION"; then
+			echo -e "${GREEN}✓ pylint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pylint${NC}"
+			exit 1
+		fi
+	fi # pylint
+
 	if should_install "sqlfluff"; then
 		# Install sqlfluff (SQL linter and formatter)
 		echo -e "${BLUE}Installing sqlfluff...${NC}"
@@ -2058,6 +2074,7 @@ main() {
 		["pip-audit"]="Python dependency vulnerability scanning"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
+		["pylint"]="Python static analysis (duplicate-code)"
 		["ruff"]="Python linting and formatting"
 		["rustfmt"]="Rust formatting"
 		["semgrep"]="Security scanning"
@@ -2085,7 +2102,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

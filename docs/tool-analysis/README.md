@@ -119,6 +119,18 @@ implementations with the core tools themselves.
   the input paths and parses the file to confirm a real section, and a clean result
   where the native tool errors because no config file exists
 
+### [pylint Analysis](./pylint-analysis.md)
+
+### Python Static Analyser (duplicate-code focus)
+
+- ✅ **Preserved**: The whole checker catalogue driven by native config, pylint's own
+  message ids/symbols/categories, and the `R0801` message body verbatim
+- ⚠️ **Limited**: Check-only, slow (full AST per module), and `R0801` is reported once
+  per clone set rather than once per file
+- 🚀 **Enhanced**: Project-scoped single invocation so cross-module checkers work at
+  all, upward config discovery that parses the file to confirm a real section, and
+  bit-field exit codes interpreted instead of trusted
+
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 
 ### AI-Powered Idiomatic Code Reviewer (built-in plugin)

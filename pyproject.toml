@@ -88,6 +88,7 @@ full = [
   "import-linter>=2.15",
   "mypy>=1.19.1",
   "pydoclint>=0.8.3",
+  "pylint>=4.0.8",
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
@@ -193,6 +194,7 @@ packages = [
   "lintro.parsers.idiom_review",
   "lintro.parsers.import_linter",
   "lintro.parsers.markdownlint",
+  "lintro.parsers.pylint",
   "lintro.parsers.pytest",
   "lintro.parsers.ruff",
   "lintro.parsers.rustfmt",
@@ -603,6 +605,9 @@ constraint-dependencies = [
 # module-level import into a function body is **not** a fix — `import-linter`
 # counts function-body imports, and so does `scripts/ci/import_matrix.py`,
 # whose two-way cycle count `tests/unit/test_import_boundaries.py` pins.
+# Exception: a new tool definition added under the current definitions pattern
+# records its three `-> lintro.plugins.{base,protocol,registry}` edges under
+# #2311, which deletes them all when it factors the pattern.
 
 [tool.importlinter]
 root_package = "lintro"
@@ -694,7 +699,7 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 141 edges owned by #2311
+  # 144 edges owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
@@ -784,6 +789,9 @@ ignore_imports = [
   "lintro.tools.definitions.pydoclint -> lintro.plugins.file_processor",            # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.protocol",                  # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.registry",                     # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.base",                         # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.protocol",                     # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.registry",                     # owned by #2311
@@ -918,6 +926,25 @@ ignore_imports = [
   "lintro.licenses.policy_engine -> lintro.config.licenses_config", # owned by #2332
   "lintro.models.core.tool_result -> lintro.parsers.base_issue",    # owned by #2332
 ]
+
+# pylint (#2292). Only the duplicate-code (R0801) checker is enabled: every
+# other pylint check either duplicates ruff/mypy or contradicts this repo's
+# style, so `disable = ["all"]` keeps the tool to the one job lintro has no
+# other checker for. `jobs = 0` fans the run out across all cores; the
+# similarity checker implements pylint's map/reduce protocol, so R0801 is
+# still detected across workers. pylint is not enabled in
+# `.lintro-config.yaml` yet — that lands with the baseline in #2293, where
+# the intended paths are `lintro` and `tests`.
+[tool.pylint.main]
+disable = ["all"]
+enable = ["duplicate-code"]
+jobs = 0
+
+[tool.pylint.similarities]
+min-similarity-lines = 12
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
 
 [tool.pydoclint]
 style = "google"
