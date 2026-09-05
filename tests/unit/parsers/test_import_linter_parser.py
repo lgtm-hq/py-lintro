@@ -392,3 +392,30 @@ pkg.low is not allowed to import pkg.high:
     assert_that([issue.code for issue in issues]).is_equal_to(
         ["IO", "Layered architecture"],
     )
+
+
+def test_parse_strips_ansi_colour_from_headings_and_hops() -> None:
+    """A colourised run parses to the same chain as the plain-text run.
+
+    ``lint-imports`` colourises its broken-contract report on a TTY, so the
+    parser strips ANSI sequences before matching. Without this case, dropping
+    that strip would leave every other parser test green.
+    """
+    coloured = (
+        "\x1b[31m----------------\x1b[0m\n"
+        "\x1b[31mBroken contracts\x1b[0m\n"
+        "\x1b[31m----------------\x1b[0m\n"
+        "\n"
+        "\x1b[1mLayered architecture\x1b[0m\n"
+        "--------------------\n"
+        "\n"
+        "mypkg.low is not allowed to import mypkg.high:\n"
+        "\n"
+        "\x1b[31m- mypkg.low -> mypkg.high (l.3)\x1b[0m\n"
+    )
+
+    issues = parse_import_linter_output(coloured)
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("Layered architecture")
+    assert_that(issues[0].message).is_equal_to("mypkg.low -> mypkg.high")

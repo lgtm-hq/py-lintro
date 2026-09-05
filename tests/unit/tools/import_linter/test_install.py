@@ -152,3 +152,22 @@ def test_app_image_bridges_import_linter_until_the_next_tools_digest() -> None:
     assert_that(bridge_at).is_not_equal_to(-1)
     bridge_line = text[bridge_at : text.index("\n", bridge_at)]
     assert_that(bridge_line).contains("import-linter")
+
+
+def test_verification_loop_targets_the_console_script() -> None:
+    """``tools_to_verify`` must name ``lint-imports``, not the package.
+
+    ``--tools import-linter`` filters the verification array, so the array has
+    to carry the console-script name plus an alias branch reconnecting it to
+    the filter name; otherwise verification silently drops the tool.
+    """
+    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    verify_at = script.find("tools_to_verify=(")
+    assert_that(verify_at).is_not_equal_to(-1)
+    verify_array = script[verify_at : script.index(")", verify_at)]
+
+    assert_that(verify_array).contains('"lint-imports"')
+    assert_that(verify_array).does_not_contain('"import-linter"')
+    assert_that(script).contains(
+        '[[ "$tool" == "lint-imports" ]] && should_install "import-linter"',
+    )

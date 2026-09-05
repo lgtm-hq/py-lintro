@@ -168,10 +168,11 @@ should_install() {
 
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
-# Note: a few tools are filtered under one name and verified under another —
-# markdownlint/markdownlint-cli2 and import-linter/lint-imports. Only the
-# filter name belongs here; the verification loop reconnects each pair with an
-# explicit alias branch.
+# Note: a few tools are filtered under one name and verified under another.
+# markdownlint lists both names here, so --tools markdownlint-cli2 is valid.
+# import-linter lists only the filter name, so --tools lint-imports is
+# rejected by the validation below; the verification loop reconnects
+# import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"

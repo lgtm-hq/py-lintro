@@ -46,7 +46,7 @@ IMPORT_LINTER_CONFIG_FILES: tuple[str, ...] = (
 #: ``setup.cfg`` and ``.importlinter`` use ``[importlinter]`` for session options
 #: and ``[importlinter:contract:<id>]`` for each contract.
 _INI_SECTION: str = "[importlinter]"
-_INI_CONTRACT_PREFIX: str = "[importlinter:"
+_INI_CONTRACT_PREFIX: str = "[importlinter:contract:"
 
 
 def _pyproject_declares_import_linter(config_path: Path) -> bool:
@@ -67,7 +67,7 @@ def _pyproject_declares_import_linter(config_path: Path) -> bool:
     try:
         with config_path.open("rb") as handle:
             document = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         logger.debug(f"Could not read import-linter config from {config_path}: {exc}")
         return False
     tool_table = document.get("tool")
@@ -81,7 +81,10 @@ def _ini_declares_import_linter(config_path: Path) -> bool:
         config_path: Path to a ``setup.cfg`` or ``.importlinter`` file.
 
     Returns:
-        True when the file carries ``[importlinter]`` or a contract section.
+        True when the file carries ``[importlinter]`` or an
+        ``[importlinter:contract:<id>]`` section. Other ``importlinter:``
+        prefixed headers are not configuration import-linter reads, so they
+        do not make a file a candidate.
     """
     try:
         text = config_path.read_text(encoding="utf-8")

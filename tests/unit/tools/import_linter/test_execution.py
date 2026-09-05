@@ -141,25 +141,34 @@ def test_check_without_configuration_is_clean(
 
 def test_check_no_python_files_skips(
     import_linter_plugin: ImportLinterPlugin,
-    tmp_path: Path,
+    project_with_contracts: Path,
 ) -> None:
     """A path with no Python files short-circuits before running the tool.
 
+    The path deliberately sits inside a configured project: with configuration
+    present, the no-config branch cannot produce this result, so the assertion
+    can only be satisfied by the file-discovery short-circuit it names.
+
     Args:
         import_linter_plugin: Plugin under test.
-        tmp_path: Pytest temporary directory.
+        project_with_contracts: Project root carrying import-linter config.
     """
-    (tmp_path / "README.md").write_text("# nothing to check\n", encoding="utf-8")
+    readme = project_with_contracts / "README.md"
+    readme.write_text("# nothing to check\n", encoding="utf-8")
 
     with (
         patch(_VERSION_PATCH, return_value=None),
         patch.object(import_linter_plugin, "_run_subprocess") as run,
     ):
-        result = import_linter_plugin.check([str(tmp_path)], {})
+        result = import_linter_plugin.check([str(readme)], {})
 
     assert_that(run.called).is_false()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    # Not the no-config path: the project this file lives in *is* configured.
+    assert_that(find_import_linter_config([str(readme)])).is_equal_to(
+        project_with_contracts / "pyproject.toml",
+    )
 
 
 def test_check_timeout_is_reported(
@@ -341,3 +350,37 @@ def test_find_config_accepts_an_ini_contract_section(tmp_path: Path) -> None:
     found = find_import_linter_config([str(tmp_path)])
 
     assert_that(found).is_equal_to(tmp_path / ".importlinter")
+
+
+def test_find_config_ignores_non_utf8_pyproject(tmp_path: Path) -> None:
+    """A ``pyproject.toml`` that is not valid UTF-8 is skipped, not fatal.
+
+    ``tomllib.load`` decodes the bytes it reads, so an invalid byte raises
+    ``UnicodeDecodeError`` rather than ``TOMLDecodeError``; letting that escape
+    would abort the whole check run instead of skipping one candidate.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "pyproject.toml").write_bytes(b'[tool.importlinter]\nroot = "\xff"\n')
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_none()
+
+
+def test_find_config_ignores_a_non_contract_importlinter_prefix(tmp_path: Path) -> None:
+    """Only ``[importlinter]`` and ``[importlinter:contract:<id>]`` count.
+
+    Upstream reads session options from ``[importlinter]`` and one section per
+    contract named ``[importlinter:contract:<id>]``. A lookalike such as
+    ``[importlinter:other]`` is not configuration, and treating it as one would
+    hand ``lint-imports`` a file it cannot use.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    (tmp_path / "setup.cfg").write_text(
+        "[importlinter:other]\nvalue = 1\n",
+        encoding="utf-8",
+    )
+
+    assert_that(find_import_linter_config([str(tmp_path)])).is_none()
