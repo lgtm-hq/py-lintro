@@ -1,0 +1,77 @@
+[
+  {
+    "severity": "P1",
+    "category": "security",
+    "file": "src/auth/session.py",
+    "line": 3,
+    "title": "Credential committed to the repository",
+    "description": "A module-level constant holds what looks like an API key.",
+    "cause": "The value was inlined instead of read from the environment.",
+    "fix": "Read the value from the environment and rotate the committed one.",
+    "confidence": "high",
+    "checklist_ids": [
+      1
+    ],
+    "suggested_code": "",
+    "source": "",
+    "kind": "finding",
+    "failure_scenario": "Anyone who installs the package can read the credential.",
+    "severity_downgraded": false,
+    "evidence_style": "diff_local",
+    "occurrences": [],
+    "suggested_change": null,
+    "suggestion_dropped": null,
+    "cross_chunk_contradiction": null,
+    "origin": null
+  },
+  {
+    "severity": "P2",
+    "category": "logic-bug",
+    "file": "src/auth/session.py",
+    "line": 6,
+    "title": "Unknown status still returns active",
+    "description": "Only the expired status is rejected; every other value falls through to True.",
+    "cause": "The final branch returns True unconditionally.",
+    "fix": "Return True only for the known active status.",
+    "confidence": "medium",
+    "checklist_ids": [
+      1
+    ],
+    "suggested_code": "",
+    "source": "",
+    "kind": "finding",
+    "failure_scenario": "",
+    "severity_downgraded": true,
+    "evidence_style": "diff_local",
+    "occurrences": [],
+    "suggested_change": null,
+    "suggestion_dropped": null,
+    "cross_chunk_contradiction": null,
+    "origin": null
+  },
+  {
+    "severity": "P2",
+    "category": "security",
+    "file": "src/auth/tokens.py",
+    "line": 1,
+    "title": "Verification defaults to off",
+    "description": "The new verify keyword defaults to False, so existing callers stop verifying.",
+    "cause": "The default was chosen for backwards compatibility.",
+    "fix": "Default verify to True and update the callers that cannot verify.",
+    "confidence": "high",
+    "checklist_ids": [
+      1
+    ],
+    "suggested_code": "",
+    "source": "",
+    "kind": "finding",
+    "failure_scenario": "",
+    "severity_downgraded": false,
+    "evidence_style": "diff_local",
+    "occurrences": [],
+    "suggested_change": null,
+    "suggestion_dropped": null,
+    "cross_chunk_contradiction": null,
+    "origin": null
+  }
+]

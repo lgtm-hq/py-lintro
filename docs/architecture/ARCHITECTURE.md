@@ -592,3 +592,6 @@ subprocess.run(
 - [ROADMAP.md](./ROADMAP.md) - Prioritized improvements
 - [../style-guide.md](../style-guide.md) - Coding standards
 - [../contributing.md](../contributing.md) - Contribution guidelines
+- [../adr/README.md](../adr/README.md) - Architecture Decision Records index
+- [ADR-0008](../adr/0008-ai-review-architecture-invariants.md) - Invariants the AI
+  review subsystem holds across the #1972 decomposition
