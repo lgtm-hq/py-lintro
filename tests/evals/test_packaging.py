@@ -10,19 +10,20 @@ from assertpy import assert_that
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_evals_is_not_a_configured_package() -> None:
-    """No eval module is listed in the wheel's explicit package list."""
+def test_evals_is_excluded_from_package_discovery() -> None:
+    """Package discovery cannot pull an eval module into the wheel.
+
+    The build uses ``[tool.setuptools.packages.find]`` (#1225): discovery is
+    limited to ``lintro*`` and ``evals*`` is excluded outright, so neither the
+    harness package nor a future ``evals`` subpackage can ship.
+    """
     data = tomllib.loads(
         (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"),
     )
-    packages = data["tool"]["setuptools"]["packages"]
+    find = data["tool"]["setuptools"]["packages"]["find"]
 
-    offenders = [
-        name for name in packages if name == "evals" or name.startswith("evals.")
-    ]
-
-    assert_that(offenders).is_empty()
-    assert_that(packages).does_not_contain("review_matrix")
+    assert_that(find["include"]).is_equal_to(["lintro*"])
+    assert_that(find["exclude"]).contains("evals*")
 
 
 def test_manifest_prunes_the_evals_directory() -> None:

@@ -1,17 +1,20 @@
 """Smoke tests to verify all package modules are importable.
 
 This test ensures that:
-1. All modules listed in pyproject.toml are actually included in the package build
-2. All packages in the source tree are listed in pyproject.toml (catches forgotten packages)
+1. Every package directory in the source tree imports cleanly
+2. The build discovers packages automatically, so no package can be forgotten
 
-This prevents packaging errors where a module exists in the source tree but is
-missing from the packages list (like the 0.43.0 bug with lintro.utils.environment).
+The wheel is built with ``[tool.setuptools.packages.find]`` (#1225), so packages
+are discovered by walking the tree for ``__init__.py`` rather than read from a
+hand-maintained list. That directive is what prevents a repeat of the 0.43.0
+packaging bug, where ``lintro.utils.environment`` was missing from the wheel.
 """
 
 import importlib
 from pathlib import Path
 
 import pytest
+from assertpy import assert_that
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -35,11 +38,11 @@ def _discover_packages_from_source() -> set[str]:
     return packages
 
 
-def _get_packages_from_pyproject() -> set[str]:
-    """Read the packages list from pyproject.toml.
+def _get_find_directive() -> dict[str, object]:
+    """Read the setuptools package-discovery directive from pyproject.toml.
 
     Returns:
-        Set of package names listed in [tool.setuptools].packages.
+        The ``[tool.setuptools.packages.find]`` table.
     """
     import tomllib
 
@@ -47,18 +50,17 @@ def _get_packages_from_pyproject() -> set[str]:
     with pyproject_path.open("rb") as f:
         data = tomllib.load(f)
 
-    packages = data.get("tool", {}).get("setuptools", {}).get("packages", [])
-    return set(packages)
+    find: dict[str, object] = data["tool"]["setuptools"]["packages"]["find"]
+    return find
 
 
-def _get_configured_packages() -> list[str]:
-    """Get packages from pyproject.toml for parametrized tests."""
-    return sorted(_get_packages_from_pyproject())
-
-
-@pytest.mark.parametrize("package", _get_configured_packages())
+@pytest.mark.parametrize("package", sorted(_discover_packages_from_source()))
 def test_package_importable(package: str) -> None:
-    """Verify each configured package can be imported successfully."""
+    """Verify each source-tree package can be imported successfully.
+
+    Args:
+        package: Dotted package name discovered in the source tree.
+    """
     # Note: We intentionally don't clear sys.modules here because doing so
     # would reinitialize global singletons (like tool_manager in lintro.tools)
     # which breaks other tests that depend on monkeypatching those singletons.
@@ -70,28 +72,40 @@ def test_package_importable(package: str) -> None:
     except ImportError as e:
         pytest.fail(
             f"Failed to import '{package}': {e}\n"
-            f"This likely means the package is missing from "
-            f"[tool.setuptools].packages in pyproject.toml",
+            f"This likely means the package is excluded by "
+            f"[tool.setuptools.packages.find] in pyproject.toml",
         )
 
 
-def test_all_source_packages_are_configured() -> None:
-    """Verify all packages in the source tree are listed in pyproject.toml.
+def test_package_discovery_covers_every_source_package() -> None:
+    """Verify the find directive includes every source-tree package.
 
-    This catches the case where a developer adds a new package directory
-    but forgets to add it to [tool.setuptools].packages.
+    A developer adding a package directory must not have to edit
+    pyproject.toml, so the directive has to match the whole ``lintro`` tree
+    while excluding the repo-only trees that ``lintro*`` would otherwise pull
+    in (notably the in-tree build backend, ``lintro_build``).
+
+    This is a fast configuration guard: it reads the declared directive rather
+    than a built artifact. What setuptools actually puts in the wheel and the
+    sdist is asserted by the slow
+    ``tests/integration/test_built_package.py`` distribution tests.
     """
-    source_packages = _discover_packages_from_source()
-    configured_packages = _get_packages_from_pyproject()
+    find = _get_find_directive()
 
-    missing = source_packages - configured_packages
-    if missing:
-        missing_list = "\n  - ".join(sorted(missing))
-        pytest.fail(
-            f"Found {len(missing)} package(s) in source tree not listed in "
-            f"pyproject.toml [tool.setuptools].packages:\n  - {missing_list}\n\n"
-            f"Add these packages to pyproject.toml to include them in the build.",
-        )
+    assert_that(find["include"]).is_equal_to(["lintro*"])
+    assert_that(find["namespaces"]).is_false()
+    assert_that(find["exclude"]).contains(
+        "lintro_build*",
+        "tests*",
+        "test_samples*",
+        "scripts*",
+        "docs*",
+        "evals*",
+    )
+    assert_that(sorted(_discover_packages_from_source())).contains(
+        "lintro",
+        "lintro.utils.environment",
+    )
 
 
 def test_doctor_command_imports() -> None:

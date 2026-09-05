@@ -303,19 +303,25 @@ entries before deciding on a value.
 
 ---
 
-## Step 7 — pyproject.toml: package list
+## Step 7 — pyproject.toml: packaging (usually nothing to do)
 
-Add the new parser package to the `packages` list in `pyproject.toml` so it is included
-in the wheel:
+Nothing is needed for the parser package itself. `pyproject.toml` discovers packages
+automatically, so `lintro.parsers.<tool>` ships as soon as it has an `__init__.py`:
 
 ```toml
-[tool.setuptools]
-packages = [
-  ...
-  "lintro.parsers.<tool>",
-  ...
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lintro*"]
 ```
+
+Only two cases need an edit:
+
+- **Non-Python files** the tool ships (templates, schemas, corpora) must be declared in
+  `[tool.setuptools.package-data]`; discovery covers modules, not data.
+- **A new top-level directory** whose name starts with `lintro` (like the in-tree build
+  backend `lintro_build`) must be added to the `exclude` list, or it lands in the wheel.
+
+Verify with `uv build` and `unzip -l dist/*.whl` when in doubt.
 
 ---
 
