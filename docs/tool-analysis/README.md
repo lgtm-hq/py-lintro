@@ -108,6 +108,17 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No impact analysis or mutation testing; plugin install not managed
 - 🚀 **Enhanced**: Coverage helpers, parallel presets, plugin/marker/fixture listings
 
+### [import-linter Analysis](./import-linter-analysis.md)
+
+### Python Import-Contract Checker
+
+- ✅ **Preserved**: All contract types, the native config filename order, and the native
+  exit-code meaning whenever a config is present (broken → issues, kept → clean)
+- ⚠️ **Limited**: Check-only (contract violations are design problems, not auto-fixable)
+- 🚀 **Enhanced**: Project-scoped single invocation, config discovery that walks up from
+  the input paths and parses the file to confirm a real section, and a clean result
+  where the native tool errors because no config file exists
+
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 
 ### AI-Powered Idiomatic Code Reviewer (built-in plugin)

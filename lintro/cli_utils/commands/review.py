@@ -53,6 +53,11 @@ from lintro.ai.review.checklist_display import (
     enrich_review_result,
     resolve_checklist_display,
 )
+from lintro.ai.review.convergence import (
+    evaluate_convergence,
+    format_convergence_stamp,
+    format_trajectory,
+)
 from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.custom_agents import (
     CustomAgentSpec,
@@ -64,9 +69,14 @@ from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
+from lintro.ai.review.finding_matcher import count_blocking_findings
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
-from lintro.ai.review.output import render_review_output
+from lintro.ai.review.output import (
+    render_convergence_outcome_json,
+    render_review_output,
+)
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
@@ -171,6 +181,95 @@ def _fail_review_command(
     # A wrapper that cannot tell the two apart reports a green check for a
     # review that never ran (#1826).
     raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
+
+
+def _finish_converged_review(
+    *,
+    decision: ConvergenceDecision,
+    output_format: str,
+    post: bool,
+    resolved_pr: int | None,
+    effective_repo: str | None,
+    prior_state: ReviewState,
+) -> NoReturn:
+    """Stamp a short-circuited round and exit without calling the provider.
+
+    Reached only when the convergence stop rule fired (#2099), which happens
+    before the provider is constructed — so no provider call is made and the
+    coverage and resume bookkeeping are never touched. Deliberately no state
+    is persisted: no round ran, so the round counter, the tracked findings,
+    and the carried coverage all stay exactly as the last real round left
+    them, and the next round that *does* run resumes from there untouched.
+
+    This raises, so it short-circuits the *whole* command, not just the review
+    round: the advisory-tool tail and the ``--fail-on-findings`` gate below
+    never run either. That is the point — the skip exists to spend nothing —
+    and ``--full`` re-runs the command end to end when the advisory tools are
+    wanted. Context collection and ``--with-lint`` have already run by this
+    point, so "costs nothing" means no provider call, not literally no work.
+
+    The process exit contract is the same one a real round uses:
+    :func:`~lintro.ai.review.finding_matcher.count_blocking_findings` — open,
+    non-question P1s — mirroring ``ReviewResult.has_p1_findings`` and
+    :func:`~lintro.ai.review.finding_matcher.derive_verdict`, which share that
+    predicate. Questions never block.
+
+    That exit is a local signal only. The CI check does *not* redden for open
+    P1s on either path: ``scripts/ci/classify_review_outcome.py`` reports a
+    REVIEWED round's P1 findings and a converged skip's leftovers alike, and
+    exits 0 for both (see the exit-code contract in
+    ``scripts/ci/run-ai-review.sh``). The readiness gate is informational at
+    check level, so the count is surfaced — on the sticky banner, in the JSON
+    envelope's ``open_p1``, and in the classifier headline — rather than
+    being hidden behind an exit code that would make a skip stricter than the
+    round that found the findings.
+
+    Args:
+        decision: The converged decision that skipped the round.
+        output_format: CLI ``--output`` value (``json`` or ``terminal``).
+        post: Whether ``--post`` requested a GitHub comment.
+        resolved_pr: PR number when posting is requested.
+        effective_repo: ``owner/repo`` when posting is requested.
+        prior_state: State already loaded for this invocation, re-rendered as
+            the board the banner is stamped onto.
+
+    Raises:
+        SystemExit: Always. ``0`` for a clean skip; ``1`` when the last real
+            round left an open P1 — the same local exit a round that found
+            them produces, and equally not a CI failure.
+    """
+    if post and resolved_pr is not None and effective_repo:
+        from lintro.ai.review.github import post_review_converged_to_github
+
+        with suppress(Exception):
+            post_review_converged_to_github(
+                decision=decision,
+                pr_number=resolved_pr,
+                repo=effective_repo,
+                prior_state=prior_state,
+            )
+    # A skipped round changes nothing about what is open, so it reports the
+    # same local exit a real round would: an open P1 left by the last real
+    # round still exits 1 here, exactly as that round did. The CI check
+    # greens both alike and names the count instead (see the docstring).
+    open_p1 = count_blocking_findings(findings=prior_state.findings)
+    if output_format == "json":
+        click.echo(
+            render_convergence_outcome_json(decision=decision, open_p1=open_p1),
+        )
+    else:
+        click.echo(f"🔁 Review skipped — {format_convergence_stamp(decision=decision)}")
+        if decision.trajectory:
+            click.echo(
+                f"   Score trajectory: {format_trajectory(scores=decision.trajectory)}",
+            )
+        if open_p1:
+            click.echo(
+                f"   {open_p1} open P1 finding(s) from the last round still "
+                "block: exiting 1.",
+            )
+        click.echo("   Re-run with --full to force another round.")
+    raise SystemExit(1 if open_p1 else 0)
 
 
 def _advisory_failure_error(results: list[ToolResult]) -> AIError:
@@ -621,12 +720,43 @@ def review_command(
         source=cap_source,
         basis=resolved_profile.cost_basis,
     )
+    # The PR detected from CI for --post is the one whose state was persisted;
+    # a bare --pr without --post still names the PR directly.
+    state_pr = resolved_pr if resolved_pr is not None else pr
     prior_state = _load_prior_review_state(
-        pr_number=pr,
+        pr_number=state_pr,
         head_ref=context.head_ref,
         repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
         post=post,
     )
+    if not force_full:
+        # Evaluated before the provider is constructed, so a converged round
+        # costs nothing at all. ``--full`` is the always-available escape
+        # hatch that forces a round from CI or a manual dispatch.
+        #
+        # The resume ledger (#2154) is consulted alongside the run window: a
+        # flagged file or an unserved group/import invalidation is work the
+        # next round owes, and ``resume.py`` would queue it on a real round.
+        # Skipping would drop it silently rather than deferring it, and the
+        # score cannot see it — a round can finish complete and quiet while
+        # still queueing a flag for the round after.
+        decision = evaluate_convergence(
+            runs=prior_state.runs,
+            threshold=lintro_config.review.convergence.threshold,
+            stable_rounds=lintro_config.review.convergence.stable_rounds,
+            pending_resume_work=bool(
+                prior_state.flagged_files or prior_state.pending_invalidations,
+            ),
+        )
+        if decision.converged:
+            _finish_converged_review(
+                decision=decision,
+                output_format=output_format,
+                post=post,
+                resolved_pr=resolved_pr,
+                effective_repo=effective_repo,
+                prior_state=prior_state,
+            )
     try:
         provider = get_provider(effective_ai_config, workspace_root=workspace_root)
         result = run_review(
@@ -714,7 +844,7 @@ def review_command(
                 context=context,
                 prior=prior_state,
                 force_full=force_full,
-                pr_number=pr,
+                pr_number=state_pr,
                 repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
             )
         except Exception:
@@ -819,7 +949,7 @@ def review_command(
                     context=context,
                     prior=prior_state,
                     force_full=force_full,
-                    pr_number=pr,
+                    pr_number=state_pr,
                     repo=effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
                     inline_comment_ids=captured_comment_ids,
                 )

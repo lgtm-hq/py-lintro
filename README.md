@@ -125,6 +125,12 @@ system.
 <td><code>bun add -D html-validate</code><br><code>npm install -D html-validate</code></td>
 </tr>
 <tr>
+<td><a href="https://github.com/seddonym/import-linter"><img src="https://img.shields.io/badge/import--linter-3776AB?logo=python&logoColor=white" alt="import-linter"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
+</tr>
+<tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
 <td>📝 Markdown</td>
 <td>-</td>
@@ -375,7 +381,8 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
 
-# Full (bundled Python tools: ruff, black, mypy, bandit, pydoclint, yamllint)
+# Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
+# pydoclint, yamllint)
 uv pip install 'lintro[full]'
 brew tap lgtm-hq/tap && brew install lintro-full
 

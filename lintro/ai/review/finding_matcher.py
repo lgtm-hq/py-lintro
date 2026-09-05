@@ -33,6 +33,7 @@ from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
     "FINGERPRINT_LENGTH",
+    "count_blocking_findings",
     "derive_verdict",
     "fingerprint_for",
     "match_findings",
@@ -127,6 +128,32 @@ def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
     return ReviewVerdict.READY
 
 
+def count_blocking_findings(*, findings: Iterable[FindingRecord]) -> int:
+    """Count the open findings that block merge readiness.
+
+    The single definition of "blocking" shared by :func:`derive_verdict` and
+    every surface that has to report the same thing in a number rather than a
+    verdict — notably the converged-skip envelope and its sticky banner
+    (#2099). Keeping one predicate is the point: a copy that drifted would let
+    the board and the verdict disagree about what is holding a PR.
+
+    Args:
+        findings: Tracked finding records; resolved records are ignored.
+
+    Returns:
+        Number of open, non-question P1 records. Questions are excluded for
+        the same reason :func:`derive_verdict` excludes them — an open
+        question is a request for information, not a defect claim.
+    """
+    return sum(
+        1
+        for record in findings
+        if record.status is FindingStatus.OPEN
+        and not record.is_question
+        and record.severity is Severity.P1
+    )
+
+
 def _normalized_occurrences(
     *,
     finding: ReviewFinding,
@@ -209,6 +236,7 @@ def _current_records(
             fix=finding.fix,
             confidence=finding.confidence,
             origin=finding.origin,
+            evidence_style=finding.evidence_style,
         )
         for index, finding in enumerate(findings)
     ]
@@ -327,6 +355,12 @@ def _merge_pair(
         # reported it too, and — symmetrically — a chunk-first record is not
         # retroactively re-attributed to the synthesis pass by a later round.
         origin=prior.origin,
+        # A carried finding keeps the *evidence basis* it was first scored on,
+        # so the likelihood term cannot drift on label noise alone. Severity
+        # and confidence still follow the current round, so the numeric score
+        # can still move — the freeze is on the basis, not on the score. A
+        # regressed finding is a fresh sighting and is re-scored (#2099).
+        evidence_style=current.evidence_style if regressed else prior.evidence_style,
     )
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
@@ -392,6 +426,7 @@ def review_findings_from_unposted(
                 severity_downgraded=record.severity_downgraded,
                 cross_chunk_contradiction=record.cross_chunk_contradiction,
                 origin=record.origin,
+                evidence_style=record.evidence_style,
             ),
         )
     return tuple(extra)

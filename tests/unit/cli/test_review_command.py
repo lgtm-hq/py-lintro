@@ -785,6 +785,27 @@ def test_review_exits_zero_without_p1_findings() -> None:
     )
 
 
+def _pin_review_config_defaults(mock_config: MagicMock) -> MagicMock:
+    """Pin the review-config fields the command reads unconditionally.
+
+    An auto-attr ``MagicMock`` answers every attribute with another mock, so a
+    fixture that omits a field silently feeds the command something no real
+    ``ReviewConfig`` would produce. The convergence stop rule is read on every
+    non-``--full`` review, so its two fields are pinned to the production
+    disable-by-default values here rather than in one branch of one helper —
+    every MagicMock review config in this file routes through this (#2099).
+
+    Args:
+        mock_config: Config mock to pin fields on.
+
+    Returns:
+        The same mock, for chaining at a construction site.
+    """
+    mock_config.review.convergence.threshold = None
+    mock_config.review.convergence.stable_rounds = 2
+    return mock_config
+
+
 def _mock_review_pipeline(
     *,
     mock_collect: MagicMock | None = None,
@@ -811,6 +832,10 @@ def _mock_review_pipeline(
         mock_config.review.sensitivity = MagicMock()
         mock_config.review.force_semantic_chunking = False
         mock_config.review.checklist_display = ChecklistDisplay.OFF
+    # Applied to a caller-supplied config too, not just the default one built
+    # above: overlays such as _agent_mode_config() and the profile-cap fixture
+    # otherwise reach the stop rule with auto-attr mocks (#2099 review).
+    _pin_review_config_defaults(mock_config)
 
     collect_patch = (
         patch(
@@ -1166,7 +1191,9 @@ def _agent_mode_config(*, tmp_path: Path, mode: CustomAgentMode) -> MagicMock:
     Returns:
         The configured mock.
     """
-    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
+    mock_config = _pin_review_config_defaults(
+        MagicMock(ai={"enabled": True, "provider": "openai"}),
+    )
     mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED

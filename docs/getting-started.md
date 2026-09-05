@@ -85,6 +85,9 @@ generator reads (#2176):
   `--tool-options`)
 - `yamllint` - YAML linter
 - `pydoclint` - Python docstring linter
+- `import-linter` - Python import-contract checker (binary `lint-imports`); it reports a
+  clean result when the project has no import-linter configuration, so it is safe to
+  leave enabled
 
 ### Optional External Tools
 

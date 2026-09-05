@@ -68,6 +68,7 @@ This script installs:
   - Markdownlint-cli2 (Markdown linter)
   - Yamllint (YAML linter)
   - Hadolint (Dockerfile linter)
+  - Import-linter (Python import-contract checker)
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
@@ -167,9 +168,14 @@ should_install() {
 
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
+# Note: a few tools are filtered under one name and verified under another.
+# markdownlint lists both names here, so --tools markdownlint-cli2 is valid.
+# import-linter lists only the filter name, so --tools lint-imports is
+# rejected by the validation below; the verification loop reconnects
+# import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc" "typos"
@@ -1584,6 +1590,35 @@ main() {
 		fi
 	fi # semgrep
 
+	if should_install "import-linter"; then
+		# Install import-linter (Python import-contract checker; binary: lint-imports)
+		echo -e "${BLUE}Installing import-linter...${NC}"
+		IMPORT_LINTER_VERSION=$(get_tool_version "import-linter") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install import-linter==${IMPORT_LINTER_VERSION}"
+		elif install_python_package "import-linter" "$IMPORT_LINTER_VERSION"; then
+			# The import-linter distribution installs a console script named
+			# lint-imports, so install_python_package (which stages by package
+			# name) cannot copy it into BIN_DIR. Stage it here by binary name.
+			# A successful pip install that yields no console script means the
+			# tool was not delivered, so fail instead of reporting success.
+			IMPORT_LINTER_BIN=$(command -v lint-imports 2>/dev/null || true)
+			if [ -z "$IMPORT_LINTER_BIN" ] || [ ! -f "$IMPORT_LINTER_BIN" ]; then
+				echo -e "${RED}✗ import-linter installed but lint-imports is not on PATH${NC}"
+				exit 1
+			fi
+			if [ "$IMPORT_LINTER_BIN" != "$BIN_DIR/lint-imports" ]; then
+				cp "$IMPORT_LINTER_BIN" "$BIN_DIR/lint-imports"
+				chmod +x "$BIN_DIR/lint-imports"
+				echo -e "${YELLOW}Copied lint-imports to $BIN_DIR${NC}"
+			fi
+			echo -e "${GREEN}✓ import-linter installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install import-linter${NC}"
+			exit 1
+		fi
+	fi # import-linter
+
 	if should_install "pip-audit"; then
 		# Install pip-audit (Python dependency vulnerability scanner)
 		echo -e "${BLUE}Installing pip-audit...${NC}"
@@ -2014,6 +2049,7 @@ main() {
 		["gitleaks"]="Secret detection"
 		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["hadolint"]="Docker linting"
+		["import-linter"]="Python import-contract checking"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
@@ -2049,7 +2085,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
@@ -2060,6 +2096,9 @@ main() {
 				filtered+=("$tool")
 			# markdownlint alias → markdownlint-cli2 verification
 			elif [[ "$tool" == "markdownlint-cli2" ]] && should_install "markdownlint"; then
+				filtered+=("$tool")
+			# import-linter alias → lint-imports verification
+			elif [[ "$tool" == "lint-imports" ]] && should_install "import-linter"; then
 				filtered+=("$tool")
 			fi
 		done

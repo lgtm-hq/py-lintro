@@ -1,0 +1,65 @@
+---
+# Cross-provider review agreement matrix (issue #2147).
+#
+# Every cell is driven purely through the LINTRO_AI_* env overrides
+# (lintro/ai/config_overrides.py); the harness has no provider wiring.
+#
+# max_cost_usd is the per-run ceiling handed to LINTRO_AI_MAX_COST_USD.
+# projected_cost_usd is the expected per-run spend used by the pre-flight
+# estimate; it defaults to max_cost_usd when omitted, so the projection is
+# never accidentally optimistic.
+version: 1
+
+# Three repeats is the minimum at which a per-config noise floor means
+# anything: two runs can only ever score a flip rate of 0.0 or 1.0.
+repeats: 3
+
+# Shared review knobs, forwarded as `lintro review --depth` / `--timeout`
+# by review_matrix/invoker.py, and held constant across configs so neither
+# knob confounds a cross-config comparison. 1800s matches the CLI transport's
+# built-in per-chunk budget: --timeout overrides ai.api_timeout, so a smaller
+# value would shorten the cli cell's budget rather than extend it.
+depth: 1
+timeout_seconds: 1800
+
+# Every model id must be one its own provider accepts. The anthropic and
+# openai ids are registered under those providers in lintro/ai/registry.py, so
+# cost accounting is real rather than the unknown-model fallback. The cursor
+# id is not in the registry, so its token accounting falls back to
+# DEFAULT_PRICING ($3/$15 per million, lintro/ai/cost.py) rather than to
+# Cursor's zero-priced registered ids; it is the id the Cursor CLI exposes, as
+# documented in docs/ai-features.md. tests/evals/test_matrix_models.py
+# enforces this.
+#
+# The two anthropic cells pair a small model with a mid-size one so the matrix
+# still measures a within-provider difference. They deliberately avoid
+# claude-opus-4-20250514: the registry still prices it, but Anthropic retired
+# it, so a cell naming it would fail at the API rather than produce a run.
+configs:
+  - id: anthropic-haiku-api
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    transport: api
+    max_cost_usd: 1.0
+    projected_cost_usd: 0.3
+
+  - id: anthropic-sonnet-api
+    provider: anthropic
+    model: claude-sonnet-4-6
+    transport: api
+    max_cost_usd: 1.5
+    projected_cost_usd: 0.4
+
+  - id: openai-gpt4o-api
+    provider: openai
+    model: gpt-4o
+    transport: api
+    max_cost_usd: 2.0
+    projected_cost_usd: 0.8
+
+  - id: cursor-grok-cli
+    provider: cursor
+    model: cursor-grok-4.6-high
+    transport: cli
+    max_cost_usd: 2.0
+    projected_cost_usd: 0.8

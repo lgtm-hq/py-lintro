@@ -32,7 +32,16 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
+    "python": [
+      "ruff",
+      "black",
+      "mypy",
+      "bandit",
+      "pydoclint",
+      "semgrep",
+      "pip_audit",
+      "import_linter"
+    ],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
@@ -225,6 +234,18 @@
       "category": "npm",
       "version_command": ["html-validate", "--version"],
       "languages": ["html"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "import_linter",
+      "install": {
+        "type": "pip",
+        "package": "import-linter"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["lint-imports", "--version"],
+      "languages": ["python"],
       "tags": ["linter"]
     },
     {

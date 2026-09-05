@@ -68,11 +68,11 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
-# next published digest. Bridge typos, spectral, and buf here so dogfood and
-# the manifest-vs-image gate actually run them instead of failing with
-# binary_missing. No-op once the digest already has them on PATH.
+# next published digest. Bridge typos, spectral, buf, and import-linter here so
+# dogfood and the manifest-vs-image gate actually run them instead of failing
+# with binary_missing. No-op once the digest already has them on PATH.
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

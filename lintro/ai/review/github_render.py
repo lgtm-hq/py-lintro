@@ -17,6 +17,11 @@ from lintro.ai.review.checklist_display import (
     orphan_concerns,
     questions_for_finding,
 )
+from lintro.ai.review.convergence import (
+    format_convergence_stamp,
+    format_score,
+    format_trajectory,
+)
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
     describe_coverage_degradations,
@@ -26,6 +31,7 @@ from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradic
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -37,6 +43,8 @@ from lintro.ai.review.timings import format_timing_summary
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
+    "format_convergence_banner",
+    "format_convergence_note",
     "format_coverage_limited_warning",
     "format_cross_chunk_note",
     "format_inline_post_cause",
@@ -379,6 +387,65 @@ def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
         "shows each chunk the other files at the base commit, so the claim is "
         f"chunk-local; the finding is kept"
         f"{_cross_chunk_band_clause(findings=findings)}."
+    )
+
+
+def format_convergence_note(*, trajectory: tuple[float, ...]) -> str:
+    """Render the convergence score and its trajectory as a one-line note.
+
+    The single builder for this line, so the mission-control sticky and any
+    later surface that shows the stability signal can never disagree about
+    how a trajectory reads (#2099). The latest score leads because that is
+    the number the stop rule compares; the arrow chain behind it is what
+    tells a reader whether the review is settling or still moving.
+
+    Args:
+        trajectory: Recorded scores, oldest first.
+
+    Returns:
+        A ``<sub>`` line, or an empty string when no round carries a score —
+        which is every round persisted before scoring existed.
+    """
+    if not trajectory:
+        return ""
+    latest = format_score(score=trajectory[-1])
+    if len(trajectory) == 1:
+        return f"<sub>Convergence score {latest}</sub>"
+    return (
+        f"<sub>Convergence score {latest} · trajectory "
+        f"{format_trajectory(scores=trajectory)}</sub>"
+    )
+
+
+def format_convergence_banner(
+    *,
+    decision: ConvergenceDecision,
+    open_p1: int = 0,
+) -> str:
+    """Render the blockquote stamped on the sticky for a short-circuited round.
+
+    Args:
+        decision: The converged decision that skipped the round.
+        open_p1: Open, non-question P1 findings the last real round left in
+            force. Named on the banner when non-zero: the skip does not
+            redden the CI check for them (a reviewed round does not either),
+            so the board is where a reader has to be able to see that
+            something is still outstanding.
+
+    Returns:
+        A blockquote naming the round, the score, the threshold, any P1
+        findings still open, and how to force a round anyway.
+    """
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = (
+        f" Skipped: {open_p1} open P1 {noun} remain from the last reviewed " "round."
+        if open_p1 > 0
+        else ""
+    )
+    return (
+        f"> 🔁 **Converged** — {format_convergence_stamp(decision=decision)} "
+        f"over {decision.stable_rounds} consecutive rounds. No provider call "
+        f"was made this round.{remaining} Re-run with `--full` to review again."
     )
 
 

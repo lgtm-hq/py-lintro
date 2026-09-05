@@ -47,6 +47,7 @@ from lintro.ai.review.checklist_display import (
     format_review_questions_markdown,
     questions_for_finding,
 )
+from lintro.ai.review.convergence import score_records, score_trajectory
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
@@ -64,6 +65,7 @@ from lintro.ai.review.github_constants import (
     MAX_STORED_RUNS,
     PRIMARY_SOFT_LIMIT,
     SHORT_SHA_LENGTH,
+    STATE_VERSION,
     STICKY_FOOTER,
     STICKY_MARKER,
 )
@@ -73,6 +75,7 @@ from lintro.ai.review.github_render import (
     _fmt_int,
     _format_checklist_appendix_markdown,
     _severity_counts,
+    format_convergence_note,
     format_coverage_limited_warning,
     format_cross_chunk_note,
     format_inline_post_note,
@@ -463,11 +466,12 @@ def advance_review_state(
         verdict=verdict,
         resolved=len(match.resolved),
         open_after=open_count,
+        convergence_score=score_records(records=match.records),
     )
     combined_runs = [*state.runs, current]
     truncated = state.truncated or len(combined_runs) > MAX_STORED_RUNS
     return ReviewState(
-        version=3,
+        version=STATE_VERSION,
         runs=tuple(combined_runs[-MAX_STORED_RUNS:]),
         findings=match.records,
         coverage=result.coverage_records,
@@ -568,6 +572,7 @@ def build_sticky_bodies(
         verdict=verdict,
         resolved=len(match.resolved),
         open_after=open_count,
+        convergence_score=score_records(records=match.records),
     )
     combined_runs = [*prior, current]
     all_runs = combined_runs[-MAX_STORED_RUNS:]
@@ -723,6 +728,7 @@ def _assemble_state_body(
             limits=limits,
             repo=repo,
             pr_number=pr_number,
+            runs=runs,
         ),
     ]
     history = _history_section(
@@ -938,6 +944,7 @@ def _assemble_body(
             limits=limits,
             repo=repo,
             pr_number=pr_number,
+            runs=runs,
         ),
         _degraded_details(
             failure=inline_failure,
@@ -1083,8 +1090,9 @@ def _findings_round_section(
     limits: _RenderLimits,
     repo: str,
     pr_number: int | None,
+    runs: list[RunRecord],
 ) -> str:
-    """Render the Findings heading and the combined Δ table.
+    """Render the Findings heading, the convergence note, and the Δ table.
 
     Args:
         match: Cross-round matching outcome.
@@ -1095,6 +1103,8 @@ def _findings_round_section(
         limits: Per-section render limits.
         repo: Repository slug for inline links.
         pr_number: Pull request number for inline links.
+        runs: Every retained run record, oldest first, current run last. Only
+            the recorded convergence scores are read from them.
 
     Returns:
         The Findings section.
@@ -1118,14 +1128,22 @@ def _findings_round_section(
         f"### Findings · Round {round_number}{sha_bit} · {coverage_label} · "
         f"{open_count} open · {len(fixed_now)} fixed this round"
     )
+    note = format_convergence_note(trajectory=score_trajectory(runs=tuple(runs)))
     if not open_records and not fixed_now:
-        return f"{heading}\n\n✅ Nothing open."
-    lines = [
-        heading,
-        "",
-        "| Δ | Sev | Finding | Where | Since |",
-        "|:-:|:-:|---|---|---|",
-    ]
+        empty = [heading, "", "✅ Nothing open."]
+        if note:
+            empty.extend(["", note])
+        return "\n".join(empty)
+    lines = [heading]
+    if note:
+        lines.extend(["", note])
+    lines.extend(
+        [
+            "",
+            "| Δ | Sev | Finding | Where | Since |",
+            "|:-:|:-:|---|---|---|",
+        ],
+    )
     for record in open_records:
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
@@ -2245,6 +2263,7 @@ def _run_record(
     verdict: ReviewVerdict,
     resolved: int,
     open_after: int,
+    convergence_score: float,
 ) -> RunRecord:
     """Build a machine-readable run record from a review result.
 
@@ -2258,6 +2277,8 @@ def _run_record(
         verdict: Readiness verdict derived from the open findings.
         resolved: Number of findings this round resolved.
         open_after: Number of findings still open after this round.
+        convergence_score: Aggregate score over the findings still open after
+            this round (#2099).
 
     Returns:
         The run record persisted in the state blob.
@@ -2317,6 +2338,7 @@ def _run_record(
         resolved=resolved,
         open_after=open_after,
         narrative=_round_narrative(result=result),
+        convergence_score=convergence_score,
     )
 
 
