@@ -108,7 +108,5 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Report status
-        run: scripts/ci/ci-log.sh "Lintro report generated successfully"
+        run: echo "Lintro report generated successfully"

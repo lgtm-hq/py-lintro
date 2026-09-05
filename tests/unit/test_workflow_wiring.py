@@ -361,11 +361,16 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
             step
             for step in job["steps"]
             if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
-            and "ci-log.sh" in step.get("run", "")
+            and "skipped:" in step.get("run", "")
         ]
         assert_that(skip_steps).described_as(job_name).is_length(1)
         skip_step = skip_steps[0]
-        assert_that(skip_step["run"]).contains('"skipped:"')
+        # Inlined (#2297): ci-log.sh only ever ran `echo "$*"`.
+        assert_that(skip_step["run"]).starts_with("echo ")
+        # Double-quoted, not bare: skip reasons contain spaces ("version-bump
+        # PR", "docs-only change"), so an unquoted expansion would word-split
+        # the reason across echo arguments.
+        assert_that(skip_step["run"]).contains('"skipped: $SKIP_REASON')
         assert_that(skip_step["env"]["SKIP_REASON"]).contains(
             "needs.changes.outputs.skip-reason",
         )
@@ -3043,7 +3048,10 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
 # pin, which is exactly the drift this guard exists to catch (#1751).
 _PINNED_IMAGE_SITES = {
     "dogfood-nightly.yml": 5,
-    "docker-ci.yml": 4,
+    # One: docker-ci carries the pin in a single workflow-level
+    # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
+    # reads (#2297).
+    "docker-ci.yml": 1,
 }
 
 
@@ -3075,6 +3083,122 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
         references.update(matches)
 
     assert_that(references).is_length(1)
+
+
+def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
+    """Every docker-ci fork-fallback consumer reads the one workflow-level pin.
+
+    The pin used to be copy-pasted at four consumers, which is how it drifted
+    four releases behind the published image (#2297). It now lives once in
+    ``env.LINTRO_FORK_FALLBACK_IMAGE``. Two consumers read that context
+    directly; the two reusable-workflow callers cannot, because ``env`` is not
+    an available context in ``jobs.<id>.with`` — they go through
+    ``needs.docker-build.outputs.fork-fallback-image``, which republishes the
+    same env. This asserts no consumer reverted to its own literal and that
+    every caller still declares the ``docker-build`` dependency that
+    indirection needs.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    pin = docker_ci["env"]["LINTRO_FORK_FALLBACK_IMAGE"].strip()
+
+    assert_that(pin).matches(
+        r"^ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$",
+    )
+    # Published from a step, not interpolated straight from `env`, so the
+    # output can never be empty — an empty middle operand is falsy in the
+    # consumers' ternary and would silently select a never-pushed ci- tag.
+    build = docker_ci["jobs"]["docker-build"]
+    assert_that(build["outputs"]).contains_entry(
+        {"fork-fallback-image": "${{ steps.fork-fallback.outputs.image }}"},
+    )
+    publish_steps = [
+        step for step in build["steps"] if step.get("id") == "fork-fallback"
+    ]
+    assert_that(publish_steps).is_length(1)
+    publish = publish_steps[0]
+    # The exact write, not just a mention of the variable: a step that merely
+    # logged the pin, or wrote it under a different key, would leave the
+    # output empty — and empty is falsy in the consumers' ternary, silently
+    # selecting a ci- tag that fork runs never push.
+    assert_that(publish["run"].strip()).is_equal_to(
+        'echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"',
+    )
+    # The key written above must be the key the job output reads back.
+    assert_that(build["outputs"]["fork-fallback-image"]).contains(
+        f"steps.{publish['id']}.outputs.image",
+    )
+    # Unconditional: the output must exist for every event, not just the ones
+    # that reach the heavy build steps.
+    assert_that(publish).does_not_contain_key("if")
+
+    # job id -> the expression carrying the fork-fallback selection.
+    reusable_callers = ("dogfooding-lint", "dogfooding_lint_retry")
+    step_consumers = {
+        "dogfooding-lint-changed": "LINTRO_IMAGE",
+        "dogfood-skip-gate": "LINTRO_IMAGE",
+    }
+    expressions: list[str] = []
+    # Reusable callers must go through the job output and must NOT use `env`:
+    # `env` is not an available context in `jobs.<id>.with`, so accepting it
+    # here would let an invalid workflow pass this test.
+    for job_id in reusable_callers:
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        expression = job["with"]["lintro-image"]
+        assert_that(expression).described_as(job_id).contains(
+            "needs.docker-build.outputs.fork-fallback-image",
+        )
+        assert_that(expression).described_as(job_id).does_not_contain(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(expression)
+    # Step-level consumers read the workflow env directly.
+    for job_id, env_key in step_consumers.items():
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        values = [
+            step["env"][env_key]
+            for step in job["steps"]
+            if env_key in (step.get("env") or {})
+        ]
+        assert_that(values).described_as(job_id).is_length(1)
+        assert_that(values[0]).described_as(job_id).contains(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(values[0])
+
+    assert_that(expressions).is_length(4)
+    for expression in expressions:
+        # No consumer may carry its own literal digest again.
+        assert_that(expression).described_as(expression).does_not_contain("sha256:")
+        # The fork-vs-same-repo selection the pin exists for must survive,
+        # including its polarity: the pin is the `&&` branch (fork) and the
+        # run-scoped CI tag the `||` branch (same repo). Asserting only that
+        # both fragments appear would accept an inverted ternary, which would
+        # hand fork PRs a ci- tag that fork runs never push.
+        collapsed = " ".join(expression.split())
+        condition = "needs.docker-build.outputs.is-fork == 'true'"
+        ci_tag = "format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id)"
+        assert_that(collapsed).described_as(expression).contains(condition)
+        assert_that(collapsed).described_as(expression).contains(ci_tag)
+        pin_token = next(
+            token
+            for token in (
+                "needs.docker-build.outputs.fork-fallback-image",
+                "env.LINTRO_FORK_FALLBACK_IMAGE",
+            )
+            if token in collapsed
+        )
+        # condition ... && <pin> ... || <ci tag>
+        assert_that(collapsed.index(condition)).described_as(
+            expression,
+        ).is_less_than(collapsed.index(pin_token))
+        assert_that(collapsed.index(pin_token)).described_as(
+            expression,
+        ).is_less_than(collapsed.index("||"))
+        assert_that(collapsed.index("||")).described_as(
+            expression,
+        ).is_less_than(collapsed.index(ci_tag))
 
 
 def test_pinned_release_image_manager_covers_both_workflows() -> None:

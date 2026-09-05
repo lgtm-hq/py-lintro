@@ -142,7 +142,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/watch/watcher.py": ("PLR0913",),
     "scripts/ci/format-changelog.py": ("C901", "PLR0912", "PLR0915"),
     "scripts/ci/format-security-comment.py": ("C901", "PLR0912", "PLR0915"),
-    "scripts/ci/site/fix-markdown-docs.py": ("PLR0912",),
     "scripts/ci/site/migrate-docs-content.py": ("C901", "PLR0912", "PLR0915"),
     "scripts/ci/verify-manifest-tools.py": ("C901", "PLR0912", "PLR0915"),
     "tests/unit/ai/review/test_cross_chunk_synthesis_2269.py": ("PLR0913",),
