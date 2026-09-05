@@ -72,9 +72,13 @@ def finalize_artifact(
     )
 
     # Tally what the run actually found, and read the previous run's tally so
-    # the renderer can report an exact count delta (issue #1739).
+    # the renderer can report an exact count delta (issue #1739). Only a check
+    # run has a comparable baseline: ``fmt`` and ``test`` measure something
+    # else, so comparing them against the last check would be meaningless.
     severity_counts = count_severities(all_results)
-    log_root = resolve_log_root(ctx.output_manager)
+    log_root = (
+        resolve_log_root(ctx.output_manager) if ctx.action == Action.CHECK else None
+    )
     previous_counts = read_severity_baseline(log_root) if log_root else None
 
     return RunArtifact(
