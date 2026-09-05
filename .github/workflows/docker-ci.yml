@@ -251,6 +251,11 @@ jobs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -282,6 +287,7 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -448,6 +454,52 @@ jobs:
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
+      # The reusable's enforcing harden-runner step consumes this input
+      # verbatim (the preset+append merge is only exposed as an output), so the
+      # caller repeats the `quality` preset baseline here and adds
+      # *.githubapp.com:443 — GitHub's own hosted-runner watchdog and
+      # request-orchestrator endpoints (hosted-compute-watchdog-*,
+      # hosted-compute-request-orchestrator-*). Blocking them correlates with
+      # long jobs being reclaimed mid-run ("The runner has received a shutdown
+      # signal", exit 143) at 12-20 minutes — see #2352.
+      # append (not replace) is deliberate: the merge is deduped first-seen, so
+      # it is a no-op against today's identical `quality` preset, and a host the
+      # preset gains later still reaches the resolved allowlist. It does NOT
+      # make the enforcing step append — this list must stay complete.
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        deb.debian.org:80
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        api.osv.dev:443
+        api.deps.dev:443
+        *.githubapp.com:443
+      allowed-endpoints-mode: append
       # Same-repo PRs: lint with the image built in this workflow run.
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
@@ -486,6 +538,11 @@ jobs:
       status: ${{ steps.lint.outputs.status }}
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # Same allowlist as the reusable-quality-lint default: the container
         # sets LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before
         # linting.
@@ -525,6 +582,7 @@ jobs:
             metrics.semgrep.dev:443
             api.osv.dev:443
             api.deps.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -612,6 +670,11 @@ jobs:
       timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # Same allowlist as dogfooding-lint-changed: the container sets
         # LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before linting.
         # yamllint disable-line rule:line-length
@@ -650,6 +713,7 @@ jobs:
             metrics.semgrep.dev:443
             api.osv.dev:443
             api.deps.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -723,6 +787,52 @@ jobs:
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
+      # The reusable's enforcing harden-runner step consumes this input
+      # verbatim (the preset+append merge is only exposed as an output), so the
+      # caller repeats the `quality` preset baseline here and adds
+      # *.githubapp.com:443 — GitHub's own hosted-runner watchdog and
+      # request-orchestrator endpoints (hosted-compute-watchdog-*,
+      # hosted-compute-request-orchestrator-*). Blocking them correlates with
+      # long jobs being reclaimed mid-run ("The runner has received a shutdown
+      # signal", exit 143) at 12-20 minutes — see #2352.
+      # append (not replace) is deliberate: the merge is deduped first-seen, so
+      # it is a no-op against today's identical `quality` preset, and a host the
+      # preset gains later still reaches the resolved allowlist. It does NOT
+      # make the enforcing step append — this list must stay complete.
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        deb.debian.org:80
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        api.osv.dev:443
+        api.deps.dev:443
+        *.githubapp.com:443
+      allowed-endpoints-mode: append
       # Same image selection as dogfooding-lint: CI-built image for
       # same-repo PRs, pinned release digest for forks (no CI push).
       # Pinned release digest for the fork path. Renovate bumps this and
@@ -935,6 +1045,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -946,6 +1061,7 @@ jobs:
             pkg-containers.githubusercontent.com:443
             api.osv.dev:443
             api.deps.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1026,6 +1142,11 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -1060,6 +1181,7 @@ jobs:
             metrics.semgrep.dev:443
             api.osv.dev:443
             api.deps.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1196,6 +1318,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Harden Runner
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143) at 12-20 minutes — see #2352.
         # No build happens here anymore (#1358): the allowlist covers
         # checkout, GHCR retagging, cosign download, and sigstore keyless
         # signing only.
@@ -1218,6 +1345,7 @@ jobs:
             tuf-repo-cdn.sigstore.dev:443
             timestamp.sigstore.dev:443
             oauth2.sigstore.dev:443
+            *.githubapp.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

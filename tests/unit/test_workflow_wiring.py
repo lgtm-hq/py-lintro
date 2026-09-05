@@ -761,6 +761,88 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+@pytest.mark.parametrize("job_id", ["dogfooding-lint", "dogfooding_lint_retry"])
+def test_dogfood_lint_callers_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Dogfood lint callers must allow GitHub's hosted-runner watchdog (#2352).
+
+    harden-runner block mode denied `hosted-compute-watchdog-*.githubapp.com`
+    and `hosted-compute-request-orchestrator-*.githubapp.com`, and long jobs
+    were reclaimed mid-run with exit 143. The reusable workflow's enforcing
+    harden-runner step reads `allowed-endpoints` verbatim, so the caller must
+    carry the whole baseline plus the watchdog entry — asserting a couple of
+    baseline hosts keeps a future edit from shrinking the list to one entry.
+
+    Args:
+        job_id: Dogfooding lint caller whose egress allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job_with = docker_ci["jobs"][job_id]["with"]
+    allowed = set(str(job_with["allowed-endpoints"]).split())
+
+    assert_that(job_with["egress-policy"]).is_equal_to("block")
+    assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
+    assert_that(allowed).contains("*.githubapp.com:443")
+    assert_that(allowed).contains(
+        "github.com:443",
+        "api.github.com:443",
+        "ghcr.io:443",
+        "pypi.org:443",
+    )
+
+
+def test_dogfood_lint_callers_share_one_egress_allowlist() -> None:
+    """Both dogfood lint callers must carry the identical allowlist (#2352).
+
+    The reusable workflow's enforcing harden-runner step reads the caller's
+    `allowed-endpoints` verbatim, so each caller repeats the whole baseline.
+    Two hand-maintained copies drift silently — a host added for the primary
+    and forgotten on the retry fails only on the retry, during an incident.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    primary = str(docker_ci["jobs"]["dogfooding-lint"]["with"]["allowed-endpoints"])
+    retry = str(
+        docker_ci["jobs"]["dogfooding_lint_retry"]["with"]["allowed-endpoints"],
+    )
+
+    assert_that(primary.split()).is_equal_to(retry.split())
+    assert_that(primary.split()).does_not_contain_duplicates()
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "docker-build",
+        "dogfooding-lint-changed",
+        "dogfood-skip-gate",
+        "security-audit",
+        "integration-test",
+        "publish",
+    ],
+)
+def test_long_docker_ci_jobs_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Every long in-repo Docker CI job allows the watchdog endpoints (#2352).
+
+    Jobs whose budget exceeds ~10 minutes are the ones observed dying with
+    "The runner has received a shutdown signal" while harden-runner blocked
+    GitHub's hosted-compute watchdog and request-orchestrator hosts.
+
+    Args:
+        job_id: Docker CI job whose harden-runner allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job = docker_ci["jobs"][job_id]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(job["timeout-minutes"]).is_greater_than(10)
+    assert_that(allowed).contains("*.githubapp.com:443")
+
+
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
     """Full-repo skip checks wait for retry and consume its final report."""
     docker_ci = _load_workflow(name="docker-ci.yml")

@@ -980,6 +980,12 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "pipelines.actions.githubusercontent.com:443",
         "results-receiver.actions.githubusercontent.com:443",
     )
+    # Hosted-runner watchdog endpoints (#2352): named exactly, because this
+    # job forbids wildcards.
+    assert_that(endpoints).contains(
+        "hosted-compute-watchdog-prod-eus-02.githubapp.com:443",
+        "hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443",
+    )
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(

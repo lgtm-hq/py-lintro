@@ -165,6 +165,15 @@ jobs:
         # wildcard endpoints, so `*.blob.core.windows.net` (used by
         # publish jobs) cannot be copied here. No additional blob-redirect
         # host has been observed on artifact upload/download in this repo.
+        # hosted-compute-watchdog-prod-* and
+        # hosted-compute-request-orchestrator-prod-* are GitHub's own
+        # hosted-runner watchdog endpoints. Blocking them correlates with long
+        # jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143), and this is the longest job in the repo (75 min)
+        # — see #2352. Listed as exact regional hosts, not *.githubapp.com,
+        # because this job forbids wildcard endpoints; a rotated region shows
+        # up as `domain not allowed` in the harden-runner summary and is a
+        # one-line allowlist PR, same as the Cursor shards above.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
@@ -185,6 +194,8 @@ jobs:
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
+            hosted-compute-watchdog-prod-eus-02.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443
             ${{ env.AI_REVIEW_CURSOR_EGRESS }}
 
       - name: Checkout base ref (trusted lintro install)
