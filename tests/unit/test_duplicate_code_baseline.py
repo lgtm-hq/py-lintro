@@ -53,6 +53,12 @@ DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
 #: can move it.
 MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 34
 
+#: pylint exit-status bit meaning "a fatal message was issued".
+PYLINT_FATAL_EXIT_BIT: int = 1
+
+#: pylint exit-status bit meaning "usage error" (bad arguments or rcfile).
+PYLINT_USAGE_EXIT_BIT: int = 32
+
 #: Minimum clone length pylint counts, from ``[tool.pylint.similarities]``.
 #: A ratchet that quietly raised this would make the count fall without any
 #: duplication being removed.
@@ -95,6 +101,11 @@ def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
         for path in (REPO_ROOT / DEFINITIONS_PACKAGE).rglob("*.py")
         if "__pycache__" not in path.parts
     )
+    # A ``<=`` comparison passes on a count of zero, so a measurement that
+    # analysed nothing would look like a clean sweep. Fail loudly instead.
+    assert_that(files).described_as(
+        f"no modules found under {DEFINITIONS_PACKAGE} to analyse",
+    ).is_not_empty()
     completed = subprocess.run(  # nosec B603 - fixed argv, no shell
         [
             pylint_executable,
@@ -108,6 +119,12 @@ def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
         check=False,
         cwd=str(REPO_ROOT),
     )
+    # pylint's exit status is a bitmask; bit 1 is "fatal message issued" and
+    # bit 32 "usage error". Either means the run never measured the package.
+    fatal_bits = completed.returncode & (PYLINT_FATAL_EXIT_BIT | PYLINT_USAGE_EXIT_BIT)
+    assert_that(fatal_bits).described_as(
+        f"pylint failed to run (exit {completed.returncode}): {completed.stderr}",
+    ).is_zero()
     report = json.loads(completed.stdout)
     messages = report.get("messages", [])
     return sum(
@@ -180,30 +197,40 @@ def _assert_within_baseline(*, count: int, baseline: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "count",
-    [0, 1, 33, 34],
-    ids=["none", "one", "one-below-baseline", "at-baseline"],
+    "offset",
+    [-MAX_ALLOWED_DUPLICATE_CODE_BASELINE, -2, -1, 0],
+    ids=["none", "two-below-baseline", "one-below-baseline", "at-baseline"],
 )
-def test_a_live_count_at_or_below_the_baseline_is_accepted(count: int) -> None:
+def test_a_live_count_at_or_below_the_baseline_is_accepted(offset: int) -> None:
     """The live comparison passes for any count that has not grown.
 
     Args:
-        count: Hypothetical live ``R0801`` count.
+        offset: Distance from the baseline, so the cases track the constant as
+            #2311 lowers it instead of pinning today's number.
     """
-    _assert_within_baseline(count=count, baseline=34)
+    _assert_within_baseline(
+        count=MAX_ALLOWED_DUPLICATE_CODE_BASELINE + offset,
+        baseline=MAX_ALLOWED_DUPLICATE_CODE_BASELINE,
+    )
 
 
 def test_a_live_count_above_the_baseline_is_rejected() -> None:
     """The live comparison still fails when the count grows."""
     with pytest.raises(AssertionError) as excinfo:
-        _assert_within_baseline(count=35, baseline=34)
+        _assert_within_baseline(
+            count=MAX_ALLOWED_DUPLICATE_CODE_BASELINE + 1,
+            baseline=MAX_ALLOWED_DUPLICATE_CODE_BASELINE,
+        )
 
     assert_that(str(excinfo.value)).contains("may only shrink")
 
 
 def test_the_over_baseline_message_explains_both_directions() -> None:
     """The failure text names the ratchet rule and the lower-count remedy."""
-    message = _over_baseline_message(count=35, baseline=34)
+    message = _over_baseline_message(
+        count=MAX_ALLOWED_DUPLICATE_CODE_BASELINE + 1,
+        baseline=MAX_ALLOWED_DUPLICATE_CODE_BASELINE,
+    )
 
     assert_that(message).contains(DUPLICATE_CODE_BASELINE_KEY)
     assert_that(message).contains("MAX_ALLOWED_DUPLICATE_CODE_BASELINE")
@@ -224,7 +251,9 @@ def test_pylint_reports_no_more_than_the_baseline() -> None:
     executable = shutil.which("pylint")
     assert executable is not None  # narrow type for mypy; guarded by skipif
     baseline = resolve_duplicate_code_baseline(config=_lintro_pylint_config())
-    assert baseline is not None  # narrow type for mypy; asserted above
+    # resolve_duplicate_code_baseline returns None when the gate is unconfigured;
+    # test_baseline_is_an_integer_within_its_ceiling covers that separately.
+    assert baseline is not None  # narrow type for mypy
 
     count = _measure_duplicate_code_count(pylint_executable=executable)
 
