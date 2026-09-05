@@ -149,7 +149,7 @@ class FindingRecord:
             JSON-serializable mapping. Optional members are omitted when unset
             so the blob stays as small as possible.
         """
-        return {
+        payload: dict[str, Any] = {
             "fingerprint": self.fingerprint,
             "ordinal": self.ordinal,
             "severity": str(self.severity),
@@ -159,18 +159,7 @@ class FindingRecord:
             "line": self.line,
             "status": str(self.status),
             "since_round": self.since_round,
-            **self._tracking_payload(),
-            **self._detail_payload(),
         }
-
-    def _tracking_payload(self) -> dict[str, Any]:
-        """Serialize the round-tracking members that carry a value.
-
-        Returns:
-            Mapping of the resolution, comment, checklist and occurrence
-            members that are set; unset members are omitted.
-        """
-        payload: dict[str, Any] = {}
         if self.status is FindingStatus.RESOLVED or self.resolved_sha:
             payload["resolved_in"] = {
                 "sha": self.resolved_sha,
@@ -194,16 +183,6 @@ class FindingRecord:
             ]
         if self.occurrence_total > 1:
             payload["occurrences_total"] = self.occurrence_total
-        return payload
-
-    def _detail_payload(self) -> dict[str, Any]:
-        """Serialize the narrative and provenance members that carry a value.
-
-        Returns:
-            Mapping of the downgrade flag, contradiction, prose fields, origin
-            and evidence style that are set; unset members are omitted.
-        """
-        payload: dict[str, Any] = {}
         if self.severity_downgraded:
             payload["severity_downgraded"] = True
         if self.cross_chunk_contradiction is not None:
