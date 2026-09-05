@@ -71,7 +71,7 @@ def test_count_severities_tallies_every_result() -> None:
 
 
 def test_count_severities_skips_results_without_issues() -> None:
-    """Skipped and clean results contribute nothing and never raise."""
+    """Skipped and clean results contribute nothing."""
     counts = count_severities(
         [
             ToolResult(
@@ -81,11 +81,15 @@ def test_count_severities_skips_results_without_issues() -> None:
                 skip_reason="no files matched",
             ),
             ToolResult(name="black", success=True, issues=[]),
-            object(),
         ],
     )
 
     assert_that(counts).is_equal_to(SeverityCounts())
+
+
+def test_count_severities_ignores_non_result_objects() -> None:
+    """Anything that is not result-shaped is skipped rather than raising."""
+    assert_that(count_severities([object()])).is_equal_to(SeverityCounts())
 
 
 def test_count_severities_ignores_issues_without_severity() -> None:

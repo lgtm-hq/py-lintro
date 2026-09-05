@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from assertpy import assert_that
@@ -27,15 +28,23 @@ def test_baseline_round_trips(tmp_path: Path) -> None:
     assert_that(read_severity_baseline(tmp_path)).is_equal_to(counts)
 
 
-def test_baseline_is_written_at_the_log_root(tmp_path: Path) -> None:
-    """The file sits beside the run directories so pruning never removes it.
+def test_baseline_is_written_at_the_log_root_as_json(tmp_path: Path) -> None:
+    """The file sits beside the run directories, and holds readable JSON.
+
+    Placement matters because pruning only ever removes ``run-*`` directories;
+    the format matters because anything else reading the file (a CI step, a
+    person) must not need lintro to parse it.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    write_severity_baseline(tmp_path, SeverityCounts(errors=1))
+    write_severity_baseline(tmp_path, SeverityCounts(errors=1, warnings=2))
 
-    assert_that((tmp_path / SEVERITY_BASELINE_FILENAME).is_file()).is_true()
+    path = tmp_path / SEVERITY_BASELINE_FILENAME
+    assert_that(path.is_file()).is_true()
+    assert_that(json.loads(path.read_text(encoding="utf-8"))).is_equal_to(
+        {"error": 1, "warning": 2, "info": 0, "total": 3},
+    )
 
 
 def test_missing_baseline_reads_as_none(tmp_path: Path) -> None:
