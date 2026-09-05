@@ -424,11 +424,333 @@ constraint-dependencies = [
   "urllib3>=2.7.0",
 ]
 
-# import-linter (#2289). The root package is declared so `lint-imports` can
-# build lintro's import graph; the contract set is deliberately empty here so
-# adding the tool is behaviour-neutral. Contracts land in #2290.
+# import-linter (#2289; contracts from #2290). `root_package` lets
+# `lint-imports` build lintro's import graph; the two contracts below declare
+# the package layering the re-alignment roadmap (#2288) refactors towards.
+#
+# RATCHET RULE (binding). Every `ignore_imports` entry is a violation that
+# exists today, annotated with the issue that will delete it. An entry may be
+# **deleted, never added**, and the list may only shrink. A PR that closes a
+# cycle deletes its entries in the same PR. If a change would need a new entry,
+# the change is wrong: turn the dependency around instead. Moving a
+# module-level import into a function body is **not** a fix — `import-linter`
+# counts function-body imports, and so does `scripts/ci/import_matrix.py`,
+# whose two-way cycle count `tests/unit/test_import_boundaries.py` pins.
+
 [tool.importlinter]
 root_package = "lintro"
+
+# Contract 1 (#2290): the AI subsystem is an optional extra, so `lintro chk`
+# must load without it. Sources are every top-level package except the four
+# that are allowed to reach into it: `ai` itself and the `mcp`, `cli_utils` and
+# `api` entry points.
+[[tool.importlinter.contracts]]
+name = "core-does-not-import-ai"
+type = "forbidden"
+source_modules = [
+  "lintro.config",
+  "lintro.deps",
+  "lintro.enums",
+  "lintro.exceptions",
+  "lintro.formatters",
+  "lintro.licenses",
+  "lintro.models",
+  "lintro.parsers",
+  "lintro.plugins",
+  "lintro.profiling",
+  "lintro.tools",
+  "lintro.utils",
+  "lintro.watch",
+]
+forbidden_modules = ["lintro.ai"]
+# Explicit rather than relying on import-linter's default: a stale entry must
+# fail the contract, otherwise the baseline could shrink on paper only.
+unmatched_ignore_imports_alerting = "error"
+ignore_imports = [
+  # 4 edges owned by #2312
+  "lintro.utils.doctor_report -> lintro.ai.doctor_checks",  # owned by #2312
+  "lintro.utils.doctor_report -> lintro.ai.interface",      # owned by #2312
+  "lintro.utils.execution.advisory -> lintro.ai.config",    # owned by #2312
+  "lintro.utils.output.sarif.document -> lintro.ai.models", # owned by #2312
+  # 11 edges owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.availability", # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.budget",       # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.config",       # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.exceptions",   # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.interface",    # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.paths",        # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.providers",    # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.budget",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.config",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.invoke",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.providers.base",    # owned by #2331
+]
+
+# Contract 2 (#2290): the target layering, highest layer first. Packages on one
+# line are independent siblings and may not import each other.
+#
+# #2290 specified an `execution` layer above `plugins | tools`, declared as the
+# module paths it occupies today (`utils.tool_executor`,
+# `utils.async_tool_executor`, `utils.execution`). `import-linter` rejects a
+# contract whose layers share descendants ("Modules have shared descendants"),
+# so `lintro.utils` and `lintro.utils.execution` cannot both be layers. Those
+# modules therefore stay inside the `utils` layer, which is the stricter of the
+# two readings; #2312 lifts them into a real `lintro.execution` package and
+# adds the layer then.
+[[tool.importlinter.contracts]]
+name = "layers"
+type = "layers"
+containers = ["lintro"]
+layers = [
+  "cli_utils | mcp | api",
+  "ai",
+  "watch | profiling",
+  "plugins | tools",
+  "config",
+  "formatters | parsers",
+  "utils",
+  "models",
+  "enums",
+  "exceptions | licenses | deps",
+]
+unmatched_ignore_imports_alerting = "error"
+ignore_imports = [
+  # 1 edge owned by #1305
+  "lintro.config.config_loader -> lintro.plugins.discovery", # owned by #1305
+  # 9 edges owned by #1972
+  "lintro.cli_utils.commands.badge -> lintro.api.core",      # owned by #1972
+  "lintro.cli_utils.commands.check -> lintro.api.core",      # owned by #1972
+  "lintro.cli_utils.commands.check -> lintro.api.pipeline",  # owned by #1972
+  "lintro.cli_utils.commands.format -> lintro.api.core",     # owned by #1972
+  "lintro.cli_utils.commands.format -> lintro.api.pipeline", # owned by #1972
+  "lintro.cli_utils.commands.mcp -> lintro.mcp",             # owned by #1972
+  "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
+  "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
+  "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
+  # 141 edges owned by #2311
+  "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
+  "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
+  "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
+  "lintro.tools -> lintro.plugins",                                                 # owned by #2311
+  "lintro.tools.core.command_builders -> lintro.plugins.subprocess_executor",       # owned by #2311
+  "lintro.tools.core.tool_installer -> lintro.plugins.execution_preparation",       # owned by #2311
+  "lintro.tools.core.tool_manager -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.core.tool_manager -> lintro.plugins.discovery",                     # owned by #2311
+  "lintro.tools.core.tool_manager -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions._ts_checker_base -> lintro.plugins.base",               # owned by #2311
+  "lintro.tools.definitions._ts_checker_execution -> lintro.plugins.base",          # owned by #2311
+  "lintro.tools.definitions.actionlint -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.definitions.actionlint -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.definitions.actionlint -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.definitions.astro_check -> lintro.plugins.base",                    # owned by #2311
+  "lintro.tools.definitions.astro_check -> lintro.plugins.protocol",                # owned by #2311
+  "lintro.tools.definitions.astro_check -> lintro.plugins.registry",                # owned by #2311
+  "lintro.tools.definitions.bandit -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.bandit -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.bandit -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.definitions.black -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.definitions.black -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.definitions.black -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions.buf -> lintro.plugins.base",                            # owned by #2311
+  "lintro.tools.definitions.buf -> lintro.plugins.protocol",                        # owned by #2311
+  "lintro.tools.definitions.buf -> lintro.plugins.registry",                        # owned by #2311
+  "lintro.tools.definitions.buf -> lintro.plugins.subprocess_executor",             # owned by #2311
+  "lintro.tools.definitions.cargo_audit -> lintro.plugins.base",                    # owned by #2311
+  "lintro.tools.definitions.cargo_audit -> lintro.plugins.protocol",                # owned by #2311
+  "lintro.tools.definitions.cargo_audit -> lintro.plugins.registry",                # owned by #2311
+  "lintro.tools.definitions.cargo_deny -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.definitions.cargo_deny -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.definitions.cargo_deny -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.definitions.clippy -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.clippy -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.clippy -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.definitions.commitlint -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.definitions.commitlint -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.definitions.commitlint -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.base",                  # owned by #2311
+  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.file_processor",        # owned by #2311
+  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.protocol",              # owned by #2311
+  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.registry",              # owned by #2311
+  "lintro.tools.definitions.gitleaks -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.gitleaks -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.gitleaks -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.definitions.golangci_lint -> lintro.plugins.base",                  # owned by #2311
+  "lintro.tools.definitions.golangci_lint -> lintro.plugins.protocol",              # owned by #2311
+  "lintro.tools.definitions.golangci_lint -> lintro.plugins.registry",              # owned by #2311
+  "lintro.tools.definitions.hadolint -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.hadolint -> lintro.plugins.file_processor",             # owned by #2311
+  "lintro.tools.definitions.hadolint -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.hadolint -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.definitions.html_validate -> lintro.plugins.base",                  # owned by #2311
+  "lintro.tools.definitions.html_validate -> lintro.plugins.protocol",              # owned by #2311
+  "lintro.tools.definitions.html_validate -> lintro.plugins.registry",              # owned by #2311
+  "lintro.tools.definitions.idiom_review -> lintro.plugins.base",                   # owned by #2311
+  "lintro.tools.definitions.idiom_review -> lintro.plugins.protocol",               # owned by #2311
+  "lintro.tools.definitions.idiom_review -> lintro.plugins.registry",               # owned by #2311
+  "lintro.tools.definitions.import_linter -> lintro.plugins.base",                  # owned by #2311
+  "lintro.tools.definitions.import_linter -> lintro.plugins.protocol",              # owned by #2311
+  "lintro.tools.definitions.import_linter -> lintro.plugins.registry",              # owned by #2311
+  "lintro.tools.definitions.markdownlint -> lintro.plugins.base",                   # owned by #2311
+  "lintro.tools.definitions.markdownlint -> lintro.plugins.protocol",               # owned by #2311
+  "lintro.tools.definitions.markdownlint -> lintro.plugins.registry",               # owned by #2311
+  "lintro.tools.definitions.mypy -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.definitions.mypy -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.definitions.mypy -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.definitions.osv_scanner -> lintro.plugins.base",                    # owned by #2311
+  "lintro.tools.definitions.osv_scanner -> lintro.plugins.execution_preparation",   # owned by #2311
+  "lintro.tools.definitions.osv_scanner -> lintro.plugins.protocol",                # owned by #2311
+  "lintro.tools.definitions.osv_scanner -> lintro.plugins.registry",                # owned by #2311
+  "lintro.tools.definitions.oxfmt -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.definitions.oxfmt -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.definitions.oxfmt -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions.oxlint -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.oxlint -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.oxlint -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.definitions.pip_audit -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.definitions.pip_audit -> lintro.plugins.execution_preparation",     # owned by #2311
+  "lintro.tools.definitions.pip_audit -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.definitions.pip_audit -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.definitions.prettier -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.prettier -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.prettier -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.definitions.pydoclint -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.definitions.pydoclint -> lintro.plugins.file_processor",            # owned by #2311
+  "lintro.tools.definitions.pydoclint -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.definitions.pydoclint -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.definitions.pytest -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.pytest -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.pytest -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.definitions.ruff -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.definitions.ruff -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.definitions.ruff -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.definitions.rustfmt -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.definitions.rustfmt -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.definitions.rustfmt -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.definitions.semgrep -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.definitions.semgrep -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.definitions.semgrep -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.definitions.shellcheck -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.definitions.shellcheck -> lintro.plugins.file_processor",           # owned by #2311
+  "lintro.tools.definitions.shellcheck -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.definitions.shellcheck -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.definitions.shfmt -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.definitions.shfmt -> lintro.plugins.file_processor",                # owned by #2311
+  "lintro.tools.definitions.shfmt -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.definitions.shfmt -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions.spectral -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.spectral -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.spectral -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.definitions.sqlfluff -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.sqlfluff -> lintro.plugins.file_processor",             # owned by #2311
+  "lintro.tools.definitions.sqlfluff -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.sqlfluff -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.definitions.stylelint -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.definitions.stylelint -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.definitions.stylelint -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.definitions.svelte_check -> lintro.plugins.base",                   # owned by #2311
+  "lintro.tools.definitions.svelte_check -> lintro.plugins.protocol",               # owned by #2311
+  "lintro.tools.definitions.svelte_check -> lintro.plugins.registry",               # owned by #2311
+  "lintro.tools.definitions.taplo -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.definitions.taplo -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.definitions.taplo -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions.trufflehog -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.definitions.trufflehog -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.definitions.trufflehog -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.definitions.tsc -> lintro.plugins.protocol",                        # owned by #2311
+  "lintro.tools.definitions.tsc -> lintro.plugins.registry",                        # owned by #2311
+  "lintro.tools.definitions.typos -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.definitions.typos -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.definitions.typos -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.definitions.vale -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.definitions.vale -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.definitions.vale -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.definitions.vue_tsc -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.definitions.vue_tsc -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.definitions.yamllint -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.definitions.yamllint -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.definitions.yamllint -> lintro.plugins.registry",                   # owned by #2311
+  # 63 edges owned by #2312
+  "lintro.models.core.run_artifact -> lintro.utils.health_score",                               # owned by #2312
+  "lintro.utils.async_tool_executor -> lintro.plugins.base",                                    # owned by #2312
+  "lintro.utils.doctor_report -> lintro.ai.doctor_checks",                                      # owned by #2312
+  "lintro.utils.doctor_report -> lintro.ai.interface",                                          # owned by #2312
+  "lintro.utils.doctor_report -> lintro.config.config_loader",                                  # owned by #2312
+  "lintro.utils.doctor_report -> lintro.config.lintro_config",                                  # owned by #2312
+  "lintro.utils.doctor_report -> lintro.mcp",                                                   # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.install_context",                            # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.install_strategies",                         # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.tool_installer",                             # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.tool_registry",                              # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.update_channels",                            # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.version_checking",                           # owned by #2312
+  "lintro.utils.doctor_report -> lintro.tools.core.version_parsing",                            # owned by #2312
+  "lintro.utils.execution.advisory -> lintro.ai.config",                                        # owned by #2312
+  "lintro.utils.execution.advisory -> lintro.config.config_loader",                             # owned by #2312
+  "lintro.utils.execution.advisory -> lintro.config.lintro_config",                             # owned by #2312
+  "lintro.utils.execution.advisory -> lintro.tools",                                            # owned by #2312
+  "lintro.utils.execution.fix_retry -> lintro.plugins.base",                                    # owned by #2312
+  "lintro.utils.execution.parallel_executor -> lintro.plugins.base",                            # owned by #2312
+  "lintro.utils.execution.parallel_executor -> lintro.tools",                                   # owned by #2312
+  "lintro.utils.execution.result_shaping -> lintro.parsers.base_issue",                         # owned by #2312
+  "lintro.utils.execution.result_shaping -> lintro.plugins.base",                               # owned by #2312
+  "lintro.utils.execution.run_preflight -> lintro.cli_utils.onboarding",                        # owned by #2312
+  "lintro.utils.execution.run_renderer -> lintro.formatters",                                   # owned by #2312
+  "lintro.utils.execution.run_renderer -> lintro.profiling.models",                             # owned by #2312
+  "lintro.utils.execution.run_renderer -> lintro.profiling.report",                             # owned by #2312
+  "lintro.utils.execution.tool_configuration -> lintro.config.config_loader",                   # owned by #2312
+  "lintro.utils.execution.tool_configuration -> lintro.config.lintro_config",                   # owned by #2312
+  "lintro.utils.execution.tool_configuration -> lintro.plugins.base",                           # owned by #2312
+  "lintro.utils.execution.tool_configuration -> lintro.tools",                                  # owned by #2312
+  "lintro.utils.execution.tool_configuration -> lintro.tools.core.tool_registry",               # owned by #2312
+  "lintro.utils.findings -> lintro.formatters.formatter",                                       # owned by #2312
+  "lintro.utils.findings -> lintro.parsers.base_issue",                                         # owned by #2312
+  "lintro.utils.health_score -> lintro.config.score_config",                                    # owned by #2312
+  "lintro.utils.issue_category -> lintro.parsers.base_issue",                                   # owned by #2312
+  "lintro.utils.issue_category -> lintro.plugins.registry",                                     # owned by #2312
+  "lintro.utils.json_output -> lintro.formatters.formatter",                                    # owned by #2312
+  "lintro.utils.json_output -> lintro.parsers.base_issue",                                      # owned by #2312
+  "lintro.utils.output.file_writer -> lintro.formatters.formatter",                             # owned by #2312
+  "lintro.utils.output.file_writer -> lintro.parsers.base_issue",                               # owned by #2312
+  "lintro.utils.output.file_writer -> lintro.profiling.models",                                 # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.actionlint.actionlint_parser",     # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.astro_check.astro_check_parser",   # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.bandit.bandit_parser",             # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.black.black_issue",                # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.black.black_parser",               # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.clippy.clippy_parser",             # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.hadolint.hadolint_parser",         # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.markdownlint.markdownlint_parser", # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.mypy.mypy_parser",                 # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.ruff.ruff_format_issue",           # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.ruff.ruff_issue",                  # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.ruff.ruff_parser",                 # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.svelte_check.svelte_check_parser", # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.vue_tsc.vue_tsc_parser",           # owned by #2312
+  "lintro.utils.output.parser_registration -> lintro.parsers.yamllint.yamllint_parser",         # owned by #2312
+  "lintro.utils.output.sarif.bridge -> lintro.parsers.base_issue",                              # owned by #2312
+  "lintro.utils.output.sarif.document -> lintro.ai.models",                                     # owned by #2312
+  "lintro.utils.post_checks -> lintro.plugins.registry",                                        # owned by #2312
+  "lintro.utils.post_checks -> lintro.tools",                                                   # owned by #2312
+  "lintro.utils.tool_executor -> lintro.config.config_loader",                                  # owned by #2312
+  "lintro.utils.tool_executor -> lintro.tools",                                                 # owned by #2312
+  # 11 edges owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.availability", # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.budget",       # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.config",       # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.exceptions",   # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.interface",    # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.paths",        # owned by #2331
+  "lintro.tools.definitions.idiom_review -> lintro.ai.providers",    # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.budget",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.config",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.invoke",            # owned by #2331
+  "lintro.tools.idiom_review.engine -> lintro.ai.providers.base",    # owned by #2331
+  # 4 edges owned by #2332
+  "lintro.deps.policy_engine -> lintro.config.deps_config",         # owned by #2332
+  "lintro.formatters.formatter -> lintro.parsers.base_issue",       # owned by #2332
+  "lintro.licenses.policy_engine -> lintro.config.licenses_config", # owned by #2332
+  "lintro.models.core.tool_result -> lintro.parsers.base_issue",    # owned by #2332
+]
 
 [tool.pydoclint]
 style = "google"
