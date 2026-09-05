@@ -108,7 +108,7 @@ jobs:
       python-versions: '3.11,3.14'
       test-path: tests
       extras: 'full'
-      extra-args: '-x --ignore=tests/integration'
+      extra-args: '--ignore=tests/integration'
       coverage: false
       draft-pr-skip: true
       # Hard-false: see file-header note on #2108 / interpolated job names.
@@ -158,7 +158,7 @@ jobs:
       python-version: '3.14'
       test-path: tests
       extras: 'full'
-      extra-args: '-x --ignore=tests/integration'
+      extra-args: '--ignore=tests/integration'
       coverage: true
       coverage-threshold: 80
       upload-coverage: true

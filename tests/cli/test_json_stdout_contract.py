@@ -256,7 +256,7 @@ def test_check_json_stdout_is_a_single_document(
 
     The smoke gate runs the default all-tools argv (300s timeout) on
     ``sample.py`` + ``sample.yaml``. This test keeps ``--tools ruff`` because
-    ``pytest.ini`` caps each test at 120s; list-tools above pins builtin
+    ``pyproject.toml`` caps each test at 120s; list-tools above pins builtin
     completeness instead. Chdirs into the fixture tree so repo config is
     not loaded.
 

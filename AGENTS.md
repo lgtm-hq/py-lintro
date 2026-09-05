@@ -30,9 +30,9 @@ required):
 
 ## Non-obvious gotchas
 
-- **`pytest.ini` sets `--maxfail=3`**, so a full `uv run pytest` run aborts after the
-  first few failures. When triaging, pass `--maxfail=0` to see the full picture. The
-  full **unit** suite (`uv run pytest tests/unit`) is green on a fresh VM.
+- **The full unit suite (`uv run pytest tests/unit`) is green on a fresh VM.** Pytest is
+  configured in one place, `[tool.pytest.ini_options]` in `pyproject.toml`, and sets no
+  `--maxfail`, so a red run reports every failure.
 - **Many wrapped tools are external (non-Python) and optional.** `uv sync` does NOT
   install prettier, hadolint, shellcheck, actionlint, oxlint, taplo, gitleaks,
   `markdownlint-cli2`, rustfmt/cargo, etc. `lintro check .` silently **skips** any tool
