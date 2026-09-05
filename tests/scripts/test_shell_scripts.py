@@ -231,6 +231,42 @@ def test_resolve_pipeline_relevance_deny_by_default(
         assert_that(lines).contains("skip-reason=")
 
 
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["lintro/plugins/registry.py"],
+        ["tests/integration/tools/shellcheck/test_check.py"],
+        ["docker/tools.Dockerfile"],
+        ["pyproject.toml"],
+        ["uv.lock"],
+    ],
+    ids=["lintro", "tests", "docker", "pyproject", "uv-lock"],
+)
+def test_resolve_pipeline_relevance_never_skips_integration_relevant_paths(
+    diff_repo: Path,
+    tmp_path: Path,
+    paths: list[str],
+) -> None:
+    """Code, test, image, and dependency changes always run the pipeline.
+
+    "🧪 Docker Integration Tests" is a required check whose heavy steps are
+    gated on ``pipeline``; a skip-list that ever swallowed one of these paths
+    would turn the required gate into a rubber stamp for exactly the changes
+    it exists to catch (#465).
+
+    Scoped to the deny-by-default path classification: a verified version-bump
+    PR still resolves pipeline=false through the RELEASE_BUMP override (#1362),
+    which this test deliberately does not set.
+
+    Args:
+        diff_repo: Fixture repository with a seed base commit.
+        tmp_path: Pytest-provided temporary directory.
+        paths: Changed paths making up the PR diff.
+    """
+    lines, _ = _classify_paths(diff_repo, tmp_path, paths)
+    assert_that(lines).contains("pipeline=true")
+
+
 def test_resolve_pipeline_relevance_rename_into_skippable_path_triggers(
     diff_repo: Path,
     tmp_path: Path,

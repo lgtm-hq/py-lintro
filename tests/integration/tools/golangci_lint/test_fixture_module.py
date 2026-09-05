@@ -1,8 +1,8 @@
 """Binary-gated integration tests for golangci-lint against a Go fixture module.
 
 These tests run the real golangci-lint binary against the committed fixture at
-``test_samples/tools/go/golangci_lint``. They are skipped when golangci-lint or
-the Go toolchain is not installed.
+``test_samples/tools/go/golangci_lint``. They skip when golangci-lint or the Go
+toolchain is missing, and fail when either is missing inside the tools image.
 """
 
 from __future__ import annotations
@@ -11,12 +11,11 @@ import shutil
 from pathlib import Path
 from typing import cast
 
-import pytest
 from assertpy import assert_that
 
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
-from tests.unit.tools.golangci_lint.conftest import golangci_lint_available
+from tests.integration._tools import require_tool
 
 _FIXTURE = (
     Path(__file__).resolve().parents[4]
@@ -26,10 +25,12 @@ _FIXTURE = (
     / "golangci_lint"
 )
 
-pytestmark = pytest.mark.skipif(
-    not golangci_lint_available(),
-    reason="golangci-lint and/or the Go toolchain are not installed",
-)
+# golangci-lint builds the module before linting, so both the linter and a Go
+# toolchain must be present.
+pytestmark = [
+    require_tool("golangci-lint", version_args=("version",)),
+    require_tool("go", version_args=("version",)),
+]
 
 
 def _stage_fixture(tmp_path: Path) -> Path:

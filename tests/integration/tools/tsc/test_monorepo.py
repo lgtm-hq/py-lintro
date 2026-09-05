@@ -12,15 +12,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.tsc.conftest import tsc_is_available
+from tests.integration._tools import require_tool
 
-pytestmark = pytest.mark.skipif(
-    not tsc_is_available(),
-    reason="tsc not available",
-)
+pytestmark = require_tool("tsc")
 
 
 def _write_json(path: Path, content: dict[str, Any]) -> None:

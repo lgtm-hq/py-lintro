@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import shutil
 import tempfile
 from collections.abc import Iterator
 from unittest.mock import patch
@@ -28,6 +27,7 @@ from lintro.utils import tool_executor as tool_executor_mod
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.tool_executor import run_lint_tools_simple
 from lintro.utils.unified_config import UnifiedConfigManager
+from tests.integration._tools import require_tool
 
 
 @pytest.fixture(autouse=True)
@@ -282,17 +282,13 @@ def test_tool_respects_execution_order_smoke(temp_python_files: list[str]) -> No
 # ---------------------------------------------------------------------------
 
 
-def _require_tools(*names: str) -> None:
-    """Skip the current test if any required tool is missing from PATH.
-
-    Args:
-        *names: Executable names that must resolve on PATH.
-    """
-    for name in names:
-        if not shutil.which(name):
-            pytest.skip(f"Tool '{name}' not available in PATH")
+# Both multi-tool tests below drive the real ruff and yamllint binaries.
+_requires_ruff = require_tool("ruff")
+_requires_yamllint = require_tool("yamllint")
 
 
+@_requires_ruff
+@_requires_yamllint
 def test_parallel_runs_multiple_tools_over_mixed_samples(
     mixed_language_sample: list[str],
 ) -> None:
@@ -305,8 +301,6 @@ def test_parallel_runs_multiple_tools_over_mixed_samples(
     Args:
         mixed_language_sample: Paths ``[python_file, yaml_file]``.
     """
-    _require_tools("ruff", "yamllint")
-
     results = run_tools_parallel(
         tools_to_run=["ruff", "yamllint"],
         paths=mixed_language_sample,
@@ -330,6 +324,8 @@ def test_parallel_runs_multiple_tools_over_mixed_samples(
     assert_that(by_name["yamllint"].success).is_false()
 
 
+@_requires_ruff
+@_requires_yamllint
 def test_simple_runner_uses_parallel_for_multiple_tools(
     mixed_language_sample: list[str],
 ) -> None:
@@ -342,8 +338,6 @@ def test_simple_runner_uses_parallel_for_multiple_tools(
     Args:
         mixed_language_sample: Paths ``[python_file, yaml_file]``.
     """
-    _require_tools("ruff", "yamllint")
-
     with patch.object(
         target=tool_executor_mod,
         attribute="_execute_tools_parallel",

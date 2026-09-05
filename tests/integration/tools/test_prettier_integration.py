@@ -7,7 +7,6 @@ They verify the PrettierPlugin definition, check command, fix command, and set_o
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,14 +14,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool, unavailable
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if prettier is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("prettier") is None,
-    reason="prettier not installed",
-)
+pytestmark = require_tool("prettier")
 
 
 @pytest.fixture
@@ -244,11 +241,11 @@ def astro_project_dir(tmp_path: Path) -> Path:
     # Symlink node_modules so prettier can resolve the astro plugin
     project_node_modules = PROJECT_ROOT / "node_modules"
     if not project_node_modules.exists():
-        pytest.skip("node_modules not found; run bun install first")
+        unavailable("node_modules not found; run bun install first")
     try:
         (tmp_path / "node_modules").symlink_to(project_node_modules)
     except OSError as exc:
-        pytest.skip(f"Cannot create symlink: {exc}")
+        unavailable(f"cannot symlink node_modules: {exc}")
 
     prettierrc = {"plugins": ["prettier-plugin-astro"]}
     (tmp_path / ".prettierrc").write_text(json.dumps(prettierrc))

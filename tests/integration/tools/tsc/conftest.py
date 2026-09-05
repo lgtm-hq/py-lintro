@@ -3,34 +3,9 @@
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
-
-
-def tsc_is_available() -> bool:
-    """Check if tsc is installed and actually works.
-
-    This checks both that the command exists AND that it executes successfully,
-    which handles cases where a wrapper script exists but the underlying
-    tool isn't installed (e.g., Docker image not yet rebuilt).
-
-    Returns:
-        True if tsc is installed and working, False otherwise.
-    """
-    if shutil.which("tsc") is None:
-        return False
-    try:
-        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["tsc", "--version"],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
 
 
 def _find_project_root() -> Path:

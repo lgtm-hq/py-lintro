@@ -18,6 +18,7 @@ from pathspec import GitIgnoreSpec
 
 from lintro._tool_versions import TOOL_VERSIONS
 from lintro.enums.tool_name import ToolName
+from tests.integration._tools import ALLOW_VERSION_LAG_ENV, TOOLS_IMAGE_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -953,6 +954,83 @@ def test_test_ci_reusables_never_path_skip() -> None:
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
+
+
+def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
+    """The Docker side declares the exact variable the gate reads (#465).
+
+    ``LINTRO_TOOLS_IMAGE`` is what turns a missing wrapped tool from a skip
+    into a failure. Its name lives in Python as
+    ``tests.integration._tools.TOOLS_IMAGE_ENV`` but has to be repeated as a
+    plain string in the Dockerfile and in docker-compose.yml, which neither
+    can import. A rename on one side would silently degrade the required
+    Docker integration check back to a rubber stamp, so pin all three.
+    """
+    switch = f"{TOOLS_IMAGE_ENV}=1"
+
+    dockerfile = (_REPO_ROOT / "docker" / "tools.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    # Match the ENV instruction itself: a bare substring would also be
+    # satisfied by the surrounding comment or by a RUN line, neither of which
+    # puts the variable in the test process's environment.
+    env_instruction = re.search(
+        rf"(?m)^\s*ENV\s+{re.escape(switch)}(?:\s|$)",
+        dockerfile,
+    )
+    assert_that(env_instruction).described_as(
+        "docker/tools.Dockerfile ENV instruction",
+    ).is_not_none()
+
+    compose = yaml.safe_load(
+        (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+    )
+    environment = compose["services"]["test-integration"]["environment"]
+    assert_that(environment).described_as("test-integration service").contains(switch)
+
+    # The hosted matrix is the other half of the lockstep: it runs the same
+    # modules on a toolless runner, so copying the switch onto the reusable
+    # would turn every absent wrapped tool into a collection failure there.
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job_text = yaml.safe_dump(test_ci["jobs"][job_name])
+        assert_that(job_text).described_as(job_name).does_not_contain(
+            TOOLS_IMAGE_ENV,
+        )
+
+
+def test_version_lag_env_matches_the_plugin_contract() -> None:
+    """The gate reads the same env var the plugins do (#1582).
+
+    ``tests/integration/_tools.py`` mirrors lintro's version-lag allowance so
+    an allow-listed lagging binary keeps collecting its module. The name is
+    spelled once per side; a rename in either would silently re-introduce the
+    skip the allowance exists to prevent.
+    """
+    from lintro.plugins.execution_preparation import _ALLOW_VERSION_LAG_ENV
+
+    assert_that(ALLOW_VERSION_LAG_ENV).is_equal_to(_ALLOW_VERSION_LAG_ENV)
+
+
+def test_test_ci_matrix_collects_the_integration_suite() -> None:
+    """The Python matrix runs tests/integration instead of ignoring it (#465).
+
+    Every integration module gates on ``tests/integration/_tools.py``, which
+    skips on a toolless runner and only fails inside the tools image, so the
+    hosted matrix can collect the suite without installing any wrapped tool.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job = test_ci["jobs"][job_name]
+        assert_that(job["with"]["test-path"]).described_as(job_name).is_equal_to(
+            "tests",
+        )
+        # Assert the absence of *any* ignore, not just this path spelling:
+        # "--ignore=tests" or "--ignore tests/integration" would exclude the
+        # suite again while still passing a substring check for the path.
+        assert_that(job["with"]["extra-args"]).described_as(
+            job_name,
+        ).does_not_contain("--ignore", "tests/integration")
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:

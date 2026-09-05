@@ -108,7 +108,9 @@ jobs:
       python-versions: '3.11,3.14'
       test-path: tests
       extras: 'full'
-      extra-args: '--ignore=tests/integration'
+      # No pytest extras: the matrix collects tests/integration too (#465),
+      # and fail-fast stays off so a red run reports every failure (#2319).
+      extra-args: ''
       coverage: false
       draft-pr-skip: true
       # Hard-false: see file-header note on #2108 / interpolated job names.
@@ -158,7 +160,9 @@ jobs:
       python-version: '3.14'
       test-path: tests
       extras: 'full'
-      extra-args: '--ignore=tests/integration'
+      # No pytest extras: the matrix collects tests/integration too (#465),
+      # and fail-fast stays off so a red run reports every failure (#2319).
+      extra-args: ''
       coverage: true
       coverage-threshold: 80
       upload-coverage: true

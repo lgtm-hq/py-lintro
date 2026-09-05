@@ -36,13 +36,21 @@ required):
 - **Many wrapped tools are external (non-Python) and optional.** `uv sync` does NOT
   install prettier, hadolint, shellcheck, actionlint, oxlint, taplo, gitleaks,
   `markdownlint-cli2`, rustfmt/cargo, etc. `lintro check .` silently **skips** any tool
-  missing from `PATH`, so it still passes without them — but some `tests/integration/**`
-  tests assume the external tool is present and will **fail (not skip)** without it
-  (e.g. `test_rustfmt_integration.py` needs a Rust toolchain; the markdownlint parity
-  test needs `markdownlint-cli2` on `PATH` because `npx` alone makes it non-skip).
-  Install the full set with `./scripts/utils/install-tools.sh --local` (network-heavy;
-  installs into `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin` and pulls a Rust
-  toolchain). This is intentionally kept out of the update script.
+  missing from `PATH`, so it still passes without them. `tests/integration/**` behaves
+  the same way: every module that drives a wrapped tool gates on
+  `tests/integration/_tools.py::require_tool` (or `require_command`, where the
+  invocation comes from the plugin's own resolution), which runs the tool's version
+  command and **skips** the module when the tool is absent or does not answer, and also
+  when the binary is below the minimum lintro enforces. Modules with a non-tool
+  prerequisite are the exception and still need it — `test_built_package.py` wants
+  `python3.12-venv` (see below). Inside the tools image (`LINTRO_TOOLS_IMAGE=1`, set by
+  `docker/tools.Dockerfile` and the `test-integration` compose service) only the first
+  condition changes: an absent or unrunnable tool **fails** instead of skipping, because
+  it is an image regression (#465). A present-but-too-old binary still **skips** even
+  there — version drift is owned by the manifest gate, which tolerates Renovate lag
+  (#1582). Install the full set with `./scripts/utils/install-tools.sh --local`
+  (network-heavy; installs into `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin` and pulls a
+  Rust toolchain). This is intentionally kept out of the update script.
 - **`tests/integration/test_built_package.py` needs the system `python3.12-venv`
   package.** Those wheel tests call stdlib `python -m venv`; without `ensurepip` they
   fail with "recreate your virtual environment" (not a code bug). Install once with

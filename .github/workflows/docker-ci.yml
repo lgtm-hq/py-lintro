@@ -1128,10 +1128,25 @@ jobs:
 
   integration-test:
     name: 🧪 Docker Integration Tests
-    # Required check: runs whenever docker-build reported success (real or
-    # docs-only early-exit) so the context reports; heavy steps are gated on
-    # the `pipeline` output. !cancelled() keeps it running (fail-open) if
-    # the changes job failed.
+    # Required check (org ruleset checks-py-lintro, context
+    # "🧪 Docker Integration Tests"): runs whenever docker-build reported
+    # success (real or docs-only early-exit) so the context reports; heavy
+    # steps are gated on the `pipeline` output. !cancelled() keeps it running
+    # (fail-open) if the changes job failed.
+    #
+    # The gate has teeth since #465: inside the tools image the suite sets
+    # LINTRO_TOOLS_IMAGE=1 (docker-compose.yml), so a wrapped tool missing
+    # from the image FAILS its integration module instead of skipping it.
+    # That makes pipeline relevance load-bearing — a PR touching code under
+    # lintro/**, tests/**, docker/**, pyproject.toml or uv.lock must resolve
+    # pipeline=true. Deny-by-default classification already gives that: the
+    # skip-list is '**/*.md', 'docs/**' and 'assets/**', so only the prose
+    # inside those trees (a tests/**/*.md, say) is skippable, never the code
+    # under them. tests/scripts/test_shell_scripts.py pins the code paths so
+    # the skip-list can never grow to swallow them. One documented exception
+    # outranks path classification: a PR that release-bump-only.sh verifies as
+    # a pure version bump forces pipeline=false even though it touches
+    # pyproject.toml and uv.lock (#1362).
     needs: [changes, docker-build]
     if: >-
       !cancelled() &&

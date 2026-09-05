@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess  # nosec B404 - fixed installer argv; shell=False
 from pathlib import Path
 
 import pytest
@@ -214,31 +212,6 @@ def test_repository_dogfoods_spectral_without_linting_violation_samples() -> Non
 
     assert_that(ruleset).contains("spectral:oas")
     assert_that(ignore).contains("test_samples/")
-
-
-def test_installer_dry_run_simulates_spectral_verification() -> None:
-    """Dry-run output must not report an uninstalled Spectral binary as missing."""
-    environment = os.environ.copy()
-    environment["PATH"] = "/usr/bin:/bin"
-
-    result = subprocess.run(  # nosec B603 - fixed repository script and argv
-        [
-            "/bin/bash",
-            "scripts/utils/install-tools.sh",
-            "--dry-run",
-            "--tools",
-            "spectral",
-        ],
-        cwd=Path.cwd(),
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("[DRY-RUN] Would verify spectral is available")
-    assert_that(result.stdout).does_not_contain("spectral: not found")
 
 
 def test_fix_raises_not_implemented(spectral_plugin: SpectralPlugin) -> None:

@@ -7,18 +7,14 @@ from discovery, so the committed sample cannot be linted in place.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
-import pytest
 from assertpy import assert_that
 
 from lintro.tools.definitions.buf import BufPlugin
+from tests.integration._tools import require_tool
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("buf") is None,
-    reason="buf not installed",
-)
+pytestmark = require_tool("buf")
 
 _VIOLATIONS = """\
 syntax = "proto3";
