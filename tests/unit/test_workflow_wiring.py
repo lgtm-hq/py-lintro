@@ -904,38 +904,58 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
         assert_that(timeout).is_equal_to(30)
 
 
-def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
-    """test-ci classifies PR diffs before calling the reusable matrix (#1359)."""
+def test_test_ci_has_no_path_classification_surface() -> None:
+    """test-ci must not reintroduce a pipeline classifier (#2108, #2297).
+
+    The Python matrix can never path-skip: ``pipeline-skip`` is hard-false
+    because a skipped reusable ``test`` job publishes the uninterpolated
+    check name and deadlocks required-check merges. The former ``changes``
+    job therefore computed a ``pipeline`` output whose only consumer
+    (``stage-coverage-html``) is push-only, while
+    ``resolve-pipeline-relevance.sh`` resolves ``pipeline=false`` on
+    ``pull_request`` alone — the condition could never be false. Guard the
+    whole surface, not just the job name, so it cannot creep back.
+    """
     test_ci = _load_workflow(name="test-ci.yml")
-    changes_job = test_ci["jobs"]["changes"]
-    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
-
-    assert_that(changes_job["outputs"]["pipeline"]).contains(
-        "steps.result.outputs.pipeline",
-    )
-    assert_that(changes_job["outputs"]["skip-reason"]).contains(
-        "steps.result.outputs.skip-reason",
+    raw = (_REPO_ROOT / ".github" / "workflows" / "test-ci.yml").read_text(
+        encoding="utf-8",
     )
 
-    bump_step = steps["bump"]
-    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
-    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+    assert_that(test_ci["jobs"]).does_not_contain_key("changes")
+    assert_that(raw).does_not_contain("resolve-pipeline-relevance.sh")
+    assert_that(raw).does_not_contain("needs.changes.")
 
-    resolve_step = steps["result"]
-    assert_that(resolve_step["run"]).is_equal_to(
-        "scripts/ci/resolve-pipeline-relevance.sh",
-    )
-    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
-        "steps.bump.outputs.release-bump",
-    )
+    # Exact dependency lists, not a "does not contain 'changes'" subset check:
+    # a classifier reintroduced under any other job id would slip past a
+    # name-shaped assertion. These are the only edges test-ci may have.
+    expected_needs: dict[str, list[str]] = {
+        "test-compat": [],
+        "test-coverage": [],
+        "test-gate": ["test-compat", "test-coverage"],
+        "test-suite-coverage": ["test-gate"],
+        "stage-coverage-html": ["test-coverage"],
+    }
+    assert_that(set(test_ci["jobs"])).is_equal_to(set(expected_needs))
+    for job_id, expected in expected_needs.items():
+        assert_that(test_ci["jobs"][job_id].get("needs") or []).described_as(
+            job_id,
+        ).is_equal_to(expected)
+    # on.<event>.paths collapses nested required contexts (#1359).
+    triggers = test_ci["on"]
+    assert_that(triggers).is_not_empty()
+    for trigger in triggers.values():
+        if isinstance(trigger, dict):
+            assert_that(trigger).does_not_contain_key("paths")
+            assert_that(trigger).does_not_contain_key("paths-ignore")
 
 
 def test_test_ci_reusables_never_path_skip() -> None:
-    """Reusable callers fail-open on changes failure and never path-skip.
+    """Reusable callers always run the matrix and never path-skip.
 
-    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
-    changes job must still run the matrix (empty pipeline != 'false')
-    instead of collapsing to skipped → false green.
+    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: the matrix
+    runs unless the whole workflow is cancelled, instead of collapsing to
+    skipped → false green. With the classifier gone (#2297) the callers
+    have no upstream dependency at all, so nothing can skip them.
 
     ``pipeline-skip`` stays hard-false (#2108): lgtm-ci's skipped ``test``
     job publishes as ``test-compat / inputs.job-name`` rather than the
@@ -950,7 +970,7 @@ def test_test_ci_reusables_never_path_skip() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     for job_name, published_name in expected_job_names.items():
         job = test_ci["jobs"][job_name]
-        assert_that(job["needs"]).contains("changes")
+        assert_that(job.get("needs") or []).is_empty()
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
@@ -1042,10 +1062,8 @@ def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains(
-        "changes",
-        "test-gate",
-    )
+    assert_that(gate["needs"]).is_equal_to(["test-gate"])
+    assert_that(gate["with"]).does_not_contain_key("pipeline-skip")
     assert_that(gate["with"]["upstream-result"]).is_equal_to(
         "${{ needs.test-gate.outputs.result }}",
     )
