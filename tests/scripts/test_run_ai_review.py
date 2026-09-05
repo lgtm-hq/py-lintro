@@ -952,6 +952,11 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     )
 
 
+# The only wildcard the AI Review job may allowlist: GitHub's hosted-runner
+# watchdog domain, whose region shard rotates (#2352).
+_WATCHDOG_WILDCARD_ENDPOINT = "*.githubapp.com:443"
+
+
 def test_workflow_allows_the_npm_registry_egress() -> None:
     """Harden-runner permits the endpoints the pinned CLI install needs.
 
@@ -980,8 +985,17 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "pipelines.actions.githubusercontent.com:443",
         "results-receiver.actions.githubusercontent.com:443",
     )
+    # Hosted-runner watchdog endpoints (#2352). One wildcard, deliberately:
+    # the hosted-compute region shard rotates (eus-02 and iad-02 both seen on
+    # 2026-09-05), so exact hosts would leave this 75-minute job killable in
+    # every other region, and githubapp.com is a GitHub-owned domain. Any other
+    # wildcard — a bare `*`, `*:443`, or a third-party suffix — stays forbidden.
+    assert_that(endpoints).contains(_WATCHDOG_WILDCARD_ENDPOINT)
     for endpoint in endpoints:
-        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(endpoint).is_equal_to(
+                _WATCHDOG_WILDCARD_ENDPOINT,
+            )
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "cursor.sh",
         )
