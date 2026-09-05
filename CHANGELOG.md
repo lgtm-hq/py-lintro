@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.0] - 2026-09-05
+
+### Added
+
+- **tools**: add pylint tool plugin (#2334) (7736c09)
+
+### Changed
+
+- **quality**: enable ruff structural families with a per-file baseline (#2323)
+  (b301132)
+- **quality**: import-layering contract with a ratcheting baseline (#2333) (6e253d2)
+
 ## [0.146.0] - 2026-09-05
 
 ### Added
