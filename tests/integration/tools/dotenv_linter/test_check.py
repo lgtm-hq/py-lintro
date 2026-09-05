@@ -6,24 +6,20 @@ These tests require the ``dotenv-linter`` binary and run it against real
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
 
 from lintro.parsers.dotenv_linter.dotenv_linter_issue import (
     DotenvLinterIssue,
 )
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("dotenv-linter") is None,
-    reason="dotenv-linter not installed",
-)
+pytestmark = require_tool("dotenv-linter")
 
 
 def test_check_detects_issues(

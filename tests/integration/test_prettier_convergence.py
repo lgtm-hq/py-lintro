@@ -8,7 +8,7 @@ content (the pattern that triggers the lgtm-ci release workflow failure).
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -16,6 +16,9 @@ from assertpy import assert_that
 
 from lintro.tools.definitions.prettier import PrettierPlugin
 from lintro.utils.tool_executor import _run_fix_with_retry
+from tests.integration._tools import require_tool
+
+pytestmark = require_tool("prettier")
 
 # Markdown content that triggers prettier non-idempotency with proseWrap: always.
 # Long lines with inline links and mixed punctuation can cause prettier to
@@ -48,19 +51,16 @@ def changelog_project() -> Generator[Path, None, None]:
 
 @pytest.fixture
 def prettier_plugin(
-    skip_if_tool_unavailable: Callable[[str], None],
     lintro_test_mode: str,
 ) -> PrettierPlugin:
-    """Provide a PrettierPlugin instance, skipping if prettier unavailable.
+    """Provide a PrettierPlugin instance.
 
     Args:
-        skip_if_tool_unavailable: Fixture to skip if prettier is not installed.
         lintro_test_mode: Fixture that sets LINTRO_TEST_MODE=1.
 
     Returns:
         A PrettierPlugin instance.
     """
-    skip_if_tool_unavailable("prettier")
     return PrettierPlugin()
 
 

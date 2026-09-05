@@ -13,15 +13,14 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.svelte_check.conftest import svelte_check_is_available
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if svelte-check is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not svelte_check_is_available(),
-    reason="svelte-check not installed or not working",
+pytestmark = require_tool(
+    "svelte-check",
+    launchers=(("bunx",), ("npx",)),
 )
 
 

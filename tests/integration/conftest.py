@@ -55,29 +55,6 @@ def lintro_test_mode(monkeypatch: pytest.MonkeyPatch) -> str:
 
 
 @pytest.fixture
-def skip_if_tool_unavailable() -> Callable[[str], None]:
-    """Skip test if required tool is not available in PATH.
-
-    Returns:
-        callable: Function that takes a tool_name (str) parameter and can be used
-        to skip tests for unavailable tools.
-    """
-
-    def _skip_if_unavailable(tool_name: str) -> None:
-        """Skip the current test if tool is not available.
-
-        Args:
-            tool_name: Name of the tool to check for availability.
-        """
-        import shutil
-
-        if not shutil.which(tool_name):
-            pytest.skip(f"Tool '{tool_name}' not available in PATH")
-
-    return _skip_if_unavailable
-
-
-@pytest.fixture
 def get_plugin(lintro_test_mode: str) -> Callable[[str], object]:
     """Factory fixture to get a fresh plugin instance by name.
 

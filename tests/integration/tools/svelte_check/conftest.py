@@ -3,61 +3,9 @@
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
-
-
-def _check_command_version(cmd: Sequence[str], timeout: int) -> bool:
-    """Run a version command and return whether it succeeded.
-
-    Args:
-        cmd: Command and arguments to execute.
-        timeout: Timeout in seconds for the subprocess.
-
-    Returns:
-        True if the command exits with returncode 0, False otherwise.
-    """
-    try:
-        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
-            cmd,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-
-def svelte_check_is_available() -> bool:
-    """Check if svelte-check is installed and actually works.
-
-    This checks both that the command exists AND that it executes successfully,
-    which handles cases where a wrapper script exists but the underlying
-    tool isn't installed. Also checks bunx/npx fallbacks.
-
-    Returns:
-        True if svelte-check is installed and working, False otherwise.
-    """
-    if shutil.which("svelte-check") is not None and _check_command_version(
-        ["svelte-check", "--version"],
-        timeout=10,
-    ):
-        return True
-
-    if shutil.which("bunx") is not None and _check_command_version(
-        ["bunx", "svelte-check", "--version"],
-        timeout=30,
-    ):
-        return True
-
-    return shutil.which("npx") is not None and _check_command_version(
-        ["npx", "svelte-check", "--version"],
-        timeout=30,
-    )
 
 
 def _find_project_root() -> Path:

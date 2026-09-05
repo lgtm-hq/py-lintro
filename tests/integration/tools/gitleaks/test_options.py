@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if gitleaks is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("gitleaks") is None,
-    reason="gitleaks not installed",
-)
+pytestmark = require_tool("gitleaks", version_args=("version",))
 
 
 @pytest.mark.parametrize(

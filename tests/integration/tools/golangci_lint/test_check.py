@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
+
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 # golangci-lint builds the module before linting, so both the linter and a Go
-# toolchain must be present. Skip the whole module otherwise.
-pytestmark = pytest.mark.skipif(
-    shutil.which("golangci-lint") is None or shutil.which("go") is None,
-    reason="golangci-lint or go toolchain not installed",
-)
+# toolchain must be present. Gate the whole module on both.
+pytestmark = [
+    require_tool("golangci-lint", version_args=("version",)),
+    require_tool("go", version_args=("version",)),
+]
 
 
 def test_check_module_with_violations(

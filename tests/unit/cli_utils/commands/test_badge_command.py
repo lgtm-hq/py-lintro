@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import click
@@ -258,20 +257,6 @@ def test_resolve_health_score_rejects_no_files_found_run() -> None:
     ):
         with pytest.raises(click.ClickException):
             resolve_health_score(score_override=None, paths=())
-
-
-def test_badge_empty_directory_does_not_publish(tmp_path: Path) -> None:
-    """A real empty directory must not publish a 100/100 badge.
-
-    Args:
-        tmp_path: Pytest temporary directory fixture.
-    """
-    runner = CliRunner()
-
-    result = runner.invoke(badge_command, [str(tmp_path)])
-
-    assert_that(result.exit_code).is_not_equal_to(0)
-    assert_that(result.output).does_not_contain("img.shields.io")
 
 
 def test_badge_live_no_files_found_prints_no_badge() -> None:

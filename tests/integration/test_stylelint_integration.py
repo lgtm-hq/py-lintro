@@ -8,7 +8,6 @@ skip automatically when stylelint is not resolvable in the environment.
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -17,39 +16,20 @@ from assertpy import assert_that
 
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.definitions.stylelint import StylelintPlugin
+from tests.integration._tools import require_command
 
 # Shared fixtures: single source of truth for stylelint sample content.
 FIXTURES = Path("test_samples/tools/web/stylelint").resolve()
 
 
-def _stylelint_available() -> bool:
-    """Report whether the stylelint binary is runnable in this environment.
-
-    Returns:
-        True if ``stylelint --version`` succeeds via the resolved command.
-    """
-    plugin = StylelintPlugin()
-    cmd = [*plugin._get_executable_command(tool_name="stylelint"), "--version"]
-    try:
-        # Probe from a neutral cwd: bunx/npx resolution can succeed from the
-        # repo root (whose node_modules satisfy the CLI) while failing in the
-        # tmp directories the tests actually lint from.
-        proc = subprocess.run(  # noqa: S603  # nosec B603 - fixed argv probe of stylelint binary; shell=False, no user shell input
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-            cwd=tempfile.gettempdir(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
-
-
-pytestmark = pytest.mark.skipif(
-    not _stylelint_available(),
-    reason="stylelint binary not available",
+# Probe from a neutral cwd: bunx/npx resolution can succeed from the repo
+# root (whose node_modules satisfy the CLI) while failing in the tmp
+# directories the tests actually lint from.
+pytestmark = require_command(
+    "stylelint",
+    StylelintPlugin()._get_executable_command(tool_name="stylelint"),
+    timeout=30,
+    cwd=tempfile.gettempdir(),
 )
 
 
