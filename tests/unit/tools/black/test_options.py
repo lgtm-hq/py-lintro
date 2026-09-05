@@ -111,3 +111,29 @@ def test_check_passes_fast_to_black(
     cmd = mock_run.call_args.kwargs["cmd"]
     assert_that(cmd).contains("--fast")
     assert_that(cmd).contains("--check")
+
+
+def test_line_length_check_accepts_float_timeout(black_plugin: BlackPlugin) -> None:
+    """A float ``timeout`` (as ``set_options`` stores it) must not raise.
+
+    ``BaseToolPlugin.set_options`` normalises ``timeout`` to ``float``, so
+    ``--tool-options black:timeout=120`` reaches the line-length checker as
+    ``120.0``. Coercing it via ``int(str(...))`` raised ``ValueError``.
+
+    Args:
+        black_plugin: The BlackPlugin instance to test.
+    """
+    black_plugin.set_options(timeout=120)
+    assert_that(black_plugin.options.get("timeout")).is_equal_to(120.0)
+
+    with patch(
+        "lintro.tools.core.line_length_checker.check_line_length_violations",
+        return_value=[],
+    ) as mock_check:
+        issues = black_plugin._check_line_length_violations(
+            files=["example.py"],
+            cwd=".",
+        )
+
+    assert_that(issues).is_empty()
+    assert_that(mock_check.call_args.kwargs["timeout"]).is_equal_to(120)

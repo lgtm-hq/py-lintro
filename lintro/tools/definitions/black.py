@@ -154,12 +154,14 @@ class BlackPlugin(BaseToolPlugin):
             line_length_val = line_length_opt
         elif line_length_opt is not None:
             line_length_val = int(str(line_length_opt))
-        if isinstance(timeout_opt, int):
-            timeout_val = timeout_opt
-        elif timeout_opt is not None:
-            timeout_val = int(str(timeout_opt))
-        else:
+        if isinstance(timeout_opt, bool) or timeout_opt is None:
             timeout_val = BLACK_DEFAULT_TIMEOUT
+        elif isinstance(timeout_opt, (int, float)):
+            # ``set_options`` normalises ``timeout`` to float, so an int()
+            # round-trip through str() would raise on e.g. "120.0" (#2356).
+            timeout_val = int(timeout_opt)
+        else:
+            timeout_val = int(float(str(timeout_opt)))
 
         violations = check_line_length_violations(
             files=files,

@@ -23,6 +23,7 @@ from lintro.utils.duplicate_code import (
     apply_duplicate_code_baseline,
     resolve_duplicate_code_baseline,
 )
+from lintro.utils.execution.tool_configuration import get_tool_lookup_keys
 from lintro.utils.module_size import (
     find_oversized_modules,
     resolve_module_size_settings,
@@ -161,6 +162,7 @@ def execute_post_checks(
     total_fixed: int,
     total_remaining: int,
     diff_base: str | None = None,
+    tool_option_dict: dict[str, dict[str, object]] | None = None,
 ) -> tuple[int, int, int]:
     """Execute post-check tools after primary linting.
 
@@ -179,6 +181,9 @@ def execute_post_checks(
         total_fixed: Current total fixed count.
         total_remaining: Current total remaining count.
         diff_base: Optional git ref to scope post-checks to changed files.
+        tool_option_dict: Parsed ``--tool-options`` mapping, so per-tool CLI
+            overrides (e.g. ``black:timeout=120``) reach post-check tools the
+            same way they reach primary tools.
 
     Returns:
         tuple[int, int, int]: Updated (total_issues, total_fixed, total_remaining)
@@ -263,7 +268,15 @@ def execute_post_checks(
                 # Configure post-check tool using UnifiedConfigManager
                 # This replaces manual sync logic with unified config management
                 post_config_manager = UnifiedConfigManager()
-                post_config_manager.apply_config_to_tool(tool=tool)
+                cli_overrides: dict[str, object] = {}
+                for option_key in get_tool_lookup_keys(tool_name_lower):
+                    overrides = (tool_option_dict or {}).get(option_key)
+                    if overrides:
+                        cli_overrides.update(overrides)
+                post_config_manager.apply_config_to_tool(
+                    tool=tool,
+                    cli_overrides=cli_overrides or None,
+                )
 
                 tool.set_options(include_venv=include_venv)
                 if exclude:
