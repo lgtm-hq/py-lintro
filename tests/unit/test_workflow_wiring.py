@@ -3115,10 +3115,21 @@ def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
         step for step in build["steps"] if step.get("id") == "fork-fallback"
     ]
     assert_that(publish_steps).is_length(1)
-    assert_that(publish_steps[0]["run"]).contains("$LINTRO_FORK_FALLBACK_IMAGE")
+    publish = publish_steps[0]
+    # The exact write, not just a mention of the variable: a step that merely
+    # logged the pin, or wrote it under a different key, would leave the
+    # output empty — and empty is falsy in the consumers' ternary, silently
+    # selecting a ci- tag that fork runs never push.
+    assert_that(publish["run"].strip()).is_equal_to(
+        'echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"',
+    )
+    # The key written above must be the key the job output reads back.
+    assert_that(build["outputs"]["fork-fallback-image"]).contains(
+        f"steps.{publish['id']}.outputs.image",
+    )
     # Unconditional: the output must exist for every event, not just the ones
     # that reach the heavy build steps.
-    assert_that(publish_steps[0]).does_not_contain_key("if")
+    assert_that(publish).does_not_contain_key("if")
 
     # job id -> the expression carrying the fork-fallback selection.
     reusable_callers = ("dogfooding-lint", "dogfooding_lint_retry")
