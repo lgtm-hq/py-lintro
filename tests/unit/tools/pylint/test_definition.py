@@ -34,7 +34,7 @@ def test_definition_metadata(pylint_plugin: PylintPlugin) -> None:
     assert_that(definition.priority).is_equal_to(50)
     assert_that(definition.default_timeout).is_equal_to(900)
     assert_that(definition.default_options).is_equal_to(
-        {"timeout": 900, "disable": None, "enable": None},
+        {"timeout": 900, "disable": None, "enable": None, "include": None},
     )
     assert_that(definition.version_command).is_equal_to(["pylint", "--version"])
     # json2 is the reporter the parser reads; it first shipped in pylint 3.2.

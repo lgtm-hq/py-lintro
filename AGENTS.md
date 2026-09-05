@@ -82,6 +82,19 @@ tool definition added under the current definitions pattern records its three
 `-> lintro.plugins.{base,protocol,registry}` edges under #2311, which deletes them all
 when it factors the pattern.
 
+## Duplicate code (#2293)
+
+`pylint`'s `duplicate-code` checker (`R0801`) runs on `lintro/tools/definitions` only —
+the scope comes from `[tool.lintro.pylint] include` in `pyproject.toml`, which also
+records `duplicate_code_baseline`, the number of clone sets present when the gate
+landed. pylint has no per-finding baseline, so the ratchet is a count:
+`lintro/utils/duplicate_code.py` takes the `R0801` findings out of the pylint result and
+fails the run only when the count is **higher** than the baseline. **The baseline may
+only shrink** — lower it in the pull request that removes duplication, never raise it,
+and never raise `min-similarity-lines`. #2311 factors the definition template and is
+done when the number reaches 0; `tests/unit/test_duplicate_code_baseline.py` fails if
+the baseline grows or drifts from what pylint reports.
+
 ## Docs site (optional secondary product)
 
 `apps/site` is an Astro + Pagefind docs site built with `bun`. After installing `just`,

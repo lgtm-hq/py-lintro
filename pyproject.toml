@@ -507,6 +507,18 @@ exclude = [
   "tests/",
 ]
 
+# Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker
+# runs on the tool-definition package only, so the copy-pasted definition
+# template cannot grow while #2311 factors it out. pylint has no per-finding
+# baseline, so the ratchet is a count: `duplicate_code_baseline` is the number
+# of R0801 blocks present when the gate landed, and the run fails when the
+# count is higher. Lower this number in the PR that removes duplication; never
+# raise it. #2311 is done when it reaches 0. See
+# lintro/utils/duplicate_code.py.
+[tool.lintro.pylint]
+include = ["lintro/tools/definitions"]
+duplicate_code_baseline = 34
+
 [tool.lintro.ruff]
 
 [tool.mypy]
