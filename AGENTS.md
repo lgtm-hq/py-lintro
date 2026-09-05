@@ -77,7 +77,10 @@ each other. Check with `uv run lintro chk . --tools import-linter`.
 issue that removes it. Entries may be **deleted, never added**, and a PR that closes a
 cycle deletes its entries. Lazy (function-body) imports are not a fix: `import-linter`
 and `scripts/ci/import_matrix.py` both count them, and
-`tests/unit/test_import_boundaries.py` pins the two-way cycle count.
+`tests/unit/test_import_boundaries.py` pins the two-way cycle count. Exception: a new
+tool definition added under the current definitions pattern records its three
+`-> lintro.plugins.{base,protocol,registry}` edges under #2311, which deletes them all
+when it factors the pattern.
 
 ## Docs site (optional secondary product)
 

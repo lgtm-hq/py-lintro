@@ -605,6 +605,9 @@ constraint-dependencies = [
 # module-level import into a function body is **not** a fix — `import-linter`
 # counts function-body imports, and so does `scripts/ci/import_matrix.py`,
 # whose two-way cycle count `tests/unit/test_import_boundaries.py` pins.
+# Exception: a new tool definition added under the current definitions pattern
+# records its three `-> lintro.plugins.{base,protocol,registry}` edges under
+# #2311, which deletes them all when it factors the pattern.
 
 [tool.importlinter]
 root_package = "lintro"
@@ -786,6 +789,9 @@ ignore_imports = [
   "lintro.tools.definitions.pydoclint -> lintro.plugins.file_processor",            # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.protocol",                  # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.definitions.pylint -> lintro.plugins.registry",                     # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.base",                         # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.protocol",                     # owned by #2311
   "lintro.tools.definitions.pytest -> lintro.plugins.registry",                     # owned by #2311
