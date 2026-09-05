@@ -18,7 +18,7 @@ from pathspec import GitIgnoreSpec
 
 from lintro._tool_versions import TOOL_VERSIONS
 from lintro.enums.tool_name import ToolName
-from tests.integration._tools import TOOLS_IMAGE_ENV
+from tests.integration._tools import ALLOW_VERSION_LAG_ENV, TOOLS_IMAGE_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -905,6 +905,29 @@ def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
     )
     environment = compose["services"]["test-integration"]["environment"]
     assert_that(environment).described_as("test-integration service").contains(switch)
+
+    # The hosted matrix is the other half of the lockstep: it runs the same
+    # modules on a toolless runner, so copying the switch onto the reusable
+    # would turn every absent wrapped tool into a collection failure there.
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job_text = yaml.safe_dump(test_ci["jobs"][job_name])
+        assert_that(job_text).described_as(job_name).does_not_contain(
+            TOOLS_IMAGE_ENV,
+        )
+
+
+def test_version_lag_env_matches_the_plugin_contract() -> None:
+    """The gate reads the same env var the plugins do (#1582).
+
+    ``tests/integration/_tools.py`` mirrors lintro's version-lag allowance so
+    an allow-listed lagging binary keeps collecting its module. The name is
+    spelled once per side; a rename in either would silently re-introduce the
+    skip the allowance exists to prevent.
+    """
+    from lintro.plugins.execution_preparation import _ALLOW_VERSION_LAG_ENV
+
+    assert_that(ALLOW_VERSION_LAG_ENV).is_equal_to(_ALLOW_VERSION_LAG_ENV)
 
 
 def test_test_ci_matrix_collects_the_integration_suite() -> None:

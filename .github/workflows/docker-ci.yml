@@ -1023,7 +1023,10 @@ jobs:
     # skip-list is '**/*.md', 'docs/**' and 'assets/**', so only the prose
     # inside those trees (a tests/**/*.md, say) is skippable, never the code
     # under them. tests/scripts/test_shell_scripts.py pins the code paths so
-    # the skip-list can never grow to swallow them.
+    # the skip-list can never grow to swallow them. One documented exception
+    # outranks path classification: a PR that release-bump-only.sh verifies as
+    # a pure version bump forces pipeline=false even though it touches
+    # pyproject.toml and uv.lock (#1362).
     needs: [changes, docker-build]
     if: >-
       !cancelled() &&

@@ -30,7 +30,16 @@ def find_markdownlint_cmd() -> list[str] | None:
     return None
 
 
-pytestmark = require_command("markdownlint-cli2", find_markdownlint_cmd())
+# ``pin``: lintro registers the tool as ``markdownlint`` (the executable is the
+# npm package ``markdownlint-cli2``). Without the pin, the floor lookup would
+# succeed but lintro's version parser rejects "markdownlint-cli2" as a tool
+# name, so parsing yields None and the floor is never applied — an old CLI
+# would run the module against a plugin that skipped the tool (#465).
+pytestmark = require_command(
+    "markdownlint-cli2",
+    find_markdownlint_cmd(),
+    pin="markdownlint",
+)
 
 
 def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
