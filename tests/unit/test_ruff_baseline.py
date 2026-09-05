@@ -6,14 +6,16 @@
 under the ``# --- structural baseline ---`` comment block.
 
 That list is a burn-down list, not a policy. It may only shrink: entries are
-deleted as the owning refactor issues (#2311, #2313, #1972, #1995) land. This
-test fails if a pull request adds one, so growth is a deliberate, visible
-decision rather than a silent config edit.
+deleted as the owning refactor issues (#2311, #2313, #1972, #1995) land. The
+``BASELINE`` mapping below mirrors the config exactly, and ``BASELINE_MAX_*``
+records how large it was allowed to be, so neither a new suppression nor the
+return of a retired one can pass unnoticed.
 """
 
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -150,8 +152,12 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "tools/ascii_resizer/cli.py": ("PLR0913",),
 }
 
-#: Number of baselined files. Ratchet: this constant may only go *down*.
-BASELINE_ENTRIES: int = len(BASELINE)
+#: Ceilings on ``BASELINE`` itself, recorded when the families were switched on
+#: and deliberately *not* derived from ``BASELINE``. Without them a pull request
+#: could edit the mapping and ``pyproject.toml`` together and reintroduce a
+#: suppression that a previous ratchet step removed. Both may only go *down*.
+BASELINE_MAX_FILES: int = 100
+BASELINE_MAX_SUPPRESSIONS: int = 200
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->
@@ -190,6 +196,23 @@ def _structural_baseline_entries() -> dict[str, list[str]]:
     }
 
 
+def _pairs(entries: Mapping[str, Sequence[str]]) -> set[tuple[str, str]]:
+    """Flatten a pattern-to-codes mapping into structural ``(path, code)`` pairs.
+
+    Args:
+        entries: Mapping of file pattern to the rule codes ignored for it.
+
+    Returns:
+        set[tuple[str, str]]: One pair per structural suppression.
+    """
+    return {
+        (pattern, code)
+        for pattern, codes in entries.items()
+        for code in codes
+        if code in STRUCTURAL_CODES
+    }
+
+
 def test_structural_families_are_selected() -> None:
     """The structural rule families stay enabled in the ruff selection."""
     select = _load_ruff_lint_config()["select"]
@@ -215,28 +238,33 @@ def test_structural_thresholds_are_not_raised() -> None:
     )
 
 
-def test_structural_baseline_may_only_shrink() -> None:
-    """No structural suppression appears that ``BASELINE`` does not record."""
-    added = sorted(
-        f"{pattern}:{code}"
-        for pattern, codes in _structural_baseline_entries().items()
-        for code in codes
-        if code not in BASELINE.get(pattern, ())
-    )
+def test_structural_baseline_matches_pyproject_exactly() -> None:
+    """``BASELINE`` and the config agree on every ``(path, code)`` suppression."""
+    configured = _pairs(_structural_baseline_entries())
+    frozen = _pairs(BASELINE)
 
-    assert_that(added).described_as(
+    assert_that(
+        sorted(f"{pattern}:{code}" for pattern, code in configured - frozen),
+    ).described_as(
         "structural baseline may only shrink: delete per-file-ignores entries "
         "for C901/PLR0912/PLR0913/PLR0915, never add them",
     ).is_empty()
+    assert_that(
+        sorted(f"{pattern}:{code}" for pattern, code in frozen - configured),
+    ).described_as(
+        "prune BASELINE in step with pyproject.toml: a suppression left here "
+        "after the config drops it can be reintroduced unnoticed",
+    ).is_empty()
 
 
-def test_baseline_constant_matches_the_recorded_count() -> None:
-    """``BASELINE`` is pruned in step with ``pyproject.toml``, never left stale."""
-    entries = _structural_baseline_entries()
-
-    assert_that(len(entries)).described_as(
-        "delete the matching BASELINE entries when a file leaves the baseline",
-    ).is_equal_to(BASELINE_ENTRIES)
+def test_structural_baseline_may_only_shrink() -> None:
+    """``BASELINE`` itself never grows past the sizes recorded for the ratchet."""
+    assert_that(len(BASELINE)).described_as(
+        "BASELINE_MAX_FILES may only be lowered, never raised",
+    ).is_less_than_or_equal_to(BASELINE_MAX_FILES)
+    assert_that(len(_pairs(BASELINE))).described_as(
+        "BASELINE_MAX_SUPPRESSIONS may only be lowered, never raised",
+    ).is_less_than_or_equal_to(BASELINE_MAX_SUPPRESSIONS)
 
 
 def test_baseline_entries_reference_existing_files() -> None:
