@@ -972,3 +972,14 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+
+[tool.coverage.run]
+source = ["lintro", "lintro_build"]
+branch = true
+omit = ["lintro/ascii-art/*", "*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 81
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]

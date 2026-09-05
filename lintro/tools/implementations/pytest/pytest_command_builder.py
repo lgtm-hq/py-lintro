@@ -12,6 +12,9 @@ from loguru import logger
 from lintro.tools.implementations.pytest.collection import (
     get_parallel_workers_from_preset,
 )
+from lintro.tools.implementations.pytest.coverage_source import (
+    resolve_coverage_sources,
+)
 from lintro.tools.implementations.pytest.markers import check_plugin_installed
 
 if TYPE_CHECKING:
@@ -165,9 +168,14 @@ def add_coverage_options(cmd: list[str], options: dict[str, Any]) -> None:
         or coverage_threshold is not None
     )
     if needs_coverage:
-        # Add --cov flag to enable coverage collection
-        # Default to current directory, but can be overridden
-        cmd.append("--cov=.")
+        # Pass the project's configured coverage sources explicitly, so the
+        # percentage covers the project's own code rather than tests/ and
+        # scripts/. A bare --cov would express the same intent, but pytest-cov
+        # declares it with nargs="?" and would swallow the following test path
+        # as its source, so every source is spelled out as --cov=<source>.
+        # Projects that declare no source keep the historical --cov=.
+        sources = resolve_coverage_sources() or ["."]
+        cmd.extend(f"--cov={source}" for source in sources)
 
     # Add coverage HTML report
     if coverage_html:
