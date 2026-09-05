@@ -959,6 +959,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "docker",
         "docker-compose.yml",
         "Dockerfile",
+        "evals",  # offline review-efficacy harness (#2147): linted Python
         "justfile",
         "LICENSE",
         "lintro",

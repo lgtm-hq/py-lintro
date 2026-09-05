@@ -1,0 +1,62 @@
+"""Model for one persisted ``lintro review`` invocation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.models.review_finding import ReviewFinding
+from review_matrix.enums.run_status import RunStatus
+
+__all__ = ["EvalRun"]
+
+
+@dataclass(frozen=True, slots=True)
+class EvalRun:
+    """One repeated review of one corpus item under one matrix config.
+
+    Attributes:
+        config_id: Matrix config that produced the run.
+        item_id: Corpus item that was reviewed.
+        repeat: 1-based repeat index within the (config, item) cell.
+        status: Whether the run produced comparable findings.
+        verdict: Verdict derived in code from the run's findings via
+            :func:`lintro.ai.review.finding_matcher.derive_verdict`, never the
+            label the model wrote. ``None`` when the run produced no findings
+            payload at all.
+        findings: Findings reported by the run, in payload order.
+        elapsed_seconds: Wall-clock duration of the invocation. Along with
+            ``cost_usd``, this varies between otherwise identical runs.
+        cost_usd: ``metadata.cost_estimate_usd`` from the review payload, or
+            ``None`` when the payload carried no readable cost. ``None`` is
+            not ``0.0``: an unreadable cost is unknown spend, and summing it
+            as zero would understate what the matrix actually cost. Like
+            ``elapsed_seconds``, it is not reproducible run to run: token
+            usage differs between identical invocations.
+        exit_code: Process exit code, or ``-1`` when the invocation never ran.
+        error: Diagnostic for a failed or unparseable run; empty when ``OK``.
+        error_kind: The error envelope's ``kind`` when the run failed with one
+            (see :mod:`lintro.ai.review.error_contract`), so the journal can
+            be filtered by failure class without parsing ``error``. ``None``
+            for every other outcome.
+        output_path: Path of the persisted raw payload, relative to the run
+            directory.
+    """
+
+    config_id: str
+    item_id: str
+    repeat: int
+    status: RunStatus
+    verdict: ReviewVerdict | None = None
+    findings: tuple[ReviewFinding, ...] = field(default_factory=tuple)
+    elapsed_seconds: float = 0.0
+    cost_usd: float | None = None
+    exit_code: int = -1
+    error: str = ""
+    error_kind: str | None = None
+    output_path: str = ""
+
+    @property
+    def is_comparable(self) -> bool:
+        """Return True when the run can take part in a metric."""
+        return self.status is RunStatus.OK and self.verdict is not None

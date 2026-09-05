@@ -1095,6 +1095,16 @@ ai:
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
 options and pricing.
 
+#### Measuring a provider choice
+
+Provider and model choice changes what a review finds. The offline eval in
+[`evals/review-efficacy/`](https://github.com/lgtm-hq/py-lintro/tree/main/evals/review-efficacy)
+runs the same corpus through every `(provider, model, transport)` config N times and
+reports each config's run-to-run noise floor, the cross-config finding and verdict
+agreement, and precision/recall against labeled findings. It is not part of the test
+suite and it spends real inference money behind a confirmation flag. The directory is
+pruned from the published distributions, so running it needs a repository checkout.
+
 ## Transports
 
 Lintro reaches a provider one of two ways, selected by `ai.transport`:

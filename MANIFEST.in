@@ -39,3 +39,9 @@ recursive-include test_samples *.rs
 recursive-include test_samples *.lock
 recursive-include test_samples *.ini
 recursive-include test_samples Dockerfile.*
+
+# The offline eval harness (#2147) is repo-only tooling: it drives the
+# installed CLI as a subprocess and must never ship in the wheel or sdist.
+# The wheel already excludes it because [tool.setuptools].packages is an
+# explicit list; this prunes it from the sdist too.
+prune evals
