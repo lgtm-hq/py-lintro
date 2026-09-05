@@ -69,7 +69,7 @@ def _enforced_minimums() -> dict[str, str]:
         from lintro.tools.core.version_checking import get_minimum_versions
 
         return dict(get_minimum_versions())
-    except Exception as exc:  # noqa: BLE001 - must not break collection
+    except Exception as exc:
         # Fail open: with no floors every module keeps its absent-vs-present
         # gate, which is the behaviour that matters inside the tools image.
         # Warn rather than fail silently — losing the floors quietly is the
@@ -342,7 +342,7 @@ def parse_version(output: str, *, tool: str = "") -> Version | None:
 
         raw = extract_version_from_output(output, tool or "unknown")
         return parse_version_string(raw) if raw else None
-    except Exception:  # noqa: BLE001 - an unknown tool name must not break collection
+    except Exception:
         return None
 
 
