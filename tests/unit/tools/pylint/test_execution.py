@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
 from unittest.mock import patch
@@ -184,39 +185,50 @@ def test_check_usage_error_is_a_failure_not_a_pass(
 
 
 @pytest.mark.parametrize(
-    ("returncode", "stdout"),
+    ("returncode", "stdout", "stderr"),
     [
-        (0, ""),
-        (32, "No files to lint: exiting."),
+        (0, "", ""),
+        (32, "No files to lint: exiting.", ""),
+        (32, "", "No files to lint: exiting."),
     ],
-    ids=["empty-clean-exit", "nothing-left-to-lint"],
+    ids=[
+        "empty-clean-exit",
+        "nothing-left-to-lint-stdout",
+        "nothing-left-to-lint-stderr",
+    ],
 )
 def test_check_non_report_output_is_clean(
     pylint_plugin: PylintPlugin,
     configured_project: Path,
     returncode: int,
     stdout: str,
+    stderr: str,
 ) -> None:
     """Informational, non-JSON output is a clean pass, not a parse failure.
 
     pylint prints "No files to lint: exiting." — and exits 32, its usage-error
-    status — when the effective configuration leaves nothing enabled, which is
-    exactly what ``pylint:disable=`` on the only enabled check produces. The
+    status — when nothing is left to analyse after its own ignore filters. The
     sentence therefore has to be recognised *before* the exit code, or a
-    legitimate configuration is reported as a broken run.
+    legitimate run is reported as broken. Which stream carries the message is
+    a pylint implementation detail, so both are pinned here.
 
     Args:
         pylint_plugin: Plugin under test.
         configured_project: Project root carrying pylint configuration.
         returncode: Exit status accompanying the output.
         stdout: Non-report stdout pylint can emit.
+        stderr: Non-report stderr pylint can emit.
     """
     with (
         patch(_VERSION_PATCH, return_value=None),
         patch.object(
             pylint_plugin,
             _RUN,
-            return_value=make_result(returncode=returncode, stdout=stdout),
+            return_value=make_result(
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+            ),
         ),
     ):
         result = pylint_plugin.check([str(configured_project)], {})
@@ -224,6 +236,55 @@ def test_check_non_report_output_is_clean(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_none()
+
+
+def test_check_report_quoting_the_nothing_to_lint_phrase_is_parsed(
+    pylint_plugin: PylintPlugin,
+    configured_project: Path,
+) -> None:
+    """A report is parsed even when a message body quotes pylint's usage text.
+
+    ``R0801`` bodies quote the duplicated source verbatim, so a clone set
+    covering code that mentions "No files to lint" would otherwise match the
+    nothing-to-lint sentinel and be reported as a clean pass — this plugin's
+    own module is such a file.
+
+    Args:
+        pylint_plugin: Plugin under test.
+        configured_project: Project root carrying pylint configuration.
+    """
+    report = json.dumps(
+        {
+            "messages": [
+                {
+                    "type": "refactor",
+                    "symbol": "duplicate-code",
+                    "message": (
+                        "Similar lines in 2 files\n"
+                        '    PYLINT_NOTHING_TO_LINT = "No files to lint"'
+                    ),
+                    "messageId": "R0801",
+                    "line": 1,
+                    "column": 0,
+                    "path": "second.py",
+                },
+            ],
+            "statistics": {"score": 9.5},
+        },
+    )
+
+    with (
+        patch(_VERSION_PATCH, return_value=None),
+        patch.object(
+            pylint_plugin,
+            _RUN,
+            return_value=make_result(returncode=8, stdout=report),
+        ),
+    ):
+        result = pylint_plugin.check([str(configured_project)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
 
 
 def test_check_unparseable_output_is_a_parse_failure(
@@ -301,6 +362,10 @@ def test_check_no_python_files_skips_early(
 
     assert_that(run.called).is_false()
     assert_that(result.issues_count).is_equal_to(0)
+    # ToolResult.success defaults to False, so this has to be asserted: a
+    # path with nothing to lint is a pass, not a skip and not a failure.
+    assert_that(result.success).is_true()
+    assert_that(result.skipped).is_false()
 
 
 def test_find_config_prefers_pylintrc_over_pyproject(tmp_path: Path) -> None:
@@ -344,7 +409,9 @@ def test_find_config_walks_up_from_a_file(tmp_path: Path) -> None:
     ("filename", "contents"),
     [
         ("pylintrc.toml", '[tool.pylint.main]\ndisable = ["all"]\n'),
+        (".pylintrc", "[MAIN]\ndisable=all\n"),
         (".pylintrc.toml", '[tool.pylint.main]\ndisable = ["all"]\n'),
+        ("setup.cfg", "[pylint.main]\ndisable=all\n"),
         ("tox.ini", "[pylint.main]\ndisable=all\n"),
     ],
 )

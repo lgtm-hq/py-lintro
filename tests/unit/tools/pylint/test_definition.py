@@ -112,7 +112,7 @@ def test_build_check_command_without_a_config_omits_rcfile(
 def test_build_check_command_maps_disable_and_enable_options(
     pylint_plugin: PylintPlugin,
 ) -> None:
-    """``pylint:disable=`` / ``pylint:enable=`` become ``--disable`` / ``--enable``.
+    """``pylint:disable=`` / ``pylint:enable=`` become ``--disable=`` / ``--enable=``.
 
     Args:
         pylint_plugin: Plugin under test.
@@ -127,6 +127,29 @@ def test_build_check_command_maps_disable_and_enable_options(
     assert_that(cmd).contains("--enable=duplicate-code")
     # The file list stays last so the options apply to it.
     assert_that(cmd[-1]).is_equal_to("a.py")
+
+
+def test_build_check_command_joins_piped_message_lists(
+    pylint_plugin: PylintPlugin,
+) -> None:
+    """A pipe-separated ``--tool-options`` list becomes pylint's comma list.
+
+    ``--tool-options`` splits its own entries on commas, so several message
+    ids are written ``pylint:disable=C0114|R0801`` and arrive as a list.
+    Interpolating that list directly would hand pylint a Python repr.
+
+    Args:
+        pylint_plugin: Plugin under test.
+    """
+    pylint_plugin.set_options(
+        disable=["all", "C0114"],
+        enable=["duplicate-code", "R0801"],
+    )
+
+    cmd = pylint_plugin._build_check_command(files=["a.py"], config_path=None)
+
+    assert_that(cmd).contains("--disable=all,C0114")
+    assert_that(cmd).contains("--enable=duplicate-code,R0801")
 
 
 def test_set_options_ignores_unset_values(pylint_plugin: PylintPlugin) -> None:

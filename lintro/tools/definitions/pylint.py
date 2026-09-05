@@ -66,9 +66,10 @@ _TOML_CONFIGS: frozenset[str] = frozenset(
 )
 
 #: Informational line pylint prints — with a *usage-error* exit status — when
-#: the effective configuration leaves it nothing to check, which is what
-#: ``--disable`` on the only enabled message produces. It is not a report and
-#: not a failure.
+#: no files remain to check after its own ignore filters have run, i.e. it was
+#: handed nothing to analyse. It is not a report and not a failure. The phrase
+#: is only meaningful outside a json2 report: an ``R0801`` body quotes the
+#: duplicated source, so a report can legitimately contain it.
 PYLINT_NOTHING_TO_LINT: str = "No files to lint"
 
 #: INI section prefix marking pylint configuration in a ``setup.cfg`` or
@@ -141,6 +142,30 @@ def _declares_pylint(config_path: Path) -> bool:
     return _ini_declares_pylint(config_path=config_path)
 
 
+def _format_message_list(value: object) -> str | None:
+    """Render a ``--disable``/``--enable`` option value for pylint's CLI.
+
+    ``--tool-options`` splits its own entries on commas, so a multi-value
+    option is written pipe-separated (``pylint:disable=all|R0801``) and reaches
+    the plugin as a list. pylint's own flags take a comma-separated list, so
+    the parts are rejoined with commas; stringifying the list directly would
+    hand pylint a Python repr.
+
+    Args:
+        value: Raw option value: a string, a list of strings, or None.
+
+    Returns:
+        The comma-separated value for the flag, or None when nothing is set.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        parts = [str(part).strip() for part in value if str(part).strip()]
+        return ",".join(parts) or None
+    text = str(value).strip()
+    return text or None
+
+
 def find_pylint_config(paths: list[str]) -> Path | None:
     """Locate the pylint configuration governing the given paths.
 
@@ -209,17 +234,19 @@ class PylintPlugin(BaseToolPlugin):
 
     def set_options(
         self,
-        disable: str | None = None,
-        enable: str | None = None,
+        disable: str | list[str] | None = None,
+        enable: str | list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Set pylint-specific options.
 
         Args:
-            disable: Comma-separated messages/categories to disable, forwarded
-                to ``--disable``.
-            enable: Comma-separated messages/categories to enable, forwarded
-                to ``--enable``.
+            disable: Messages/categories to disable, forwarded to
+                ``--disable=``. A pipe-separated ``--tool-options`` value
+                arrives here as a list.
+            enable: Messages/categories to enable, forwarded to ``--enable=``.
+                A pipe-separated ``--tool-options`` value arrives here as a
+                list.
             **kwargs: Other tool options (e.g. ``timeout``).
         """
         options: dict[str, Any] = {"disable": disable, "enable": enable}
@@ -249,11 +276,11 @@ class PylintPlugin(BaseToolPlugin):
         # The ``--flag=value`` form is required, not cosmetic: pylint's
         # disable/enable actions treat a space-separated value as a usage
         # error (exit 32) instead of a message list.
-        disable = self.options.get("disable")
+        disable = _format_message_list(self.options.get("disable"))
         if disable:
             cmd.append(f"--disable={disable}")
 
-        enable = self.options.get("enable")
+        enable = _format_message_list(self.options.get("enable"))
         if enable:
             cmd.append(f"--enable={enable}")
 
@@ -322,22 +349,23 @@ class PylintPlugin(BaseToolPlugin):
         if stderr:
             logger.debug(f"[pylint] stderr: {stderr[:500]}")
 
-        if PYLINT_NOTHING_TO_LINT in stdout or PYLINT_NOTHING_TO_LINT in stderr:
-            # pylint exits 32 here even though nothing went wrong, so this has
-            # to be recognised before the exit code is consulted.
-            logger.debug("[pylint] Nothing left to lint; treating as a clean pass")
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output=None,
-                issues_count=0,
-            )
-
         if not stdout.startswith("{"):
             # pylint prints usage errors (a bad rcfile, an unknown message id)
             # to stderr with no report at all. A report is always JSON, so
             # non-JSON plus a non-zero exit is an execution failure, while
             # non-JSON with a zero exit is informational and clean.
+            if PYLINT_NOTHING_TO_LINT in stdout or PYLINT_NOTHING_TO_LINT in stderr:
+                # pylint exits 32 here even though nothing went wrong, so this
+                # has to be recognised before the exit code is consulted. The
+                # check is confined to the no-report branch: a json2 report
+                # can carry the same phrase inside an ``R0801`` body.
+                logger.debug("[pylint] Nothing left to lint; treating as a clean pass")
+                return ToolResult(
+                    name=self.definition.name,
+                    success=True,
+                    output=None,
+                    issues_count=0,
+                )
             if result.returncode != 0:
                 return ToolResult(
                     name=self.definition.name,

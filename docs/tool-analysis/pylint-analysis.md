@@ -73,10 +73,12 @@ A clean run exits 0; anything reported sets the matching bits (a run reporting o
 - **Exit status is not trusted on its own.** pylint's exit code is a bit field, so any
   non-zero status with a parseable JSON report is treated as "issues found". Only a
   non-zero exit with _no_ report — a usage error such as a missing rcfile (exit 32) — is
-  an execution failure. The one exception is `No files to lint: exiting.`, which pylint
-  prints with that same exit 32 when the effective configuration leaves nothing enabled;
-  that is a clean pass. Output that is present but unreadable — invalid JSON, or JSON
-  with no `messages` array — is reported as a parse failure, never as a clean pass.
+  an execution failure. The one exception is `No files to lint: exiting.`, pylint's
+  usage message when nothing is left to analyse after its own ignore filters have run;
+  it carries that same exit 32 and is a clean pass. The phrase is only honoured outside
+  a json2 report, because an `R0801` body quotes the duplicated source and can contain
+  it. Output that is present but unreadable — invalid JSON, or JSON with no `messages`
+  array — is reported as a parse failure, never as a clean pass.
 
 ### Issue mapping
 
@@ -126,7 +128,9 @@ behaviour, not a Lintro choice.
 pylint is fully native-config driven — see
 [configuration.md](../configuration.md#pylint) for the option syntax. Lintro injects
 nothing into the check set; `--tool-options pylint:disable=` / `pylint:enable=` are
-forwarded straight to `--disable` / `--enable`.
+forwarded straight to `--disable=` / `--enable=` (the glued form is load-bearing; pylint
+exits 32 on a space-separated value). Multiple values are written pipe-separated in
+`--tool-options` and rejoined with commas for pylint.
 
 ## Recommendations
 

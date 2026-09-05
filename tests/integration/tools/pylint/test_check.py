@@ -112,4 +112,8 @@ def test_check_skips_a_path_with_no_python_files(
     plugin = get_plugin("pylint")
     result = plugin.check([str(tmp_path)], {})
 
+    # ToolResult.success defaults to False: a path with nothing to lint has to
+    # be an explicit pass, not a skip and not a failure.
+    assert_that(result.success).is_true()
+    assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_equal_to(0)

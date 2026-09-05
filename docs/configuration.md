@@ -1531,8 +1531,10 @@ other bundled tool provides.
 
 **Install:** `uv pip install 'lintro[full]'` or `uv pip install pylint`
 
-**File:** `pyproject.toml` (also reads `pylintrc`, `pylintrc.toml`, `.pylintrc`,
-`.pylintrc.toml`, `setup.cfg` and `tox.ini`, in that precedence order)
+**File:** pylint reads the first of these that declares pylint configuration, in this
+precedence order: `pylintrc`, `pylintrc.toml`, `.pylintrc`, `.pylintrc.toml`,
+`pyproject.toml`, `setup.cfg`, `tox.ini`. Lintro discovers the same file and passes it
+as `--rcfile`.
 
 ```toml
 [tool.pylint.main]
@@ -1564,8 +1566,11 @@ ignore-imports = true
 
 **Available `--tool-options`:**
 
-- `disable`: Comma-separated messages or categories, forwarded to `--disable`
-- `enable`: Comma-separated messages or categories, forwarded to `--enable`
+- `disable`: Message or category to disable, forwarded to `--disable=`. Commas separate
+  `--tool-options` entries, so several values are written pipe-separated
+  (`pylint:disable=C0114|R0801`)
+- `enable`: Message or category to enable, forwarded to `--enable=`. Several values are
+  written pipe-separated (`pylint:enable=duplicate-code|C0114`)
 - `timeout`: Seconds to allow the run (default: 900; a whole-repo pylint run is slow)
 
 **Usage:**
@@ -1574,6 +1579,8 @@ ignore-imports = true
 lintro check .
 lintro check . --tools pylint
 lintro check . --tools pylint --tool-options "pylint:disable=all,pylint:enable=duplicate-code"
+# Several message ids in one option: pipe-separated, because commas split entries
+lintro check . --tools pylint --tool-options "pylint:enable=duplicate-code|C0114"
 ```
 
 Every message id and symbol is documented upstream at
