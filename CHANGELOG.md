@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.144.0] - 2026-09-05
+
+### Added
+
+- **ai**: add a numeric convergence score as a deterministic re-review stop signal
+  (#2263) (1fd2356)
+
 ## [0.143.0] - 2026-09-04
 
 ### Added
