@@ -620,13 +620,17 @@ def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None
 
     Only ``check`` runs record a baseline: ``fmt`` and ``test`` measure
     something else, and letting them overwrite the baseline would make the
-    next check's delta compare two different populations.
+    next check's delta compare two different populations. A run that produced
+    no results at all (every tool skipped, nothing matched) is excluded for
+    the same reason: its zero counts are "nothing ran", not "nothing found",
+    and recording them would make the next real run report every existing
+    issue as newly introduced.
 
     Args:
         artifact: The completed run artifact.
         ctx: Shared run context; supplies the run-log directory.
     """
-    if artifact.action != Action.CHECK:
+    if artifact.action != Action.CHECK or not artifact.tool_results:
         return
 
     from lintro.utils.severity_baseline import (

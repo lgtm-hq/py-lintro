@@ -62,9 +62,10 @@ class SeverityCounts:
     def from_dict(cls, data: dict[str, Any]) -> SeverityCounts:
         """Rebuild counts from a :meth:`to_dict` payload.
 
-        Unknown keys are ignored and missing or non-integer values fall back
-        to zero, so a hand-edited or older baseline file degrades to "no
-        issues recorded" instead of raising.
+        Unknown keys are ignored, and missing, non-integer or negative values
+        fall back to zero, so a hand-edited or older baseline file degrades to
+        "no issues recorded" instead of raising or producing a delta against a
+        count that cannot exist.
 
         Args:
             data: Mapping produced by :meth:`to_dict`.
@@ -75,9 +76,9 @@ class SeverityCounts:
 
         def _read(key: str) -> int:
             value = data.get(key)
-            return (
-                value if isinstance(value, int) and not isinstance(value, bool) else 0
-            )
+            if not isinstance(value, int) or isinstance(value, bool):
+                return 0
+            return max(0, value)
 
         return cls(
             errors=_read("error"),

@@ -27,7 +27,10 @@ from lintro.tools import tool_manager
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_renderer import render_run
 from lintro.utils.execution.tool_configuration import SkippedTool, ToolsToRunResult
-from lintro.utils.severity_baseline import read_severity_baseline
+from lintro.utils.severity_baseline import (
+    read_severity_baseline,
+    write_severity_baseline,
+)
 from lintro.utils.severity_counts import count_severities
 from lintro.utils.tool_executor import execute_run
 
@@ -622,8 +625,13 @@ def test_render_run_prints_no_delta_without_a_baseline(
             "Change since last run: no change",
             "cyan",
         ),
+        (
+            SeverityCounts(errors=2, warnings=6, info=1),
+            "Change since last run: -6 warnings, -1 info",
+            "green",
+        ),
     ],
-    ids=["improved", "regressed", "unchanged"],
+    ids=["improved", "regressed", "unchanged", "non-error-severities"],
 )
 def test_render_run_colors_the_delta_by_direction_of_improvement(
     tmp_path: Path,
@@ -675,6 +683,30 @@ def test_render_run_records_the_baseline_for_the_next_run(
 
     assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
         SeverityCounts(errors=2, info=1),
+    )
+
+
+def test_render_run_does_not_record_a_baseline_for_an_empty_run(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """A run where nothing executed must not overwrite a real baseline.
+
+    Its zero counts mean "nothing ran", not "nothing found"; recording them
+    would make the next real check report every existing issue as newly
+    introduced.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    write_severity_baseline(ctx.output_manager.base_dir, SeverityCounts(errors=9))
+
+    render_run(RunArtifact(action=Action.CHECK), ctx=ctx, output_format="grid")
+
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
+        SeverityCounts(errors=9),
     )
 
 

@@ -120,8 +120,9 @@ def test_counts_to_dict_includes_the_total() -> None:
         {"error": "many"},
         {"error": True},
         {"unrelated": 5},
+        {"error": -3, "warning": -1},
     ],
-    ids=["empty", "non-int", "bool", "unknown-key"],
+    ids=["empty", "non-int", "bool", "unknown-key", "negative"],
 )
 def test_counts_from_dict_degrades_to_zero(data: dict[str, object]) -> None:
     """A malformed baseline payload reads as "nothing recorded".

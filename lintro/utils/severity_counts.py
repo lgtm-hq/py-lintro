@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COLOR_BETTER",
+    "COLOR_NON_ERROR",
     "COLOR_UNCHANGED",
     "COLOR_WORSE",
     "count_severities",
@@ -34,6 +35,8 @@ __all__ = [
 COLOR_BETTER: str = "green"
 COLOR_WORSE: str = "red"
 COLOR_UNCHANGED: str = "cyan"
+#: Issues remain, but none of them is an error.
+COLOR_NON_ERROR: str = "yellow"
 
 
 def count_severities(tool_results: Sequence[object]) -> SeverityCounts:
@@ -114,7 +117,7 @@ def counts_color(counts: SeverityCounts) -> str:
     if counts.errors:
         return COLOR_WORSE
     if counts.total:
-        return "yellow"
+        return COLOR_NON_ERROR
     return COLOR_BETTER
 
 

@@ -40,6 +40,7 @@ def test_artifact_carries_every_field_of_a_real_run(tmp_path: Path) -> None:
         action=Action.CHECK,
         workspace_root=tmp_path,
         severity_counts=SeverityCounts(errors=2, warnings=1),
+        previous_severity_counts=SeverityCounts(errors=5),
         total_issues=3,
         total_fixed=0,
         total_remaining=3,
@@ -51,6 +52,7 @@ def test_artifact_carries_every_field_of_a_real_run(tmp_path: Path) -> None:
     assert_that(artifact.action).is_equal_to(Action.CHECK)
     assert_that(artifact.workspace_root).is_equal_to(tmp_path)
     assert_that(artifact.severity_counts.total).is_equal_to(3)
+    assert_that(artifact.previous_severity_counts).is_equal_to(SeverityCounts(errors=5))
     assert_that(artifact.total_issues).is_equal_to(3)
     assert_that(artifact.total_remaining).is_equal_to(3)
     assert_that(artifact.exit_code).is_equal_to(1)

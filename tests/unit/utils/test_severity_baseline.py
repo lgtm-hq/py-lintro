@@ -5,14 +5,28 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.models.core.severity_counts import SeverityCounts
 from lintro.utils.severity_baseline import (
     SEVERITY_BASELINE_FILENAME,
     read_severity_baseline,
+    resolve_log_root,
     write_severity_baseline,
 )
+
+
+class _Manager:
+    """Output-manager double exposing one ``base_dir`` value."""
+
+    def __init__(self, base_dir: object) -> None:
+        """Store the value this double reports as its log root.
+
+        Args:
+            base_dir: Whatever the double should expose as ``base_dir``.
+        """
+        self.base_dir = base_dir
 
 
 def test_baseline_round_trips(tmp_path: Path) -> None:
@@ -103,3 +117,42 @@ def test_write_failure_is_swallowed(tmp_path: Path) -> None:
     write_severity_baseline(blocker, SeverityCounts(errors=1))
 
     assert_that(read_severity_baseline(blocker)).is_none()
+
+
+def test_resolve_log_root_accepts_a_path(tmp_path: Path) -> None:
+    """A real path is returned unchanged.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    assert_that(resolve_log_root(_Manager(tmp_path))).is_equal_to(tmp_path)
+
+
+def test_resolve_log_root_accepts_a_string(tmp_path: Path) -> None:
+    """A string log root is normalised to a ``Path``.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    assert_that(resolve_log_root(_Manager(str(tmp_path)))).is_equal_to(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "base_dir",
+    [None, object(), 42],
+    ids=["none", "not-a-path", "int"],
+)
+def test_resolve_log_root_rejects_anything_else(base_dir: object) -> None:
+    """A manager double or half-built manager yields no log root.
+
+    The baseline is then skipped rather than raising mid-run.
+
+    Args:
+        base_dir: Value the output-manager double exposes.
+    """
+    assert_that(resolve_log_root(_Manager(base_dir))).is_none()
+
+
+def test_resolve_log_root_handles_a_manager_without_base_dir() -> None:
+    """An object with no ``base_dir`` at all is handled, not probed blindly."""
+    assert_that(resolve_log_root(object())).is_none()
