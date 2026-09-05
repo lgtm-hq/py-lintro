@@ -189,11 +189,9 @@ jobs:
               # are covered by '**/.*' below).
               - '**/ruff.toml'
               - '**/setup.cfg'
-              - '**/tox.ini'
               - '**/pytest.ini'
               - '**/Dockerfile*'
               - 'pytest.ini'
-              - 'tox.ini'
               - '.node-version'
               # Dotfiles are tool config by convention — root and nested
               # (e.g. .lintro-config.yaml, .yamllint, .prettierrc.json,

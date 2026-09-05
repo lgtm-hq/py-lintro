@@ -1159,7 +1159,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "test_samples",
         "tests",
         "tools",
-        "tox.ini",
         "uv.lock",
     },
 )

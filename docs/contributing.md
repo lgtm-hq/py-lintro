@@ -85,6 +85,10 @@ commits before merge.
    uv sync --dev
    ```
 
+   `[dependency-groups] dev` in `pyproject.toml` is the project's only dev dependency
+   list; there is no `dev` or `test` extra. Add `--extra full` to also install the
+   Python-based wrapped tools (ruff, black, mypy, bandit, pydoclint, yamllint).
+
 3. Run tests:
 
    ```bash

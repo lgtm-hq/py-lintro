@@ -46,7 +46,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
     with:
       publish-test-summary: false
-      python-versions: '3.11,3.14'
+      python-versions: '3.11,3.12,3.13,3.14'
       test-path: tests
       extras: 'full'
       # No pytest extras: the matrix collects tests/integration too (#465),
@@ -237,7 +237,6 @@ jobs:
         with:
           python-version: '3.14'
           install-dependencies: 'true'
-          install-extras: 'dev'
 
       - name: Download coverage artifact
         # yamllint disable-line rule:line-length
