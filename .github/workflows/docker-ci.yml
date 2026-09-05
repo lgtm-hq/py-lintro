@@ -262,10 +262,8 @@ jobs:
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     outputs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
-      # Republished so the reusable-workflow callers below can reach the
-      # workflow-level pin: `env` is not an available context in
-      # `jobs.<id>.with`, but it is in `jobs.<id>.outputs`.
-      fork-fallback-image: ${{ env.LINTRO_FORK_FALLBACK_IMAGE }}
+      # See the "Publish fork-fallback image pin" step below.
+      fork-fallback-image: ${{ steps.fork-fallback.outputs.image }}
     steps:
       - name: Harden Runner
         # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
@@ -315,6 +313,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
         run: scripts/ci/detect-fork-pr.sh
+      # Republishes the workflow-level pin as a job output so the
+      # reusable-workflow callers can reach it (`env` is not an available
+      # context in `jobs.<id>.with`). Written from a step rather than
+      # interpolated straight into `outputs:` so the value cannot be empty:
+      # an empty middle operand is falsy in the consumers' ternary and would
+      # silently select a ci- tag that fork runs never push.
+      - name: Publish fork-fallback image pin
+        id: fork-fallback
+        run: echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"
       - name: Free disk space (fork fallback)
         if: >-
           needs.changes.outputs.pipeline != 'false' &&
