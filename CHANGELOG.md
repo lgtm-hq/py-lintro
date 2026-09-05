@@ -21,6 +21,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.3] - 2026-09-05
+
+### Changed
+
+- **ci**: pin the fork-fallback image once and delete orphaned scripts (#2322) (16da987)
+- **ci**: delete the dead changes job from test-ci (#2320) (b539ee0)
+- **ci**: integration suite in the required gate; missing tool is a failure inside
+  Docker (#2326) (7d75401)
+- **ci**: drop fail-fast from CI test runs so a red run reports every failure (#2319)
+  (4f68973)
+
+### Fixed
+
+- **ci**: fail-closed required lint check when the lint job produces no verdict (#2324)
+  (9f4a1d6)
+
 ## [0.147.2] - 2026-09-05
 
 ### Changed
