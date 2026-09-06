@@ -282,9 +282,7 @@ max-statements = 50
 "lintro/tools/definitions/bandit.py" = ["C901", "PLR0912", "PLR0913"]
 "lintro/tools/definitions/buf.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/mypy.py" = ["C901", "PLR0912", "PLR0915"]
-"lintro/tools/definitions/oxfmt.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/definitions/oxlint.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
-"lintro/tools/definitions/prettier.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/oxlint.py" = ["PLR0913"]
 "lintro/tools/definitions/pytest.py" = ["C901", "PLR0912"]
 "lintro/tools/definitions/ruff.py" = ["PLR0913"]
 "lintro/tools/definitions/spectral.py" = ["PLR0912"]
@@ -417,7 +415,7 @@ exclude = [
 # reaches 0. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = ["lintro/tools/definitions"]
-duplicate_code_baseline = 17
+duplicate_code_baseline = 3
 
 [tool.lintro.ruff]
 
@@ -616,11 +614,12 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 142 edges owned by #2311
+  # 143 edges owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
   "lintro.tools -> lintro.plugins",                                                 # owned by #2311
+  "lintro.tools.core.batch_runner -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.check_runner -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.check_runner -> lintro.plugins.file_processor",                # owned by #2311
   "lintro.tools.core.command_builders -> lintro.plugins.subprocess_executor",       # owned by #2311

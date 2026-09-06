@@ -51,7 +51,7 @@ DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
 #: that removes duplication, never raise it. #2311 drives it to 0. The
 #: configured baseline is asserted to be ``<=`` this ceiling; no tool runs, so
 #: no environment can move it.
-MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 17
+MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 3
 
 #: pylint exit-status bit meaning "a fatal message was issued".
 PYLINT_FATAL_EXIT_BIT: int = 1

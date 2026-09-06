@@ -31,6 +31,7 @@ from lintro.parsers.golangci_lint.golangci_lint_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import batch_fix_timeout_result
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -367,25 +368,15 @@ class GolangciLintPlugin(BaseToolPlugin):
                 tool_name="golangci_lint",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
-                timeout=timeout,
-                cmd=check_cmd,
-                tool_name="golangci_lint",
-            )
             # The initial check never completed, so no issues were parsed.
             # Report zero remaining issues rather than inventing a phantom
             # finding that would corrupt multi-module fix totals.
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
+            return batch_fix_timeout_result(
+                plugin=self,
+                timeout=timeout,
+                initial_issues=[],
+                cmd=check_cmd,
+                tool_name="golangci_lint",
             )
 
         initial_issues = parse_golangci_lint_output(output=output_check)
@@ -417,23 +408,12 @@ class GolangciLintPlugin(BaseToolPlugin):
                 tool_name="golangci_lint",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=timeout,
+                initial_issues=initial_issues,
                 cmd=fix_cmd,
                 tool_name="golangci_lint",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         # Re-check after fix to count remaining issues.
@@ -446,23 +426,12 @@ class GolangciLintPlugin(BaseToolPlugin):
                 tool_name="golangci_lint",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=timeout,
+                initial_issues=initial_issues,
                 cmd=check_cmd,
                 tool_name="golangci_lint",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         remaining_issues = parse_golangci_lint_output(output=output_after)

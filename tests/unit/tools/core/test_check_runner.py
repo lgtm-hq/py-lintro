@@ -268,3 +268,28 @@ def test_a_parser_failure_fails_only_that_file(tmp_path: Path) -> None:
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).contains("malformed report")
+
+
+def test_default_policy_reports_findings_from_a_clean_exit(tmp_path: Path) -> None:
+    """A parsed finding fails the run even when the command exited zero.
+
+    The default policy leaves ``issues_imply_failure`` off, but the aggregated
+    ``ToolResult`` still fails: a file is only successful when nothing was
+    parsed out of it, so a tool that reports findings on exit 0 is not
+    silently reported as clean.
+
+    Args:
+        tmp_path: Temporary directory for the shell script.
+    """
+    script = tmp_path / "a.sh"
+    script.write_text("#!/bin/bash\necho $foo\n")
+    plugin = ShellcheckPlugin()
+    with patch.object(
+        plugin,
+        "_run_subprocess",
+        return_value=(True, SHELLCHECK_FINDING),
+    ):
+        result = plugin.check([str(script)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)

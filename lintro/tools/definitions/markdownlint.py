@@ -26,8 +26,8 @@ from lintro.parsers.markdownlint.markdownlint_parser import parse_markdownlint_o
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.option_validators import validate_positive_int
-from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.config import get_central_line_length
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
@@ -253,17 +253,10 @@ class MarkdownlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
                 cmd=cmd,
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
             )
         finally:
             # Clean up temp config file if created

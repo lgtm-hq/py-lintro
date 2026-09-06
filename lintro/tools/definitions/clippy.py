@@ -26,12 +26,18 @@ from lintro.parsers.clippy.clippy_parser import parse_clippy_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchOutput,
+    BatchSuccess,
+    batch_fix_timeout_result,
+    run_batch_check,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
 )
 from lintro.tools.core.timeout_utils import (
-    create_timeout_result,
     run_subprocess_with_timeout,
 )
 
@@ -224,43 +230,20 @@ class ClippyPlugin(BaseToolPlugin):
 
         cmd = _build_clippy_command(fix=False)
 
-        try:
-            success_cmd, output = run_subprocess_with_timeout(
-                tool=self,
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-                tool_name="clippy",
-            )
-        except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
-                timeout=ctx.timeout,
-                cmd=cmd,
-                tool_name="clippy",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
-            )
-
-        issues = parse_clippy_output(output=output)
-        issues_count = len(issues)
-
-        # Preserve output when command fails with no parsed issues for debugging
-        # When issues exist, they'll be displayed instead
-        should_show_output = not success_cmd and issues_count == 0
-
-        return ToolResult(
-            name=self.definition.name,
-            success=bool(success_cmd),
-            output=output if should_show_output else None,
-            issues_count=issues_count,
-            issues=issues,
+        # Clippy's exit status is the verdict; the raw output is only worth
+        # surfacing when the command failed with nothing parsed out of it,
+        # because that is a compilation or configuration error, not a lint.
+        return run_batch_check(
+            ctx,
+            plugin=self,
+            cmd=cmd,
+            parse=lambda output: parse_clippy_output(output=output),
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.EXIT_STATUS,
+                output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+            ),
+            cwd=str(cargo_root),
+            tool_name="clippy",
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -306,22 +289,12 @@ class ClippyPlugin(BaseToolPlugin):
                 tool_name="clippy",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=[],
                 cmd=check_cmd,
                 tool_name="clippy",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=1,
             )
 
         initial_issues = parse_clippy_output(output=output_check)
@@ -338,23 +311,12 @@ class ClippyPlugin(BaseToolPlugin):
                 tool_name="clippy",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=initial_issues,
                 cmd=fix_cmd,
                 tool_name="clippy",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         # Re-check after fix to count remaining issues
@@ -367,23 +329,12 @@ class ClippyPlugin(BaseToolPlugin):
                 tool_name="clippy",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=initial_issues,
                 cmd=check_cmd,
                 tool_name="clippy",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         remaining_issues = parse_clippy_output(output=output_after)
