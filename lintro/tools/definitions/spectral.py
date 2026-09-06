@@ -252,13 +252,13 @@ class SpectralPlugin(BaseToolPlugin):
         merged_options = dict(self.options)
         merged_options.update(options)
 
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to check.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Spectral accepts one ruleset per process. Group matched files by the
         # nearest ruleset discovered from each file so nested project configs

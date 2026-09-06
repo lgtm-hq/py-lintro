@@ -348,9 +348,9 @@ class DotenvLinterPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         result = self._process_files_with_progress(
             files=ctx.files,
@@ -377,13 +377,13 @@ class DotenvLinterPlugin(BaseToolPlugin):
         Returns:
             ToolResult with fix results.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths=paths,
             options=options,
             no_files_message="No files to fix.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         initial_issues_total = 0
         fixed_issues_total = 0

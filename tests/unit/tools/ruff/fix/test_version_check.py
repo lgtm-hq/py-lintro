@@ -17,7 +17,7 @@ def test_execute_ruff_fix_version_check_fails(
 ) -> None:
     """Return version error result when the prepared context reports a failure.
 
-    Version checking now happens inside the shared ``_prepare_execution``
+    Version checking now happens inside the shared ``prepare``
     pipeline, which surfaces the failure via ``early_result``.
 
     Args:
@@ -30,7 +30,7 @@ def test_execute_ruff_fix_version_check_fails(
         output="Ruff version too old",
         issues_count=0,
     )
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         early_result=version_error,
     )
 

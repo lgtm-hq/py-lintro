@@ -301,13 +301,13 @@ class PrettierPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to check.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         logger.debug(
             f"[PrettierPlugin] Discovered {len(ctx.files)} files matching patterns: "
@@ -419,13 +419,13 @@ class PrettierPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to format.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Get Lintro config injection args (--no-config, --config)
         config_args = self._build_config_args()

@@ -25,10 +25,10 @@ def make_ruff_execution_context(
     timeout: int = 30,
     should_skip: bool = False,
     early_result: ToolResult | None = None,
-) -> MagicMock:
-    """Build a mock ``ExecutionContext`` for ruff execution tests.
+) -> MagicMock | ToolResult:
+    """Build a mock preparation outcome for ruff execution tests.
 
-    Mirrors the shape returned by ``BaseToolPlugin._prepare_execution`` so
+    Mirrors the shape returned by ``BaseToolPlugin.prepare`` so
     ruff's ``execute_ruff_check``/``execute_ruff_fix`` helpers, which now route
     through that shared pipeline, can be exercised in isolation.
 
@@ -41,26 +41,30 @@ def make_ruff_execution_context(
         early_result: Result returned when ``should_skip`` is True.
 
     Returns:
-        MagicMock: Object exposing the ``ExecutionContext`` attributes used by
-        the ruff execution helpers.
+        MagicMock | ToolResult: ``early_result`` itself when preparation should
+        short-circuit — mirroring what ``BaseToolPlugin.prepare`` returns —
+        otherwise an object exposing the ``ExecutionContext`` attributes used
+        by the ruff execution helpers.
     """
+    if early_result is not None:
+        return early_result
     resolved_files = ["test.py"] if files is None else files
     ctx = MagicMock()
     ctx.files = resolved_files
     ctx.rel_files = resolved_files if rel_files is None else rel_files
     ctx.cwd = cwd
     ctx.timeout = timeout
-    ctx.should_skip = should_skip or (early_result is not None)
-    ctx.early_result = early_result
+    ctx.should_skip = should_skip
+    ctx.early_result = None
     return ctx
 
 
 @pytest.fixture
-def ruff_execution_context() -> Callable[..., MagicMock]:
-    """Provide a factory for mock ruff execution contexts.
+def ruff_execution_context() -> Callable[..., MagicMock | ToolResult]:
+    """Provide a factory for mock ruff preparation outcomes.
 
     Returns:
-        Callable[..., MagicMock]: Factory delegating to
+        Callable[..., MagicMock | ToolResult]: Factory delegating to
         :func:`make_ruff_execution_context`.
     """
     return make_ruff_execution_context
@@ -96,9 +100,9 @@ def mock_ruff_tool() -> MagicMock:
     tool._get_enforced_settings.return_value = {}
 
     # Ruff execution helpers now route through the shared
-    # BaseToolPlugin._prepare_execution pipeline. Provide a sensible default
+    # BaseToolPlugin.prepare pipeline. Provide a sensible default
     # context (one file, no skip) that individual tests can override.
-    tool._prepare_execution.return_value = make_ruff_execution_context()
+    tool.prepare.return_value = make_ruff_execution_context()
 
     return tool
 

@@ -177,9 +177,9 @@ class ValePlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cmd = self._build_command() + list(ctx.rel_files)
         logger.debug(f"[ValePlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")

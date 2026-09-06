@@ -10,6 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.vale.vale_issue import ValeIssue
 from lintro.tools.definitions.vale import ValePlugin
 from tests.test_samples_helpers import copy_sample
@@ -138,7 +139,12 @@ def test_check_returns_early_when_skipping(
     """
     from unittest.mock import MagicMock
 
-    early = MagicMock()
+    early = ToolResult(
+        name="vale",
+        success=True,
+        output="",
+        issues_count=0,
+    )
     ctx = MagicMock()
     ctx.should_skip = True
     ctx.early_result = early

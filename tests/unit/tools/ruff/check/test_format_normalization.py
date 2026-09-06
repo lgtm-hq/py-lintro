@@ -23,7 +23,7 @@ def test_execute_ruff_check_normalizes_format_paths_to_absolute(
         ruff_execution_context: Factory for mock execution contexts.
     """
     mock_ruff_tool.options["format_check"] = True
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         files=["/test/project/test.py"],
         rel_files=["test.py"],
         cwd="/test/project",

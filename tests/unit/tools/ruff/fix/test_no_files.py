@@ -22,7 +22,7 @@ def test_execute_ruff_fix_no_paths(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         early_result=ToolResult(
             name="ruff",
             success=True,
@@ -50,7 +50,7 @@ def test_execute_ruff_fix_no_python_files_found(
         ruff_execution_context: Factory for mock execution contexts.
         tmp_path: Temporary directory path for testing.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         early_result=ToolResult(
             name="ruff",
             success=True,

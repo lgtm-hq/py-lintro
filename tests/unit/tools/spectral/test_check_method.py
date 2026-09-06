@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.spectral import SpectralPlugin
@@ -570,7 +571,12 @@ def test_check_returns_early_when_skipped(
         spectral_plugin: The SpectralPlugin instance under test.
         tmp_path: Temporary directory path for test files.
     """
-    early = MagicMock()
+    early = ToolResult(
+        name="spectral",
+        success=True,
+        output="",
+        issues_count=0,
+    )
     ctx = MagicMock()
     ctx.should_skip = True
     ctx.early_result = early

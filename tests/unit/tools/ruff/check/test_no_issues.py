@@ -76,7 +76,7 @@ def test_execute_ruff_check_empty_paths_returns_no_files_message(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         early_result=ToolResult(
             name="ruff",
             success=True,
@@ -102,7 +102,7 @@ def test_execute_ruff_check_no_python_files_found(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         early_result=ToolResult(
             name="ruff",
             success=True,

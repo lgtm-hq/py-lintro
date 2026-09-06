@@ -221,9 +221,9 @@ class TaploPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         all_issues: list[TaploIssue] = []
         all_outputs: list[str] = []
@@ -304,13 +304,13 @@ class TaploPlugin(BaseToolPlugin):
             ToolResult with fix results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No TOML files to format.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Build check command for before/after comparison
         check_cmd: list[str] = self._get_executable_command(tool_name="taplo") + [

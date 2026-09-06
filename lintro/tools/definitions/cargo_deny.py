@@ -165,13 +165,13 @@ class CargoDenyPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No Cargo files found to check.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cargo_root = _find_cargo_root(ctx.files)
         if cargo_root is None:

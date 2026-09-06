@@ -365,9 +365,9 @@ class BanditPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Use absolute paths to avoid running from inside Python package directories.
         # When bandit runs from inside lintro/, it may trigger imports that corrupt

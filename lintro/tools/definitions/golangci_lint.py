@@ -236,13 +236,13 @@ class GolangciLintPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No Go files found to check.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:
@@ -317,13 +317,13 @@ class GolangciLintPlugin(BaseToolPlugin):
         Returns:
             ToolResult with fix results.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No Go files found to fix.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         module_roots = _find_go_module_roots(ctx.files)
         if not module_roots:

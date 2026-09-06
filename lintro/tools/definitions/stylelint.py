@@ -253,13 +253,13 @@ class StylelintPlugin(BaseToolPlugin):
         merged_options = dict(self.options)
         merged_options.update(options)
 
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to check.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cmd = [
             *self._base_command(merged_options, cwd=ctx.cwd),
@@ -317,13 +317,13 @@ class StylelintPlugin(BaseToolPlugin):
         merged_options = dict(self.options)
         merged_options.update(options)
 
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to fix.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         base_cmd = self._base_command(merged_options, cwd=ctx.cwd)
         check_cmd = [*base_cmd, "--formatter", "json", *ctx.rel_files]

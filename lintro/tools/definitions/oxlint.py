@@ -268,14 +268,13 @@ class OxlintPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to check.",
         )
-        if ctx.should_skip:
-            assert ctx.early_result is not None
-            return ctx.early_result
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         logger.debug(
             f"[OxlintPlugin] Discovered {len(ctx.files)} files matching patterns: "
@@ -360,14 +359,13 @@ class OxlintPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to fix.",
         )
-        if ctx.should_skip:
-            assert ctx.early_result is not None
-            return ctx.early_result
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Get Lintro config injection args if available
         config_args = self._build_config_args()

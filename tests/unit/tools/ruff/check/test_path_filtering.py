@@ -1,7 +1,7 @@
 """Tests for path handling in execute_ruff_check.
 
 File discovery, exclude patterns, and venv handling are owned by the shared
-``BaseToolPlugin._prepare_execution`` pipeline. These tests verify that
+``BaseToolPlugin.prepare`` pipeline. These tests verify that
 ``execute_ruff_check`` delegates discovery to that pipeline and consumes the
 resulting execution context (relative files and cwd) when building commands.
 """
@@ -36,8 +36,8 @@ def test_execute_ruff_check_delegates_discovery_to_prepare_execution(
     ):
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-        mock_ruff_tool._prepare_execution.assert_called_once()
-        call = mock_ruff_tool._prepare_execution.call_args
+        mock_ruff_tool.prepare.assert_called_once()
+        call = mock_ruff_tool.prepare.call_args
         assert_that(call.kwargs.get("paths")).is_equal_to(["/test/project"])
 
 
@@ -51,7 +51,7 @@ def test_execute_ruff_check_converts_paths_to_relative(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         files=[
             "/test/project/src/main.py",
             "/test/project/tests/test_main.py",
@@ -99,7 +99,7 @@ def test_execute_ruff_check_handles_multiple_directories(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         files=["/test/project1/main.py", "/test/project2/main.py"],
         rel_files=["project1/main.py", "project2/main.py"],
         cwd="/test",
@@ -130,7 +130,7 @@ def test_execute_ruff_check_uses_absolute_paths_when_no_cwd(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         files=["/test/project/test.py"],
         rel_files=["/test/project/test.py"],
         cwd=None,

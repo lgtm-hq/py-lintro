@@ -597,6 +597,47 @@ class BaseToolPlugin(ABC):
             timeout=timeout,
         )
 
+    def prepare(
+        self,
+        paths: list[str],
+        options: dict[str, object],
+        *,
+        no_files_message: str = "No files to check.",
+    ) -> ExecutionContext | ToolResult:
+        """Prepare execution, returning either a context or an early result.
+
+        This is the typed entry point subclasses should use. Unlike
+        :meth:`_prepare_execution`, which hands back an
+        :class:`ExecutionContext` whose ``early_result`` may or may not be
+        set, this method collapses the two outcomes into a union the caller
+        pattern-matches on, so no ``type: ignore`` is needed to narrow the
+        optional away::
+
+            prepared = self.prepare(paths, options)
+            if isinstance(prepared, ToolResult):
+                return prepared
+            cmd = self._build_command(prepared.rel_files)
+
+        Args:
+            paths: Input paths to process.
+            options: Runtime options to merge with defaults.
+            no_files_message: Message when no files are found.
+
+        Returns:
+            ExecutionContext | ToolResult: The prepared context when the tool
+            should run, or the finished :class:`ToolResult` to return when
+            execution must stop early (no matching files, or an unmet version
+            requirement).
+        """
+        ctx = self._prepare_execution(
+            paths,
+            options,
+            no_files_message=no_files_message,
+        )
+        if ctx.early_result is not None:
+            return ctx.early_result
+        return ctx
+
     def _process_files_with_progress(
         self,
         files: list[str],

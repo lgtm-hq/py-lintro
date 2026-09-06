@@ -260,21 +260,18 @@ class PipAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
-        ctx = self._prepare_execution(paths, options)
+        ctx = self.prepare(paths, options)
         # Requirements files in a ``requirements/`` directory (e.g.
         # ``requirements/base.txt``) are not matched by lintro's basename-only
         # discovery, so collect them separately and audit them via ``-r``.
         extra_req_files = _collect_requirements_dir_files(paths)
 
-        if ctx.should_skip:
-            early_result = ctx.early_result
+        if isinstance(ctx, ToolResult):
             # A version-check failure (tool missing or too old) must short-circuit
             # even when requirements-directory files were found; that skip result
             # is flagged via ``skipped``. A plain "no files" skip is not.
-            if not extra_req_files or (
-                early_result is not None and early_result.skipped
-            ):
-                return early_result  # type: ignore[return-value]
+            if not extra_req_files or ctx.skipped:
+                return ctx
             # No basename-matched files, but ``requirements/<name>.txt`` files
             # exist: run the version gate ourselves (it was skipped when no files
             # matched), then audit those files.

@@ -173,9 +173,9 @@ class GitleaksPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Determine source paths from prepared execution context. ctx.cwd may be
         # narrowed to a subdirectory; use rel_files (paths relative to ctx.cwd)

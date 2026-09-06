@@ -363,11 +363,9 @@ class TyposPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            # Framework invariant: should_skip is True only when the context
-            # carries an early_result, so the Optional narrowing is safe.
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         files = self._text_files(files=list(ctx.rel_files), cwd=ctx.cwd)
         if not files:
@@ -411,15 +409,13 @@ class TyposPlugin(BaseToolPlugin):
             ToolResult with fix results, satisfying the invariant
             ``initial = fixed + remaining``.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths=paths,
             options=options,
             no_files_message="No files to fix.",
         )
-        if ctx.should_skip:
-            # Framework invariant: should_skip is True only when the context
-            # carries an early_result, so the Optional narrowing is safe.
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         files = self._text_files(files=list(ctx.rel_files), cwd=ctx.cwd)
         if not files:

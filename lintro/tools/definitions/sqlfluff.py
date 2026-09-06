@@ -418,9 +418,9 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Process files with progress bar support
         def processor(file_path: str) -> FileProcessingResult:
@@ -453,9 +453,9 @@ class SqlfluffPlugin(BaseToolPlugin):
             ToolResult with fix results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Track fix-specific metrics. We tally per-file so skipped or
         # errored files still contribute their issues — AggregatedResult

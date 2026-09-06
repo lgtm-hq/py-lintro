@@ -159,9 +159,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
                 output="idiom-review skipped: no AI provider available.",
             )
 
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         try:
             return self._run_review(files=ctx.files, options=merged)

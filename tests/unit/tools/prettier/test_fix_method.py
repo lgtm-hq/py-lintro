@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from assertpy import assert_that
+
+from lintro.models.core.tool_result import ToolResult
 
 if TYPE_CHECKING:
     from lintro.tools.definitions.prettier import PrettierPlugin
@@ -90,7 +92,6 @@ def test_fix_timeout_during_check(
         prettier_plugin: The PrettierPlugin instance to test.
         mock_execution_context_for_tool: Mock execution context factory.
     """
-    from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.prettier.prettier_issue import PrettierIssue
 
     timeout_result = ToolResult(
@@ -151,7 +152,12 @@ def test_fix_early_return_when_should_skip(
     """
     with patch.object(prettier_plugin, "_prepare_execution") as mock_prepare:
         ctx = mock_execution_context_for_tool(should_skip=True)
-        ctx.early_result = MagicMock(success=True, issues_count=0)
+        ctx.early_result = ToolResult(
+            name="prettier",
+            success=True,
+            output="",
+            issues_count=0,
+        )
         mock_prepare.return_value = ctx
 
         result = prettier_plugin.fix(["/tmp"], {})

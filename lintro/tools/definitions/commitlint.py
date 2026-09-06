@@ -155,9 +155,9 @@ class CommitlintPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Shared preparation handles version check, path validation, and cwd.
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cmd: list[str] = self._get_commitlint_command(
             cwd=Path(ctx.cwd) if ctx.cwd else None,

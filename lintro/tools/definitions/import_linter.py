@@ -224,10 +224,9 @@ class ImportLinterPlugin(BaseToolPlugin):
         Returns:
             ToolResult with one issue per broken import chain.
         """
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            # early_result is guaranteed to be ToolResult when should_skip=True
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         config_path = find_import_linter_config(paths)
         if config_path is None:

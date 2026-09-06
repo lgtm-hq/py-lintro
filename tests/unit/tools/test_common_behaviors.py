@@ -14,6 +14,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 
 if TYPE_CHECKING:
@@ -435,9 +436,12 @@ def test_check_early_return_when_should_skip(
     """
     plugin = _get_plugin_instance(plugin_class_path)
 
-    early_result = MagicMock()
-    early_result.success = True
-    early_result.issues_count = 0
+    early_result = ToolResult(
+        name=str(expected_name),
+        success=True,
+        output="",
+        issues_count=0,
+    )
 
     ctx = mock_execution_context(
         should_skip=True,
