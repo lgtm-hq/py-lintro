@@ -50,6 +50,7 @@ from lintro.ai.review.lint_bridge import (
 )
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.transport import apply_resolved_transport
 
 if TYPE_CHECKING:
@@ -486,31 +487,33 @@ def execute_review(
         prepared: The prepared review from :func:`prepare_review`.
         provider: Configured AI provider instance.
         policy: Adapter-owned execution knobs. Defaults to
-            :data:`DEFAULT_EXECUTION_POLICY`, which matches ``run_review``'s
-            own defaults.
+            :data:`DEFAULT_EXECUTION_POLICY`, which matches the
+            :class:`~lintro.ai.review.session.ReviewSessionOptions` defaults.
 
     Returns:
         ReviewResult: The completed review.
     """
     return run_review(
         prepared.context,
-        provider=provider,
-        ai_config=prepared.ai_config,
-        depth=prepared.depth,
-        checklist_items=prepared.checklist_items,
-        checklist_text=prepared.checklist_text,
-        classifications=prepared.classifications,
-        context_window_override=policy.context_window_override,
-        lint_results=prepared.lint_digest,
-        progress=policy.progress,
-        sensitivity=prepared.sensitivity,
-        force_semantic_chunking=prepared.force_semantic_chunking,
-        custom_agents=prepared.custom_agents,
-        run_builtin_checklist=prepared.run_builtin_checklist,
-        workspace_root=prepared.workspace_root,
-        context_collection_seconds=prepared.context_collection_seconds,
-        prior_state=policy.prior_state,
-        force_full=policy.force_full,
-        enforce_cost_cap=policy.enforce_cost_cap,
-        synthesis=prepared.synthesis,
+        options=ReviewSessionOptions(
+            provider=provider,
+            ai_config=prepared.ai_config,
+            depth=prepared.depth,
+            checklist_items=prepared.checklist_items,
+            checklist_text=prepared.checklist_text,
+            classifications=prepared.classifications,
+            context_window_override=policy.context_window_override,
+            lint_results=prepared.lint_digest,
+            progress=policy.progress,
+            sensitivity=prepared.sensitivity,
+            force_semantic_chunking=prepared.force_semantic_chunking,
+            custom_agents=prepared.custom_agents,
+            run_builtin_checklist=prepared.run_builtin_checklist,
+            workspace_root=prepared.workspace_root,
+            context_collection_seconds=prepared.context_collection_seconds,
+            prior_state=policy.prior_state,
+            force_full=policy.force_full,
+            enforce_cost_cap=policy.enforce_cost_cap,
+            synthesis=prepared.synthesis,
+        ),
     )

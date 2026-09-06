@@ -1,9 +1,15 @@
-"""Review session options and stop-condition helpers.
+"""Review run option surfaces and stop-condition helpers.
 
-The options object is the single carrier for everything a review run needs
-beyond its context: :func:`lintro.ai.review.orchestrator.run_review` builds one
-from its keyword arguments and every layer below takes the object instead of
-re-threading the same twenty keywords by hand (issue #2301).
+:class:`ReviewSessionOptions` is the single carrier for everything a review run
+needs beyond its context, and the only place its defaults are declared:
+:func:`lintro.ai.review.orchestrator.run_review` takes one and forwards it, and
+every layer below reads the object instead of re-threading the same twenty
+keywords by hand (issue #2301). A new run setting is a new field here.
+
+:class:`ChunkRunPlan` is the same idea one level down: the run-scope inputs the
+chunk fan-out and the per-chunk passes share. It is derived from the session
+options once per run, and the two values that legitimately vary per chunk are
+applied with :func:`dataclasses.replace`.
 
 The stop-condition helpers answer whether an exception that ended a run is a
 graceful stop (cost cap, timeout) that should be reported as a partial review,
@@ -29,17 +35,21 @@ if TYPE_CHECKING:
     import asyncio
     from pathlib import Path
 
+    from lintro.ai.budget import CostBudget
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.ai.review.custom_agents import CustomAgentSpec
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
+    from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_state import ReviewState
     from lintro.ai.review.progress import ReviewProgressCallback
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
+    from lintro.ai.review.timings import ReviewTimingRecorder
     from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
+    "ChunkRunPlan",
     "ReviewSessionOptions",
     "aborted_before_completion",
     "cost_cap_reason",
@@ -107,6 +117,56 @@ class ReviewSessionOptions:
     enforce_cost_cap: bool = True
     stop: asyncio.Event | None = None
     synthesis: ReviewSynthesisConfig | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ChunkRunPlan:
+    """Run-scope inputs shared by every chunk of one review.
+
+    One object instead of the ~18 keywords each layer used to forward by hand.
+    It is frozen: the two values that legitimately differ per chunk — the
+    progress tracker and the first generated-checklist id — are applied with
+    :func:`dataclasses.replace`, so a chunk can never mutate the run's plan.
+
+    Attributes:
+        context: Collected review diff context.
+        provider: Configured AI provider instance.
+        ai_config: Effective AI configuration for retries, budget, fallbacks.
+        depth: Review depth level (1-3).
+        checklist_items: Selected checklist items for the review.
+        checklist_text: Pre-formatted checklist prompt text.
+        classifications: Domain classifications for changed files.
+        lint_results: Optional lint digest for ``--with-lint`` integration.
+        budget: Run cost budget tracker.
+        progress: Progress callback for live status updates.
+        repo_root: Absolute path to the repository under review.
+        use_one_shot: When True, avoid durable provider sessions.
+        strictness_section: Pre-formatted strictness prompt section.
+        next_generated_checklist_id: First id available to generated items.
+        diff_budget: Token budget available for embedded diffs.
+        max_parallel_calls: Ceiling on concurrently in-flight chunk reviews.
+        stop: Optional event set by a SIGTERM/SIGINT handler.
+        timings: Optional recorder for per-phase and per-chunk spans (#2148).
+    """
+
+    context: ReviewContext
+    provider: BaseAIProvider
+    ai_config: AIConfig
+    depth: int
+    checklist_items: list[ChecklistItem]
+    checklist_text: str
+    classifications: list[FileClassification]
+    lint_results: str | None
+    budget: CostBudget
+    progress: ReviewProgressCallback
+    repo_root: str
+    use_one_shot: bool
+    strictness_section: str
+    next_generated_checklist_id: int
+    diff_budget: int
+    max_parallel_calls: int = 1
+    stop: asyncio.Event | None = None
+    timings: ReviewTimingRecorder | None = None
 
 
 def aborted_before_completion(

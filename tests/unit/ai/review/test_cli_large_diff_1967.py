@@ -39,7 +39,6 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
-    resolve_review_chunks,
     run_review_async,
 )
 from lintro.ai.review.response_pipeline import (
@@ -49,6 +48,7 @@ from lintro.ai.review.response_pipeline import (
     ChunkReviewRequest,
     invoke_chunk_review,
 )
+from lintro.ai.review.run_planning import resolve_review_chunks
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
 from tests.unit.ai.conftest import patch_cli_exec
@@ -445,7 +445,7 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
     )
 
     with patch(
-        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(return_value=ok_response),
     ) as mock_call:
         result = await run_review_async(
@@ -526,7 +526,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         return ok_response
 
     with patch(
-        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
         response, _elapsed, _degradations = await invoke_chunk_review(

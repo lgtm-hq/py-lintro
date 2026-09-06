@@ -534,7 +534,7 @@ async def _degradations_for(
         return _ok_response()
 
     with patch(
-        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
         _response, _elapsed, degradations = await invoke_chunk_review(
@@ -646,7 +646,7 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
     provider.capabilities.supports_sessions = False
 
     with patch(
-        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(return_value=_ok_response()),
     ):
         result = await run_review_async(

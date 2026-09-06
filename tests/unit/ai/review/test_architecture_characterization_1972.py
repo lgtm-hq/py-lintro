@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - fixed git argv against a temp repo
 from collections.abc import Iterator
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -33,6 +34,7 @@ from lintro.ai.review.error_contract import (
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
@@ -40,7 +42,8 @@ from lintro.mcp.errors import McpError
 from lintro.mcp.toolkits import review as mcp_review
 from tests.unit.ai.review.test_cli_mcp_parity import CLI_ONLY_POLICY_FIELDS
 
-# Keys both CLI and MCP forward into ``run_review``. #2300 added
+# Fields both CLI and MCP set on the ``ReviewSessionOptions`` they hand
+# ``run_review``. #2300 added
 # ``custom_agents`` and ``run_builtin_checklist``: both surfaces now reach the
 # orchestrator through one ``execute_review`` call site, so the shared set grew
 # by exactly what left the CLI-only allowlist.
@@ -70,8 +73,9 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
 # against the same list, so neither story can shrink without the other.
 _CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = CLI_ONLY_POLICY_FIELDS
 
-# What ``run_review`` itself defaults each policy kwarg to. MCP runs on the
-# default policy, so these are the values it must forward.
+# What ``ReviewSessionOptions`` itself defaults each policy field to — since
+# #2301 that is the only surface the defaults live on. MCP runs on the default
+# policy, so these are the values it must forward.
 _DEFAULT_POLICY_KWARGS: dict[str, Any] = {
     "context_window_override": None,
     "progress": None,
@@ -79,6 +83,23 @@ _DEFAULT_POLICY_KWARGS: dict[str, Any] = {
     "force_full": False,
     "enforce_cost_cap": True,
 }
+
+
+def _option_fields(*, options: ReviewSessionOptions) -> dict[str, Any]:
+    """Flatten a session options object into a field-name mapping.
+
+    Since #2301 both adapters pass one options object rather than a keyword
+    wall, so the parity assertions read its fields instead of call kwargs.
+
+    Args:
+        options: The options object an adapter handed ``run_review``.
+
+    Returns:
+        Mapping of option field name to the value the adapter set.
+    """
+    return {
+        item.name: getattr(options, item.name) for item in fields(ReviewSessionOptions)
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -287,8 +308,12 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
 
     mcp_calls: list[dict[str, Any]] = []
 
-    def _mcp_run_review(context: Any, **kwargs: Any) -> ReviewResult:
-        mcp_calls.append({"context": context, **kwargs})
+    def _mcp_run_review(
+        context: Any,
+        *,
+        options: ReviewSessionOptions,
+    ) -> ReviewResult:
+        mcp_calls.append({"context": context, **_option_fields(options=options)})
         return _result_with(findings=())
 
     monkeypatch.setattr(preparation, "run_review", _mcp_run_review)
@@ -302,8 +327,12 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
 
     cli_calls: list[dict[str, Any]] = []
 
-    def _cli_run_review(context: Any, **kwargs: Any) -> ReviewResult:
-        cli_calls.append({"context": context, **kwargs})
+    def _cli_run_review(
+        context: Any,
+        *,
+        options: ReviewSessionOptions,
+    ) -> ReviewResult:
+        cli_calls.append({"context": context, **_option_fields(options=options)})
         return _result_with(findings=())
 
     runner = CliRunner()

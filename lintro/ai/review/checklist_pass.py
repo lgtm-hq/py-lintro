@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
     format_changed_files_for_prompt,
 )
+from lintro.ai.review import provider_call
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.sanitize import make_boundary_marker
@@ -81,7 +81,7 @@ async def generate_extra_checklist(
         changed_files=changed_files,
     )
     budget.check()
-    response = await call_ai(
+    response = await provider_call.call_ai(
         provider=provider,
         ai_config=ai_config,
         system_prompt=(

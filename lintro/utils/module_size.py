@@ -53,10 +53,7 @@ DEFAULT_MODULE_SIZE_EXCLUDES: tuple[str, ...] = (
 # #1052). Remove entries here as the modules are refactored below the
 # threshold. Paths are matched against each discovered file's path suffix, so
 # repo-relative POSIX paths are used.
-DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = (
-    "lintro/ai/review/orchestrator.py",
-    "lintro/cli_utils/commands/doctor.py",
-)
+DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = ("lintro/cli_utils/commands/doctor.py",)
 
 
 def _coerce_threshold(

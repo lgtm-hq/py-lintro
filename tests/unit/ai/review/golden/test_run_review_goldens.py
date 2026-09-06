@@ -23,9 +23,10 @@ from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.orchestrator import (
-    resolve_review_chunks,
     run_review,
 )
+from lintro.ai.review.run_planning import resolve_review_chunks
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.timings import ReviewTimings
 from tests.unit.ai.review.golden.golden_fixtures import (
     GOLDEN_BOUNDARY,
@@ -116,44 +117,41 @@ def _run_golden_review() -> ReviewResult:
         The complete review result for the fixed context.
     """
     with (
-        patch(
-            "lintro.ai.review.checklist_pass.make_boundary_marker",
-            return_value=GOLDEN_BOUNDARY,
-        ),
-        patch(
-            "lintro.ai.review.adversarial_pass.make_boundary_marker",
-            return_value=GOLDEN_BOUNDARY,
-        ),
+        # Depth 1 only: the depth-2 question generator and the depth-3
+        # adversarial sweep never run, so their boundary markers need no
+        # pinning. The prompt builder's marker is the only one a golden sees.
         patch(
             "lintro.ai.review.prompts.make_boundary_marker",
             return_value=GOLDEN_BOUNDARY,
         ),
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=golden_chunks(),
         ),
         patch(
-            "lintro.ai.review.response_pipeline.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_replay_call_ai,
         ),
     ):
         return run_review(
             golden_review_context(),
-            provider=_stub_provider(),
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.API,
-                # Serialised so the replay order, and therefore the merged
-                # finding order, is deterministic.
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=_stub_provider(),
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.API,
+                    # Serialised so the replay order, and therefore the merged
+                    # finding order, is deterministic.
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=golden_checklist_items(),
+                checklist_text=golden_checklist_text(),
+                classifications=golden_classifications(),
+                context_window_override=200_000,
+                workspace_root=Path("/workspace/py-lintro"),
             ),
-            depth=1,
-            checklist_items=golden_checklist_items(),
-            checklist_text=golden_checklist_text(),
-            classifications=golden_classifications(),
-            context_window_override=200_000,
-            workspace_root=Path("/workspace/py-lintro"),
         )
 
 

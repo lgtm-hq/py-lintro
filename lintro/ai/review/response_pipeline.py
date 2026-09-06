@@ -24,13 +24,13 @@ from loguru import logger
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIError
-from lintro.ai.invoke import call_ai
 from lintro.ai.prompts.review import (
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SCHEMA_REMINDER_TEMPLATE,
     REVIEW_SYSTEM,
 )
 from lintro.ai.raw_response import persist_raw_response
+from lintro.ai.review import provider_call
 from lintro.ai.review.cli_limits import (
     is_cli_output_exhaustion,
     tighter_findings_cap,
@@ -187,7 +187,7 @@ async def invoke_chunk_review(
         else:
             system_prompt, user_prompt = build_review_prompt(inputs=prompt_inputs)
         try:
-            response = await call_ai(
+            response = await provider_call.call_ai(
                 provider=request.provider,
                 ai_config=ai_config,
                 system_prompt=system_prompt,
@@ -310,7 +310,7 @@ async def parse_review_payload_with_recovery(
         previous_response=response.content,
     )
     try:
-        retry_response = await call_ai(
+        retry_response = await provider_call.call_ai(
             provider=provider,
             ai_config=ai_config,
             system_prompt=REVIEW_SYSTEM,
