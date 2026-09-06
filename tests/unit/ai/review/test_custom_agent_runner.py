@@ -174,13 +174,13 @@ def _patch_agent_call(*, content: str, cost: float = 0.01) -> _Patcher:
 
 
 def _patch_builtin_call(*, content: str) -> _Patcher:
-    """Patch the orchestrator's provider call with a fixed review response.
+    """Patch the chunk pipeline's provider call with a fixed review response.
 
     Args:
         content: Response content the patched call returns.
 
     Returns:
-        An active ``unittest.mock`` patcher for the orchestrator's ``call_ai``.
+        An active ``unittest.mock`` patcher for ``response_pipeline.call_ai``.
     """
     return patch(
         "lintro.ai.review.response_pipeline.call_ai",
