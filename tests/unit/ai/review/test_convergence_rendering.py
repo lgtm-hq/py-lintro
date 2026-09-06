@@ -18,7 +18,7 @@ from lintro.ai.review.github_constants import (
     PRIMARY_SOFT_LIMIT,
     STATE_MARKER_PREFIX,
 )
-from lintro.ai.review.github_render import format_convergence_banner
+from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState

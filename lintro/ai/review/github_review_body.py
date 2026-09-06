@@ -29,15 +29,19 @@ from lintro.ai.review.agent_prompts import (
     render_agent_prompt_panel,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
-from lintro.ai.review.github_render import (
-    Section,
-    assemble,
+from lintro.ai.review.github_badges import (
     format_badge_tables,
+    run_stats_primary_cells,
+)
+from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
     format_synthesis_note_line,
     format_timings_note,
-    run_stats_primary_cells,
+)
+from lintro.ai.review.github_render import (
+    Section,
+    assemble,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope

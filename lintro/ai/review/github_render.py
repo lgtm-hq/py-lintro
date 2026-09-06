@@ -29,28 +29,11 @@ from lintro.ai.review.checklist_display import (
     questions_for_finding,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
-from lintro.ai.review.github_badges import (
-    format_badge_table,
-    format_badge_tables,
-    run_stats_primary_cells,
-)
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
 from lintro.ai.review.github_contract import (
     DEFAULT_BUDGET,
     CommentBudget,
     cap_body,
-)
-from lintro.ai.review.github_notes import (
-    format_convergence_banner,
-    format_convergence_note,
-    format_coverage_limited_warning,
-    format_cross_chunk_note,
-    format_inline_post_cause,
-    format_inline_post_note,
-    format_run_mechanics,
-    format_synthesis_note_line,
-    format_timings_note,
-    sanitized_timing_summary,
 )
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -62,21 +45,8 @@ __all__ = [
     "SECTION_SEPARATOR",
     "Section",
     "assemble",
-    "format_badge_table",
-    "format_badge_tables",
-    "format_convergence_banner",
-    "format_convergence_note",
-    "format_coverage_limited_warning",
-    "format_cross_chunk_note",
     "format_finding_comment",
-    "format_inline_post_cause",
-    "format_inline_post_note",
-    "format_run_mechanics",
-    "format_synthesis_note_line",
-    "format_timings_note",
-    "run_stats_primary_cells",
     "sanitize_comment_text",
-    "sanitized_timing_summary",
 ]
 
 #: Blank line between two rendered sections. Every GitHub comment surface used

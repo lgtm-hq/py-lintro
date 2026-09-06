@@ -46,15 +46,17 @@ from lintro.ai.review.github_lifecycle import (
     regression_provenance,
     sync_addressed_lifecycle,
 )
+from lintro.ai.review.github_notes import (
+    format_convergence_banner,
+    format_inline_post_cause,
+    format_run_mechanics,
+)
 from lintro.ai.review.github_render import (
     REGRESSED_TITLE_SUFFIX,
     Section,
     _partition_findings,
     assemble,
-    format_convergence_banner,
     format_finding_comment,
-    format_inline_post_cause,
-    format_run_mechanics,
     sanitize_comment_text,
 )
 from lintro.ai.review.github_review_body import build_review_body

@@ -42,7 +42,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
-from lintro.ai.review.github_render import format_synthesis_note_line
+from lintro.ai.review.github_notes import format_synthesis_note_line
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile

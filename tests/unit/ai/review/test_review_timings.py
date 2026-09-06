@@ -16,7 +16,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.github_render import format_run_mechanics
+from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext

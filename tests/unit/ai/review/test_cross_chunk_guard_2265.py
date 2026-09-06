@@ -33,7 +33,7 @@ from lintro.ai.review.finding_matcher import (
     match_findings,
     review_findings_from_unposted,
 )
-from lintro.ai.review.github_render import format_cross_chunk_note
+from lintro.ai.review.github_notes import format_cross_chunk_note
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.finding_record import FindingRecord

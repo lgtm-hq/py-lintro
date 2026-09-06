@@ -12,7 +12,7 @@ from dataclasses import replace
 from assertpy import assert_that
 
 from lintro.ai.review.finding_matcher import match_findings
-from lintro.ai.review.github_render import (
+from lintro.ai.review.github_badges import (
     format_badge_table,
     format_badge_tables,
     run_stats_primary_cells,
