@@ -12,6 +12,7 @@ from assertpy import assert_that
 
 from lintro.ai.exceptions import AINotAvailableError, AIProviderError
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.cli_capabilities import CliCapabilityGuard
 from lintro.ai.providers.cli_contracts import (
     CLI_CONTRACTS,
     CliContract,
@@ -641,3 +642,32 @@ def test_contract_flags_are_distinct_and_well_formed(provider: AIProvider) -> No
     assert_that(required.intersection(optional)).is_empty()
     for flag in required | optional:
         assert_that(flag).starts_with("--")
+
+
+def test_transport_exposes_the_guard_as_a_collaborator() -> None:
+    """The guard is a separate object the transport owns and delegates to (#1871)."""
+    transport = _FakeTransport(
+        binary_path="/bin/fake",
+        binary_name="fake",
+        install_hint="Install fake.",
+        contract=_TEST_CONTRACT,
+    )
+
+    assert_that(transport.capabilities).is_instance_of(CliCapabilityGuard)
+    assert_that(transport.capabilities.contract).is_same_as(_TEST_CONTRACT)
+    assert_that(transport.contract).is_same_as(_TEST_CONTRACT)
+
+
+@pytest.mark.asyncio
+async def test_note_unsupported_flag_short_circuits_the_help_gate() -> None:
+    """A flag the backstop rejected is never re-offered by the proactive gate."""
+    transport = _FakeTransport(
+        binary_path="/bin/fake",
+        binary_name="fake",
+        install_hint="Install fake.",
+        contract=_TEST_CONTRACT,
+    )
+    transport.capabilities.note_unsupported_flag("--resume")
+
+    # No subprocess is patched: a cached answer must not reach a help probe.
+    assert_that(await transport.supports_flag("--resume")).is_false()

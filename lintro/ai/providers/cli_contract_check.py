@@ -28,6 +28,7 @@ import shutil
 from dataclasses import dataclass
 
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
 from lintro.ai.providers.cli_contracts import (
     CLI_CONTRACTS,
     CliContract,
@@ -35,7 +36,7 @@ from lintro.ai.providers.cli_contracts import (
     format_version,
     unadvertised_flags,
 )
-from lintro.ai.providers.cli_transport import PROBE_TIMEOUT, CliTransport
+from lintro.ai.providers.cli_transport import CliTransport
 
 __all__ = [
     "CliSurfaceReport",
