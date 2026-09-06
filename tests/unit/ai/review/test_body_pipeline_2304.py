@@ -112,24 +112,30 @@ def test_every_comment_surface_binds_the_one_assemble() -> None:
 
 
 @pytest.mark.parametrize(
-    ("module_name", "render"),
+    ("module_name", "render", "expected_section"),
     [
-        ("sticky.assembly", _sticky_body),
-        ("github_review_body", _review_body),
-        ("github_errors", _error_body),
+        ("sticky.assembly", _sticky_body, "findings_round"),
+        ("github_review_body", _review_body, "header"),
+        ("github_errors", _error_body, "guidance"),
     ],
 )
 def test_each_posting_path_assembles_through_the_pipeline(
     monkeypatch: pytest.MonkeyPatch,
     module_name: str,
     render: Callable[[], str],
+    expected_section: str,
 ) -> None:
     """Spying on one surface's ``assemble`` sees that surface's whole body.
+
+    The named section is one the surface cannot render without, so a body that
+    reached the pipeline carrying something unrelated fails here rather than
+    passing an existence check.
 
     Args:
         monkeypatch: Fixture used to swap the module's bound ``assemble``.
         module_name: Surface under test, for the failure message.
         render: Callable driving that surface end to end.
+        expected_section: Section this surface must always assemble.
     """
     calls: list[tuple[Section, ...]] = []
 
@@ -161,7 +167,7 @@ def test_each_posting_path_assembles_through_the_pipeline(
 
     assert_that(calls).described_as(f"{module_name} bypassed assemble").is_not_empty()
     assert_that(body).is_not_empty()
-    assert_that(calls[-1]).extracting("name").is_not_empty()
+    assert_that(calls[-1]).extracting("name").contains(expected_section)
 
 
 def test_no_surface_joins_its_own_sections() -> None:
@@ -206,3 +212,32 @@ def test_assemble_drops_empty_sections_and_caps_the_result() -> None:
     assert_that(body).is_equal_to("one\n\ntwo")
     assert_that(len(capped)).is_less_than_or_equal_to(200)
     assert_that(capped).contains(TRUNCATION_NOTICE.strip())
+
+
+def test_an_absent_question_map_renders_the_same_board() -> None:
+    """``question_map=None`` is normalized to an empty map, not passed through.
+
+    The request documents ``None`` as "no questions", and the plan the section
+    renderers read holds a real mapping, so the normalization is a contract a
+    caller relies on rather than an implementation detail.
+    """
+
+    def board(question_map: dict[int, str] | None) -> str:
+        """Render the pinned board with the given question map.
+
+        Args:
+            question_map: Prompt id to question text, or ``None``.
+
+        Returns:
+            str: The primary sticky body.
+        """
+        return build_sticky_comment(
+            request=StickyRequest(
+                result=golden_review_result(),
+                prior_state=golden_prior_state(),
+                head_sha=GOLDEN_HEAD_SHA,
+                question_map=question_map,
+            ),
+        )
+
+    assert_that(board(None)).is_equal_to(board({}))

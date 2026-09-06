@@ -32,9 +32,11 @@ GOLDEN_HEAD_SHA: str = "0d15ea5edeadbeef0d15ea5edeadbeef0d15ea5e"
 #: Head commit of the round already recorded in the prior state.
 GOLDEN_PRIOR_SHA: str = "1111111aaaaaaaa1111111aaaaaaaa1111111aaa"
 
-#: Version the review body's run-stats table renders. Pinned so a release
-#: bump does not rewrite a golden that says nothing about review behaviour.
-GOLDEN_LINTRO_VERSION: str = "0.147.6"
+#: Version the review body's run-stats table renders. Pinned so a release bump
+#: does not rewrite a golden that says nothing about review behaviour, and
+#: deliberately not a plausible semver: a maintainer who greps for it should
+#: land on this line rather than conclude the fixture went stale.
+GOLDEN_LINTRO_VERSION: str = "0.0.0-golden"
 
 #: Repository slug and PR number used to link finding titles to their threads.
 GOLDEN_REPO: str = "lgtm-hq/py-lintro"

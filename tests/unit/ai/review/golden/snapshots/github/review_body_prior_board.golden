@@ -45,7 +45,7 @@
 
 | transport | depth | strictness | files | checks | duration | lintro |
 | --- | --- | --- | --- | --- | --- | --- |
-| api · api-key | 2 | balanced | 3 | 2 | 42s | 0.147.6 |
+| api · api-key | 2 | balanced | 3 | 2 | 42s | 0.0.0-golden |
 
 <sub>Config source: pyproject.toml</sub>
 

@@ -1,19 +1,28 @@
 """The one body-assembly pipeline for GitHub AI-review comments (#2304).
 
-Three surfaces post Markdown on a pull request — the sticky mission-control
-board, the per-round review body, and the failure comment — and each used to
-join its own list of strings with its own separator and its own size cap. The
-shapes differed; the assembly did not. :class:`Section` and :func:`assemble`
-are that assembly, and all three paths go through them, so a change to how a
-comment is put together is one edit rather than three.
+Every comment a review posts is a list of Markdown blocks joined with a blank
+line — the sticky mission-control board, the per-round review body, the
+failure comment, the history archive, and the inline comment on a finding.
+Each used to join its own list with its own separator and its own size cap.
+The shapes differed; the assembly did not. :class:`Section` and
+:func:`assemble` are that assembly, and every surface goes through them, so a
+change to how a comment is put together is one edit rather than five.
 
 Sizing is not re-implemented here: :func:`assemble` caps through
-``github_contract.cap_body``, and the sticky renderer — the only surface with
-prunable sections — passes ``budget=None`` because ``contract.fit_body`` owns
-the cap for that path and has to measure un-capped candidates to prune them.
+``github_contract.cap_body``. ``budget=None`` is the one opt-out, for a
+caller that owns sizing itself — the sticky renderer and the archive's trim
+loop, whose ``contract.fit_body`` search has to measure *un-capped* candidates
+to know which sections to prune, and the inline comment, which has never been
+capped at all.
 
 The module also renders the inline finding comment, the one review surface
 that is a *whole comment per finding* rather than an assembled body.
+
+Moved out of here by #2304, and no longer re-exported: the badge table and the
+numeric cell formatting live in :mod:`lintro.ai.review.github_badges`, and the
+one-line prose notes (timings, synthesis, coverage, inline-post failures,
+cross-chunk, convergence, run mechanics) in
+:mod:`lintro.ai.review.github_notes`.
 """
 
 from __future__ import annotations

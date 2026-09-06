@@ -6,22 +6,37 @@ the round-over-round delta, then indexes the open findings — it deliberately
 does **not** repeat the finding detail that already lives on the inline
 comments.
 
-Layout, top to bottom:
+Layout of the round board, top to bottom, as ``body.round_sections`` orders
+it:
 
-1. header — ``🔎 Lintro Review · round N · commit <sha>``
-2. readiness pill, the verdict rubric as fine-print directly under it, then the
-   delta line
+1. header — ``## 🔎 Lintro Review — <verdict>``
+2. the incomplete-coverage banner and the coverage line, when either applies
 3. ``Summary`` — headline plus walkthrough bullets, severity-marked when a
    bullet is tied to an open P1/P2
 4. ``Why it's blocked`` — the model's reasoning and the files needing
    attention
-5. severity tiles (blockers / warnings / nits / fixed)
-6. ``Open findings`` — one line per finding, titles only
-7. the fix-all agent prompt panel, scoped to *all* still-open findings
-8. ``Resolved`` — struck-through titles with their fixing commit
+5. the one-line rows: degraded inline posting, dropped suggestions, limited
+   coverage, cross-chunk contradictions
+6. ``Findings · Round N`` — the delta table, one row per open finding and per
+   finding fixed this round
+7. the folded finding detail, when inline comments could not be posted
+8. the fix-all agent prompt panel, scoped to *all* still-open findings
 9. *This run* badges, two single-row tables (model-first ordering)
-10. ``---`` then exactly one ``🕘 Run history`` collapsible
-11. a one-line footer
+10. the structured-checklist appendix, when the display mode asks for it
+11. ``---`` then exactly one ``🕘 Run history`` collapsible, which carries the
+    severity tiles and the per-round expanders
+12. a one-line footer
+
+A state-only re-render (``body.state_sections``) is the same list minus every
+section that describes a run that did not happen: summary, reasoning, the
+prompt panel and the *This run* badges.
+
+Some renderers in ``sections`` and ``findings`` are not on either list —
+``_readiness_pill``, ``_verdict_explainer``, ``_delta_line`` and
+``_open_findings_section``, whose content the ``Findings`` table and the
+header absorbed in the #2157 redesign. They are left where the split found
+them: reviving or deleting a section is a comment-design decision (#1905), and
+this package's job is to render whichever set that design settles on.
 
 Two invariants the renderer enforces, neither of them implemented here:
 

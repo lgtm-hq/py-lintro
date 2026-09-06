@@ -3,7 +3,9 @@
 Timings, synthesis, coverage degradation, inline-post failures, cross-chunk
 contradictions, convergence and the run-mechanics footer all render as short
 sentences appended to whichever body is being assembled. They are formatting,
-not assembly: :mod:`lintro.ai.review.github_render` decides where they go.
+not assembly: a surface imports the note it needs from here and decides where
+it goes, while :mod:`lintro.ai.review.github_render` owns the assembly itself
+and imports nothing from this module.
 """
 
 from __future__ import annotations
