@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.mypy import (
+from lintro.tools.mypy.definition import (
     MypyPlugin,
     _has_no_python_files_error,
 )

@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.oxfmt import OxfmtPlugin
+    from lintro.tools.oxfmt.definition import OxfmtPlugin
 
 
 # =============================================================================

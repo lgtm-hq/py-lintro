@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.oxlint import OxlintPlugin
+    from lintro.tools.oxlint.definition import OxlintPlugin
 
 
 # =============================================================================

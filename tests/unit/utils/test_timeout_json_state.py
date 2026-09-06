@@ -30,8 +30,8 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from lintro.tools.definitions.mypy import MypyPlugin
-from lintro.tools.definitions.prettier import PrettierPlugin
+from lintro.tools.mypy.definition import MypyPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,

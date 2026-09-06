@@ -19,7 +19,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.osv_scanner import OsvScannerPlugin
+from lintro.tools.osv_scanner.definition import OsvScannerPlugin
 
 # Lockfiles laid out by the fixture repo, relative to the project root.
 _MAIN_LOCKFILE: str = "apps/web/bun.lock"
@@ -147,7 +147,7 @@ def _run_check(
     )
     with (
         patch(
-            "lintro.tools.definitions.osv_scanner.verify_tool_version",
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
             return_value=None,
         ),
         patch.object(
@@ -387,7 +387,7 @@ def test_execution_failure_still_fails_when_all_findings_excluded(
 
     with (
         patch(
-            "lintro.tools.definitions.osv_scanner.verify_tool_version",
+            "lintro.tools.osv_scanner.definition.verify_tool_version",
             return_value=None,
         ),
         patch.object(
@@ -450,7 +450,7 @@ def test_relative_source_is_resolved_against_the_scan_root(
         return False
 
     with patch(
-        "lintro.tools.definitions.osv_scanner.should_exclude_path",
+        "lintro.tools.osv_scanner.definition.should_exclude_path",
         side_effect=_capture,
     ):
         plugin.filter_excluded_issues(
@@ -495,7 +495,7 @@ def test_absolute_source_is_left_untouched(tmp_path: Path) -> None:
         return False
 
     with patch(
-        "lintro.tools.definitions.osv_scanner.should_exclude_path",
+        "lintro.tools.osv_scanner.definition.should_exclude_path",
         side_effect=_capture,
     ):
         plugin.filter_excluded_issues(

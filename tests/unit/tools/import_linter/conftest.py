@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lintro.tools.definitions.import_linter import ImportLinterPlugin
+from lintro.tools.import_linter.definition import ImportLinterPlugin
 
 BROKEN_OUTPUT = """\
 ---------

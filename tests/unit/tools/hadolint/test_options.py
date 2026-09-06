@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.hadolint import (
+from lintro.tools.hadolint.definition import (
     HADOLINT_DEFAULT_FAILURE_THRESHOLD,
     HADOLINT_DEFAULT_FORMAT,
     HADOLINT_DEFAULT_NO_COLOR,

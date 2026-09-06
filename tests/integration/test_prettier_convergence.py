@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.prettier import PrettierPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
 from lintro.utils.tool_executor import _run_fix_with_retry
 from tests.integration._tools import require_tool
 

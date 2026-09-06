@@ -21,8 +21,8 @@ from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 
 if TYPE_CHECKING:
     from lintro.tools.clippy.definition import ClippyPlugin
-    from lintro.tools.definitions.mypy import MypyPlugin
     from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.mypy.definition import MypyPlugin
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def mypy_plugin() -> MypyPlugin:
     Returns:
         A MypyPlugin instance.
     """
-    from lintro.tools.definitions.mypy import MypyPlugin
+    from lintro.tools.mypy.definition import MypyPlugin
 
     return MypyPlugin()
 

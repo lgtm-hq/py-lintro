@@ -11,7 +11,7 @@ from assertpy import assert_that
 from lintro.models.core.tool_result import ToolResult
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 def test_fix_success_no_issues(

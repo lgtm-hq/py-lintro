@@ -10,7 +10,7 @@ from assertpy import assert_that
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.import_linter import (
+from lintro.tools.import_linter.definition import (
     IMPORT_LINTER_DEFAULT_PRIORITY,
     IMPORT_LINTER_DEFAULT_TIMEOUT,
     ImportLinterPlugin,

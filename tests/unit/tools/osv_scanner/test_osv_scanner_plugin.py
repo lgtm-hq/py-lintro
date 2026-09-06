@@ -16,7 +16,7 @@ from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_type import ToolType
 from lintro.parsers.osv_scanner.osv_scanner_issue import OsvScannerIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.osv_scanner import (
+from lintro.tools.osv_scanner.definition import (
     OSV_SCANNER_DEFAULT_TIMEOUT,
     OsvScannerPlugin,
 )

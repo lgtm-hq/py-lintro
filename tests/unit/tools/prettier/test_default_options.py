@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.prettier import PRETTIER_DEFAULT_TIMEOUT
+from lintro.tools.prettier.definition import PRETTIER_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 def test_default_options_timeout(prettier_plugin: PrettierPlugin) -> None:

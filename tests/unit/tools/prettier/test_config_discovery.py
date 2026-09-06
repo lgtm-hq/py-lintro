@@ -10,7 +10,7 @@ from assertpy import assert_that
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 # Tests for _find_prettier_config method

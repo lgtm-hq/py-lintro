@@ -88,7 +88,7 @@ TOOL_TIMEOUT_CONFIGS = [
 # (plugin_class_path, error_match_pattern)
 TOOLS_THAT_CANNOT_FIX = [
     pytest.param(
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         "cannot automatically fix",
         id="hadolint",
     ),
@@ -98,12 +98,12 @@ TOOLS_THAT_CANNOT_FIX = [
         id="yamllint",
     ),
     pytest.param(
-        "lintro.tools.definitions.markdownlint.MarkdownlintPlugin",
+        "lintro.tools.markdownlint.definition.MarkdownlintPlugin",
         "cannot fix issues",
         id="markdownlint",
     ),
     pytest.param(
-        "lintro.tools.definitions.mypy.MypyPlugin",
+        "lintro.tools.mypy.definition.MypyPlugin",
         "cannot automatically fix",
         id="mypy",
     ),
@@ -123,7 +123,7 @@ TOOL_EARLY_SKIP_CONFIGS = [
         id="black",
     ),
     pytest.param(
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         ToolName.HADOLINT,
         id="hadolint",
     ),

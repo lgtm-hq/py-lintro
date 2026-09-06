@@ -41,7 +41,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.HADOLINT,
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         False,
         ToolType.LINTER | ToolType.INFRASTRUCTURE,
         ["Dockerfile", "best practice"],
@@ -49,7 +49,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.MARKDOWNLINT,
-        "lintro.tools.definitions.markdownlint.MarkdownlintPlugin",
+        "lintro.tools.markdownlint.definition.MarkdownlintPlugin",
         False,
         ToolType.LINTER,
         ["Markdown", "linter"],
@@ -65,7 +65,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.MYPY,
-        "lintro.tools.definitions.mypy.MypyPlugin",
+        "lintro.tools.mypy.definition.MypyPlugin",
         False,
         ToolType.LINTER | ToolType.TYPE_CHECKER,
         ["type", "Python"],

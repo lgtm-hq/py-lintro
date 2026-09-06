@@ -13,7 +13,7 @@ from assertpy import assert_that
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.oxlint import OxlintPlugin
+    from lintro.tools.oxlint.definition import OxlintPlugin
 
 
 def test_check_with_issues(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:

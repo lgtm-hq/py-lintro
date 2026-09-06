@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.html_validate import HtmlValidatePlugin
+from lintro.tools.html_validate.definition import HtmlValidatePlugin
 
 
 @pytest.fixture
