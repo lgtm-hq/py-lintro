@@ -126,6 +126,9 @@ def test_streaming_wait_receives_remaining_timeout_budget() -> None:
         assert_that(wait_timeout).is_greater_than_or_equal_to(0.0)
 
 
+# Drives a real child process past a one-second timeout, so the wall-clock
+# cost is the assertion itself and cannot be faked away (#2315).
+@pytest.mark.slow
 def test_streaming_total_walltime_stays_within_budget_on_hang() -> None:
     """A hanging process is bounded by the configured timeout plus epsilon.
 

@@ -294,11 +294,15 @@ def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> Non
         load_config(config_path=str(config_file))
 
 
-def test_load_yaml_config_with_defaults(tmp_path: Path) -> None:
+def test_load_yaml_config_with_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Should load .lintro-config.yaml file with defaults section.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
     """
     config_content = """\
 defaults:
@@ -309,19 +313,13 @@ defaults:
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(config_content)
 
-    import os
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
 
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        clear_config_cache()
+    config = load_config()
 
-        config = load_config()
-
-        assert_that(config.get_tool_defaults("prettier")["singleQuote"]).is_true()
-        assert_that(config.get_tool_defaults("prettier")["tabWidth"]).is_equal_to(2)
-    finally:
-        os.chdir(original_cwd)
+    assert_that(config.get_tool_defaults("prettier")["singleQuote"]).is_true()
+    assert_that(config.get_tool_defaults("prettier")["tabWidth"]).is_equal_to(2)
 
 
 def test_load_explicit_path(tmp_path: Path) -> None:
@@ -342,25 +340,23 @@ enforce:
     assert_that(config.enforce.line_length).is_equal_to(120)
 
 
-def test_returns_default_when_no_config(tmp_path: Path) -> None:
+def test_returns_default_when_no_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Should return default config when no file found.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    import os
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
 
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        clear_config_cache()
+    config = load_config(allow_pyproject_fallback=False)
 
-        config = load_config(allow_pyproject_fallback=False)
-
-        # Should get default empty config
-        assert_that(config.enforce.line_length).is_none()
-    finally:
-        os.chdir(original_cwd)
+    # Should get default empty config
+    assert_that(config.enforce.line_length).is_none()
 
 
 def test_returns_sensible_defaults() -> None:

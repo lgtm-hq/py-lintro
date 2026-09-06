@@ -10,7 +10,6 @@ gate weeks later. These tests pin the same contract against the live CLI.
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -40,26 +39,6 @@ def cli_runner() -> CliRunner:
         CliRunner: A Click test runner instance.
     """
     return CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def isolated_registry() -> Generator[None]:
-    """Snapshot and restore the full registry, including origins.
-
-    Yields:
-        None: Registry snapshot for the test duration.
-    """
-    with ToolRegistry._lock:
-        original_tools = dict(ToolRegistry._tools)
-        original_instances = dict(ToolRegistry._instances)
-        original_origins = dict(ToolRegistry._origins)
-    try:
-        yield
-    finally:
-        with ToolRegistry._lock:
-            ToolRegistry._tools = original_tools
-            ToolRegistry._instances = original_instances
-            ToolRegistry._origins = original_origins
 
 
 def _require_discovered_builtin_origins() -> None:

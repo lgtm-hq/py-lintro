@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from lintro.plugins.discovery import discover_all_tools
+from lintro.plugins.registry import ToolRegistry
 from lintro.utils.path_utils import normalize_file_path_for_display
 
 # Ensure stable docker builds under pytest-xdist by disabling BuildKit, which
@@ -43,6 +44,34 @@ def _discover_tools() -> None:
     the builtin tool definitions and any external plugins.
     """
     discover_all_tools()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_plugin_registry() -> Generator[None]:
+    """Snapshot and restore the global plugin registry around every test.
+
+    :class:`~lintro.plugins.registry.ToolRegistry` keeps its tool classes,
+    lazily built instances and origin labels in class-level dictionaries, so a
+    test that registers, clears or re-registers a plugin leaks that state into
+    whatever runs next. Restoring the three mappings here makes registry
+    mutation local to the test performing it, which is what lets the suite run
+    under ``-n auto`` and in randomised order (#2315). Tests no longer need
+    ad-hoc save/restore blocks of their own.
+
+    Yields:
+        None: Restores the registry mappings once the test has finished.
+    """
+    with ToolRegistry._lock:
+        original_tools = dict(ToolRegistry._tools)
+        original_instances = dict(ToolRegistry._instances)
+        original_origins = dict(ToolRegistry._origins)
+    try:
+        yield
+    finally:
+        with ToolRegistry._lock:
+            ToolRegistry._tools = original_tools
+            ToolRegistry._instances = original_instances
+            ToolRegistry._origins = original_origins
 
 
 @pytest.fixture(scope="session")
