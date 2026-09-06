@@ -16,9 +16,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.fix_runner import PerFileFixPolicy, VerifyMode
-from lintro.tools.definitions.dotenv_linter import DotenvLinterPlugin
 from lintro.tools.definitions.shfmt import ShfmtPlugin
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
+from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 
 #: A minimal shfmt diff, enough for the parser to report one issue.
 SHFMT_DIFF: str = """--- script.sh.orig

@@ -50,7 +50,19 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 #: package, and the gate's scope follows the modules it moves so a definition
 #: cannot escape the ratchet by changing address.
 GATE_PACKAGES: tuple[str, ...] = (
+    "lintro/tools/actionlint",
+    "lintro/tools/astro_check",
+    "lintro/tools/bandit",
+    "lintro/tools/black",
+    "lintro/tools/buf",
+    "lintro/tools/cargo_audit",
+    "lintro/tools/cargo_deny",
+    "lintro/tools/clippy",
+    "lintro/tools/commitlint",
     "lintro/tools/definitions",
+    "lintro/tools/dotenv_linter",
+    "lintro/tools/gitleaks",
+    "lintro/tools/golangci_lint",
     "lintro/tools/pytest",
     "lintro/tools/ruff",
 )

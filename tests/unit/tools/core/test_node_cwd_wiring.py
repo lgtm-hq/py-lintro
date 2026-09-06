@@ -22,8 +22,8 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins.base import BaseToolPlugin
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
-from lintro.tools.definitions.commitlint import CommitlintPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
+from lintro.tools.commitlint.definition import CommitlintPlugin
 from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
 from lintro.tools.definitions.oxfmt import OxfmtPlugin
 from lintro.tools.definitions.oxlint import OxlintPlugin

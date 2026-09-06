@@ -15,7 +15,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
-from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin
 from tests.integration._tools import require_tool
 
 _FIXTURE = (

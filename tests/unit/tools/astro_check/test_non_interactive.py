@@ -17,7 +17,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import validate_subprocess_command
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
 
 
 @pytest.fixture

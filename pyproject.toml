@@ -294,12 +294,12 @@ max-statements = 50
 "lintro/parsers/black/black_parser.py" = ["PLR0912"]
 "lintro/parsers/osv_scanner/osv_scanner_parser.py" = ["C901", "PLR0912"]
 "lintro/parsers/pytest/format_parsers.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/astro_check/definition.py" = ["PLR0912"]
+"lintro/tools/bandit/definition.py" = ["C901", "PLR0912", "PLR0913"]
+"lintro/tools/buf/definition.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/core/update_channels.py" = ["PLR0912"]
 "lintro/tools/core/version_parsing.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/_ts_checker_execution.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/definitions/astro_check.py" = ["PLR0912"]
-"lintro/tools/definitions/bandit.py" = ["C901", "PLR0912", "PLR0913"]
-"lintro/tools/definitions/buf.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/mypy.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/oxlint.py" = ["PLR0913"]
 "lintro/tools/definitions/spectral.py" = ["PLR0912"]
@@ -428,7 +428,19 @@ exclude = [
 # to delete the duplication. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = [
+  "lintro/tools/actionlint",
+  "lintro/tools/astro_check",
+  "lintro/tools/bandit",
+  "lintro/tools/black",
+  "lintro/tools/buf",
+  "lintro/tools/cargo_audit",
+  "lintro/tools/cargo_deny",
+  "lintro/tools/clippy",
+  "lintro/tools/commitlint",
   "lintro/tools/definitions",
+  "lintro/tools/dotenv_linter",
+  "lintro/tools/gitleaks",
+  "lintro/tools/golangci_lint",
   "lintro/tools/pytest",
   "lintro/tools/ruff",
 ]
@@ -663,6 +675,34 @@ ignore_imports = [
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
   "lintro.tools -> lintro.plugins",                                                 # owned by #2311
+  "lintro.tools.actionlint.definition -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.actionlint.definition -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.actionlint.definition -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.astro_check.definition -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.astro_check.definition -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.astro_check.definition -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.bandit.definition -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.bandit.definition -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.bandit.definition -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.black.definition -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.black.definition -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.black.definition -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.buf.definition -> lintro.plugins.base",                             # owned by #2311
+  "lintro.tools.buf.definition -> lintro.plugins.protocol",                         # owned by #2311
+  "lintro.tools.buf.definition -> lintro.plugins.registry",                         # owned by #2311
+  "lintro.tools.buf.definition -> lintro.plugins.subprocess_executor",              # owned by #2311
+  "lintro.tools.cargo_audit.definition -> lintro.plugins.base",                     # owned by #2311
+  "lintro.tools.cargo_audit.definition -> lintro.plugins.protocol",                 # owned by #2311
+  "lintro.tools.cargo_audit.definition -> lintro.plugins.registry",                 # owned by #2311
+  "lintro.tools.cargo_deny.definition -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.cargo_deny.definition -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.cargo_deny.definition -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.clippy.definition -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.clippy.definition -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.clippy.definition -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.commitlint.definition -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.commitlint.definition -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.commitlint.definition -> lintro.plugins.registry",                  # owned by #2311
   "lintro.tools.core.batch_runner -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.check_runner -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.check_runner -> lintro.plugins.file_processor",                # owned by #2311
@@ -676,43 +716,6 @@ ignore_imports = [
   "lintro.tools.core.tool_manager -> lintro.plugins.registry",                      # owned by #2311
   "lintro.tools.definitions._ts_checker_base -> lintro.plugins.base",               # owned by #2311
   "lintro.tools.definitions._ts_checker_execution -> lintro.plugins.base",          # owned by #2311
-  "lintro.tools.definitions.actionlint -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.actionlint -> lintro.plugins.protocol",                 # owned by #2311
-  "lintro.tools.definitions.actionlint -> lintro.plugins.registry",                 # owned by #2311
-  "lintro.tools.definitions.astro_check -> lintro.plugins.base",                    # owned by #2311
-  "lintro.tools.definitions.astro_check -> lintro.plugins.protocol",                # owned by #2311
-  "lintro.tools.definitions.astro_check -> lintro.plugins.registry",                # owned by #2311
-  "lintro.tools.definitions.bandit -> lintro.plugins.base",                         # owned by #2311
-  "lintro.tools.definitions.bandit -> lintro.plugins.protocol",                     # owned by #2311
-  "lintro.tools.definitions.bandit -> lintro.plugins.registry",                     # owned by #2311
-  "lintro.tools.definitions.black -> lintro.plugins.base",                          # owned by #2311
-  "lintro.tools.definitions.black -> lintro.plugins.protocol",                      # owned by #2311
-  "lintro.tools.definitions.black -> lintro.plugins.registry",                      # owned by #2311
-  "lintro.tools.definitions.buf -> lintro.plugins.base",                            # owned by #2311
-  "lintro.tools.definitions.buf -> lintro.plugins.protocol",                        # owned by #2311
-  "lintro.tools.definitions.buf -> lintro.plugins.registry",                        # owned by #2311
-  "lintro.tools.definitions.buf -> lintro.plugins.subprocess_executor",             # owned by #2311
-  "lintro.tools.definitions.cargo_audit -> lintro.plugins.base",                    # owned by #2311
-  "lintro.tools.definitions.cargo_audit -> lintro.plugins.protocol",                # owned by #2311
-  "lintro.tools.definitions.cargo_audit -> lintro.plugins.registry",                # owned by #2311
-  "lintro.tools.definitions.cargo_deny -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.cargo_deny -> lintro.plugins.protocol",                 # owned by #2311
-  "lintro.tools.definitions.cargo_deny -> lintro.plugins.registry",                 # owned by #2311
-  "lintro.tools.definitions.clippy -> lintro.plugins.base",                         # owned by #2311
-  "lintro.tools.definitions.clippy -> lintro.plugins.protocol",                     # owned by #2311
-  "lintro.tools.definitions.clippy -> lintro.plugins.registry",                     # owned by #2311
-  "lintro.tools.definitions.commitlint -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.commitlint -> lintro.plugins.protocol",                 # owned by #2311
-  "lintro.tools.definitions.commitlint -> lintro.plugins.registry",                 # owned by #2311
-  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.base",                  # owned by #2311
-  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.protocol",              # owned by #2311
-  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.registry",              # owned by #2311
-  "lintro.tools.definitions.gitleaks -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.gitleaks -> lintro.plugins.protocol",                   # owned by #2311
-  "lintro.tools.definitions.gitleaks -> lintro.plugins.registry",                   # owned by #2311
-  "lintro.tools.definitions.golangci_lint -> lintro.plugins.base",                  # owned by #2311
-  "lintro.tools.definitions.golangci_lint -> lintro.plugins.protocol",              # owned by #2311
-  "lintro.tools.definitions.golangci_lint -> lintro.plugins.registry",              # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.base",                       # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.registry",                   # owned by #2311
@@ -797,6 +800,15 @@ ignore_imports = [
   "lintro.tools.definitions.yamllint -> lintro.plugins.base",                       # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.dotenv_linter.definition -> lintro.plugins.base",                   # owned by #2311
+  "lintro.tools.dotenv_linter.definition -> lintro.plugins.protocol",               # owned by #2311
+  "lintro.tools.dotenv_linter.definition -> lintro.plugins.registry",               # owned by #2311
+  "lintro.tools.gitleaks.definition -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.gitleaks.definition -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.gitleaks.definition -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.golangci_lint.definition -> lintro.plugins.base",                   # owned by #2311
+  "lintro.tools.golangci_lint.definition -> lintro.plugins.protocol",               # owned by #2311
+  "lintro.tools.golangci_lint.definition -> lintro.plugins.registry",               # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.protocol",                      # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.registry",                      # owned by #2311

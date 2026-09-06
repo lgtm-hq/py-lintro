@@ -10,7 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.astro_check.astro_check_issue import AstroCheckIssue
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
 
 
 def _mock_subprocess_success(**kwargs: Any) -> tuple[bool, str]:

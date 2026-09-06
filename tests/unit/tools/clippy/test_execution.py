@@ -8,7 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
-from lintro.tools.definitions.clippy import ClippyPlugin
+from lintro.tools.clippy.definition import ClippyPlugin
 
 _CLIPPY_ISSUE = (
     '{"reason":"compiler-message","message":{"code":{"code":"clippy::needless_return"},'

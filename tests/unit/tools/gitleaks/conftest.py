@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.gitleaks import GitleaksPlugin
+from lintro.tools.gitleaks.definition import GitleaksPlugin
 
 
 @pytest.fixture

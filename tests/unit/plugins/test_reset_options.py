@@ -68,10 +68,10 @@ def test_bandit_reset_options_preserves_native_config() -> None:
     }
 
     with patch(
-        "lintro.tools.definitions.bandit.load_bandit_config",
+        "lintro.tools.bandit.definition.load_bandit_config",
         return_value=native_config,
     ):
-        from lintro.tools.definitions.bandit import BanditPlugin
+        from lintro.tools.bandit.definition import BanditPlugin
 
         plugin = BanditPlugin()
 
@@ -88,7 +88,7 @@ def test_bandit_reset_options_preserves_native_config() -> None:
 
     # Reset should restore native config, not defaults (which have skips=None)
     with patch(
-        "lintro.tools.definitions.bandit.load_bandit_config",
+        "lintro.tools.bandit.definition.load_bandit_config",
         return_value=native_config,
     ):
         plugin.reset_options()

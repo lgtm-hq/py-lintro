@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.commitlint import CommitlintPlugin
+from lintro.tools.commitlint.definition import CommitlintPlugin
 
 
 def test_default_options(commitlint_plugin: CommitlintPlugin) -> None:

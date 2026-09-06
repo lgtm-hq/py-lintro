@@ -53,7 +53,7 @@ def _get_plugin_instance(plugin_class_path: str) -> BaseToolPlugin:
 # (plugin_class_path, tool_name, sample_file, success_output)
 TOOL_CHECK_SUCCESS_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         "test.py",
         (True, "All done! 1 file left unchanged."),
@@ -65,7 +65,7 @@ TOOL_CHECK_SUCCESS_CONFIGS = [
 # (plugin_class_path, tool_name, sample_file, failure_output)
 TOOL_CHECK_FAILURE_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         "test.py",
         (False, "would reformat test.py\nOh no! 1 file would be reformatted."),
@@ -77,7 +77,7 @@ TOOL_CHECK_FAILURE_CONFIGS = [
 # (plugin_class_path, tool_name, executable_cmd)
 TOOL_TIMEOUT_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         ["black"],
         id="black",
@@ -118,7 +118,7 @@ TOOLS_THAT_CANNOT_FIX = [
 # (plugin_class_path, tool_name)
 TOOL_EARLY_SKIP_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         id="black",
     ),

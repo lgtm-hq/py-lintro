@@ -113,11 +113,11 @@ def _labels_for(*, path: str) -> set[str]:
         (".github/workflows/docker-ci.yml", {"ci"}),
         (".allstar/allstar.yaml", {"infrastructure"}),
         (
-            "lintro/tools/definitions/bandit.py",
+            "lintro/tools/bandit/definition.py",
             {"enhancement", "security"},
         ),
         (
-            "lintro/tools/definitions/gitleaks.py",
+            "lintro/tools/gitleaks/definition.py",
             {"enhancement", "security"},
         ),
         (

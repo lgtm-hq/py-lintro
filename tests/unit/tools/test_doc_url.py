@@ -14,12 +14,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.actionlint import ActionlintPlugin
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
-from lintro.tools.definitions.bandit import BanditPlugin
-from lintro.tools.definitions.cargo_audit import CargoAuditPlugin
-from lintro.tools.definitions.cargo_deny import CargoDenyPlugin
-from lintro.tools.definitions.clippy import ClippyPlugin
+from lintro.tools.actionlint.definition import ActionlintPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
+from lintro.tools.bandit.definition import BanditPlugin
+from lintro.tools.cargo_audit.definition import CargoAuditPlugin
+from lintro.tools.cargo_deny.definition import CargoDenyPlugin
+from lintro.tools.clippy.definition import ClippyPlugin
 from lintro.tools.definitions.hadolint import HadolintPlugin
 from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
 from lintro.tools.definitions.mypy import MypyPlugin

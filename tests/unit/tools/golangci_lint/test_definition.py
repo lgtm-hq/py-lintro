@@ -5,7 +5,7 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.golangci_lint import (
+from lintro.tools.golangci_lint.definition import (
     GolangciLintPlugin,
     _build_golangci_lint_command,
 )
