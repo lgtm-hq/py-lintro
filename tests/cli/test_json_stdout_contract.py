@@ -18,7 +18,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
-from lintro.plugins._builtin_index import REGISTERING_TOOL_MODULES
+from lintro.plugins._builtin_index import REGISTERING_TOOL_PACKAGES
 from lintro.plugins.discovery import discover_builtin_tools
 from lintro.plugins.registry import ToolRegistry
 
@@ -174,7 +174,7 @@ def test_list_tools_json_stdout_is_a_single_document(
 ) -> None:
     """``list-tools --json`` stdout is one JSON object of every builtin.
 
-    The smoke test requires every ``REGISTERING_TOOL_MODULES`` name to
+    The smoke test requires every ``REGISTERING_TOOL_PACKAGES`` name to
     appear as ``origin==builtin``, not merely a non-empty builtin set.
 
     Args:
@@ -193,7 +193,7 @@ def test_list_tools_json_stdout_is_a_single_document(
     reported = {name.replace("-", "_") for name in builtins}
     missing = [
         name
-        for name in REGISTERING_TOOL_MODULES
+        for name in REGISTERING_TOOL_PACKAGES
         if name.replace("-", "_") not in reported
     ]
     assert_that(missing).is_empty()
@@ -310,7 +310,7 @@ def test_check_json_default_argv_stdout_is_a_single_document(
             f"{name} should skip without PATH or python -m tools",
         ).is_true()
     reported = {name.replace("-", "_") for name in by_tool}
-    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
     assert_that(reported & expected).is_not_empty()
 
 

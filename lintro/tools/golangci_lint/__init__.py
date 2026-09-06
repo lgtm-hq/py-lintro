@@ -2,8 +2,8 @@
 
 Everything the ``golangci-lint`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.golangci_lint.definition`. ``lintro.tools.definitions.golangci_lint``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.golangci_lint.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.golangci_lint.definition import (

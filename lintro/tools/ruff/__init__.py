@@ -3,8 +3,7 @@
 Everything the ``ruff`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
 :mod:`lintro.tools.ruff.definition`, and the command builders and executors it
-delegates to. ``lintro.tools.definitions.ruff`` re-exports the plugin so
-plugin discovery keeps finding it (#2311).
+delegates to. Plugin discovery enters the package through that module (#2311).
 """
 
 from lintro.tools.ruff.check import execute_ruff_check

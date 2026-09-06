@@ -4,8 +4,7 @@ Everything the ``pytest`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
 :mod:`lintro.tools.pytest.definition`, and the command builder, executor,
 output processing and analytics modules it delegates to.
-``lintro.tools.definitions.pytest`` re-exports the plugin so plugin discovery
-keeps finding it (#2311).
+Plugin discovery enters the package through that module (#2311).
 """
 
 from lintro.tools.pytest.definition import PytestPlugin

@@ -3,9 +3,9 @@
 Everything the ``oxlint`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
 :mod:`lintro.tools.oxlint.definition`, and the type-aware doctor checks in
-:mod:`lintro.tools.oxlint.doctor`. ``lintro.tools.definitions.oxlint`` and
-``lintro.tools.definitions.oxlint_doctor`` re-export them so plugin discovery
-keeps finding both (#2311).
+:mod:`lintro.tools.oxlint.doctor`. Plugin discovery enters the package through
+the definition module, and this re-export surface brings the doctor checks with
+it (#2311).
 """
 
 from lintro.tools.oxlint.definition import (

@@ -22,27 +22,27 @@ _RUN = "_run_subprocess_result"
 def test_filter_keeps_only_files_under_a_prefix() -> None:
     """Files outside every include prefix are dropped."""
     files = [
-        "lintro/tools/definitions/ruff.py",
+        "lintro/tools/ruff/definition.py",
         "lintro/utils/config.py",
-        "lintro/tools/definitions_helper.py",
+        "lintro/tools/ruffian.py",
     ]
 
     kept = filter_included_files(
         files=files,
-        prefixes=("lintro/tools/definitions",),
+        prefixes=("lintro/tools/ruff",),
     )
 
-    assert_that(kept).is_equal_to(["lintro/tools/definitions/ruff.py"])
+    assert_that(kept).is_equal_to(["lintro/tools/ruff/definition.py"])
 
 
 def test_filter_normalizes_leading_dot_slash() -> None:
     """Discovery's ``./`` prefixes still match a plain configured prefix."""
     kept = filter_included_files(
-        files=["./lintro/tools/definitions/ruff.py", "./lintro/utils/config.py"],
-        prefixes=("lintro/tools/definitions",),
+        files=["./lintro/tools/ruff/definition.py", "./lintro/utils/config.py"],
+        prefixes=("lintro/tools/ruff",),
     )
 
-    assert_that(kept).is_equal_to(["./lintro/tools/definitions/ruff.py"])
+    assert_that(kept).is_equal_to(["./lintro/tools/ruff/definition.py"])
 
 
 def test_filter_without_prefixes_keeps_everything() -> None:

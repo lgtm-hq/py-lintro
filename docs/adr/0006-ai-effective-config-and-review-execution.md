@@ -164,7 +164,7 @@ add a competing lifecycle abstraction (for example a second context-manager laye
 before or beside #1885.
 
 Providers are constructed at five sites today (`cli_utils/commands/review.py`,
-`mcp/toolkits/review.py`, `tools/definitions/idiom_review.py`, `ai/orchestrator.py`,
+`mcp/toolkits/review.py`, `tools/idiom_review/definition.py`, `ai/orchestrator.py`,
 `ai/liveness.py`). Closing inside the review orchestrator would be a use-after-close
 hazard for MCP session reuse; ownership stays with the constructing run/session.
 

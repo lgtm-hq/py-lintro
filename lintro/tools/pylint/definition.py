@@ -114,7 +114,7 @@ def filter_included_files(
     pylint has no built-in way to scope a project-wide run to a subtree while
     still reading the project config, so the scoping is applied here. Paths are
     matched as prefixes of each file path relative to the run's working
-    directory, so ``lintro/tools/definitions`` selects that package and nothing
+    directory, so ``lintro/tools/ruff`` selects that package and nothing
     else.
 
     Args:

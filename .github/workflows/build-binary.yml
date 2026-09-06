@@ -497,8 +497,8 @@ jobs:
       # Needed for scripts/build/create_universal.sh and the binary smoke
       # test. smoke-test-binary.py reads lintro/plugins/_builtin_index.py,
       # which is no longer committed (#2180), so the checkout carries the
-      # builtin-index generator's inputs instead: lintro/tools/definitions
-      # (the modules it scans) and the lintro_build package (the
+      # builtin-index generator's inputs instead: lintro/tools (the per-tool
+      # packages it scans) and the lintro_build package (the
       # implementation). The codeload / objects.githubusercontent.com
       # endpoints above are what actions/checkout fetches through, and match
       # the other sparse-checkout jobs here.
@@ -508,7 +508,7 @@ jobs:
           sparse-checkout: |
             scripts
             lintro/plugins
-            lintro/tools/definitions
+            lintro/tools
             lintro_build
           persist-credentials: false
 

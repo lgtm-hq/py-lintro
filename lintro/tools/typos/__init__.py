@@ -2,8 +2,8 @@
 
 Everything the ``typos`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.typos.definition`. ``lintro.tools.definitions.typos``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.typos.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.typos.definition import (
