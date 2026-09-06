@@ -8,9 +8,12 @@ it wrong independently before this module existed (issue #1739):
 * The severity baseline must not record — or compare against — a run that did
   not measure the same population as a normal ``check``.
 
-A tool that finds nothing to do still returns ``skipped=False`` and
+A tool that finds nothing to do often still returns ``skipped=False`` and
 ``success=True``, so its message is the only signal that nothing was looked
-at. :func:`result_inspected_files` classifies those messages.
+at. That covers two shapes: "No <files> to check" for an empty file set, and
+"Skipping <tool>: ..." for a wrapper that declined to run at all (``vale`` and
+``stylelint`` use the latter without setting ``skipped``, unlike ``spectral``
+and ``commitlint``). :func:`result_inspected_files` classifies both.
 
 Known limitation
 ----------------
@@ -58,6 +61,12 @@ _NO_WORK_ENDINGS: tuple[str, ...] = (
 #: was absent, e.g. "No Cargo.lock found; skipping cargo-audit.".
 _SKIPPING_MARKER = "; skipping"
 
+#: Prefix of the whole-output message a wrapper emits when it declines to run
+#: at all — missing configuration, a failed auto-install, an unusable version.
+#: ``vale`` and ``stylelint`` use this shape *without* setting ``skipped=True``,
+#: so it is the only signal that they inspected nothing.
+_SKIPPING_PREFIX = "skipping "
+
 
 def _reports_no_work(text: str) -> bool:
     """Return whether a result's text says the tool found nothing to do.
@@ -66,11 +75,21 @@ def _reports_no_work(text: str) -> bool:
         text: The result's combined ``output`` and ``formatted_output``.
 
     Returns:
-        bool: ``True`` when the message names an empty file/path set rather
-        than a clean inspection.
+        bool: ``True`` when the message names an empty file/path set, or says
+        the tool declined to run, rather than a clean inspection.
     """
-    for line in text.splitlines():
-        stripped = line.strip().rstrip(".").lower()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+
+    # Matched on the first line only: a "Skipping <tool>: ..." result carries
+    # that message as its entire output, whereas a tool that really ran could
+    # mention "skipping" somewhere inside a findings blob.
+    if lines[0].lower().startswith(_SKIPPING_PREFIX):
+        return True
+
+    for line in lines:
+        stripped = line.rstrip(".").lower()
         if not stripped.startswith("no "):
             continue
         if _SKIPPING_MARKER in stripped or stripped.endswith(_NO_WORK_ENDINGS):

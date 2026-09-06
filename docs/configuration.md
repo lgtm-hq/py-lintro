@@ -279,18 +279,26 @@ severities that actually moved are listed; a run with no movement reads `no chan
 Severities are compared most-severe first, so trading an error for a warning still reads
 as an improvement.
 
-The comparison baseline is stored at `.lintro/severity-baseline.json` — at the root of
-the log directory rather than inside a `run-*` directory, so run pruning never removes
-it.
+The comparison baseline is stored as `severity-baseline.json` at the root of the log
+directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
+directory, so run pruning never removes it.
 
 Only a run that actually measured the project reads or writes it, and the same rule
 governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
 measure something else), is not a `fmt --dry-run` preview (those report as checks but
 count only the auto-fixable subset), and had at least one tool actually inspect files.
-Runs that do not qualify — an empty directory, an all-skipped toolset, an early exit —
-leave the previous baseline in place rather than overwriting it with zeroes, so the next
-comparison may be against an older run rather than the immediately preceding one. A
-missing or unreadable baseline simply omits the change line, and never fails a run.
+Runs that do not qualify — an empty directory, an all-skipped toolset, a toolset that
+declined to run for want of configuration, an early exit — leave the previous baseline
+in place rather than overwriting it with zeroes, so the next comparison may be against
+an older run rather than the immediately preceding one. A missing or unreadable baseline
+simply omits the change line, and never fails a run.
+
+A **tool timeout** is treated differently by the baseline and by the badge, on purpose.
+A check where one tool timed out but another inspected files still records a baseline:
+the alternative would let a single flaky `semgrep` or `gitleaks` timeout freeze the
+baseline, so the next successful run would report its delta against an arbitrarily old
+measurement. `lintro badge` refuses that same run, because a badge is a public claim and
+"0 issues" would assert something about findings that were never collected.
 
 > **Removed in favour of this (issue #1739).** `lintro` used to compute a 0-100 "health
 > score" along with `check --score` and `check --fail-under N`. The score had no size
@@ -308,22 +316,28 @@ lintro badge --url            # bare badge URL
 lintro badge --json           # counts, message, color, url, and markdown as JSON
 ```
 
-`--json` and `--url` are mutually exclusive. `lintro badge` runs a check (or accepts
-`--errors N` / `--warnings N` / `--info N` to skip the run) and prints a shields.io
-snippet such as
+`--json` and `--url` are mutually exclusive. `lintro badge` runs a check and prints a
+shields.io snippet such as
 `![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)`. Badge
 colour is bright green for a clean run, red when any error was found, and yellow when
 only warnings or info issues remain.
+
+Passing any of `--errors N` / `--warnings N` / `--info N` skips the live check entirely
+and treats the severities you omit as zero.
+
+A live badge **refuses to publish** rather than assert a quality claim the run did not
+support. It exits non-zero, printing no snippet, when the check exited early, when any
+tool timed out, and when nothing actually inspected a file — which covers an empty
+directory, an all-skipped toolset, and a toolset that declined to run for want of
+configuration.
 
 #### JSON output
 
 In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
 `total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
 object is **gone** — this is a breaking change for anything that read it.
-`severity_delta` appears only when a comparable baseline exists. `--output` files and
-configured JSON artifacts carry the same two severity keys; the rest of their `summary`
-object differs from the stdout document by design (it adds `timestamp` and `tools_run`,
-and omits `total_remaining`):
+`severity_delta` appears only when a comparable baseline exists; on a first run the key
+is absent rather than zero. The **stdout** document looks like this:
 
 ```json
 {
@@ -331,6 +345,25 @@ and omits `total_remaining`):
     "total_issues": 3,
     "total_fixed": 0,
     "total_remaining": 3,
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
+  }
+}
+```
+
+`--output` files and configured JSON artifacts carry the same two severity keys, but the
+rest of their `summary` object differs from the stdout document by design — it adds
+`timestamp` and `tools_run`, and omits `total_remaining`:
+
+```json
+{
+  "timestamp": "2026-09-06T00:00:00+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "tools_run": 12,
+    "timed_out_tools": [],
     "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
     "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
   }

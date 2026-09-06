@@ -268,3 +268,54 @@ def test_result_inspected_files_treats_empty_output_as_inspected() -> None:
     result = ToolResult(name="ruff", success=True, skipped=False, output=None)
 
     assert_that(result_inspected_files(result)).is_true()
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        (
+            "Skipping vale: no Vale configuration found "
+            "(e.g. .vale.ini). Add one to enable prose linting."
+        ),
+        (
+            "Skipping stylelint: no stylelint configuration found "
+            '(e.g. .stylelintrc.json, stylelint.config.js, or a "stylelint" '
+            "key in package.json). Add one to enable CSS/SCSS/Less linting."
+        ),
+        "Skipping astro-check: auto-install failed.",
+        "Skipping svelte-check: could not resolve the binary",
+    ],
+    ids=["vale", "stylelint", "auto-install", "unresolved-binary"],
+)
+def test_result_inspected_files_rejects_declined_to_run_messages(output: str) -> None:
+    """A wrapper that declined to run inspected nothing.
+
+    ``vale`` and ``stylelint`` emit this shape with ``skipped=False``, unlike
+    ``spectral`` and ``commitlint`` which set the flag. Before this was
+    recognised, a vale- or stylelint-only check looked measured, so it could
+    record a zero baseline over a real one and publish a "0 issues" badge.
+
+    Args:
+        output: A real "declined to run" message from a wrapped tool.
+    """
+    result = ToolResult(name="tool", success=True, skipped=False, output=output)
+
+    assert_that(result_inspected_files(result)).is_false()
+
+
+def test_result_inspected_files_keeps_findings_mentioning_skipping() -> None:
+    """A findings blob mentioning "Skipping" is not a declined-to-run result.
+
+    The prefix is matched on the first line only, because a declined result
+    carries that message as its entire output while a tool that really ran
+    could mention skipping anywhere in its report.
+    """
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        skipped=False,
+        issues_count=1,
+        output="a.py:1:1 F401 unused import\nSkipping the rest of the file",
+    )
+
+    assert_that(result_inspected_files(result)).is_true()

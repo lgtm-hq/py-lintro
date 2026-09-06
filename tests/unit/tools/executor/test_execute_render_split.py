@@ -64,11 +64,18 @@ class _FakeTool:
         Returns:
             ToolResult: The canned result for this double.
         """
+        # Parsed issues, not a bare count: ``count_severities`` reads
+        # severities off this list, so a fixture with an empty one would make
+        # the execute phase's tally unobservable.
+        issues: list[Any] = [
+            RuffIssue(file="a.py", line=index + 1, code="F401", message="unused")
+            for index in range(self._issues_count)
+        ]
         return ToolResult(
             name="ruff",
             success=self._issues_count == 0,
             issues_count=self._issues_count,
-            issues=[],
+            issues=issues,
         )
 
 
@@ -243,7 +250,10 @@ def test_execute_run_returns_an_artifact_and_emits_no_document(
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(artifact.action).is_equal_to(Action.CHECK)
     assert_that(artifact.workspace_root).is_equal_to(Path.cwd())
-    assert_that(artifact.severity_counts).is_not_none()
+    # A real tally, not a presence check: ``severity_counts`` is a non-Optional
+    # field, so ``is_not_none()`` could never fail. ``RuffIssue`` maps F401 to
+    # WARNING, so the execute phase must report two warnings here.
+    assert_that(artifact.severity_counts).is_equal_to(SeverityCounts(warnings=2))
     assert_that(artifact.early_exit).is_false()
     assert_that(capsys.readouterr().out).is_empty()
 
