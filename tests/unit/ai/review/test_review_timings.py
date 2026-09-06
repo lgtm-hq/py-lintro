@@ -570,8 +570,11 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
         [True, True, True],
     )
     # The leader is whichever chunk the semaphore admitted first, not
-    # necessarily index 0 once the breakdown is sorted by chunk index.
-    leader = max(timings.chunks, key=lambda chunk: chunk.in_flight_seconds)
+    # necessarily index 0 once the breakdown is sorted by chunk index. Identify
+    # it by the shortest wait: a sibling cancelled just after admission can
+    # briefly out-measure the leader on in-flight time under load, which made
+    # the previous `max(in_flight_seconds)` pick the wrong chunk (#2315).
+    leader = min(timings.chunks, key=lambda chunk: chunk.queued_seconds)
     assert_that(leader.in_flight_seconds).is_greater_than_or_equal_to(0.01)
     for chunk in timings.chunks:
         if chunk is leader:

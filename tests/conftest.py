@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
+from loguru import logger
 
 from lintro.plugins.discovery import discover_all_tools
 from lintro.plugins.registry import ToolRegistry
@@ -47,6 +48,46 @@ def _discover_tools() -> None:
     the builtin tool definitions and any external plugins.
     """
     discover_all_tools()
+
+
+def _loguru_handler_ids() -> set[int]:
+    """Return the ids of the loguru handlers installed right now.
+
+    loguru exposes no public way to enumerate its handlers, so this reads the
+    private table defensively: an absent attribute yields an empty set rather
+    than an error, which degrades the isolation fixture below to a no-op if a
+    future loguru release moves it.
+
+    Returns:
+        The currently installed handler ids.
+    """
+    core = getattr(logger, "_core", None)
+    return set(getattr(core, "handlers", {}))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_loguru_handlers() -> Generator[None]:
+    """Remove any loguru sink a test adds and leaves behind.
+
+    ``logger.add`` mutates a process-global handler table. A test that adds a
+    sink bound to ``sys.stderr`` binds pytest's per-test capture buffer, which
+    is closed once that test ends — every later record then raises ``I/O
+    operation on closed file`` and loguru prints the traceback to the real
+    stdout, which corrupted the JSON that CLI tests parse. Dropping the sinks a
+    test added keeps the damage inside the test that caused it (#2315).
+
+    Handlers present beforehand are left alone: loguru closes a sink when it is
+    removed, so a removed handler cannot be added back.
+
+    Yields:
+        None: Removes newly added loguru handlers after the test.
+    """
+    before = _loguru_handler_ids()
+    try:
+        yield
+    finally:
+        for handler_id in _loguru_handler_ids() - before:
+            logger.remove(handler_id)
 
 
 @pytest.fixture(autouse=True)
