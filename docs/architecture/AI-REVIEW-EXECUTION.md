@@ -74,8 +74,11 @@ suppression. `run_review_async` reads as three steps:
 |        | `lintro/ai/review/chunk_pass.py`      | One chunk's depth-1/2/3 passes                                                                |
 | Report | `lintro/ai/review/result_assembly.py` | Totals, file selection, coverage records, flag reconciliation, `ReviewMetadata`               |
 
-The two halves of that flow travel as frozen objects: `ReviewRunPlan` (what the run
-resolved to do) and `ReviewRunOutcome` (what it produced, completed or stopped).
+The Run step is a sequence the orchestrator still owns, not a single module: after the
+chunk fan-out it calls the custom-agent passes (`custom_agent_runner.py`), merges and
+filters (`merge.py`), and may run the cross-chunk synthesis pass (`synthesis.py`). The
+two halves of the flow travel as frozen objects: `ReviewRunPlan` (what the run resolved
+to do) and `ReviewRunOutcome` (what it produced, completed or stopped).
 
 ### Session options (`lintro/ai/review/session.py`, #2301)
 

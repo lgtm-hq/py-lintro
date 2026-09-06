@@ -443,15 +443,22 @@ async def review_all_chunks(
         The completed partials, in chunk order.
     """
     sink = _CompletionSink(completed=completed_sink, on_complete=on_chunk_complete)
-    if len(chunks) <= 1:
+    if not chunks:
+        # A resumed round can filter every chunk away. The caller skips this
+        # function then, but the fast path below indexes chunks[0], so the
+        # empty case is answered here rather than left as a footgun.
+        return []
+    if len(chunks) == 1:
         single = await _review_one_chunk_until_stop(chunk=chunks[0], plan=plan)
         sink.record(partial=single)
         return [single]
 
     # Bounded concurrency on the caller's event loop: chunk reviews are
     # provider I/O, so tasks under a semaphore keep the ``max_parallel_calls``
-    # ceiling without threads. A cost cap does not force serial execution; see
-    # ``CostBudget.execute`` for the accepted n-1-call overshoot bound.
+    # ceiling without threads. The ceiling arrives already resolved --
+    # ``plan_run`` sets it to 1 for a cost-capped run so the resume queue
+    # cannot invert (#2154) -- and above 1 the accepted overshoot bound is the
+    # n-1 calls documented on ``CostBudget.execute``.
     semaphore = asyncio.Semaphore(min(len(chunks), plan.max_parallel_calls))
     tasks: list[asyncio.Future[_ChunkOutcome]] = [
         asyncio.ensure_future(

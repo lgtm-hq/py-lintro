@@ -204,7 +204,10 @@ def test_checkpoint_writer_is_inert_without_a_state_directory(tmp_path: Path) ->
         patch.dict("os.environ", {"LINTRO_REVIEW_STATE_DIR": ""}),
         patch(
             "lintro.ai.review.incremental_coverage.write_state_part",
-            side_effect=calls.append,
+            # Keyword-taking, like the real call: a bare ``calls.append`` would
+            # raise TypeError into ``checkpoint_writer``'s best-effort handler,
+            # so a regression that lost the env gate would still look inert.
+            side_effect=lambda **kwargs: calls.append(kwargs),
         ),
     ):
         checkpoint([_partial()])
