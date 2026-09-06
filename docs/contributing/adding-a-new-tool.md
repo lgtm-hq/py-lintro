@@ -63,9 +63,10 @@ discovery finds the package (#2311):
 - `lintro/tools/<tool>/__init__.py` — the package's import surface: re-export the plugin
   class, its module-level constants and every helper other packages import, and list
   them in `__all__`, so no caller reaches past the package. Importing `definition` runs
-  this module, which is how the package's other modules come along; keep a module that
-  must stay lazy (one reaching into `lintro.ai`, say) out of it and import it inside the
-  function that needs it, as `lintro/tools/idiom_review/__init__.py` does.
+  this module, which is how the package's other modules come along — and why a module
+  left out of it is never loaded by discovery. A tool package must not import
+  `lintro.ai`: the layers contract puts `ai` above `tools`, and moving the import into a
+  function body is not a fix, because import-linter counts those too.
 - `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include`, and
   add the same path to `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py`,
   in the same change. The duplicate-code gate's scope follows the files, so a package

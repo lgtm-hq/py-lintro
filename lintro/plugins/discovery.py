@@ -177,9 +177,9 @@ def discover_builtin_tools() -> int:
 
     Note:
         Each per-tool package's ``definition`` module uses the @register_tool
-        decorator to register itself with the ToolRegistry. The package's other
-        modules are imported too, so a tool that registers from elsewhere in
-        its package is still discovered.
+        decorator to register itself with the ToolRegistry. That module is the
+        package's entry point, so a decorator applied anywhere else in the
+        package registers nothing.
     """
     loaded_count = 0
 

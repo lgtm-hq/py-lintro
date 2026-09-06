@@ -145,13 +145,16 @@ def test_collect_registering_package_names_skips_shared_packages(
     )
 
 
-def test_collect_registering_package_names_scans_every_module(
+def test_collect_registering_package_names_follows_the_imported_modules(
     tmp_path: Path,
 ) -> None:
-    """A tool registered outside ``definition`` still counts.
+    """Only the modules discovery imports can contribute a registration.
 
-    The registering set drives the released binary's registry assertion, so it
-    must follow the decorator rather than the file name.
+    The registering set drives the released binary's registry assertion, and a
+    frozen binary imports exactly the indexed modules. A decorator in a module
+    the index does not name would make that assertion expect a tool the binary
+    can never register, so it must not count. A shared package, whose every
+    public module is indexed, counts from anywhere.
 
     Args:
         tmp_path: Pytest-provided temporary directory.
@@ -161,9 +164,14 @@ def test_collect_registering_package_names_scans_every_module(
         name="oxlint",
         modules={"definition.py": "X = 1\n", "doctor.py": _registering_module()},
     )
+    _make_package(
+        root=tmp_path,
+        name="ts_checker",
+        modules={"base.py": _registering_module()},
+    )
 
     assert_that(builtin_index.collect_registering_package_names(tmp_path)).is_equal_to(
-        ["oxlint"],
+        ["ts_checker"],
     )
 
 

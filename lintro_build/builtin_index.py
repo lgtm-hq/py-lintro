@@ -235,10 +235,14 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
 def collect_registering_package_names(tools_dir: Path) -> list[str]:
     """Collect the per-tool packages that contribute a registry entry.
 
-    Registration is detected by walking each module's AST for a
-    ``register_tool`` decorator (a ``Name`` or ``Attribute``). Comments and
-    docstrings that mention the decorator do not count. A shared package such
-    as ``ts_checker`` registers nothing and is therefore absent.
+    Registration is detected by walking the AST of each module
+    :func:`_entry_modules` names — the ones discovery actually imports — for a
+    ``register_tool`` decorator (a ``Name`` or ``Attribute``). Scanning the
+    same modules keeps the two lists consistent by construction: a decorator in
+    a module discovery never imports would otherwise make a frozen binary
+    expect a tool it cannot register. Comments and docstrings that mention the
+    decorator do not count. A shared package such as ``ts_checker`` registers
+    nothing and is therefore absent.
 
     Args:
         tools_dir: The ``lintro/tools`` directory holding the per-tool packages.
@@ -253,7 +257,7 @@ def collect_registering_package_names(tools_dir: Path) -> list[str]:
                 source=module.read_text(encoding="utf-8"),
                 path=module,
             )
-            for module in _public_modules(package)
+            for module in _entry_modules(package)
         ):
             registering.append(package.name)
     return sorted(registering)
