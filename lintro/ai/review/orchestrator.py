@@ -75,11 +75,6 @@ from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
-from lintro.ai.review.errors_taxonomy import (
-    ReviewErrorKind,
-    classify_provider_error,
-    resolve_cause_text,
-)
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.file_selection import resolve_file_selection
 from lintro.ai.review.finding_matcher import match_findings
@@ -132,6 +127,14 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.review.session import (
+    ReviewSessionOptions,
+    aborted_before_completion,
+    cost_cap_reason,
+    is_cost_cap_stop,
+    is_timeout_stop,
+    timeout_reason,
+)
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.state_store import state_dir, write_state_part
 from lintro.ai.review.synthesis import (
@@ -157,6 +160,7 @@ if TYPE_CHECKING:
     from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
+    "ReviewSessionOptions",
     "guard_changed_paths",
     "build_git_native_review_prompt",
     "build_review_prompt",
@@ -176,134 +180,6 @@ _PROMPT_OVERHEAD_TOKENS = 12_000
 # Depth ≥ 2 generates 5–10 checklist questions per chunk. Parallel chunks get
 # disjoint id ranges so merge_checklist_answers does not collide across chunks.
 _GENERATED_CHECKLIST_ID_STRIDE = 32
-
-
-def _aborted_before_completion(
-    *,
-    cause: Exception,
-    provider: BaseAIProvider,
-    chunk_index: int,
-    total_chunks: int,
-    step: str,
-    completed_chunks: int,
-) -> ReviewExecutionError:
-    """Wrap a mid-run chunk failure, preserving and surfacing the real cause.
-
-    Classifies the underlying provider exception into a canonical
-    :class:`~lintro.ai.review.errors_taxonomy.ReviewErrorKind` and logs the real
-    cause text so the true failure (e.g. depleted credits) is never lost behind
-    the generic "aborted" wrapper.
-
-    Args:
-        cause: The underlying provider or parser exception.
-        provider: Configured provider, used to resolve provider-aware kinds.
-        chunk_index: Zero-based index of the failing chunk.
-        total_chunks: Total chunks planned for the review.
-        step: Sub-step within the chunk where the failure occurred.
-        completed_chunks: Number of chunks completed before the failure.
-
-    Returns:
-        A ``ReviewExecutionError`` carrying the resolved kind and cause message.
-    """
-    kind = classify_provider_error(provider=str(provider.name), error=cause)
-    cause_message = resolve_cause_text(error=cause)
-    logger.error(
-        "Review aborted before all chunks completed on chunk {chunk} during "
-        "{step} — kind={kind}, cause: {cause}",
-        chunk=chunk_index,
-        step=step,
-        kind=kind.value,
-        cause=cause_message,
-    )
-    return ReviewExecutionError(
-        message="Review aborted before all chunks completed.",
-        chunk_index=chunk_index,
-        total_chunks=total_chunks,
-        step=step,
-        completed_chunks=completed_chunks,
-        cause_message=cause_message,
-        error_kind=kind,
-    )
-
-
-def _is_cost_cap_stop(*, exc: BaseException) -> bool:
-    """Return whether an exception represents a graceful cost-cap stop.
-
-    The cost cap can surface either as a raw
-    :class:`~lintro.ai.exceptions.AICostBudgetExceededError` (when the
-    top-of-loop ``budget.check()`` raises) or wrapped inside a
-    :class:`~lintro.ai.review.exceptions.ReviewExecutionError` (when an
-    intra-chunk check raises and the chunk failure is wrapped). Both cases are
-    detected by walking the ``__cause__`` chain so a cost-cap stop is never
-    misclassified as a genuine provider error, and vice versa.
-
-    Args:
-        exc: The exception raised while reviewing chunks.
-
-    Returns:
-        True when the underlying cause is a cost-cap exhaustion.
-    """
-    current: BaseException | None = exc
-    while current is not None:
-        if isinstance(current, AICostBudgetExceededError):
-            return True
-        current = current.__cause__
-    return False
-
-
-def _cost_cap_reason(*, cap: float | None) -> str:
-    """Build the human-readable ``stopped_reason`` for a cost-cap stop.
-
-    Args:
-        cap: The configured ``ai.max_cost_usd`` ceiling, if any.
-
-    Returns:
-        A message such as ``"cost cap ($0.50) reached"``.
-    """
-    if cap is None:
-        return "cost cap reached"
-    return f"cost cap (${cap:.2f}) reached"
-
-
-def _is_timeout_stop(*, exc: BaseException) -> bool:
-    """Return whether an exception is a persistable mid-round timeout.
-
-    ADR-0007 / #2154: cap, quota, and timeout all persist coverage and resume.
-    A timeout is classified from the wrapped ``ReviewExecutionError`` kind or
-    from the provider error text (``timed out`` / ``timeout``).
-
-    Args:
-        exc: The exception raised while reviewing chunks.
-
-    Returns:
-        True when the underlying cause is a provider or CLI timeout.
-    """
-    current: BaseException | None = exc
-    while current is not None:
-        if (
-            isinstance(current, ReviewExecutionError)
-            and current.error_kind is ReviewErrorKind.TIMEOUT
-        ):
-            return True
-        current = current.__cause__
-    if not isinstance(exc, Exception):
-        return False
-    return classify_provider_error(provider="", error=exc) is ReviewErrorKind.TIMEOUT
-
-
-def _timeout_reason(*, exc: BaseException) -> str:
-    """Build the human-readable ``stopped_reason`` for a timeout stop.
-
-    Args:
-        exc: The timeout exception (possibly wrapped).
-
-    Returns:
-        A short stop reason that names the timeout.
-    """
-    cause = resolve_cause_text(error=exc) if isinstance(exc, Exception) else str(exc)
-    if cause:
-        return f"timeout ({cause})"
-    return "timeout"
 
 
 def _write_incremental_coverage_part(
@@ -779,7 +655,7 @@ async def _review_all_chunks(
                 isinstance(outcome, Exception)
                 and stop is not None
                 and stop.is_set()
-                and not _is_cost_cap_stop(exc=outcome)
+                and not is_cost_cap_stop(exc=outcome)
             ):
                 # A forwarded TERM can kill the isolated agent and surface
                 # a non-timeout provider error. Persist as SIGTERM anyway.
@@ -787,7 +663,7 @@ async def _review_all_chunks(
             graceful_stop = isinstance(
                 outcome,
                 (ReviewExecutionError, AICostBudgetExceededError),
-            ) or (isinstance(outcome, Exception) and _is_timeout_stop(exc=outcome))
+            ) or (isinstance(outcome, Exception) and is_timeout_stop(exc=outcome))
             if graceful_stop:
                 # A cost-cap / timeout / SIGTERM stop is an expected halt.
                 # Harvest siblings that already finished so a timeout on
@@ -816,7 +692,7 @@ async def _review_all_chunks(
                     raise outcome
             if isinstance(outcome, Exception):
                 if first_error is None:
-                    first_error = _aborted_before_completion(
+                    first_error = aborted_before_completion(
                         cause=outcome,
                         provider=provider,
                         chunk_index=chunk_index,
@@ -902,7 +778,7 @@ async def _review_chunk_with_progress(
     except Exception as exc:
         # A cost-cap stop is an expected graceful halt, not a chunk failure:
         # re-raise it raw so run_review can finalize a partial cleanly.
-        if _is_cost_cap_stop(exc=exc):
+        if is_cost_cap_stop(exc=exc):
             raise
         step_tracker = progress if isinstance(progress, StepTrackingProgress) else None
         last_step = step_tracker.last_step if step_tracker else "reviewing"
@@ -913,7 +789,7 @@ async def _review_chunk_with_progress(
             completed_chunks=chunk_index,
             error=exc,
         )
-        raise _aborted_before_completion(
+        raise aborted_before_completion(
             cause=exc,
             provider=provider,
             chunk_index=chunk_index,
@@ -955,7 +831,9 @@ def run_review(
     This is the sync/async boundary for ``lintro review``: the review
     pipeline below it is async, and ``asyncio.run`` is entered exactly
     once here so one event loop (and one provider client) serves the
-    whole review.
+    whole review. It is also where the keyword wall ends — the options
+    are packed into a :class:`~lintro.ai.review.session.ReviewSessionOptions`
+    and every layer below takes that object (#2301).
 
     Args:
         context: Collected review diff context.
@@ -992,27 +870,29 @@ def run_review(
     return asyncio.run(
         run_review_async(
             context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=depth,
-            checklist_items=checklist_items,
-            checklist_text=checklist_text,
-            classifications=classifications,
-            context_window_override=context_window_override,
-            lint_results=lint_results,
-            progress=progress,
-            sensitivity=sensitivity,
-            force_semantic_chunking=force_semantic_chunking,
-            timeout=timeout,
-            custom_agents=custom_agents,
-            run_builtin_checklist=run_builtin_checklist,
-            workspace_root=workspace_root,
-            context_collection_seconds=context_collection_seconds,
-            prior_state=prior_state,
-            force_full=force_full,
-            enforce_cost_cap=enforce_cost_cap,
-            stop=stop,
-            synthesis=synthesis,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_items=checklist_items,
+                checklist_text=checklist_text,
+                classifications=classifications,
+                context_window_override=context_window_override,
+                lint_results=lint_results,
+                progress=progress,
+                sensitivity=sensitivity,
+                force_semantic_chunking=force_semantic_chunking,
+                timeout=timeout,
+                custom_agents=custom_agents,
+                run_builtin_checklist=run_builtin_checklist,
+                workspace_root=workspace_root,
+                context_collection_seconds=context_collection_seconds,
+                prior_state=prior_state,
+                force_full=force_full,
+                enforce_cost_cap=enforce_cost_cap,
+                stop=stop,
+                synthesis=synthesis,
+            ),
         ),
     )
 
@@ -1038,79 +918,31 @@ def guard_changed_paths(*, context: ReviewContext) -> tuple[str, ...]:
 async def run_review_async(
     context: ReviewContext,
     *,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    depth: int = 1,
-    checklist_items: list[ChecklistItem],
-    checklist_text: str,
-    classifications: list[FileClassification],
-    context_window_override: int | None = None,
-    lint_results: str | None = None,
-    progress: ReviewProgressCallback | None = None,
-    sensitivity: ReviewSensitivityPolicy | None = None,
-    force_semantic_chunking: bool = False,
-    timeout: float | None = None,
-    custom_agents: tuple[CustomAgentSpec, ...] = (),
-    run_builtin_checklist: bool = True,
-    workspace_root: Path | None = None,
-    context_collection_seconds: float = 0.0,
-    prior_state: ReviewState | None = None,
-    force_full: bool = False,
-    enforce_cost_cap: bool = True,
-    stop: asyncio.Event | None = None,
-    synthesis: ReviewSynthesisConfig | None = None,
+    options: ReviewSessionOptions,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
     Args:
         context: Collected review diff context.
-        provider: Configured AI provider instance.
-        ai_config: AI configuration for retries, budget, and fallbacks.
-        depth: Review depth level (1-3).
-        checklist_items: Selected checklist items for the review.
-        checklist_text: Pre-formatted checklist prompt text.
-        classifications: Domain classifications for changed files.
-        context_window_override: Optional explicit context window override.
-        lint_results: Optional lint digest for ``--with-lint`` integration.
-        progress: Optional progress callback for live status updates.
-        sensitivity: Sensitivity preset controlling prompts and finding filters.
-        force_semantic_chunking: When True, skip the single-chunk fast path.
-        timeout: Optional per-call timeout override in seconds.
-        custom_agents: Discovered user-defined review agents (issue #1245).
-            Agents are scoped to the changed files their globs match; each
-            scoped agent adds one provider call against the same run budget.
-        run_builtin_checklist: When False, skip the built-in checklist passes
-            and run only the custom agents (``review.custom_agents: only``).
-        workspace_root: Optional workspace root used to build providers for
-            agents that declare a ``model`` override.
-        context_collection_seconds: Wall-clock seconds the caller spent in
-            ``collect_review_context`` (recorded in ``phase_timings``).
-        prior_state: Artifact or local-ledger state from a previous round.
-        force_full: Discard carried coverage (``--full``).
-        enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
-            chunk calls so concurrency cannot violate queue order.
-        stop: Optional event set to persist and halt (tests inject this;
-            production uses SIGTERM/SIGINT via :func:`install_review_interrupt`).
-        synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
-            disabled config means no extra pass runs, and the run is
-            byte-identical on every surface to one from before the pass
-            existed.
+        options: Session options for the run — provider, AI config, depth,
+            checklist, sensitivity, resume state, and stop event. See
+            :class:`~lintro.ai.review.session.ReviewSessionOptions`.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
 
     Raises:
-        ValueError: If ``depth`` is outside the allowed range 1-3.
+        ValueError: If ``options.depth`` is outside the allowed range 1-3.
         AIError: When the review fails for a non-recoverable reason (e.g.
             provider authentication or a genuine provider error). A cost-cap
             stop is handled internally and returned as a partial result instead.
         ReviewExecutionError: When a chunk fails mid-run for a reason other than
             the cost cap.
     """
-    if depth < 1 or depth > 3:
-        raise ValueError(f"depth must be between 1 and 3, got {depth}")
+    if options.depth < 1 or options.depth > 3:
+        raise ValueError(f"depth must be between 1 and 3, got {options.depth}")
 
-    review_sensitivity = sensitivity or ReviewSensitivityPolicy(
+    review_sensitivity = options.sensitivity or ReviewSensitivityPolicy(
         strictness=ReviewStrictness.BALANCED,
         report_migration_notes=True,
         report_doc_drift=True,
@@ -1121,11 +953,11 @@ async def run_review_async(
     if not context.changed_files and not context.unified_diff.strip():
         return _empty_review_result(
             context=context,
-            provider=provider,
-            depth=depth,
-            checklist_items=checklist_items,
-            context_window_override=context_window_override,
-            context_collection_seconds=context_collection_seconds,
+            provider=options.provider,
+            depth=options.depth,
+            checklist_items=options.checklist_items,
+            context_window_override=options.context_window_override,
+            context_collection_seconds=options.context_collection_seconds,
         )
 
     # One monotonic clock for the whole run: the recorder is back-dated by the
@@ -1133,38 +965,38 @@ async def run_review_async(
     # reported duration) covers the whole wait, not just the phases after the
     # early-return (#2148).
     timings = ReviewTimingRecorder(
-        started_at=time.monotonic() - max(context_collection_seconds, 0.0),
+        started_at=time.monotonic() - max(options.context_collection_seconds, 0.0),
     )
     timings.add_phase(
         name=ReviewPhase.CONTEXT_COLLECTION,
-        seconds=context_collection_seconds,
+        seconds=options.context_collection_seconds,
     )
 
     context_window = get_context_window(
-        model=provider.model_name,
-        override=context_window_override,
+        model=options.provider.model_name,
+        override=options.context_window_override,
     )
     prompt_overhead = _estimate_prompt_overhead(
         context=context,
-        checklist_text=checklist_text,
-        classifications=classifications,
-        lint_results=lint_results,
+        checklist_text=options.checklist_text,
+        classifications=options.classifications,
+        lint_results=options.lint_results,
     )
     diff_budget = calculate_available_diff_tokens(
         context_window=context_window,
         prompt_overhead=prompt_overhead,
     )
-    if ai_config.transport == AITransport.CLI:
+    if options.ai_config.transport == AITransport.CLI:
         # Context-window budgets are transport-blind and leave ~1.5k-line PRs
         # as a single CLI chunk (#1967). Tighten before the chunker runs, and
         # refuse outright when the full diff exceeds the hard ceiling.
         assert_cli_diff_within_ceiling(
             context=context,
-            cli_max_diff_bytes=ai_config.cli_max_diff_bytes,
+            cli_max_diff_bytes=options.ai_config.cli_max_diff_bytes,
         )
         diff_budget = resolve_cli_diff_budget(
             context_window_budget=diff_budget,
-            cli_max_diff_tokens=ai_config.cli_max_diff_tokens,
+            cli_max_diff_tokens=options.ai_config.cli_max_diff_tokens,
         )
     chunk_skips: list[SkippedFile] = []
     with timings.phase(name=ReviewPhase.CHUNKING):
@@ -1172,11 +1004,11 @@ async def run_review_async(
             resolve_review_chunks(
                 context=context,
                 diff_budget=diff_budget,
-                classifications=classifications,
-                force_semantic_chunking=force_semantic_chunking,
+                classifications=options.classifications,
+                force_semantic_chunking=options.force_semantic_chunking,
                 skipped_sink=chunk_skips,
             )
-            if run_builtin_checklist
+            if options.run_builtin_checklist
             else []
         )
     # Resume planning hashes every file patch and walks importers over the
@@ -1185,17 +1017,17 @@ async def run_review_async(
     with timings.phase(name=ReviewPhase.RESUME_PLANNING):
         resume = plan_resume(
             context=context,
-            prior=prior_state,
+            prior=options.prior_state,
             extra_skips=chunk_skips,
             groups=tuple(tuple(chunk.files) for chunk in chunks),
-            force_full=force_full,
+            force_full=options.force_full,
         )
         if resume.queue:
             chunks = filter_chunks(chunks=chunks, queue=resume.queue)
-        elif run_builtin_checklist:
+        elif options.run_builtin_checklist:
             chunks = []
     agent_selection = select_custom_agents(
-        agents=custom_agents,
+        agents=options.custom_agents,
         changed_paths=tuple(file.path for file in context.changed_files),
     )
     for skipped_agent in agent_selection.skipped:
@@ -1206,28 +1038,32 @@ async def run_review_async(
         )
 
     effective_ai_config = (
-        ai_config.model_copy(update={"api_timeout": timeout})
-        if timeout is not None
-        else ai_config
+        options.ai_config.model_copy(update={"api_timeout": options.timeout})
+        if options.timeout is not None
+        else options.ai_config
     )
-    tracker = progress or NullReviewProgress()
+    tracker = options.progress or NullReviewProgress()
     budget = CostBudget(
-        max_cost_usd=ai_config.max_cost_usd if enforce_cost_cap else None,
+        max_cost_usd=(
+            options.ai_config.max_cost_usd if options.enforce_cost_cap else None
+        ),
     )
     # A cost cap serializes chunk calls so the resume queue cannot invert
     # (#2154); the effective ceiling is reported alongside the timings so a
     # slow run's concurrency is never guessed at.
     max_parallel_calls = (
         1
-        if enforce_cost_cap and ai_config.max_cost_usd is not None
-        else ai_config.max_parallel_calls
+        if options.enforce_cost_cap and options.ai_config.max_cost_usd is not None
+        else options.ai_config.max_parallel_calls
     )
     effective_max_parallel = max(min(len(chunks), max_parallel_calls), 1)
     # Branch on the provider's declared capability, not its identity (#1241):
     # a durable session only helps when the transport can resume one.
     # begin/end_durable_session are concrete no-ops on BaseAIProvider, so no
     # hasattr guard is needed -- every provider answers them.
-    use_durable_session = provider.capabilities.supports_sessions and len(chunks) == 1
+    use_durable_session = (
+        options.provider.capabilities.supports_sessions and len(chunks) == 1
+    )
     repo_root = context.repo_root or os.getcwd()
     use_one_shot = len(chunks) > 1
 
@@ -1248,15 +1084,15 @@ async def run_review_async(
     provider_started = time.monotonic()
     provider_seconds = 0.0
     parse_merge_seconds = 0.0
-    interrupt = stop if stop is not None else asyncio.Event()
+    interrupt = options.stop if options.stop is not None else asyncio.Event()
     uninstall_interrupt = install_review_interrupt(interrupt)
     try:
         # Open the session inside the try so a failure before or during
         # on_start() still reaches the finally that tears it down.
         if use_durable_session:
-            provider.begin_durable_session(repo_root=repo_root)
+            options.provider.begin_durable_session(repo_root=repo_root)
             durable_session_started = True
-        tracker.on_start(total_chunks=len(chunks), depth=depth)
+        tracker.on_start(total_chunks=len(chunks), depth=options.depth)
         provider_started = time.monotonic()
         if chunks:
             part_seq = 0
@@ -1270,8 +1106,8 @@ async def run_review_async(
                         collected=done,
                         resume=resume,
                         context=context,
-                        prior_state=prior_state,
-                        force_full=force_full,
+                        prior_state=options.prior_state,
+                        force_full=options.force_full,
                         sequence=next_seq,
                         policy=review_sensitivity,
                     )
@@ -1286,13 +1122,13 @@ async def run_review_async(
             partials = await _review_all_chunks(
                 chunks=chunks,
                 context=context,
-                provider=provider,
+                provider=options.provider,
                 ai_config=effective_ai_config,
-                depth=depth,
-                checklist_items=checklist_items,
-                checklist_text=checklist_text,
-                classifications=classifications,
-                lint_results=lint_results,
+                depth=options.depth,
+                checklist_items=options.checklist_items,
+                checklist_text=options.checklist_text,
+                classifications=options.classifications,
+                lint_results=options.lint_results,
                 budget=budget,
                 progress=tracker,
                 repo_root=repo_root,
@@ -1300,7 +1136,7 @@ async def run_review_async(
                 max_parallel_calls=max_parallel_calls,
                 strictness_section=strictness_section,
                 next_generated_checklist_id=(
-                    _max_checklist_id(checklist_items=checklist_items) + 1
+                    _max_checklist_id(checklist_items=options.checklist_items) + 1
                 ),
                 diff_budget=diff_budget,
                 completed_sink=collected,
@@ -1312,11 +1148,11 @@ async def run_review_async(
             await run_custom_agent_passes(
                 selected=agent_selection.selected,
                 context=context,
-                provider=provider,
+                provider=options.provider,
                 ai_config=effective_ai_config,
                 budget=budget,
                 repo_root=repo_root,
-                workspace_root=workspace_root,
+                workspace_root=options.workspace_root,
                 # Never reuse the built-in review's durable session: each agent
                 # is an independent, narrowly scoped pass with its own
                 # instructions.
@@ -1350,17 +1186,20 @@ async def run_review_async(
         # #1972 Phase 4 can move this call without touching the pass itself.
         # Only the completed path runs it: a review already stopped by a cost
         # cap or a timeout must not spend another call.
-        if should_run_synthesis(config=synthesis, chunks_reviewed=len(partials)):
+        if should_run_synthesis(
+            config=options.synthesis,
+            chunks_reviewed=len(partials),
+        ):
             # ``should_run_synthesis`` already rejected a None config; bind it
             # so the type checker knows that too.
-            synthesis_config = synthesis
+            synthesis_config = options.synthesis
             assert synthesis_config is not None
             with timings.phase(name=ReviewPhase.SYNTHESIS):
                 synthesis_pass = await run_synthesis_pass(
                     context=context,
                     summaries=_chunk_summaries(chunks=chunks, partials=partials),
                     existing_findings=filtered_findings,
-                    provider=provider,
+                    provider=options.provider,
                     ai_config=effective_ai_config,
                     config=synthesis_config,
                     policy=review_sensitivity,
@@ -1388,10 +1227,10 @@ async def run_review_async(
         # taxonomy. When the stop trips before ANY chunk completes,
         # ``collected`` is empty and the partial is empty-but-actionable
         # rather than a generic abort.
-        if _is_cost_cap_stop(exc=exc):
-            stopped_reason = _cost_cap_reason(cap=budget.max_cost_usd)
-        elif _is_timeout_stop(exc=exc):
-            stopped_reason = _timeout_reason(exc=exc)
+        if is_cost_cap_stop(exc=exc):
+            stopped_reason = cost_cap_reason(cap=budget.max_cost_usd)
+        elif is_timeout_stop(exc=exc):
+            stopped_reason = timeout_reason(exc=exc)
         else:
             raise
         if provider_seconds <= 0.0:
@@ -1420,7 +1259,7 @@ async def run_review_async(
         elif stopped_reason.startswith("timeout"):
             timeout_setting = (
                 "ai.transports.cli.timeout"
-                if ai_config.transport is AITransport.CLI
+                if options.ai_config.transport is AITransport.CLI
                 else "ai.transports.api.timeout"
             )
             hint = f"Raise {timeout_setting} or narrow --path to review the rest."
@@ -1440,7 +1279,7 @@ async def run_review_async(
         validation_started = time.monotonic()
         uninstall_interrupt()
         if durable_session_started:
-            provider.end_durable_session()
+            options.provider.end_durable_session()
         with suppress(Exception):
             if completed:
                 tracker.on_complete(total_findings=total_findings)
@@ -1451,7 +1290,7 @@ async def run_review_async(
     # (MCP run payloads, eval stamps) already read; ``timings`` carries the
     # ordered spans and the per-chunk detail.
     phase_timings = {
-        "context_collection": max(context_collection_seconds, 0.0),
+        "context_collection": max(options.context_collection_seconds, 0.0),
         "provider": max(provider_seconds, 0.0),
         "parse_merge": max(parse_merge_seconds, 0.0),
     }
@@ -1476,7 +1315,7 @@ async def run_review_async(
     chunks_reviewed = len(partials)
     summary = (
         _custom_agents_only_summary(
-            run_builtin_checklist=run_builtin_checklist,
+            run_builtin_checklist=options.run_builtin_checklist,
             agents_run=len(custom_results),
             findings=len(custom_findings),
         )
@@ -1490,7 +1329,7 @@ async def run_review_async(
             *_agent_scope_skips(
                 context=context,
                 selection=agent_selection,
-                run_builtin_checklist=run_builtin_checklist,
+                run_builtin_checklist=options.run_builtin_checklist,
                 completed_agents=frozenset(
                     result.agent_name for result in custom_results
                 ),
@@ -1499,10 +1338,10 @@ async def run_review_async(
     )
 
     metadata = ReviewMetadata(
-        model=provider.model_name,
-        provider=provider.name,
+        model=options.provider.model_name,
+        provider=options.provider.name,
         context_window=context_window,
-        depth=depth,
+        depth=options.depth,
         strictness=review_sensitivity.strictness.value,
         chunks_total=len(chunks),
         chunks_current=chunks_reviewed,
@@ -1510,7 +1349,7 @@ async def run_review_async(
         files_total=len(selection.reviewed_paths) + len(selection.skipped),
         reviewed_paths=selection.reviewed_paths,
         skipped_files=selection.skipped,
-        checklist_items=len(checklist_items),
+        checklist_items=len(options.checklist_items),
         token_usage={
             "prompt": total_input,
             "completion": total_output,
@@ -1520,7 +1359,7 @@ async def run_review_async(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
-        token_usage_estimated=ai_config.transport == AITransport.CLI,
+        token_usage_estimated=options.ai_config.transport == AITransport.CLI,
         partial=partial,
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
@@ -1555,8 +1394,10 @@ async def run_review_async(
         plan=resume,
         reviewed_paths=covered_now,
         head_sha=context.head_ref,
-        round_number=prior_state.next_round if prior_state is not None else 1,
-        prior=None if force_full else prior_state,
+        round_number=(
+            options.prior_state.next_round if options.prior_state is not None else 1
+        ),
+        prior=None if options.force_full else options.prior_state,
         stopped_reason=stopped_reason,
     )
     payload_flags = tuple(
@@ -1593,9 +1434,13 @@ async def run_review_async(
                 ),
             ),
         )
-    prior_flags = prior_state.flagged_files if prior_state is not None else ()
+    prior_flags = (
+        options.prior_state.flagged_files if options.prior_state is not None else ()
+    )
     prior_consumed = (
-        () if force_full or prior_state is None else prior_state.consumed_flags
+        ()
+        if options.force_full or options.prior_state is None
+        else options.prior_state.consumed_flags
     )
     flagged_files = carry_unserved_flags(
         new_flags=(*payload_flags, *converted_flags),

@@ -45,6 +45,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review_async
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.severity_gate import (
     UNCHANGED_CLAIM_PHRASES,
     apply_cross_chunk_guard,
@@ -756,16 +757,18 @@ async def test_a_full_run_downgrades_a_contradicted_p1(tmp_path: Path) -> None:
     ):
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.API,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.API,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
         )
 
     tagged = cross_chunk_contradictions(findings=result.findings)
@@ -813,16 +816,18 @@ async def test_a_full_run_guards_a_claim_about_a_rename_source(tmp_path: Path) -
     ):
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.API,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.API,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
         )
 
     tagged = cross_chunk_contradictions(findings=result.findings)

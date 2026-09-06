@@ -384,10 +384,10 @@ def test_budget_detection_matches_the_engine_stop_reason() -> None:
     one string both sides depend on; reword it there and this fails rather than
     the tool silently reporting a capped run as a complete one.
     """
-    from lintro.ai.review.orchestrator import _cost_cap_reason
+    from lintro.ai.review.session import cost_cap_reason
     from lintro.mcp.toolkits.review import _stopped_on_budget
 
-    metadata = _metadata(partial=True, stopped_reason=_cost_cap_reason(cap=1.0))
+    metadata = _metadata(partial=True, stopped_reason=cost_cap_reason(cap=1.0))
 
     assert_that(_stopped_on_budget(metadata=metadata)).is_true()
 

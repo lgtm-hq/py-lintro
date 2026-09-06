@@ -43,6 +43,7 @@ from lintro.ai.review.orchestrator import (
 )
 from lintro.ai.review.progress import ReviewProgressCallback
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.state_store import load_ci_state, write_state_part
 
 
@@ -362,17 +363,19 @@ async def test_run_review_returns_partial_on_sigterm() -> None:
     ):
         result = await run_review_async(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                stop=stop,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            stop=stop,
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -432,17 +435,19 @@ async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
     ):
         result = await run_review_async(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                stop=stop,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            stop=stop,
         )
 
     assert_that(result.metadata.partial).is_true()

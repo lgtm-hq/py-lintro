@@ -40,8 +40,17 @@ def _request(*, mode: CustomAgentMode | None) -> ReviewRunRequest:
 
 
 def test_custom_agent_mode_is_unset_by_default() -> None:
-    """An omitted ``custom_agent_mode`` means "not requested", not disabled."""
-    assert_that(_request(mode=None).custom_agent_mode).is_none()
+    """An omitted ``custom_agent_mode`` means "not requested", not disabled.
+
+    Built without the field so the assertion observes the dataclass default
+    itself rather than a ``None`` the helper passed in (#2377 review).
+    """
+    request = ReviewRunRequest(
+        workspace_root=Path("/workspace"),
+        lintro_config=LintroConfig(),
+    )
+
+    assert_that(request.custom_agent_mode).is_none()
 
 
 def test_unset_custom_agent_mode_resolves_from_config() -> None:
