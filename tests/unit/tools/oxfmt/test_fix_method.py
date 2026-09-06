@@ -221,19 +221,17 @@ def test_fix_early_return_when_should_skip(
         oxfmt_plugin: The OxfmtPlugin instance to test.
         mock_execution_context_for_tool: Mock execution context factory.
     """
-    with patch.object(oxfmt_plugin, "_prepare_execution") as mock_prepare:
-        ctx = mock_execution_context_for_tool(should_skip=True)
-        ctx.early_result = ToolResult(
-            name="oxfmt",
-            success=True,
-            output="",
-            issues_count=0,
-        )
-        mock_prepare.return_value = ctx
+    early_result = ToolResult(
+        name="oxfmt",
+        success=True,
+        output="",
+        issues_count=0,
+    )
 
+    with patch.object(oxfmt_plugin, "prepare", return_value=early_result):
         result = oxfmt_plugin.fix(["/tmp"], {})
 
-        assert_that(result.success).is_true()
+    assert_that(result).is_same_as(early_result)
 
 
 def test_fix_multiple_files_with_issues(

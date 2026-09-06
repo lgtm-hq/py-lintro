@@ -443,12 +443,7 @@ def test_check_early_return_when_should_skip(
         issues_count=0,
     )
 
-    ctx = mock_execution_context(
-        should_skip=True,
-        early_result=early_result,
-    )
-
-    with patch.object(plugin, "_prepare_execution", return_value=ctx):
+    with patch.object(plugin, "prepare", return_value=early_result):
         result = plugin.check(["/tmp"], {})
 
     assert_that(result.success).is_true()

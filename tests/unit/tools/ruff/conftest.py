@@ -23,7 +23,6 @@ def make_ruff_execution_context(
     rel_files: list[str] | None = None,
     cwd: str | None = "/test/project",
     timeout: int = 30,
-    should_skip: bool = False,
     early_result: ToolResult | None = None,
 ) -> MagicMock | ToolResult:
     """Build a mock preparation outcome for ruff execution tests.
@@ -37,8 +36,8 @@ def make_ruff_execution_context(
         rel_files: File paths relative to ``cwd``. Defaults to ``files``.
         cwd: Working directory for command execution.
         timeout: Timeout value in seconds.
-        should_skip: Whether execution should short-circuit to ``early_result``.
-        early_result: Result returned when ``should_skip`` is True.
+        early_result: Finished result returned instead of a context when
+            preparation short-circuits.
 
     Returns:
         MagicMock | ToolResult: ``early_result`` itself when preparation should
@@ -54,7 +53,6 @@ def make_ruff_execution_context(
     ctx.rel_files = resolved_files if rel_files is None else rel_files
     ctx.cwd = cwd
     ctx.timeout = timeout
-    ctx.should_skip = should_skip
     ctx.early_result = None
     return ctx
 

@@ -577,11 +577,8 @@ def test_check_returns_early_when_skipped(
         output="",
         issues_count=0,
     )
-    ctx = MagicMock()
-    ctx.should_skip = True
-    ctx.early_result = early
 
-    with patch.object(spectral_plugin, "_prepare_execution", return_value=ctx):
+    with patch.object(spectral_plugin, "prepare", return_value=early):
         result = spectral_plugin.check([str(tmp_path)], {})
 
     assert_that(result).is_same_as(early)

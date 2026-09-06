@@ -212,11 +212,7 @@ def test_check_skips_when_ctx_should_skip(
     from lintro.models.core.tool_result import ToolResult
 
     early = ToolResult(name="stylelint", success=True, output=None, issues_count=0)
-    with patch.object(stylelint_plugin, "_prepare_execution") as prep:
-        ctx = make_ctx(tmp_path, [])
-        ctx.should_skip = True
-        ctx.early_result = early
-        prep.return_value = ctx
+    with patch.object(stylelint_plugin, "prepare", return_value=early):
         result = stylelint_plugin.check([str(tmp_path)], {})
 
     assert_that(result).is_same_as(early)

@@ -148,14 +148,11 @@ def test_check_returns_early_when_skipped(
         output="",
         issues_count=0,
     )
-    ctx = MagicMock()
-    ctx.should_skip = True
-    ctx.early_result = early
 
     with patch.object(
         html_validate_plugin,
-        "_prepare_execution",
-        return_value=ctx,
+        "prepare",
+        return_value=early,
     ):
         result = html_validate_plugin.check(["x.html"], {})
 

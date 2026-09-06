@@ -137,19 +137,14 @@ def test_check_returns_early_when_skipping(
         vale_plugin: The ValePlugin instance under test.
         tmp_path: Temporary directory path.
     """
-    from unittest.mock import MagicMock
-
     early = ToolResult(
         name="vale",
         success=True,
         output="",
         issues_count=0,
     )
-    ctx = MagicMock()
-    ctx.should_skip = True
-    ctx.early_result = early
 
-    with patch.object(vale_plugin, "_prepare_execution", return_value=ctx):
+    with patch.object(vale_plugin, "prepare", return_value=early):
         result = vale_plugin.check(["nonexistent"], {})
 
     assert_that(result).is_same_as(early)
