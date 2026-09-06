@@ -575,7 +575,8 @@ python3 scripts/ci/generate-builtin-tool-index.py --check
 Implementation checklist:
 
 - [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-      `ToolDefinition`
+      `ToolDefinition`; for a tool with helper modules, those three live in
+      `lintro/tools/<tool>/definition.py` and this module is the re-export shim
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
