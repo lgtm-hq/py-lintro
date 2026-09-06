@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger as loguru_logger
 
 from lintro.utils.console import ThreadSafeConsoleLogger
 
@@ -175,20 +176,34 @@ def test_save_console_log(logger: ThreadSafeConsoleLogger, tmp_path: Path) -> No
     assert_that(content).contains("Message 3")
 
 
-def test_save_console_log_handles_error(logger: ThreadSafeConsoleLogger) -> None:
-    """Test save_console_log handles write errors gracefully.
+def test_save_console_log_handles_error(
+    logger: ThreadSafeConsoleLogger,
+    tmp_path: Path,
+) -> None:
+    """An unwritable target logs an error instead of raising.
 
     Args:
         logger: ThreadSafeConsoleLogger instance for testing.
+        tmp_path: Temporary directory path for testing.
     """
     logger._messages = ["Message"]
+    # A regular file where a directory is expected makes open() fail for real.
+    blocking_file = tmp_path / "not-a-directory"
+    blocking_file.write_text("", encoding="utf-8")
 
-    with (
-        patch("builtins.open", side_effect=OSError("Permission denied")),
-        patch("lintro.utils.console.logger.logger") as mock_logger,
-    ):
-        logger.save_console_log("/invalid/path")
-        mock_logger.error.assert_called_once()
+    errors: list[str] = []
+    handler_id = loguru_logger.add(
+        lambda message: errors.append(message.record["message"]),
+        level="ERROR",
+    )
+    try:
+        logger.save_console_log(blocking_file)
+    finally:
+        loguru_logger.remove(handler_id)
+
+    assert_that(errors).is_length(1)
+    assert_that(errors[0]).contains("Failed to save console log")
+    assert_that(errors[0]).contains("console.log")
 
 
 def test_multiple_messages_tracked(logger: ThreadSafeConsoleLogger) -> None:

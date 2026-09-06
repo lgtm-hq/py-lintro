@@ -12,6 +12,7 @@ from assertpy import assert_that
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.definitions.stylelint import StylelintPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.conftest import record_subprocess_argv
 from tests.unit.tools.stylelint.conftest import make_ctx
 
 WARNINGS_JSON = (
@@ -181,13 +182,18 @@ def test_check_passes_config_option(
     )
     stylelint_plugin.set_options(config="my.stylelintrc.json")
 
+    commands: list[list[str]] = []
+
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
         patch.object(
             stylelint_plugin,
             "_run_subprocess",
-            return_value=(True, CLEAN_JSON),
-        ) as run,
+            side_effect=record_subprocess_argv(
+                commands,
+                default=(True, CLEAN_JSON),
+            ),
+        ),
         patch.object(
             stylelint_plugin,
             "_get_executable_command",
@@ -195,13 +201,13 @@ def test_check_passes_config_option(
         ),
     ):
         prep.return_value = make_ctx(tmp_path, ["a.css"])
-        stylelint_plugin.check([str(tmp_path / "a.css")], {})
+        result = stylelint_plugin.check([str(tmp_path / "a.css")], {})
 
-    cmd = run.call_args.kwargs["cmd"]
-    assert_that(cmd).contains("--config")
-    assert_that(cmd).contains("my.stylelintrc.json")
-    assert_that(cmd).contains("--formatter")
-    assert_that(cmd).contains("json")
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--config", "my.stylelintrc.json")
+    assert_that(commands[0]).contains("--formatter", "json")
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 def test_check_skips_when_ctx_should_skip(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
+from collections.abc import Sequence
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -370,21 +371,39 @@ def test_ruff_resolves_rule_name_to_url(mock_run: MagicMock) -> None:
 
 @patch("subprocess.run")
 def test_ruff_caches_resolved_name(mock_run: MagicMock) -> None:
-    """Second call for same code uses cache, not subprocess.
+    """Second call for same code returns the same URL without re-running ruff.
 
     Args:
         mock_run: Mocked subprocess.run.
     """
-    mock_run.return_value = MagicMock(
-        returncode=0,
-        stdout=json.dumps({"name": "line-too-long"}),
-    )
+    invocations: list[list[str]] = []
+
+    def fake_run(*args: Sequence[object], **_kwargs: object) -> MagicMock:
+        """Record the ruff argv and answer with the rule name.
+
+        Args:
+            *args: Positional subprocess arguments; the first is the argv.
+            **_kwargs: Ignored keyword subprocess arguments.
+
+        Returns:
+            A completed process carrying ruff's JSON rule description.
+        """
+        invocations.append([str(part) for part in args[0]])
+        return MagicMock(
+            returncode=0,
+            stdout=json.dumps({"name": "line-too-long"}),
+        )
+
+    mock_run.side_effect = fake_run
     plugin = RuffPlugin()
 
-    plugin.doc_url("E501")
-    plugin.doc_url("E501")
+    first = plugin.doc_url("E501")
+    second = plugin.doc_url("E501")
 
-    assert_that(mock_run.call_count).is_equal_to(1)
+    assert_that(invocations).is_length(1)
+    assert_that(invocations[0]).contains("E501")
+    assert_that(first).is_equal_to("https://docs.astral.sh/ruff/rules/line-too-long/")
+    assert_that(second).is_equal_to(first)
 
 
 @patch("subprocess.run")

@@ -90,14 +90,6 @@ def test_formatters_have_lower_priority_than_linters() -> None:
     )
 
 
-def test_pytest_runs_last() -> None:
-    """Pytest should have highest priority value (runs last)."""
-    pytest_priority = DEFAULT_TOOL_PRIORITIES["pytest"]
-    for tool, priority in DEFAULT_TOOL_PRIORITIES.items():
-        if tool != "pytest":
-            assert_that(priority).is_less_than(pytest_priority)
-
-
 @pytest.mark.parametrize(
     "tool_name",
     ["ruff", "markdownlint", "yamllint", "black"],

@@ -8,12 +8,10 @@ when the package is installed (not in editable mode).
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 import tarfile
 import tempfile
-import time
 import zipfile
 from pathlib import Path
 
@@ -221,103 +219,6 @@ def _assert_lintro_installed_into(venv_path: Path, python_exe: Path) -> None:
     assert_that(located.stdout.strip()).described_as(
         "lintro was resolved from outside the test environment",
     ).starts_with(str(venv_path.resolve()))
-
-
-def _build_distributions(dist_dir: Path) -> None:
-    """Build the wheel and the sdist into ``dist_dir``.
-
-    Args:
-        dist_dir: Directory the distributions are written to.
-    """
-    project_root = Path(__file__).parent.parent.parent
-
-    build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-        ["uv", "build", "--out-dir", str(dist_dir)],
-        cwd=str(project_root),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert_that(build_result.returncode).described_as(
-        f"uv build failed:\n{build_result.stdout}\n{build_result.stderr}",
-    ).is_equal_to(0)
-
-
-# Kept below the 600s per-test budget the tests using this fixture declare:
-# fixture setup counts toward pytest-timeout, so a lock wait longer than the
-# test's own allowance would be killed by the timeout plugin instead of raising
-# the diagnosable error below.
-_BUILD_LOCK_TIMEOUT_SECONDS = 300.0
-_BUILD_POLL_SECONDS = 0.5
-
-
-@pytest.fixture(scope="session")
-def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Build the wheel and the sdist once for the whole session.
-
-    ``uv build`` keeps its scratch state inside the project directory —
-    ``build/``, ``lintro.egg-info/`` and the sdist staging tree — so two builds
-    running at once corrupt each other. Under ``pytest -n auto`` that produced
-    both outright build failures ("could not delete ...: No such file or
-    directory") and, worse, wheels silently missing packages. One build behind
-    a lock file, shared by every xdist worker, makes the artifacts
-    deterministic and cuts the suite from four builds to one.
-
-    Args:
-        tmp_path_factory: Session-scoped temporary directory factory.
-
-    Returns:
-        Directory holding the built wheel and source distribution.
-
-    Raises:
-        TimeoutError: If another worker holds the build lock for too long.
-    """
-    # Under xdist each worker gets ``.../pytest-<n>/popen-gw<k>`` and the
-    # session root they share is its parent. Without xdist ``getbasetemp()``
-    # already is that root, and its own parent persists across sessions, which
-    # would hand a later run a stale wheel.
-    basetemp = tmp_path_factory.getbasetemp()
-    shared_root = basetemp.parent if os.environ.get("PYTEST_XDIST_WORKER") else basetemp
-    dist_dir = shared_root / "lintro-dist"
-    marker = shared_root / "lintro-dist.complete"
-    lock = shared_root / "lintro-dist.lock"
-
-    deadline = time.monotonic() + _BUILD_LOCK_TIMEOUT_SECONDS
-    while not marker.exists():
-        try:
-            handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as exc:
-            if time.monotonic() > deadline:
-                raise TimeoutError(
-                    f"Timed out waiting for the shared build lock at {lock}",
-                ) from exc
-            time.sleep(_BUILD_POLL_SECONDS)
-            continue
-        try:
-            # Another worker may have finished between the marker check and
-            # the lock acquisition.
-            if marker.exists():
-                break
-            # A previous attempt can have died mid-build and left a partial
-            # artifact behind; the glob below would happily install it.
-            shutil.rmtree(dist_dir, ignore_errors=True)
-            dist_dir.mkdir(parents=True)
-            _build_distributions(dist_dir=dist_dir)
-            marker.touch()
-        finally:
-            os.close(handle)
-            lock.unlink(missing_ok=True)
-
-    # Every caller takes the first match, so more than one artifact of a kind
-    # would make which distribution is under test a coin toss.
-    assert_that(sorted(dist_dir.glob("*.whl"))).described_as(
-        "expected exactly one built wheel",
-    ).is_length(1)
-    assert_that(sorted(dist_dir.glob("*.tar.gz"))).described_as(
-        "expected exactly one built sdist",
-    ).is_length(1)
-
-    return dist_dir
 
 
 def _source_packages() -> set[str]:

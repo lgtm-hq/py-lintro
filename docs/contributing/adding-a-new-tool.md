@@ -318,10 +318,10 @@ exclude = ["lintro_build*", "tests*", "..."]  # keep repo-only trees out
 namespaces = false                            # setuptools defaults to true
 ```
 
-Both keys under `include` are load-bearing, so copy the real table from `pyproject.toml`
-rather than this excerpt if you ever edit it: `namespaces = false` is what keeps
-`lintro/ascii-art` and the prompt-template data directories out of the package list, and
-`exclude` is what keeps the in-tree build backend out of the wheel —
+`exclude` and `namespaces` are load-bearing, so copy the real table from
+`pyproject.toml` rather than this excerpt if you ever edit it: `namespaces = false` is
+what keeps `lintro/ascii-art` and the prompt-template data directories out of the
+package list, and `exclude` is what keeps the in-tree build backend out of the wheel —
 `include = ["lintro*"]` matches `lintro_build` too.
 
 Only two cases need an edit:

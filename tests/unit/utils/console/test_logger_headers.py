@@ -7,71 +7,68 @@ formatting and display functionality.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.utils.console.conftest import patch_tty_streams
 
 
-def test_print_lintro_header_with_run_dir(tmp_path: Path) -> None:
-    """Verify print_lintro_header outputs header when run directory exists.
-
-    When configured with a run_dir, the header should display a message
-    indicating where output files will be generated, followed by a blank line.
+def test_print_lintro_header_with_run_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The header announces where the run's output files will be written.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
-    with patch.object(logger, "console_output") as mock_output:
-        logger.print_lintro_header()
-        # Should be called twice: header message and blank line
-        assert_that(mock_output.call_count).is_equal_to(2)
-        # Verify first call contains the run directory path
-        first_call_text = mock_output.call_args_list[0].kwargs.get(
-            "text",
-            (
-                mock_output.call_args_list[0].args[0]
-                if mock_output.call_args_list[0].args
-                else ""
-            ),
-        )
-        assert_that(str(tmp_path) in first_call_text).is_true()
+
+    logger.print_lintro_header()
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("[LINTRO]")
+    assert_that(out).contains(str(tmp_path))
+    assert_that(out).ends_with("\n\n")
 
 
 def test_print_lintro_header_without_run_dir_is_noop(
     logger: ThreadSafeConsoleLogger,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_lintro_header does nothing without run directory.
-
-    Without a run_dir, there's no output location to announce, so the
-    header should be skipped entirely.
+    """With no run directory there is nothing to announce, so nothing prints.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        capsys: Pytest stdout/stderr capture fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.print_lintro_header()
-        mock_output.assert_not_called()
+    logger.print_lintro_header()
+
+    assert_that(capsys.readouterr().out).is_empty()
+    assert_that(logger.get_buffer()).is_empty()
 
 
 def test_print_tool_header_outputs_formatted_header(
     logger: ThreadSafeConsoleLogger,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_tool_header outputs a formatted banner for tool execution.
-
-    The tool header should include borders, the tool name, action, and
-    decorative emoji elements to visually separate tool output sections.
+    """The tool banner names the tool and action between two borders.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        capsys: Pytest stdout/stderr capture fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.print_tool_header("ruff", "check")
-        # Should output: border, header text, border, blank line
-        assert_that(mock_output.call_count).is_equal_to(4)
+    logger.print_tool_header("ruff", "check")
+
+    lines = capsys.readouterr().out.splitlines()
+    assert_that(lines).is_length(4)
+    assert_that(lines[0]).matches(r"^=+$")
+    assert_that(lines[1]).contains("Running ruff (check)")
+    assert_that(lines[2]).is_equal_to(lines[0])
+    assert_that(lines[3]).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -87,37 +84,45 @@ def test_print_tool_header_various_tools(
     logger: ThreadSafeConsoleLogger,
     tool_name: str,
     action: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_tool_header works with various tool and action combinations.
-
-    Different tools should produce appropriate headers with their names
-    and corresponding actions displayed correctly.
+    """Every tool and action pair is named in its own banner.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
         tool_name: The name of the tool to display.
         action: The action being performed.
+        capsys: Pytest stdout/stderr capture fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.print_tool_header(tool_name, action)
-        assert_that(mock_output.call_count).is_equal_to(4)
-        # Verify tool name appears in the header
-        header_text = str(mock_output.call_args_list[1])
-        assert_that(header_text).contains(tool_name)
+    logger.print_tool_header(tool_name, action)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert_that(lines).is_length(4)
+    assert_that(lines[1]).contains(f"Running {tool_name} ({action})")
 
 
 def test_print_post_checks_header_outputs_styled_header(
     logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify print_post_checks_header outputs a distinctive styled header.
+    """The post-checks banner uses magenta heavy borders around its own title.
 
-    The post-checks header uses a different style (magenta, heavy borders)
-    to visually separate optional follow-up checks from primary tool runs.
+    The distinct style is what separates optional follow-up checks from the
+    primary tool runs, so the colour is part of the behaviour.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.print_post_checks_header()
-        # Should output: border, title, subtitle, border, blank line
-        assert_that(mock_output.call_count).is_equal_to(5)
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.print_post_checks_header()
+
+    lines = stdout.getvalue().splitlines()
+    assert_that(lines).is_length(5)
+    assert_that(lines[0]).contains("\u2501")
+    assert_that(lines[0]).starts_with("\x1b[35m")
+    assert_that(lines[1]).contains("POST-CHECKS")
+    assert_that(lines[2]).contains("Running optional follow-up checks")
+    assert_that(lines[3]).is_equal_to(lines[0])
+    assert_that(lines[4]).is_empty()

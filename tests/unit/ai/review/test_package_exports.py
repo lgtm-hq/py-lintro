@@ -5,12 +5,45 @@ from __future__ import annotations
 import ast
 import importlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
 import lintro.ai.review as review_pkg
+
+
+@pytest.fixture(autouse=True)
+def _restore_review_package() -> Iterator[None]:
+    """Undo the reloads and ``sys.modules`` evictions these tests perform.
+
+    Every test here reloads ``lintro.ai.review`` and one of them deletes each
+    lazy target from ``sys.modules`` so the loader has to import it again.
+    Left in place, a later import binds a *different* function object than the
+    one a neighbour already captured, which broke identity assertions once the
+    suite started running in randomised order (#2315). Snapshot the package
+    namespace and the affected modules, and put both back.
+
+    Yields:
+        None: Restores the package namespace and ``sys.modules``.
+    """
+    targets = {module for module, _ in review_pkg._LAZY_EXPORTS.values()}
+    original_namespace = dict(vars(review_pkg))
+    original_modules = {
+        name: sys.modules[name] for name in targets if name in sys.modules
+    }
+    try:
+        yield
+    finally:
+        importlib.reload(review_pkg)
+        vars(review_pkg).clear()
+        vars(review_pkg).update(original_namespace)
+        for name in targets:
+            if name in original_modules:
+                sys.modules[name] = original_modules[name]
+            else:
+                sys.modules.pop(name, None)
 
 
 @pytest.mark.parametrize("export_name", review_pkg.__all__)

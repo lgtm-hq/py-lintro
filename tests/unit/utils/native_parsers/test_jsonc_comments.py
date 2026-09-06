@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.utils.jsonc import strip_jsonc_comments as _strip_jsonc_comments
 
@@ -99,11 +99,19 @@ def test_strip_jsonc_comments_backslash_in_string() -> None:
 
 
 def test_strip_jsonc_comments_unclosed_block_comment_warning() -> None:
-    """Warn when a block comment is not properly closed."""
-    content = '{"key": "value"} /* unclosed'
-    with patch("lintro.utils.jsonc.logger") as mock_logger:
-        _strip_jsonc_comments(content)
-        mock_logger.warning.assert_called_once()
+    """Warn when a block comment is not properly closed, and drop its text."""
+    warnings: list[str] = []
+    handler_id = logger.add(
+        lambda message: warnings.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        result = _strip_jsonc_comments('{"key": "value"} /* unclosed')
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(warnings).is_equal_to(["Unclosed block comment in JSONC content"])
+    assert_that(json.loads(result)).is_equal_to({"key": "value"})
 
 
 def test_strip_jsonc_comments_empty_content() -> None:

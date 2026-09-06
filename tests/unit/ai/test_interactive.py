@@ -129,27 +129,6 @@ def test_apply_fix_line_targeted_replacement(tmp_path):
     assert_that(lines[2]).is_equal_to("x = 2")
 
 
-def test_apply_fix_fails_when_line_targeting_misses(tmp_path):
-    """Returns False when line targeting misses (no fallback)."""
-    f = tmp_path / "test.py"
-    # File must be long enough that clamped target_idx (last line)
-    # plus default search_radius (5) cannot reach line 0.
-    filler = "".join(f"line {i}\n" for i in range(2, 22))
-    f.write_text(f"old code\n{filler}")
-
-    fix = AIFixSuggestion(
-        file=str(f),
-        line=99,  # Way off -- no match near this line
-        original_code="old code",
-        suggested_code="new code",
-    )
-
-    result = _apply_fix(fix, workspace_root=tmp_path)
-    assert_that(result).is_false()
-    # File should remain unchanged
-    assert_that(f.read_text()).contains("old code")
-
-
 def test_apply_fix_empty_original_code(tmp_path):
     """Verify that an empty original_code string causes _apply_fix to return False."""
     f = tmp_path / "test.py"

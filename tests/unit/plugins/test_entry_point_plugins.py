@@ -188,18 +188,19 @@ def enable_external_plugins() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def preserve_registry() -> Iterator[None]:
-    """Snapshot and restore global registry + discovery state per test."""
+def preserve_discovery() -> Iterator[None]:
+    """Reset the memoised discovery state around each test.
+
+    The registry itself is snapshotted by the root ``_isolate_plugin_registry``
+    autouse fixture (#2315); only the discovery memo needs clearing here.
+
+    Yields:
+        None: Resets discovery before and after the test.
+    """
     reset_discovery()
-    tools = dict(ToolRegistry._tools)
-    instances = dict(ToolRegistry._instances)
-    origins = dict(ToolRegistry._origins)
     try:
         yield
     finally:
-        ToolRegistry._tools = tools
-        ToolRegistry._instances = instances
-        ToolRegistry._origins = origins
         reset_discovery()
 
 

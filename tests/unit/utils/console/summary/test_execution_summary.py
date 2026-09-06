@@ -1,7 +1,9 @@
 """Unit tests for ThreadSafeConsoleLogger execution summary methods.
 
 This module tests the execution summary functionality of ThreadSafeConsoleLogger,
-including tests for CHECK and FIX action handling.
+including CHECK and FIX action handling. Counts are asserted by parsing the
+rendered TOTALS table back out of the captured output rather than by inspecting
+mock calls (#2315).
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.utils.console.conftest import patch_tty_streams
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,94 +27,106 @@ if TYPE_CHECKING:
 # Braille block used by the decorative ASCII art (U+2800..U+28FF).
 _BRAILLE_RE = re.compile(r"[\u2800-\u28ff]")
 
+# One rendered totals row, e.g. "| Total Issues   | 8       |".
+_TOTALS_ROW_RE = re.compile(r"^\|\s*(?P<metric>[^|]+?)\s*\|\s*(?P<count>\d+)\s*\|$")
+
+
+def _totals_row(*, output: str) -> dict[str, int]:
+    """Parse the rendered TOTALS table back into metric/count pairs.
+
+    Args:
+        output: Captured console output containing a totals table.
+
+    Returns:
+        A mapping of metric label to the count rendered beside it.
+    """
+    return {
+        match.group("metric"): int(match.group("count"))
+        for line in output.splitlines()
+        if (match := _TOTALS_ROW_RE.match(line.strip()))
+    }
+
 
 # =============================================================================
 # Execution Summary Tests - CHECK Action
 # =============================================================================
 
 
+@pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_no_issues(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify print_execution_summary handles check action with no issues.
-
-    When all tools pass with zero issues, the summary should indicate
-    complete success and call ASCII art with zero total issues.
-
+    """A clean CHECK run reports zero issues and shows the success art.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        monkeypatch: Pytest monkeypatch fixture.
     """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        mock_art.assert_called_once_with(total_issues=0)
+    logger.print_execution_summary(Action.CHECK, results)
+
+    out = stdout.getvalue()
+    assert_that(out).contains("Total Issues")
+    assert_that(out).contains("ART:success.txt")
 
 
+@pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_with_issues(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify print_execution_summary aggregates issue counts from multiple tools.
+    """The aggregated total reaches both the totals table and the art choice.
 
-    When multiple tools report issues, the total should be summed and
-    passed to both the totals table and ASCII art display.
-
+    Two tools reporting 5 and 3 issues must render a summed total of 8, and
+    the same non-zero total must select the failure art rather than the
+    success art.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        monkeypatch: Pytest monkeypatch fixture.
     """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
     results = [
         fake_tool_result_factory(success=True, issues_count=5),
         fake_tool_result_factory(success=True, issues_count=3),
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_totals_table") as mock_totals,
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        # Should show total of 8 issues
-        mock_art.assert_called_once_with(total_issues=8)
-        # Verify totals table was called with correct total
-        mock_totals.assert_called_once()
-        call_kwargs = mock_totals.call_args.kwargs
-        assert_that(call_kwargs["total_issues"]).is_equal_to(8)
+    logger.print_execution_summary(Action.CHECK, results)
+
+    out = stdout.getvalue()
+    assert_that(_totals_row(output=out)).contains_entry({"Total Issues": 8})
+    assert_that(out).contains("ART:fail.txt")
+    assert_that(out).does_not_contain("ART:success.txt")
 
 
+@pytest.mark.usefixtures("labelled_ascii_art")
 def test_execution_summary_check_failed_tool_shows_minimum_issues(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify print_execution_summary shows at least 1 issue when a tool fails.
+    """A failed tool reporting zero issues still shows the failure art.
 
-    Failed tools should be treated as having issues even if issues_count is 0,
-    ensuring the summary reflects the failure state.
-
+    The counted total stays at zero, but the run must not look like a clean
+    pass, so the art is selected as if there were at least one issue.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        monkeypatch: Pytest monkeypatch fixture.
     """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=False, issues_count=0)]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        # Should show at least 1 for art when tool failed
-        mock_art.assert_called_once_with(
-            total_issues=1,
-        )
+    logger.print_execution_summary(Action.CHECK, results)
+
+    out = stdout.getvalue()
+    assert_that(out).contains("ART:fail.txt")
+    assert_that(out).does_not_contain("ART:success.txt")
 
 
 @pytest.mark.parametrize(
@@ -128,17 +143,15 @@ def test_execution_summary_check_issue_aggregation(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     issue_counts: list[int],
     expected_total: int,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary correctly sums issues from all tools.
-
-    Different combinations of issue counts should be properly aggregated
-    into the correct total.
-
+    """The totals table reports the sum of every tool's issue count.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
         issue_counts: List of issue counts for each tool.
         expected_total: Expected total issues after aggregation.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
@@ -146,15 +159,11 @@ def test_execution_summary_check_issue_aggregation(
         for count in issue_counts
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        mock_art.assert_called_once_with(
-            total_issues=expected_total,
-        )
+    logger.print_execution_summary(Action.CHECK, results)
+
+    assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
+        {"Total Issues": expected_total},
+    )
 
 
 # =============================================================================
@@ -164,15 +173,13 @@ def test_execution_summary_check_issue_aggregation(
 
 def test_execution_summary_fix_with_standardized_counts(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary uses standardized counts for fix action.
-
-    When fixed_issues_count and remaining_issues_count are provided,
-    they should be used instead of parsing from output.
-
+    """Standardized fix counts are reported verbatim, not re-parsed from output.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
@@ -183,13 +190,11 @@ def test_execution_summary_fix_with_standardized_counts(
         ),
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.FIX, results)
-        mock_art.assert_called_once_with(total_issues=2)
+    logger.print_execution_summary(Action.FIX, results)
+
+    rows = _totals_row(output=capsys.readouterr().out)
+    assert_that(rows).contains_entry({"Fixed Issues (Native)": 10})
+    assert_that(rows).contains_entry({"Remaining Issues": 2})
 
 
 def test_execution_summary_fix_fallback_to_issues_count(
@@ -254,15 +259,13 @@ def test_execution_summary_fix_failed_tool_handled(
 
 def test_execution_summary_fix_parses_remaining_from_output(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary parses remaining issues from output.
-
-    When remaining_issues_count is not set, the method should parse
-    the output string to extract remaining issue counts.
-
+    """With no standardized count, the remaining total is read from the output.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
@@ -273,29 +276,24 @@ def test_execution_summary_fix_parses_remaining_from_output(
         ),
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.FIX, results)
-        mock_art.assert_called_once_with(total_issues=5)
+    logger.print_execution_summary(Action.FIX, results)
+
+    assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
+        {"Remaining Issues": 5},
+    )
 
 
 def test_execution_summary_fix_parses_cannot_autofix_from_output(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary parses 'cannot autofix' count from output.
-
-    The 'cannot be auto-fixed' pattern should be recognized and the count
-    extracted for remaining issues calculation.
-
+    """The "cannot be auto-fixed" wording also yields the remaining total.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    # Use the exact format the regex expects
     results = [
         fake_tool_result_factory(
             success=True,
@@ -304,15 +302,11 @@ def test_execution_summary_fix_parses_cannot_autofix_from_output(
         ),
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.FIX, results)
-        mock_art.assert_called_once_with(
-            total_issues=3,
-        )
+    logger.print_execution_summary(Action.FIX, results)
+
+    assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
+        {"Remaining Issues": 3},
+    )
 
 
 def test_execution_summary_fix_handles_string_sentinel_remaining(
@@ -439,18 +433,16 @@ def test_execution_summary_fix_various_counts(
     fixed: int,
     remaining: int,
     expected_remaining: int,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary handles various fixed/remaining combinations.
-
-    Different scenarios of fixed and remaining issues should be handled
-    correctly with proper totals passed to ASCII art.
-
+    """Each fixed/remaining combination reaches the totals table intact.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
         fixed: Number of fixed issues.
         remaining: Number of remaining issues.
         expected_remaining: Expected remaining issues total.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [
@@ -461,10 +453,8 @@ def test_execution_summary_fix_various_counts(
         ),
     ]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.FIX, results)
-        mock_art.assert_called_once_with(total_issues=expected_remaining)
+    logger.print_execution_summary(Action.FIX, results)
+
+    rows = _totals_row(output=capsys.readouterr().out)
+    assert_that(rows).contains_entry({"Fixed Issues (Native)": fixed})
+    assert_that(rows).contains_entry({"Remaining Issues": expected_remaining})

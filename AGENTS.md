@@ -55,9 +55,19 @@ required):
   package.** Those wheel tests call stdlib `python -m venv`; without `ensurepip` they
   fail with "recreate your virtual environment" (not a code bug). Install once with
   `sudo apt-get install -y python3.12-venv` if missing on a fresh VM.
-- `tests/unit/plugins/test_entry_point_plugins.py::test_list_tools_shows_origin_for_builtin_and_external`
-  can fail under `pytest -n auto` due to plugin-registry cross-test pollution; it passes
-  when run on its own. Not an environment problem.
+- **The plugin registry is snapshotted around every test.** `tests/conftest.py` holds an
+  autouse `_isolate_plugin_registry` fixture that saves and restores
+  `ToolRegistry._tools` / `._instances` / `._origins`, so registering or clearing a
+  plugin cannot leak into the next test (#2315). Tests must not add their own
+  save/restore blocks. The suite also runs under `pytest-randomly`, so nothing may
+  depend on declaration order.
+- **Two test-hygiene scanners run as tests.**
+  `scripts/ci/testing/scan_duplicate_test_bodies.py` reports test functions sharing a
+  normalised body and module context; `scripts/ci/testing/scan_mock_only_tests.py`
+  reports tests whose only assertions read mock call bookkeeping (`assert_called*`,
+  `call_count`, …). Both are ratcheted at **0** by
+  `tests/scripts/ci/testing/test_suite_hygiene_scanners.py` — a new test must assert on
+  something observable, and must not be a copy of an existing one.
 - **The required `lintro-code-quality` check fails closed (#2296).** If the dogfooding
   lint job is killed, cancelled, or times out it produces no lint verdict, and the gate
   goes **red** with `status=no-verdict` / `infra-flake=true` rather than absorbing the

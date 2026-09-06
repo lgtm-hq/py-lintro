@@ -394,14 +394,32 @@ def test_fetch_compare_lines_returns_none_without_a_files_array() -> None:
 def test_api_requests_never_replay_the_token_to_a_redirect_target() -> None:
     """Urllib copies ordinary headers across redirects; the token must not go."""
     reporter = GitHubPRReporter(token=_TEST_TOKEN, repo="owner/name", pr_number=7)
+    requests: list[urllib.request.Request] = []
 
-    with patch(
-        "urllib.request.urlopen",
-        return_value=_reader({"files": []}),
-    ) as urlopen:
-        reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+    def _urlopen(
+        request: urllib.request.Request,
+        *_args: object,
+        **_kwargs: object,
+    ) -> MagicMock:
+        """Record the prepared request and answer with an empty file list.
 
-    request = urlopen.call_args.args[0]
+        Args:
+            request: The request urllib was asked to send.
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+
+        Returns:
+            A reader over an empty ``files`` payload.
+        """
+        requests.append(request)
+        return _reader({"files": []})
+
+    with patch("urllib.request.urlopen", _urlopen):
+        lines = reporter.fetch_compare_lines(base="aaa111", head="bbb222")
+
+    assert_that(lines).is_equal_to({})
+    assert_that(requests).is_length(1)
+    request = requests[0]
     # ``header_items()`` merges both maps, so the split is only visible in the
     # underlying dicts: ordinary headers ride along on a redirect, unredirected
     # ones do not.

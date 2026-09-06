@@ -435,12 +435,6 @@ def test_mcp_review_failure_reuses_cli_error_contract_fields() -> None:
     )
 
 
-def test_review_error_exit_code_stays_two_distinct_from_p1() -> None:
-    """Exit 2 means no review; exit 1 stays reserved for successful P1 findings."""
-    assert_that(REVIEW_ERROR_EXIT_CODE).is_equal_to(2)
-    assert_that(REVIEW_ERROR_EXIT_CODE).is_not_equal_to(1)
-
-
 # ---------------------------------------------------------------------------
 # Exit behavior 0 / 1 / 2
 # ---------------------------------------------------------------------------

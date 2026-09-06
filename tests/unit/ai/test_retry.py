@@ -120,13 +120,27 @@ async def test_retry_does_not_retry_on_authentication_error() -> None:
     assert_that(call_count).is_equal_to(1)
 
 
-@patch("lintro.ai.retry.asyncio.sleep")
-async def test_retry_raises_after_max_retries_exhausted(mock_sleep: MagicMock) -> None:
-    """Verify the original error is raised after all retry attempts are exhausted.
+async def test_retry_raises_after_max_retries_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The original error surfaces after every retry attempt is spent.
 
     Args:
-        mock_sleep: Patched ``asyncio.sleep``.
+        monkeypatch: Pytest monkeypatch fixture, used to record backoff waits
+            instead of really sleeping.
     """
+    delays: list[float] = []
+    attempts: list[int] = []
+
+    async def _record_sleep(seconds: float) -> None:
+        """Record a backoff wait without spending real time.
+
+        Args:
+            seconds: Requested backoff duration.
+        """
+        delays.append(seconds)
+
+    monkeypatch.setattr("lintro.ai.retry.asyncio.sleep", _record_sleep)
 
     @with_retry(max_retries=2, base_delay=0.1)
     async def fn() -> str:
@@ -138,11 +152,15 @@ async def test_retry_raises_after_max_retries_exhausted(mock_sleep: MagicMock) -
         Raises:
             AIProviderError: Always.
         """
+        attempts.append(len(attempts) + 1)
         raise AIProviderError("always fails")
 
     with pytest.raises(AIProviderError, match="always fails"):
         await fn()
-    assert_that(mock_sleep.call_count).is_equal_to(2)
+
+    # Three attempts (the original plus two retries) separated by two waits.
+    assert_that(attempts).is_length(3)
+    assert_that(delays).is_length(2)
 
 
 @patch("lintro.ai.retry.random.uniform", return_value=1.0)
@@ -182,18 +200,26 @@ async def test_retry_exponential_backoff_delays(
     assert_that(delays).is_equal_to([1.0, 2.0, 4.0])
 
 
-@patch("lintro.ai.retry.random.uniform", return_value=1.0)
-@patch("lintro.ai.retry.asyncio.sleep")
-async def test_retry_max_delay_cap(
-    mock_sleep: MagicMock,
-    _mock_uniform: MagicMock,
-) -> None:
+async def test_retry_max_delay_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify retry delays are capped at the configured max_delay value.
 
     Args:
-        mock_sleep: Patched ``asyncio.sleep``.
-        _mock_uniform: Patched jitter source pinned to 1.0.
+        monkeypatch: Pytest monkeypatch fixture, used to pin the jitter and
+            record backoff waits instead of really sleeping.
     """
+    delays: list[float] = []
+
+    async def _record_sleep(seconds: float) -> None:
+        """Record a backoff wait without spending real time.
+
+        Args:
+            seconds: Requested backoff duration.
+        """
+        delays.append(seconds)
+
+    monkeypatch.setattr("lintro.ai.retry.asyncio.sleep", _record_sleep)
+    monkeypatch.setattr("lintro.ai.retry.random.uniform", lambda *_args: 1.0)
+
     call_count = 0
 
     @with_retry(
@@ -217,9 +243,10 @@ async def test_retry_max_delay_cap(
             raise AIProviderError("fail")
         return "ok"
 
-    await fn()
-    delays = [call.args[0] for call in mock_sleep.call_args_list]
-    assert_that(delays).is_length(5)
+    result = await fn()
+
+    assert_that(result).is_equal_to("ok")
+    # The 10 -> 30 -> 90 ... growth is clamped to the 25s ceiling.
     assert_that(delays).is_equal_to([10.0, 25.0, 25.0, 25.0, 25.0])
 
 

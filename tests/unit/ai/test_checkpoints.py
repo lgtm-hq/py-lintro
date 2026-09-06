@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,7 +25,8 @@ from lintro.ai.config import AIConfig
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import _apply_or_review, _report_checkpoints
 from lintro.ai.undo import prepare_fix_batch, restore_undo
-from tests.unit.conftest import init_git_repo, run_git
+from tests.conftest import run_git
+from tests.unit.conftest import init_git_repo
 
 
 def _init_git_repo(tmp_path: Path) -> Path:
@@ -591,11 +593,19 @@ def test_interactive_review_receives_the_prepared_undo_state(tmp_path: Path) -> 
     config = AIConfig(auto_apply=False, auto_apply_safe_fixes=False)
     suggestion = _make_suggestion("tracked.py", "alpha = 1\n", "alpha = 2\n")
 
+    undo_states: list[Any] = []
+
+    def _review_interactive(
+        *_args: Any,
+        **kwargs: Any,
+    ) -> tuple[int, int, list[Any]]:
+        undo_states.append(kwargs.get("undo_state"))
+        return 0, 0, []
+
     with (
         patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=True),
-        patch("lintro.ai.pipeline.review_fixes_interactive") as mock_review,
+        patch("lintro.ai.pipeline.review_fixes_interactive", _review_interactive),
     ):
-        mock_review.return_value = (0, 0, [])
         _apply_or_review(
             [suggestion],
             config,
@@ -604,7 +614,6 @@ def test_interactive_review_receives_the_prepared_undo_state(tmp_path: Path) -> 
             workspace_root=repo,
         )
 
-    assert_that(mock_review.call_count).is_equal_to(1)
-    passed = mock_review.call_args.kwargs.get("undo_state")
-    assert_that(passed).is_not_none()
-    assert_that(passed.kind).is_equal_to("git")  # type: ignore[union-attr]
+    assert_that(undo_states).is_length(1)
+    assert_that(undo_states[0]).is_not_none()
+    assert_that(undo_states[0].kind).is_equal_to("git")

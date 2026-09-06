@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -76,6 +77,37 @@ def mock_subprocess() -> Generator[MagicMock, None, None]:
         yield mock
 
 
+@pytest.fixture
+def recorded_ruff_argv() -> Generator[list[list[str]], None, None]:
+    """Record the argv of every ``subprocess.run`` call made by the checker.
+
+    Reading the argv back off a mock only asserts how the mock was called;
+    recording it into a plain list makes the executed command an observable
+    value (#2315).
+
+    Yields:
+        list[list[str]]: A list accumulating one argv per ruff invocation.
+    """
+    commands: list[list[str]] = []
+
+    def fake_run(argv: list[str], *args: object, **kwargs: object) -> SimpleNamespace:
+        """Record one ruff invocation and report no violations.
+
+        Args:
+            argv: Command line ruff was invoked with.
+            *args: Positional arguments the caller passed through.
+            **kwargs: Keyword arguments the caller passed through.
+
+        Returns:
+            A completed process reporting empty JSON output.
+        """
+        commands.append(list(argv))
+        return SimpleNamespace(stdout="[]", returncode=0)
+
+    with patch("subprocess.run", side_effect=fake_run):
+        yield commands
+
+
 # --- check_line_length_violations function tests ---
 
 
@@ -127,20 +159,19 @@ def test_check_line_length_successful_detection(
 
 def test_check_line_length_custom_line_length(
     mock_ruff_available: MagicMock,
-    mock_subprocess: MagicMock,
+    recorded_ruff_argv: list[list[str]],
 ) -> None:
-    """Test that custom line_length is passed to ruff.
+    """Pass a custom line_length through to the ruff command line.
 
     Args:
         mock_ruff_available: Mock fixture ensuring ruff is available.
-        mock_subprocess: Mock fixture for subprocess operations.
+        recorded_ruff_argv: Recorded argv of each ruff invocation.
     """
-    check_line_length_violations(files=["test.py"], line_length=100)
+    violations = check_line_length_violations(files=["test.py"], line_length=100)
 
-    call_args = mock_subprocess.call_args
-    cmd = call_args[0][0]
-    assert_that(cmd).contains("--line-length")
-    assert_that(cmd).contains("100")
+    assert_that(recorded_ruff_argv).is_length(1)
+    assert_that(recorded_ruff_argv[0]).contains("--line-length", "100")
+    assert_that(violations).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -197,36 +228,38 @@ def test_check_line_length_invalid_output_returns_empty(
 
 def test_check_line_length_relative_paths_converted_to_absolute(
     mock_ruff_available: MagicMock,
-    mock_subprocess: MagicMock,
+    recorded_ruff_argv: list[list[str]],
 ) -> None:
-    """Test that relative file paths are converted to absolute.
+    """Resolve relative file paths against ``cwd`` before invoking ruff.
 
     Args:
         mock_ruff_available: Mock fixture ensuring ruff is available.
-        mock_subprocess: Mock fixture for subprocess operations.
+        recorded_ruff_argv: Recorded argv of each ruff invocation.
     """
-    check_line_length_violations(
+    violations = check_line_length_violations(
         files=["src/module.py", "tests/test_module.py"],
         cwd="/project",
     )
 
-    call_args = mock_subprocess.call_args
-    cmd = call_args[0][0]
-    assert_that(cmd).contains("/project/src/module.py")
-    assert_that(cmd).contains("/project/tests/test_module.py")
+    assert_that(recorded_ruff_argv).is_length(1)
+    assert_that(recorded_ruff_argv[0]).contains(
+        "/project/src/module.py",
+        "/project/tests/test_module.py",
+    )
+    assert_that(violations).is_empty()
 
 
 def test_check_line_length_cwd_symlink_is_not_resolved(
     tmp_path: Path,
     mock_ruff_available: MagicMock,
-    mock_subprocess: MagicMock,
+    recorded_ruff_argv: list[list[str]],
 ) -> None:
     """Relative input paths preserve ``abspath`` symlink semantics.
 
     Args:
         tmp_path: Temporary directory fixture.
         mock_ruff_available: Mock fixture ensuring ruff is available.
-        mock_subprocess: Mock fixture for subprocess operations.
+        recorded_ruff_argv: Recorded argv of each ruff invocation.
     """
     real_dir = tmp_path / "real"
     real_dir.mkdir()
@@ -235,9 +268,11 @@ def test_check_line_length_cwd_symlink_is_not_resolved(
 
     check_line_length_violations(files=["src/module.py"], cwd=str(symlink_dir))
 
-    cmd = mock_subprocess.call_args[0][0]
-    assert_that(cmd).contains(str(symlink_dir / "src" / "module.py"))
-    assert_that(cmd).does_not_contain(str(real_dir / "src" / "module.py"))
+    assert_that(recorded_ruff_argv).is_length(1)
+    assert_that(recorded_ruff_argv[0]).contains(str(symlink_dir / "src" / "module.py"))
+    assert_that(recorded_ruff_argv[0]).does_not_contain(
+        str(real_dir / "src" / "module.py"),
+    )
 
 
 def test_check_line_length_old_ruff_json_format(
@@ -312,22 +347,23 @@ def test_check_line_length_multiple_violations(
 
 def test_check_line_length_command_includes_required_flags(
     mock_ruff_available: MagicMock,
-    mock_subprocess: MagicMock,
+    recorded_ruff_argv: list[list[str]],
 ) -> None:
-    """Test that the ruff command includes required flags.
+    """Invoke ruff with the flags the E501-only check depends on.
 
     Args:
         mock_ruff_available: Mock for ruff availability check.
-        mock_subprocess: Mock for subprocess calls.
+        recorded_ruff_argv: Recorded argv of each ruff invocation.
     """
-    check_line_length_violations(files=["test.py"])
+    violations = check_line_length_violations(files=["test.py"])
 
-    call_args = mock_subprocess.call_args
-    cmd = call_args[0][0]
-
-    assert_that(cmd).contains("check")
-    assert_that(cmd).contains("--select")
-    assert_that(cmd).contains("E501")
-    assert_that(cmd).contains("--output-format")
-    assert_that(cmd).contains("json")
-    assert_that(cmd).contains("--no-cache")
+    assert_that(recorded_ruff_argv).is_length(1)
+    assert_that(recorded_ruff_argv[0]).contains(
+        "check",
+        "--select",
+        "E501",
+        "--output-format",
+        "json",
+        "--no-cache",
+    )
+    assert_that(violations).is_empty()

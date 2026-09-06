@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -28,9 +29,33 @@ from lintro.models.core.tool_result import ToolResult
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _RecordingLogger:
+    """Console logger stand-in that records the text it is asked to print.
+
+    Used instead of a mock so the tests assert on what a user would see rather
+    than on how the collaborator was called (#2315).
+
+    Attributes:
+        lines: Every message passed to :meth:`console_output`, in order.
+    """
+
+    lines: list[str] = field(default_factory=list)
+
+    def console_output(self, message: str, *_args: Any, **_kwargs: Any) -> None:
+        """Record one console line.
+
+        Args:
+            message: Text the production code wants on the console.
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+        """
+        self.lines.append(message)
+
+
 def test_warn_ai_fix_disabled_warns_only_for_check_when_fix_requested_and_ai_disabled():
     """Warn when action is CHECK, ai_fix=True, and AI disabled."""
-    logger = MagicMock()
+    logger = _RecordingLogger()
 
     _warn_ai_fix_disabled(
         action=Action.CHECK,
@@ -39,15 +64,14 @@ def test_warn_ai_fix_disabled_warns_only_for_check_when_fix_requested_and_ai_dis
         logger=logger,
     )
 
-    assert_that(logger.console_output.call_count).is_equal_to(1)
-    warning_text = logger.console_output.call_args[0][0]
-    assert_that(warning_text).contains("AI fixes requested")
-    assert_that(warning_text).contains("AI lint is disabled")
+    assert_that(logger.lines).is_length(1)
+    assert_that(logger.lines[0]).contains("AI fixes requested")
+    assert_that(logger.lines[0]).contains("AI lint is disabled")
 
 
-def test_warn_ai_fix_disabled_no_warning_for_other_states():
-    """Test that no warning is issued for non-qualifying state combinations."""
-    logger = MagicMock()
+def test_warn_ai_fix_disabled_no_warning_for_other_states() -> None:
+    """No console text is produced for non-qualifying state combinations."""
+    logger = _RecordingLogger()
 
     _warn_ai_fix_disabled(
         action=Action.FIX,
@@ -68,15 +92,19 @@ def test_warn_ai_fix_disabled_no_warning_for_other_states():
         logger=logger,
     )
 
-    assert_that(logger.console_output.call_count).is_equal_to(0)
+    assert_that(logger.lines).is_empty()
 
 
 @pytest.mark.parametrize("output_format", ["json", "sarif", "JSON", "SARIF"])
 def test_warn_ai_fix_disabled_suppressed_for_machine_formats(
     output_format: str,
 ) -> None:
-    """Warning is suppressed for machine-readable output formats."""
-    logger = MagicMock()
+    """Machine-readable output formats get no plain-text warning.
+
+    Args:
+        output_format: Machine-readable format under test.
+    """
+    logger = _RecordingLogger()
 
     _warn_ai_fix_disabled(
         action=Action.CHECK,
@@ -86,7 +114,7 @@ def test_warn_ai_fix_disabled_suppressed_for_machine_formats(
         output_format=output_format,
     )
 
-    assert_that(logger.console_output.call_count).is_equal_to(0)
+    assert_that(logger.lines).is_empty()
 
 
 # ---------------------------------------------------------------------------

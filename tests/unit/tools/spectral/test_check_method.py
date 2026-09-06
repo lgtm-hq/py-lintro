@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess symbols are only referenced for patching/exception types; no process is spawned
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -70,6 +71,48 @@ def _process(
         stderr=stderr,
         output=output,
     )
+
+
+def _recording_run(
+    *,
+    commands: list[list[str]],
+    stdout: str = "[]",
+    calls: list[dict[str, object]] | None = None,
+) -> Callable[..., SubprocessResult]:
+    """Build a Spectral subprocess double that records each argv it is given.
+
+    Args:
+        commands: List that accumulates one argv per Spectral invocation.
+        stdout: JSON output every recorded invocation reports back.
+        calls: Optional list accumulating the full keyword arguments of each
+            invocation, for tests that also assert on ``cwd`` or ``timeout``.
+
+    Returns:
+        A callable suitable as ``_run_subprocess_result``'s side effect.
+    """
+
+    def _run(**kwargs: object) -> SubprocessResult:
+        """Record the Spectral argv and report a clean run.
+
+        Args:
+            **kwargs: Arguments the plugin passed to the subprocess helper.
+
+        Returns:
+            A successful Spectral result carrying ``stdout``.
+
+        Raises:
+            TypeError: If the recorded ``cmd`` is not a list, which would
+                otherwise be coerced silently into a list of characters.
+        """
+        cmd = kwargs["cmd"]
+        if not isinstance(cmd, list):
+            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
+        commands.append([str(part) for part in cmd])
+        if calls is not None:
+            calls.append(dict(kwargs))
+        return _process(stdout=stdout)
+
+    return _run
 
 
 def test_check_with_issues(spectral_plugin: SpectralPlugin, tmp_path: Path) -> None:
@@ -242,13 +285,16 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
     spec = specs_dir / "openapi.yaml"
     spec.write_text("openapi: 3.0.0\n")
 
+    commands: list[list[str]] = []
+    calls: list[dict[str, object]] = []
+
     with (
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
             "_run_subprocess_result",
-            return_value=_process(stdout="[]"),
-        ) as mock_run,
+            side_effect=_recording_run(commands=commands, calls=calls),
+        ),
         patch.object(
             spectral_plugin,
             "_get_spectral_command",
@@ -260,19 +306,20 @@ def test_check_discovers_parent_ruleset_and_builds_json_command(
             files=[str(spec)],
             rel_files=["specs/openapi.yaml"],
         )
-        spectral_plugin.check([str(specs_dir)], {})
+        result = spectral_plugin.check([str(specs_dir)], {})
 
-    command = mock_run.call_args.kwargs["cmd"]
-    assert_that(command).contains(
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains(
         "lint",
         "--format",
         "json",
         "--ignore-unknown-format",
         "--ruleset",
     )
-    assert_that(command).contains(str(ruleset.absolute()), "specs/openapi.yaml")
-    assert_that(mock_run.call_args.kwargs["cwd"]).is_equal_to(str(tmp_path))
-    assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(30)
+    assert_that(commands[0]).contains(str(ruleset.absolute()), "specs/openapi.yaml")
+    assert_that(calls[0]["cwd"]).is_equal_to(str(tmp_path))
+    assert_that(calls[0]["timeout"]).is_equal_to(30)
+    assert_that(result.success).is_true()
 
 
 def test_find_ruleset_supports_all_declared_filenames(
@@ -332,13 +379,15 @@ def test_check_per_call_ruleset_reaches_command(
     ruleset = tmp_path / "custom.spectral.yaml"
     ruleset.write_text("rules: {}\n")
 
+    commands: list[list[str]] = []
+
     with (
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
             "_run_subprocess_result",
-            return_value=_process(stdout="[]"),
-        ) as mock_run,
+            side_effect=_recording_run(commands=commands),
+        ),
         patch.object(
             spectral_plugin,
             "_get_spectral_command",
@@ -346,10 +395,11 @@ def test_check_per_call_ruleset_reaches_command(
         ),
     ):
         mock_prepare.return_value = _mock_ctx(tmp_path)
-        spectral_plugin.check([str(spec)], {"ruleset": ruleset.name})
+        result = spectral_plugin.check([str(spec)], {"ruleset": ruleset.name})
 
-    command = mock_run.call_args.kwargs["cmd"]
-    assert_that(command).contains("--ruleset", str(ruleset.absolute()))
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--ruleset", str(ruleset.absolute()))
+    assert_that(result.success).is_true()
 
 
 def test_check_configured_ruleset_reaches_command(
@@ -367,14 +417,15 @@ def test_check_configured_ruleset_reaches_command(
     ruleset = tmp_path / "configured.spectral.yaml"
     ruleset.write_text("rules: {}\n")
     spectral_plugin.set_options(ruleset=ruleset.name)
+    commands: list[list[str]] = []
 
     with (
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
             "_run_subprocess_result",
-            return_value=_process(stdout="[]"),
-        ) as mock_run,
+            side_effect=_recording_run(commands=commands),
+        ),
         patch.object(
             spectral_plugin,
             "_get_spectral_command",
@@ -382,12 +433,11 @@ def test_check_configured_ruleset_reaches_command(
         ),
     ):
         mock_prepare.return_value = _mock_ctx(tmp_path)
-        spectral_plugin.check([str(spec)], {})
+        result = spectral_plugin.check([str(spec)], {})
 
-    assert_that(mock_run.call_args.kwargs["cmd"]).contains(
-        "--ruleset",
-        str(ruleset.absolute()),
-    )
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--ruleset", str(ruleset.absolute()))
+    assert_that(result.success).is_true()
 
 
 def test_check_runs_each_nested_ruleset_group_separately(
@@ -454,6 +504,10 @@ def test_check_searches_all_input_paths_for_ruleset(
         spectral_plugin: The SpectralPlugin instance under test.
         tmp_path: Temporary directory path for test files.
     """
+    # Bound the upward ruleset walk at tmp_path, the way the sibling
+    # parent-ruleset test does, so discovery cannot reach the repo's own
+    # .spectral.yaml when tmp_path happens to sit inside a checkout (#2315).
+    (tmp_path / ".git").mkdir()
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
     first_dir.mkdir()
@@ -464,14 +518,15 @@ def test_check_searches_all_input_paths_for_ruleset(
     second_spec.write_text("openapi: 3.0.0\n")
     ruleset = second_dir / ".spectral.yaml"
     ruleset.write_text('extends: ["spectral:oas"]\n')
+    commands: list[list[str]] = []
 
     with (
         patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             spectral_plugin,
             "_run_subprocess_result",
-            return_value=_process(stdout="[]"),
-        ) as mock_run,
+            side_effect=_recording_run(commands=commands),
+        ),
         patch.object(
             spectral_plugin,
             "_get_spectral_command",
@@ -483,16 +538,18 @@ def test_check_searches_all_input_paths_for_ruleset(
             files=[str(first_spec), str(second_spec)],
             rel_files=["first/first.yaml", "second/second.yaml"],
         )
-        spectral_plugin.check([str(first_spec), str(second_spec)], {})
+        result = spectral_plugin.check([str(first_spec), str(second_spec)], {})
 
-    assert_that(mock_run.call_args.kwargs["cmd"]).contains(
+    # Exactly one invocation: only second_dir carries a ruleset, so a second
+    # command would mean discovery found one somewhere it should not have.
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains(
         "--ruleset",
         str(ruleset.absolute()),
         "second/second.yaml",
     )
-    assert_that(mock_run.call_args.kwargs["cmd"]).does_not_contain(
-        "first/first.yaml",
-    )
+    assert_that(commands[0]).does_not_contain("first/first.yaml")
+    assert_that(result.success).is_true()
 
 
 def test_missing_explicit_ruleset_fails_closed(

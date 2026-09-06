@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.tools.implementations.ruff.fix import execute_ruff_fix
 
@@ -50,7 +51,20 @@ def test_execute_ruff_fix_warns_about_unsafe_fixes(
         }
     ]"""
 
-    with patch("lintro.tools.implementations.ruff.fix.logger") as mock_logger:
+    warnings: list[str] = []
+
+    def sink(message: object) -> None:
+        """Collect WARNING-level loguru messages.
+
+        Args:
+            message: Loguru message object carrying the record.
+        """
+        record = message.record  # type: ignore[attr-defined]
+        if record["level"].name == "WARNING":
+            warnings.append(record["message"])
+
+    sink_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
         mock_ruff_tool._run_subprocess.side_effect = [
             (False, remaining_output),  # Initial check
             (False, remaining_output),  # Fix attempt
@@ -58,7 +72,7 @@ def test_execute_ruff_fix_warns_about_unsafe_fixes(
         ]
 
         execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    finally:
+        logger.remove(sink_id)
 
-    mock_logger.warning.assert_called()
-    warning_msg = str(mock_logger.warning.call_args)
-    assert_that(warning_msg).contains("unsafe")
+    assert_that("\n".join(warnings)).contains("unsafe")

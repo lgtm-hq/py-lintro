@@ -2,12 +2,37 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.utils.unified_config import UnifiedConfigManager
+
+
+@dataclass
+class RecordingTool:
+    """Minimal stand-in for a tool that records the options applied to it.
+
+    Attributes:
+        name: Tool name the manager reads to look up configuration.
+        applied: Option mappings handed to :meth:`set_options`, in order.
+    """
+
+    name: str
+    applied: list[dict[str, Any]] = field(default_factory=list)
+
+    def set_options(self, **options: Any) -> None:
+        """Record one set of applied options.
+
+        Args:
+            **options: Effective options the manager resolved for this tool.
+        """
+        self.applied.append(dict(options))
+
 
 # =============================================================================
 # Tests for apply_config_to_tool method
@@ -19,38 +44,32 @@ def test_manager_apply_config_does_nothing_for_tool_without_name(
 ) -> None:
     """Verify apply_config_to_tool skips tools without a name.
 
-    When tool.name is empty, set_options should not be called.
-
+    A tool with an empty name has no configuration to look up, so it must come
+    back with no options applied at all.
 
     Args:
         manager: Configuration manager instance.
     """
-    mock_tool = MagicMock()
-    mock_tool.name = ""
+    tool = RecordingTool(name="")
 
-    manager.apply_config_to_tool(mock_tool)
+    manager.apply_config_to_tool(tool)
 
-    mock_tool.set_options.assert_not_called()
+    assert_that(tool.applied).is_empty()
 
 
 def test_manager_apply_config_calls_set_options_with_effective_config(
     manager: UnifiedConfigManager,
-    mock_tool: MagicMock,
 ) -> None:
-    """Verify apply_config_to_tool calls set_options on the tool.
+    """Verify apply_config_to_tool merges every source into one option set.
 
-    The tool's set_options method should be called with merged config
-    from all sources.
-
-            mock_tool: Mock tool instance.
-
-            mock_tool: Mock tool instance.
-
+    The line length, the ``[tool.lintro.<tool>]`` config and the CLI overrides
+    must all arrive on the tool in a single call.
 
     Args:
         manager: Configuration manager instance.
-        mock_tool: Mock tool instance.
     """
+    tool = RecordingTool(name="ruff")
+
     with (
         patch(
             "lintro.utils.unified_config_manager.is_tool_injectable",
@@ -62,65 +81,27 @@ def test_manager_apply_config_calls_set_options_with_effective_config(
             return_value={"strict": True},
         ),
     ):
-        manager.apply_config_to_tool(mock_tool, cli_overrides={"debug": True})
+        manager.apply_config_to_tool(tool, cli_overrides={"debug": True})
 
-        mock_tool.set_options.assert_called_once()
-
-
-def test_manager_apply_config_includes_line_length_for_injectable_tools(
-    manager: UnifiedConfigManager,
-    mock_tool: MagicMock,
-) -> None:
-    """Verify line_length is included for injectable tools.
-
-    When is_tool_injectable returns True, line_length should be passed
-    to set_options.
-
-            mock_tool: Mock tool instance.
-
-            mock_tool: Mock tool instance.
-
-
-    Args:
-        manager: Configuration manager instance.
-        mock_tool: Mock tool instance.
-    """
-    with (
-        patch(
-            "lintro.utils.unified_config_manager.is_tool_injectable",
-            return_value=True,
-        ),
-        patch.object(manager, "get_effective_line_length", return_value=100),
-        patch(
-            "lintro.utils.unified_config_manager.load_lintro_tool_config",
-            return_value={},
-        ),
-    ):
-        manager.apply_config_to_tool(mock_tool)
-
-        call_kwargs = mock_tool.set_options.call_args[1]
-        assert_that(call_kwargs).contains_key("line_length")
-        assert_that(call_kwargs["line_length"]).is_equal_to(100)
+    assert_that(tool.applied).is_equal_to(
+        [{"line_length": 100, "strict": True, "debug": True}],
+    )
 
 
 def test_manager_apply_config_cli_overrides_take_precedence(
     manager: UnifiedConfigManager,
-    mock_tool: MagicMock,
 ) -> None:
     """Verify CLI overrides have highest priority.
 
-    When cli_overrides conflict with other config sources, CLI values
-    should win.
-
-            mock_tool: Mock tool instance.
-
-            mock_tool: Mock tool instance.
-
+    Three sources name ``line_length`` at once: the effective line length,
+    the tool's own config and the CLI. The value the tool actually receives
+    must be the CLI one.
 
     Args:
         manager: Configuration manager instance.
-        mock_tool: Mock tool instance.
     """
+    tool = RecordingTool(name="ruff")
+
     with (
         patch(
             "lintro.utils.unified_config_manager.is_tool_injectable",
@@ -132,10 +113,9 @@ def test_manager_apply_config_cli_overrides_take_precedence(
             return_value={"line_length": 80},
         ),
     ):
-        manager.apply_config_to_tool(mock_tool, cli_overrides={"line_length": 120})
+        manager.apply_config_to_tool(tool, cli_overrides={"line_length": 120})
 
-        call_kwargs = mock_tool.set_options.call_args[1]
-        assert_that(call_kwargs["line_length"]).is_equal_to(120)
+    assert_that(tool.applied).is_equal_to([{"line_length": 120}])
 
 
 def test_manager_apply_config_raises_value_error_from_tool(
@@ -243,22 +223,17 @@ def test_manager_apply_config_handles_other_errors_gracefully(
 
 def test_manager_apply_config_skips_non_injectable_line_length(
     manager: UnifiedConfigManager,
-    mock_tool: MagicMock,
 ) -> None:
     """Verify line_length is not set for non-injectable tools.
 
-    When is_tool_injectable returns False, line_length should not be
-    included in the options.
-
-            mock_tool: Mock tool instance.
-
-            mock_tool: Mock tool instance.
-
+    A tool that cannot take an injected line length receives only its own
+    configuration, even though an effective line length is available.
 
     Args:
         manager: Configuration manager instance.
-        mock_tool: Mock tool instance.
     """
+    tool = RecordingTool(name="ruff")
+
     with (
         patch(
             "lintro.utils.unified_config_manager.is_tool_injectable",
@@ -270,11 +245,9 @@ def test_manager_apply_config_skips_non_injectable_line_length(
             return_value={"other_option": True},
         ),
     ):
-        manager.apply_config_to_tool(mock_tool)
+        manager.apply_config_to_tool(tool)
 
-        call_kwargs = mock_tool.set_options.call_args[1]
-        assert_that(call_kwargs).does_not_contain_key("line_length")
-        assert_that(call_kwargs).contains_key("other_option")
+    assert_that(tool.applied).is_equal_to([{"other_option": True}])
 
 
 # =============================================================================
@@ -300,49 +273,37 @@ def test_manager_get_report_returns_string(manager: UnifiedConfigManager) -> Non
         assert_that(result).is_equal_to("Report")
 
 
-def test_manager_get_report_delegates_to_config_reporting(
-    manager: UnifiedConfigManager,
-) -> None:
-    """Verify get_report calls the config_reporting module.
-
-    The report generation is delegated to get_config_report function.
-
-
-    Args:
-        manager: Configuration manager instance.
-    """
-    with patch(
-        "lintro.utils.config_reporting.get_config_report",
-        return_value="Detailed Report",
-    ) as mock_report:
-        manager.get_report()
-
-        mock_report.assert_called_once()
-
-
 # =============================================================================
 # Tests for print_report method
 # =============================================================================
 
 
-def test_manager_print_report_calls_config_reporting(
+def test_manager_print_report_emits_the_report_lines(
     manager: UnifiedConfigManager,
 ) -> None:
-    """Verify print_report delegates to print_config_report.
-
-    The print_report method should call the print_config_report function
-    from the config_reporting module.
-
+    """Verify print_report emits the generated report through the logger.
 
     Args:
         manager: Configuration manager instance.
     """
-    with patch(
-        "lintro.utils.config_reporting.print_config_report",
-    ) as mock_print:
-        manager.print_report()
+    emitted: list[str] = []
+    handler_id = logger.add(
+        lambda message: emitted.append(str(message)),
+        level="INFO",
+        format="{message}",
+    )
+    try:
+        with patch(
+            "lintro.utils.config_reporting.get_config_report",
+            return_value="first line\nsecond line",
+        ):
+            manager.print_report()
+    finally:
+        logger.remove(handler_id)
 
-        mock_print.assert_called_once()
+    joined = "".join(emitted)
+    assert_that(joined).contains("first line")
+    assert_that(joined).contains("second line")
 
 
 def test_manager_print_report_does_not_return_value(

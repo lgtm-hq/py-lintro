@@ -12,9 +12,6 @@ from loguru import logger
 from lintro.plugins import ToolRegistry
 from tests.integration._tools import require_tool
 
-logger.remove()
-logger.add(lambda msg: print(msg, end=""), level="INFO")
-
 pytestmark = require_tool("actionlint")
 
 SAMPLE_BAD = Path("test_samples/tools/config/github_actions/actionlint_violations.yml")

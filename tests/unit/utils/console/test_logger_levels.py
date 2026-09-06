@@ -12,48 +12,69 @@ import pytest
 from assertpy import assert_that
 
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.utils.console.conftest import patch_tty_streams
 
 
-def test_info_delegates_to_console_output(logger: ThreadSafeConsoleLogger) -> None:
-    """Verify info() delegates to console_output without color styling.
-
-    The info method is a convenience wrapper that passes messages directly
-    to console_output without any color formatting.
-
-    Args:
-        logger: ThreadSafeConsoleLogger instance fixture.
-    """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.info("info message")
-        mock_output.assert_called_once_with("info message")
-
-
-def test_debug_uses_loguru_logger(logger: ThreadSafeConsoleLogger) -> None:
-    """Verify debug() uses loguru's debug level instead of console output.
-
-    Debug messages go to the loguru logger for proper debug-level filtering,
-    rather than always appearing on the console.
+def test_info_prints_the_message_unstyled(
+    logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An info message reaches the terminal and the buffer without colour.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch("lintro.utils.console.logger.logger.debug") as mock_debug:
-        logger.debug("debug message")
-        mock_debug.assert_called_once_with("debug message")
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.info("info message")
+
+    assert_that(stdout.getvalue()).is_equal_to("info message\n")
+    assert_that(logger.get_buffer()).is_equal_to("info message")
 
 
-def test_warning_outputs_yellow_text(logger: ThreadSafeConsoleLogger) -> None:
-    """Verify warning() outputs messages in yellow color with WARNING prefix.
-
-    Warning messages should be visually distinct using yellow coloring
-    and a WARNING prefix to indicate potential issues.
+def test_debug_stays_off_the_console(
+    logger: ThreadSafeConsoleLogger,
+    loguru_messages: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Debug messages go to loguru only, never to the console or the buffer.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        loguru_messages: Messages captured from the loguru sink.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.warning("warning message")
-        mock_output.assert_called_once_with("WARNING: warning message", color="yellow")
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.debug("debug message")
+
+    assert_that(loguru_messages).contains("debug message")
+    assert_that(stdout.getvalue()).is_empty()
+    assert_that(logger.get_buffer()).is_empty()
+
+
+def test_warning_outputs_yellow_text(
+    logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warning is prefixed and coloured yellow on the terminal.
+
+    The buffer that backs ``console.log`` keeps the plain text, so the colour
+    codes never reach the saved artifact.
+
+    Args:
+        logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.warning("warning message")
+
+    assert_that(stdout.getvalue()).is_equal_to(
+        "\x1b[33mWARNING: warning message\x1b[0m\n",
+    )
+    assert_that(logger.get_buffer()).is_equal_to("WARNING: warning message")
 
 
 def test_error_outputs_red_text(logger: ThreadSafeConsoleLogger) -> None:
@@ -79,51 +100,48 @@ def test_error_outputs_red_text(logger: ThreadSafeConsoleLogger) -> None:
 
 def test_success_outputs_green_text_with_checkmark(
     logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify success() outputs messages in green with checkmark emoji prefix.
-
-    Success messages include a checkmark emoji and use green coloring
-    to clearly indicate successful completion of operations.
+    """A success message is prefixed with a checkmark and coloured green.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        logger.success("success message")
-        mock_output.assert_called_once_with(
-            text="\u2705 success message",
-            color="green",
-        )
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.success("success message")
+
+    assert_that(stdout.getvalue()).is_equal_to(
+        "\x1b[32m\u2705 success message\x1b[0m\n",
+    )
+    assert_that(logger.get_buffer()).is_equal_to("\u2705 success message")
 
 
 @pytest.mark.parametrize(
-    ("method", "expected_color"),
+    ("method", "expected_ansi"),
     [
-        pytest.param("warning", "yellow", id="warning-yellow"),
-        pytest.param("success", "green", id="success-green"),
+        pytest.param("warning", "\x1b[33m", id="warning-yellow"),
+        pytest.param("success", "\x1b[32m", id="success-green"),
+        pytest.param("error", "\x1b[31m", id="error-red"),
     ],
 )
 def test_logging_methods_use_correct_colors(
     logger: ThreadSafeConsoleLogger,
     method: str,
-    expected_color: str,
+    expected_ansi: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify each logging level method uses its designated color.
-
-    Each logging method has an associated color to provide visual distinction
-    between message severity levels in console output.
+    """Each logging level emits its own colour code on an interactive terminal.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
         method: The logging method name to test.
-        expected_color: The expected color for the logging method.
+        expected_ansi: The ANSI colour prefix the method must emit.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch.object(logger, "console_output") as mock_output:
-        getattr(logger, method)("test message")
-        call_kwargs = mock_output.call_args
-        assert_that(
-            call_kwargs.kwargs.get(
-                "color",
-                call_kwargs.args[1] if len(call_kwargs.args) > 1 else None,
-            ),
-        ).is_equal_to(expected_color)
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    getattr(logger, method)("test message")
+
+    assert_that(stdout.getvalue()).starts_with(expected_ansi)

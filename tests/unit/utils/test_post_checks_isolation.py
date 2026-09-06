@@ -207,6 +207,10 @@ def _run_post_check(*, include_venv: bool, exclude: str) -> ToolResult:
     return next(r for r in results if r.name == "observing-post-check")
 
 
+# The observing fake plugin sleeps mid-call so a shared-state clobber is
+# observable; there is no clock to inject, so the wall-clock cost is marked
+# instead (#2315).
+@pytest.mark.slow
 def test_post_check_uses_isolated_copy_not_singleton(
     observing_singleton: _ObservingPostCheckPlugin,
 ) -> None:
@@ -229,6 +233,7 @@ def test_post_check_uses_isolated_copy_not_singleton(
     )
 
 
+@pytest.mark.slow
 def test_concurrent_post_checks_do_not_bleed(
     observing_singleton: _ObservingPostCheckPlugin,
 ) -> None:

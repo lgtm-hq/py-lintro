@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.cost import (
     estimate_cost,
@@ -14,6 +16,24 @@ from lintro.ai.cost import (
     format_token_count,
 )
 from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS, ModelPricing
+
+
+@pytest.fixture
+def debug_messages() -> Iterator[list[str]]:
+    """Capture loguru DEBUG records emitted during the test.
+
+    Yields:
+        list[str]: A list that accumulates formatted debug messages.
+    """
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="DEBUG",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(handler_id)
 
 
 def test_cost_known_model():
@@ -44,21 +64,37 @@ def test_cost_unknown_model_uses_default():
     assert_that(cost).is_close_to(expected, 1e-10)
 
 
-@patch("lintro.ai.cost.logger")
-def test_cost_unknown_model_logs_debug(mock_logger):
-    """Verify a debug message is logged for unknown model default pricing."""
-    estimate_cost("totally-unknown-model", 100, 50)
-    mock_logger.debug.assert_called_once()
-    call_args = mock_logger.debug.call_args[0][0]
-    assert_that(call_args).contains("totally-unknown-model")
-    assert_that(call_args).contains("default pricing")
+def test_cost_unknown_model_logs_debug(debug_messages: list[str]) -> None:
+    """An unknown model logs the default-pricing fallback it applied.
+
+    Args:
+        debug_messages: Loguru DEBUG records captured during the test.
+    """
+    cost = estimate_cost("totally-unknown-model", 100, 50)
+
+    expected = (100 / 1_000_000) * DEFAULT_PRICING.input_per_million + (
+        50 / 1_000_000
+    ) * DEFAULT_PRICING.output_per_million
+    assert_that(cost).is_close_to(expected, 1e-10)
+    transcript = "\n".join(debug_messages)
+    assert_that(transcript).contains("totally-unknown-model")
+    assert_that(transcript).contains("default pricing")
 
 
-@patch("lintro.ai.cost.logger")
-def test_cost_known_model_does_not_log(mock_logger):
-    """Verify no debug message is logged when pricing is found for a known model."""
-    estimate_cost("gpt-4o", 100, 50)
-    mock_logger.debug.assert_not_called()
+def test_cost_known_model_does_not_log(debug_messages: list[str]) -> None:
+    """A model with registered pricing logs no default-pricing fallback notice.
+
+    Args:
+        debug_messages: Loguru DEBUG records captured during the test.
+    """
+    pricing = PROVIDERS.model_pricing["gpt-4o"]
+    cost = estimate_cost("gpt-4o", 100, 50)
+
+    expected = (100 / 1_000_000) * pricing.input_per_million + (
+        50 / 1_000_000
+    ) * pricing.output_per_million
+    assert_that(cost).is_close_to(expected, 1e-10)
+    assert_that("\n".join(debug_messages)).does_not_contain("default pricing")
 
 
 def test_cost_zero_tokens():

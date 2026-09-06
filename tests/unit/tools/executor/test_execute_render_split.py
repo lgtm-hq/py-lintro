@@ -981,13 +981,35 @@ def test_render_run_is_a_no_op_for_an_early_exit(
 
 def test_simple_runner_finalizes_output_after_execution_error(
     monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
 ) -> None:
-    """The convenience runner should release its active marker on exceptions."""
-    output_manager = MagicMock()
-    output_manager.cleanup_old_runs.side_effect = OSError("permission denied")
+    """The convenience runner should release its active marker on exceptions.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        fake_logger: Console logger double recording every call.
+    """
+    finalization: list[str] = []
+
+    class _FailingOutputManager:
+        """Output manager double whose cleanup step raises."""
+
+        def mark_run_complete(self) -> None:
+            """Record that the active-run marker was released."""
+            finalization.append("mark_run_complete")
+
+        def cleanup_old_runs(self) -> None:
+            """Record the cleanup attempt and fail it.
+
+            Raises:
+                OSError: Always, standing in for an unwritable run directory.
+            """
+            finalization.append("cleanup_old_runs")
+            raise OSError("permission denied")
+
     ctx = MagicMock(
-        output_manager=output_manager,
-        logger=MagicMock(),
+        output_manager=_FailingOutputManager(),
+        logger=fake_logger,
         action=Action.CHECK,
     )
     monkeypatch.setattr(te, "build_run_context", lambda **_kwargs: ctx)
@@ -1014,9 +1036,16 @@ def test_simple_runner_finalizes_output_after_execution_error(
             verbose=False,
         )
 
-    output_manager.mark_run_complete.assert_called_once_with()
-    output_manager.cleanup_old_runs.assert_called_once_with()
-    ctx.logger.warning.assert_called_once()
+    assert_that(finalization).is_equal_to(["mark_run_complete", "cleanup_old_runs"])
+    # Assert the message, not just that some warning happened: the point is
+    # that the cleanup failure is reported to the user (#2315).
+    warning_messages = [
+        str(args[0])
+        for name, args, _kwargs in fake_logger.calls
+        if name == "warning" and args
+    ]
+    assert_that(warning_messages).is_length(1)
+    assert_that(warning_messages[0]).contains("Failed to clean up old runs")
 
 
 def _profiled_artifact() -> RunArtifact:

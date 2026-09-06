@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,10 +11,12 @@ from assertpy import assert_that
 from loguru import logger
 
 import lintro.tools.definitions as definitions_package
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins._builtin_index import (
     BUILTIN_TOOL_MODULES,
     REGISTERING_TOOL_MODULES,
 )
+from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.discovery import (
     BUILTIN_DEFINITIONS_PACKAGE,
     ENTRY_POINT_GROUP,
@@ -28,7 +31,83 @@ from lintro.plugins.discovery import (
     is_discovered,
     reset_discovery,
 )
+from lintro.plugins.protocol import LINTRO_PLUGIN_API_VERSION, ToolDefinition
 from lintro.plugins.registry import ToolRegistry
+
+
+def _make_external_plugin(*, tool_name: str) -> type[BaseToolPlugin]:
+    """Build a well-formed third-party plugin class.
+
+    Args:
+        tool_name: Name the plugin's tool definition should report.
+
+    Returns:
+        A ``BaseToolPlugin`` subclass declaring a compatible API version.
+    """
+
+    @dataclass
+    class _ExternalPlugin(BaseToolPlugin):
+        LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+
+        @property
+        def definition(self) -> ToolDefinition:
+            """Return the plugin's tool definition.
+
+            Returns:
+                The tool definition advertised by this fake plugin.
+            """
+            return ToolDefinition(
+                name=tool_name,
+                description="An external tool used in discovery tests",
+                file_patterns=["*.fake"],
+            )
+
+        def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+            """Return a trivially successful result.
+
+            Args:
+                paths: Unused input paths.
+                options: Unused runtime options.
+
+            Returns:
+                A successful ``ToolResult``.
+            """
+            return ToolResult(name=tool_name, success=True, issues_count=0)
+
+    return _ExternalPlugin
+
+
+@dataclass
+class _FakeEntryPoint:
+    """Minimal stand-in for ``importlib.metadata.EntryPoint``.
+
+    Attributes:
+        name: Entry-point name, which is also the tool name the backing plugin
+            registers itself under.
+        value: The ``module:attr`` target string discovery reports on failure.
+        dist: Distribution object exposing ``.name``, or ``None``.
+        load_count: How many times :meth:`load` has been invoked, so a test
+            can assert the trust gate refused *before* importing the plugin.
+    """
+
+    name: str
+    value: str = "fake_pkg.plugin:Plugin"
+    dist: object | None = None
+    load_count: int = 0
+
+    def load(self) -> type[BaseToolPlugin]:
+        """Return a well-formed plugin class registering ``self.name``.
+
+        Counts its own invocations: the trust gate has to fail closed *before*
+        importing third-party code, so "was never registered" is a weaker
+        property than "was never loaded" (#2315).
+
+        Returns:
+            A ``BaseToolPlugin`` subclass whose tool is named after this entry
+            point.
+        """
+        self.load_count += 1
+        return _make_external_plugin(tool_name=self.name)
 
 
 @pytest.fixture(autouse=True)
@@ -254,15 +333,13 @@ def test_external_plugins_opt_in_env(
         lambda: {},
     )
 
-    mock_ep = MagicMock()
-    mock_ep.name = "trusted_plugin"
-    mock_ep.load.return_value = "not-a-class"
+    entry_point = _FakeEntryPoint(name="trusted-plugin")
 
-    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
-        discover_external_plugins()
+    with patch("importlib.metadata.entry_points", return_value=[entry_point]):
+        registered = discover_external_plugins()
 
-    # Opt-in reached the load path and executed the entry point.
-    assert_that(mock_ep.load.called).is_true()
+    assert_that(registered).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("trusted-plugin")).is_true()
 
 
 def test_allowlist_filters_untrusted(
@@ -276,22 +353,22 @@ def test_allowlist_filters_untrusted(
     monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
     monkeypatch.setattr(
         "lintro.plugins.discovery._load_plugins_config",
-        lambda: {"trusted": ["a"]},
+        lambda: {"trusted": ["allowed-plugin"]},
     )
 
-    ep_a = MagicMock()
-    ep_a.name = "a"
-    ep_a.load.return_value = "not-a-class"
-    ep_b = MagicMock()
-    ep_b.name = "b"
-    ep_b.load.return_value = "not-a-class"
+    allowed = _FakeEntryPoint(name="allowed-plugin")
+    untrusted = _FakeEntryPoint(name="untrusted-plugin")
 
-    with patch("importlib.metadata.entry_points", return_value=[ep_a, ep_b]):
-        discover_external_plugins()
+    with patch("importlib.metadata.entry_points", return_value=[allowed, untrusted]):
+        registered = discover_external_plugins()
 
-    # Only the allowlisted entry point may be loaded/executed.
-    assert_that(ep_a.load.called).is_true()
-    assert_that(ep_b.load.called).is_false()
+    assert_that(registered).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("allowed-plugin")).is_true()
+    assert_that(ToolRegistry.is_registered("untrusted-plugin")).is_false()
+    # The untrusted entry point must never be imported at all: refusing to
+    # register it after loading would already have run its module-level code.
+    assert_that(allowed.load_count).is_equal_to(1)
+    assert_that(untrusted.load_count).is_equal_to(0)
 
 
 def test_malformed_yaml_config_fails_closed(

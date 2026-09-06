@@ -7,6 +7,7 @@ import urllib.error
 from email.message import Message
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -515,15 +516,31 @@ def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
     ]
 
     diff = {"src/main.py": {10}}
+    payloads: list[dict[str, Any]] = []
+
+    def _record_request(*args: Any, **_kwargs: Any) -> bool:
+        """Record the review payload instead of issuing an API request.
+
+        Args:
+            *args: Positional request arguments; the third is the payload.
+            **_kwargs: Ignored keyword arguments.
+
+        Returns:
+            bool: Always ``True``, standing in for a successful call.
+        """
+        payloads.append(args[2])
+        return True
+
     with (
         patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "api_request", return_value=True) as mock_api,
+        patch.object(reporter, "api_request", _record_request),
     ):
-        reporter._post_review(suggestions)
-        payload = mock_api.call_args[0][2]
-        comment_path = payload["comments"][0]["path"]
-        # Should be relative to workspace_root, not an absolute path
-        assert_that(comment_path).is_equal_to("src/main.py")
+        posted = reporter._post_review(suggestions)
+
+    assert_that(posted).is_true()
+    assert_that(payloads).is_length(1)
+    # Should be relative to workspace_root, not an absolute path
+    assert_that(payloads[0]["comments"][0]["path"]).is_equal_to("src/main.py")
 
 
 def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None:
@@ -547,13 +564,31 @@ def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None
     ]
 
     diff = {"some/other/file.py": {1, 2, 3}}
+    requests: list[tuple[object, ...]] = []
+
+    def _record_request(*args: object, **_kwargs: object) -> bool:
+        """Record an API request instead of issuing one.
+
+        Args:
+            *args: Positional request arguments.
+            **_kwargs: Ignored keyword arguments.
+
+        Returns:
+            bool: Always ``True``, standing in for a successful call.
+        """
+        requests.append(args)
+        return True
+
     with (
         patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "api_request", return_value=True) as mock_api,
+        patch.object(reporter, "api_request", _record_request),
     ):
-        reporter._post_review(suggestions)
-        # Out-of-workspace suggestion should be filtered; no API call made
-        mock_api.assert_not_called()
+        posted = reporter._post_review(suggestions)
+
+    # The out-of-workspace suggestion is filtered out, so nothing is posted
+    # and the call still reports success.
+    assert_that(requests).is_empty()
+    assert_that(posted).is_true()
 
 
 def test_parse_patch_lines_skips_no_newline_marker() -> None:

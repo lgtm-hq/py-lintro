@@ -120,16 +120,20 @@ def _fake_run_with_probes(
 def _completion_calls(mock_run: MagicMock) -> list[list[str]]:
     """Return only the argv lists of real completion calls.
 
+    Reads the recorder's plain ``transport_calls`` list rather than mock call
+    bookkeeping, so the assertions built on it describe real captured argv
+    (#2315).
+
     Args:
-        mock_run: The patched ``subprocess.run`` mock.
+        mock_run: The recorder yielded by :func:`patch_cli_exec`.
 
     Returns:
         Argv lists with ``--version`` / ``--help`` probes filtered out.
     """
     return [
-        list(call.args[0])
-        for call in mock_run.call_args_list
-        if "--version" not in call.args[0] and "--help" not in call.args[0]
+        list(call.cmd)
+        for call in mock_run.transport_calls
+        if "--version" not in call.cmd and "--help" not in call.cmd
     ]
 
 
@@ -239,13 +243,14 @@ async def test_complete_one_shot_skips_resume(provider):
             stderr="",
         )
         provider.begin_durable_session(repo_root="/tmp/repo")
-        await provider.complete(
+        response = await provider.complete(
             "chunk",
             repo_root="/tmp/repo",
             use_one_shot=True,
         )
-        cmd = mock_run.call_args.args[0]
-        assert_that(cmd).does_not_contain("--resume")
+
+    assert_that(response.content).is_equal_to("ok")
+    assert_that(_completion_calls(mock_run)[-1]).does_not_contain("--resume")
 
 
 async def test_timeout_floor_is_six_hundred_seconds(provider):
@@ -473,9 +478,10 @@ async def test_complete_omits_trust_flag_when_trust_opted_out(
             stdout=stdout,
             stderr="",
         )
-        await provider.complete("Hello", repo_root="/tmp/repo")
-    cmd = mock_run.call_args.args[0]
-    assert_that(cmd).does_not_contain("--trust")
+        response = await provider.complete("Hello", repo_root="/tmp/repo")
+
+    assert_that(response.content).is_equal_to("ok")
+    assert_that(_completion_calls(mock_run)[-1]).does_not_contain("--trust")
 
 
 async def test_complete_includes_trust_flag_when_constructed_with_trust(

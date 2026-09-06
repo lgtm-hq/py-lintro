@@ -454,40 +454,6 @@ def test_check_multi_project_aggregates_issues(
     assert_that(result.issues_count).is_greater_than_or_equal_to(2)
 
 
-def test_check_single_project_backward_compat(
-    tsc_plugin: TscPlugin,
-    tmp_path: Path,
-) -> None:
-    """Single tsconfig behaves identically to previous behavior.
-
-    Args:
-        tsc_plugin: The TscPlugin instance to test.
-        tmp_path: Temporary directory path for test files.
-    """
-    test_file = copy_sample(
-        tmp_path,
-        "tools",
-        "typescript",
-        "tsc",
-        "tsc_const_x_clean.ts",
-        dest_name="main.ts",
-    )
-
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
-            tsc_plugin,
-            "_run_subprocess",
-            return_value=(True, ""),
-        ):
-            result = tsc_plugin.check([str(test_file)], {})
-
-    assert_that(result.success).is_true()
-    assert_that(result.issues_count).is_equal_to(0)
-
-
 # =============================================================================
 # Tests for TscPlugin.fix method
 # =============================================================================

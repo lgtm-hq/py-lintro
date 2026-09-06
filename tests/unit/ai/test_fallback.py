@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -295,11 +296,27 @@ async def test_model_restored_on_success() -> None:
 
 
 async def test_forwards_all_kwargs() -> None:
-    """Forward all keyword arguments to provider.complete."""
+    """Every keyword argument reaches provider.complete unchanged."""
     provider = _make_provider()
-    provider.complete.return_value = _ok_response()
+    seen: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    expected = _ok_response()
 
-    await complete_with_fallback(
+    async def _record(*args: Any, **kwargs: Any) -> AIResponse:
+        """Record one provider invocation and answer successfully.
+
+        Args:
+            *args: Positional arguments the fallback chain forwarded.
+            **kwargs: Keyword arguments the fallback chain forwarded.
+
+        Returns:
+            AIResponse: The canned successful response.
+        """
+        seen.append((args, kwargs))
+        return expected
+
+    provider.complete = _record
+
+    response = await complete_with_fallback(
         provider,
         "hello",
         system="sys",
@@ -307,15 +324,19 @@ async def test_forwards_all_kwargs() -> None:
         timeout=30.0,
     )
 
-    provider.complete.assert_called_once_with(
-        "hello",
-        system="sys",
-        max_tokens=512,
-        timeout=30.0,
-        repo_root=None,
-        use_one_shot=False,
-        model="primary-model",
-        cli_schema=None,
+    assert_that(response).is_same_as(expected)
+    assert_that(seen).is_length(1)
+    assert_that(seen[0][0]).is_equal_to(("hello",))
+    assert_that(seen[0][1]).is_equal_to(
+        {
+            "system": "sys",
+            "max_tokens": 512,
+            "timeout": 30.0,
+            "repo_root": None,
+            "use_one_shot": False,
+            "model": "primary-model",
+            "cli_schema": None,
+        },
     )
 
 
