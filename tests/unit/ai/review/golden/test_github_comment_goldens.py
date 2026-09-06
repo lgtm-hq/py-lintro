@@ -18,19 +18,19 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.review import github_errors
+from lintro.ai.review import github_errors, github_review_body
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import post_review_error_to_github
 from lintro.ai.review.github_contract import (
     MAX_COMMENT_CHARS,
     STICKY_MARKER,
+    TRUNCATION_NOTICE,
     CommentBudget,
     cap_body,
 )
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_render import format_finding_comment
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
@@ -40,13 +40,33 @@ from lintro.ai.review.sticky import (
 )
 from tests.unit.ai.review.golden.github_comment_fixtures import (
     GOLDEN_HEAD_SHA,
+    GOLDEN_LINTRO_VERSION,
     GOLDEN_PR_NUMBER,
     GOLDEN_REPO,
+    golden_first_round_match,
     golden_match,
     golden_prior_state,
     golden_review_result,
 )
 from tests.unit.ai.review.golden.golden_io import assert_golden
+
+
+@pytest.fixture
+def pinned_lintro_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the version the review body renders in its run-stats table.
+
+    The body reports the running ``lintro`` version, so without this every
+    release bump would rewrite a golden that describes nothing about review
+    behaviour.
+
+    Args:
+        monkeypatch: Fixture used to replace the module-level version.
+    """
+    monkeypatch.setattr(
+        github_review_body,
+        "lintro_version",
+        GOLDEN_LINTRO_VERSION,
+    )
 
 
 class _RecordingReporter:
@@ -214,7 +234,7 @@ def test_oversized_error_body_is_capped_by_the_shared_budget(
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
-    assert_that(body).contains("Comment truncated to fit GitHub's size limit")
+    assert_that(body).contains(TRUNCATION_NOTICE.strip())
     assert_that(body).starts_with(STICKY_MARKER)
 
 
@@ -230,20 +250,25 @@ def test_cap_body_reserves_room_for_a_trailer() -> None:
 
     assert_that(budget.body_limit).is_equal_to(800)
     assert_that(len(capped)).is_less_than_or_equal_to(800)
-    assert_that(capped).contains("Comment truncated to fit GitHub's size limit")
+    assert_that(capped).contains(TRUNCATION_NOTICE.strip())
 
 
-def test_review_body_first_round_golden() -> None:
+def test_review_body_first_round_golden(
+    pinned_lintro_version: None,
+) -> None:
     """The per-round review body is pinned for a first-round post.
 
     ``build_review_body`` is the third body-assembly path #2304 converges on
     the shared pipeline, so it needs the same byte-for-byte cover the sticky
     and error surfaces already have.
+
+    Args:
+        pinned_lintro_version: Fixture pinning the version cell.
     """
     body = build_review_body(
         result=golden_review_result(),
         prior_state=ReviewState(),
-        match=FindingMatchResult(),
+        match=golden_first_round_match(),
         head_sha=GOLDEN_HEAD_SHA,
         transport="api",
         auth_mode="api-key",
@@ -254,8 +279,14 @@ def test_review_body_first_round_golden() -> None:
     assert_golden(name="github/review_body_first_round.golden", actual=body)
 
 
-def test_review_body_over_a_prior_board_golden() -> None:
-    """The review body is pinned for a round carrying prior state."""
+def test_review_body_over_a_prior_board_golden(
+    pinned_lintro_version: None,
+) -> None:
+    """The review body is pinned for a round carrying prior state.
+
+    Args:
+        pinned_lintro_version: Fixture pinning the version cell.
+    """
     body = build_review_body(
         result=golden_review_result(),
         prior_state=golden_prior_state(),

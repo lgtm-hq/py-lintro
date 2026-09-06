@@ -21,7 +21,11 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review import github, github_errors, github_render, github_review_body
-from lintro.ai.review.github_contract import DEFAULT_BUDGET, CommentBudget
+from lintro.ai.review.github_contract import (
+    DEFAULT_BUDGET,
+    TRUNCATION_NOTICE,
+    CommentBudget,
+)
 from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_state import ReviewState
@@ -201,4 +205,4 @@ def test_assemble_drops_empty_sections_and_caps_the_result() -> None:
 
     assert_that(body).is_equal_to("one\n\ntwo")
     assert_that(len(capped)).is_less_than_or_equal_to(200)
-    assert_that(capped).contains("Comment truncated to fit GitHub's size limit")
+    assert_that(capped).contains(TRUNCATION_NOTICE.strip())

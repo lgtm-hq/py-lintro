@@ -32,6 +32,10 @@ GOLDEN_HEAD_SHA: str = "0d15ea5edeadbeef0d15ea5edeadbeef0d15ea5e"
 #: Head commit of the round already recorded in the prior state.
 GOLDEN_PRIOR_SHA: str = "1111111aaaaaaaa1111111aaaaaaaa1111111aaa"
 
+#: Version the review body's run-stats table renders. Pinned so a release
+#: bump does not rewrite a golden that says nothing about review behaviour.
+GOLDEN_LINTRO_VERSION: str = "0.147.6"
+
 #: Repository slug and PR number used to link finding titles to their threads.
 GOLDEN_REPO: str = "lgtm-hq/py-lintro"
 GOLDEN_PR_NUMBER: int = 2303
@@ -239,6 +243,26 @@ def golden_match() -> FindingMatchResult:
         previous=prior,
         findings=result.findings,
         round_number=prior.next_round,
+        head_sha=GOLDEN_HEAD_SHA,
+        reviewed_paths=matcher_reviewed_paths(result=result),
+    )
+
+
+def golden_first_round_match() -> FindingMatchResult:
+    """Match this round's findings against an empty prior state.
+
+    A first round still runs the matcher — every finding comes back as new —
+    so the golden covers what the posting path actually hands the renderer
+    rather than a hand-built empty result.
+
+    Returns:
+        FindingMatchResult: The first round's matching outcome.
+    """
+    result = golden_review_result()
+    return match_findings(
+        previous=ReviewState(),
+        findings=result.findings,
+        round_number=1,
         head_sha=GOLDEN_HEAD_SHA,
         reviewed_paths=matcher_reviewed_paths(result=result),
     )

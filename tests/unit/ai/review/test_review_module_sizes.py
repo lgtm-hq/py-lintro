@@ -68,10 +68,18 @@ def _ratcheted_modules() -> list[Path]:
     Returns:
         list[Path]: Modules directly in ``lintro/ai/review`` plus those in the
         subpackages named by :data:`RATCHETED_SUBPACKAGES`.
+
+    Raises:
+        AssertionError: When a named subpackage no longer exists. A stale name
+            would silently measure nothing instead of failing.
     """
     paths = list(REVIEW_PACKAGE.glob("*.py"))
     for package in RATCHETED_SUBPACKAGES:
-        paths.extend((REVIEW_PACKAGE / package).glob("*.py"))
+        package_path = REVIEW_PACKAGE / package
+        if not package_path.is_dir():
+            msg = f"ratcheted subpackage is missing: {package_path}"
+            raise AssertionError(msg)
+        paths.extend(package_path.glob("*.py"))
     return sorted(paths)
 
 
