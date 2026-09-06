@@ -257,10 +257,15 @@ def _run_stats_section(
     metadata = result.metadata
     primary = run_stats_primary_cells(metadata=metadata)
 
+    # Guard on the *sanitized* transport, not the raw one: appending a
+    # provenance suffix to an empty value makes it truthy, which would let a
+    # blank transport render as a bare " (config)" row (#1972 owner comment,
+    # 2026-08-14 item 2).
+    sanitized_transport = sanitize_comment_text(transport, limit=40).strip()
     transport_label = ""
-    if transport:
+    if sanitized_transport:
         transport_label = format_sourced_value(
-            sanitize_comment_text(transport, limit=40),
+            sanitized_transport,
             metadata.transport_source or None,
         )
     if transport_label and auth_mode:

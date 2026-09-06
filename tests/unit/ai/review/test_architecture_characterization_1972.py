@@ -22,7 +22,7 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError
 from lintro.ai.interface import resolve_ai_config
@@ -228,7 +228,7 @@ def test_resolve_ai_config_matches_for_identical_raw_mapping() -> None:
     right = resolve_ai_config(LintroConfig(ai=dict(raw)))
 
     assert_that(left).is_equal_to(right)
-    assert_that(left).is_equal_to(AIConfig.from_mapping(raw))
+    assert_that(left).is_equal_to(resolve_effective_ai_config(raw).config)
     assert_that(left.review_enabled).is_true()
     assert_that(left.transport).is_equal_to(AITransport.API)
     assert_that(left.max_cost_usd).is_equal_to(0.5)

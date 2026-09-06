@@ -1440,8 +1440,8 @@ def test_advisory_only_unset_provider_exits_two_before_tools() -> None:
             return_value=MagicMock(ai={"enabled": True, "review": True}),
         ),
         patch(
-            "lintro.cli_utils.commands.review.apply_cli_overrides",
-            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
                 {"enabled": True, "review": True},
             ),
         ),
@@ -1529,8 +1529,8 @@ def test_advisory_only_errored_tool_exits_two() -> None:
             return_value=MagicMock(ai={"enabled": True, "review": True}),
         ),
         patch(
-            "lintro.cli_utils.commands.review.apply_cli_overrides",
-            lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
                 {"enabled": True, "review": True, "provider": "openai"},
             ),
         ),

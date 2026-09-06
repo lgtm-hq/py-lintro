@@ -10,7 +10,7 @@ from assertpy import assert_that
 
 import lintro.ai.interface as interface
 from lintro.ai.config import AIConfig
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.interface import (
     _warn_ai_fix_disabled,
     ai_exit_code_override,
@@ -18,6 +18,7 @@ from lintro.ai.interface import (
     run_ai_layer,
 )
 from lintro.ai.models import AIResult
+from lintro.ai.resolved_ai_config import ResolvedAIConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
@@ -197,13 +198,14 @@ def _stub_hook(
             self,
             lintro_config: LintroConfig,
             *,
-            ai_config: AIConfig | None = None,
+            resolved_ai_config: ResolvedAIConfig | None = None,
             ai_fix: bool = False,
-            transport: str | None = None,
         ) -> None:
-            recorded["ai_config"] = ai_config
+            recorded["resolved_ai_config"] = resolved_ai_config
+            recorded["ai_config"] = (
+                resolved_ai_config.config if resolved_ai_config is not None else None
+            )
             recorded["ai_fix"] = ai_fix
-            recorded["transport"] = transport
 
         def should_run(self, action: Action) -> bool:
             recorded["should_run_action"] = action
@@ -359,7 +361,12 @@ def test_run_ai_layer_resolves_effective_ai_fix_from_config(monkeypatch):
     )
 
     assert_that(recorded.get("ai_fix")).is_true()
-    assert_that(recorded.get("transport")).is_equal_to("cli")
+    # #2299: ``--transport`` on the lint path is an ordinary CLI overlay on
+    # the one resolver, so the hook receives it already resolved, with
+    # provenance, instead of as a separate post-resolution argument.
+    resolved = recorded["resolved_ai_config"]
+    assert_that(resolved.config.transport).is_equal_to(AITransport.CLI)
+    assert_that(resolved.source_of("transport")).is_equal_to(ConfigSource.FLAG)
 
 
 def test_run_ai_layer_warns_when_ai_fix_requested_but_lint_disabled(monkeypatch):
@@ -400,17 +407,20 @@ def test_render_ai_status_delegates_to_display_module():
 
 
 def test_interface_public_surface_stays_small():
-    """The facade exposes exactly four public names.
+    """The facade exposes exactly five public names.
 
-    Down from five: collapsing the executor's three AI seams (issue #1823)
-    made ``run_ai_layer`` an implementation detail of
-    :func:`~lintro.ai.interface.enhance_artifact`.
+    Collapsing the executor's three AI seams (issue #1823) made
+    ``run_ai_layer`` an implementation detail of
+    :func:`~lintro.ai.interface.enhance_artifact`; #2299 added
+    ``resolve_effective_ai_config``, the provenance-carrying resolver every
+    AI surface shares, alongside the value-only ``resolve_ai_config``.
     """
     assert_that(sorted(interface.__all__)).is_equal_to(
         [
             "enhance_artifact",
             "render_ai_status",
             "resolve_ai_config",
+            "resolve_effective_ai_config",
             "sarif_enrichment_from_results",
         ],
     )

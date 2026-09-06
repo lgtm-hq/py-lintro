@@ -52,6 +52,7 @@ from lintro.mcp.toolkits.runner import workspace_session
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -277,14 +278,20 @@ def _relative_paths(*, arguments: dict[str, Any], workspace: Path) -> list[str] 
     return relative
 
 
-def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
+def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
     """Load the workspace config and require AI review to be usable.
+
+    MCP has no CLI flags, so it resolves through the shared resolver with no
+    overlay (#2299). Its one per-call knob, ``max_cost_usd``, is applied
+    downstream by :func:`resolve_budget_policy` as a monotonic clamp that may
+    only lower the resolved ceiling — see ADR-0008 invariant 6.
 
     Args:
         workspace: Workspace root, used only for the error detail.
 
     Returns:
-        tuple[Any, AIConfig]: The Lintro config and its resolved AI section.
+        tuple[Any, ResolvedAIConfig]: The Lintro config and the effective AI
+        configuration with per-field provenance.
 
     Raises:
         McpError: :attr:`McpErrorCode.TOOL_UNAVAILABLE` when no AI provider is
@@ -294,8 +301,8 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
             fails validation.
     """
     from lintro.ai.availability import is_ai_available
+    from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
-    from lintro.ai.interface import resolve_ai_config
     from lintro.config.config_loader import get_config
 
     if not is_ai_available():
@@ -310,13 +317,14 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
 
     lintro_config = get_config()
     try:
-        ai_config = resolve_ai_config(lintro_config)
+        resolved = resolve_effective_ai_config(lintro_config.ai)
     except AIConfigOverrideError as exc:
         raise McpError(
             code=McpErrorCode.INVALID_INPUT,
             message=str(exc),
             detail={"tool": "lintro_review", "reason": "invalid_ai_override"},
         ) from exc
+    ai_config = resolved.config
     if not ai_config.review_enabled:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
@@ -343,7 +351,7 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, AIConfig]:
                 "workspace": str(workspace),
             },
         )
-    return lintro_config, ai_config
+    return lintro_config, resolved
 
 
 def _collect_context(
@@ -700,8 +708,8 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.review.sensitivity import resolve_sensitivity_policy
     from lintro.ai.transport import apply_resolved_transport
 
-    lintro_config, ai_config = _resolve_ai_config(workspace=workspace)
-    ai_config = apply_resolved_transport(ai_config)
+    lintro_config, resolved_ai = _resolve_ai_config(workspace=workspace)
+    ai_config = apply_resolved_transport(resolved_ai.config)
     budget = resolve_budget_policy(
         requested=arguments.get("max_cost_usd"),
         configured=ai_config.max_cost_usd,

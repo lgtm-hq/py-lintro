@@ -2,8 +2,9 @@
 
 Issue #724 PR 3 removed the last two ``lintro.config`` -> ``lintro.ai`` import
 edges: ``LintroConfig.ai`` now stores the ``ai:`` section verbatim as a raw
-mapping and the AI layer parses it via :meth:`AIConfig.from_mapping`, exposed
-on the facade as :func:`lintro.ai.interface.resolve_ai_config`.
+mapping and the AI layer parses it via
+:func:`lintro.ai.effective_config.resolve_effective_ai_config`, exposed on the
+facade as :func:`lintro.ai.interface.resolve_ai_config`.
 
 The behavioural risk this creates is warning *timing*: unknown ``ai.*`` keys
 used to be reported at config-load time. These tests pin that a typo is still
@@ -23,6 +24,7 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport, ConfidenceLevel
 from lintro.ai.interface import resolve_ai_config, run_ai_layer
 from lintro.ai.registry import AIProvider
@@ -50,23 +52,27 @@ def warnings_captured() -> Iterator[list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# AIConfig.from_mapping
+# resolve_effective_ai_config
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("data", [None, {}])
-def test_from_mapping_empty_yields_model_defaults(data: dict[str, Any] | None) -> None:
+def test_resolve_effective_ai_config_empty_yields_model_defaults(
+    data: dict[str, Any] | None,
+) -> None:
     """An absent or empty ``ai:`` section produces a default AIConfig.
 
     Args:
         data: The raw mapping under test.
     """
-    assert_that(AIConfig.from_mapping(data)).is_equal_to(AIConfig())
+    assert_that(resolve_effective_ai_config(data).config).is_equal_to(AIConfig())
 
 
-def test_from_mapping_applies_known_keys() -> None:
+def test_resolve_effective_ai_config_applies_known_keys() -> None:
     """Recognized keys are applied and omitted ones keep model defaults."""
-    config = AIConfig.from_mapping({"enabled": True, "lint": True, "max_tokens": 1234})
+    config = resolve_effective_ai_config(
+        {"enabled": True, "lint": True, "max_tokens": 1234},
+    ).config
 
     assert_that(config.enabled).is_true()
     assert_that(config.lint).is_true()
@@ -75,7 +81,7 @@ def test_from_mapping_applies_known_keys() -> None:
     assert_that(config.provider).is_none()
 
 
-def test_from_mapping_drops_unknown_keys_and_warns_sorted(
+def test_resolve_effective_ai_config_drops_unknown_keys_and_warns_sorted(
     warnings_captured: list[str],
 ) -> None:
     """Unknown keys are dropped, not rejected, and listed sorted in a warning.
@@ -83,9 +89,9 @@ def test_from_mapping_drops_unknown_keys_and_warns_sorted(
     Args:
         warnings_captured: Captured loguru warning messages.
     """
-    config = AIConfig.from_mapping(
+    config = resolve_effective_ai_config(
         {"enabled": True, "zulu_typo": 1, "alpha_typo": 2},
-    )
+    ).config
 
     assert_that(config.enabled).is_true()
     assert_that(config.model_dump()).does_not_contain_key("zulu_typo")
@@ -94,7 +100,7 @@ def test_from_mapping_drops_unknown_keys_and_warns_sorted(
     )
 
 
-def test_from_mapping_can_suppress_the_unknown_key_warning(
+def test_resolve_effective_ai_config_can_suppress_the_unknown_key_warning(
     warnings_captured: list[str],
 ) -> None:
     """Display callers opt out of diagnostics without changing parsing.
@@ -102,13 +108,16 @@ def test_from_mapping_can_suppress_the_unknown_key_warning(
     Args:
         warnings_captured: Captured loguru warning messages.
     """
-    config = AIConfig.from_mapping({"lint": True, "typo": 1}, diagnostics=False)
+    config = resolve_effective_ai_config(
+        {"lint": True, "typo": 1},
+        diagnostics=False,
+    ).config
 
     assert_that(config.lint).is_true()
     assert_that(warnings_captured).is_empty()
 
 
-def test_from_mapping_warns_on_legacy_enabled_only_config(
+def test_resolve_effective_ai_config_warns_on_legacy_enabled_only_config(
     warnings_captured: list[str],
 ) -> None:
     """A legacy ``enabled``-only mapping still gets the migration hint.
@@ -116,7 +125,7 @@ def test_from_mapping_warns_on_legacy_enabled_only_config(
     Args:
         warnings_captured: Captured loguru warning messages.
     """
-    config = AIConfig.from_mapping({"enabled": True})
+    config = resolve_effective_ai_config({"enabled": True}).config
 
     assert_that(config.lint).is_true()
     assert_that(config.review).is_true()
@@ -125,7 +134,7 @@ def test_from_mapping_warns_on_legacy_enabled_only_config(
     )
 
 
-def test_from_mapping_suppresses_the_legacy_deprecation_hint(
+def test_resolve_effective_ai_config_suppresses_the_legacy_deprecation_hint(
     warnings_captured: list[str],
 ) -> None:
     """Display-only parsing does not repeat the legacy migration hint.
@@ -138,7 +147,10 @@ def test_from_mapping_suppresses_the_legacy_deprecation_hint(
     """
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
-        config = AIConfig.from_mapping({"enabled": True}, diagnostics=False)
+        config = resolve_effective_ai_config(
+            {"enabled": True},
+            diagnostics=False,
+        ).config
 
     assert_that(config.lint).is_true()
     assert_that(config.review).is_true()

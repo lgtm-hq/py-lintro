@@ -15,7 +15,7 @@ from lintro.ai.models import AIResult
 from lintro.enums.action import Action
 
 if TYPE_CHECKING:
-    from lintro.ai.config import AIConfig
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
@@ -28,28 +28,29 @@ class AIPostExecutionHook:
         self,
         lintro_config: LintroConfig,
         *,
-        ai_config: AIConfig | None = None,
+        resolved_ai_config: ResolvedAIConfig | None = None,
         ai_fix: bool = False,
-        transport: str | None = None,
     ) -> None:
         """Initialize the hook.
 
         Args:
             lintro_config: Full Lintro configuration.
-            ai_config: Pre-resolved AI configuration. Passed by callers that
-                already resolved it so the raw ``ai:`` mapping is parsed once
-                per run; resolved here when omitted.
+            resolved_ai_config: Effective AI config plus provenance, already
+                resolved for this invocation (CLI overlays included) so the
+                raw ``ai:`` mapping is resolved once per run. Resolved here
+                without overlays when omitted.
             ai_fix: Whether AI fix suggestions were requested.
-            transport: Optional CLI override for ``ai.transport``.
         """
-        from lintro.ai.interface import resolve_ai_config
+        from lintro.ai.interface import resolve_effective_ai_config
 
         self._lintro_config = lintro_config
-        self._ai_config = (
-            ai_config if ai_config is not None else resolve_ai_config(lintro_config)
+        self._resolved_ai_config = (
+            resolved_ai_config
+            if resolved_ai_config is not None
+            else resolve_effective_ai_config(lintro_config)
         )
+        self._ai_config = self._resolved_ai_config.config
         self._ai_fix = ai_fix
-        self._transport = transport
 
     def should_run(self, action: Action) -> bool:
         """Check whether AI enhancement should run for this action.
@@ -95,11 +96,10 @@ class AIPostExecutionHook:
                 action=action,
                 all_results=all_results,
                 lintro_config=self._lintro_config,
-                ai_config=self._ai_config,
+                ai_config=self._resolved_ai_config,
                 logger=console_logger,
                 output_format=output_format,
                 ai_fix=self._ai_fix,
-                transport=self._transport,
             )
         except Exception as e:
             logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")

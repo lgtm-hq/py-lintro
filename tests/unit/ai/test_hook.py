@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport
 from lintro.ai.hook import AIPostExecutionHook
 from lintro.config.lintro_config import LintroConfig
@@ -136,11 +137,10 @@ def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
         action=Action.CHECK,
         all_results=results,
         lintro_config=config,
-        ai_config=AIConfig.from_mapping(config.ai),
+        ai_config=resolve_effective_ai_config(config.ai),
         logger=console_logger,
         output_format="json",
         ai_fix=True,
-        transport=None,
     )
 
 

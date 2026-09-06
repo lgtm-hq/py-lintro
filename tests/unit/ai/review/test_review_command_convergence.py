@@ -111,8 +111,8 @@ def patched_review(
     )
     monkeypatch.setattr(
         review_module,
-        "apply_cli_overrides",
-        lambda _resolved, **_kwargs: AIConfig.resolve_from_mapping(
+        "resolve_effective_ai_config",
+        lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
             {"enabled": True, "review": True, "provider": "anthropic"},
         ),
     )

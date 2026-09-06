@@ -450,43 +450,6 @@ class AIConfig(BaseModel):
     # -- Construction from raw config data ---------------------------------
 
     @classmethod
-    def from_mapping(
-        cls,
-        data: Mapping[str, Any] | None,
-        *,
-        diagnostics: bool = True,
-    ) -> AIConfig:
-        """Build an :class:`AIConfig` from a raw ``ai:`` config mapping.
-
-        Only recognized keys are passed through, so the model's own defaults
-        apply to every omitted field. Unknown keys are dropped rather than
-        rejected, because ``AIConfig`` itself forbids extras and a stale key
-        in ``.lintro-config.yaml`` must not break the whole run.
-
-        Environment overrides (``LINTRO_AI_PROVIDER``, ``LINTRO_AI_MODEL``,
-        ``LINTRO_AI_TRANSPORT``, ``LINTRO_AI_ENABLED``,
-        ``LINTRO_AI_REVIEW``, ``LINTRO_AI_MAX_COST_USD``) are applied here
-        so every consumer of :meth:`from_mapping` — execution, status,
-        doctor, MCP — sees the same effective values (#1970, #2024, #2153).
-
-        This is the boundary that keeps :mod:`lintro.config` free of any
-        knowledge of ``AIConfig``'s field set (see issue #724): the loader
-        stores the ``ai:`` section verbatim and the AI layer parses it.
-
-        Args:
-            data: Raw ``ai`` section from config, or None when absent.
-            diagnostics: Whether this parse may emit user-facing diagnostics
-                — the dropped-unknown-key warning and the validators'
-                migration hints. Display-only callers pass False, because
-                they re-parse a mapping the resolver already reported on and
-                must not duplicate its output; resolvers leave it True.
-
-        Returns:
-            AIConfig: Parsed AI configuration after env overlays.
-        """
-        return cls.resolve_from_mapping(data, diagnostics=diagnostics).config
-
-    @classmethod
     def resolve_from_mapping(
         cls,
         data: Mapping[str, Any] | None,
@@ -495,14 +458,32 @@ class AIConfig(BaseModel):
     ) -> ResolvedAIConfig:
         """Parse ``ai:`` into effective values plus per-field provenance.
 
+        Only recognized keys are passed through, so the model's own defaults
+        apply to every omitted field. Unknown keys are dropped rather than
+        rejected, because ``AIConfig`` itself forbids extras and a stale key
+        in ``.lintro-config.yaml`` must not break the whole run. This is also
+        the boundary that keeps :mod:`lintro.config` free of any knowledge of
+        ``AIConfig``'s field set (issue #724): the loader stores the ``ai:``
+        section verbatim and the AI layer parses it.
+
         Env overlays are applied after the mapping is validated so a
         ``LINTRO_AI_ENABLED=1`` overlay cannot trigger the legacy
         ``ai.enabled``-only sub-toggle default. Invalid env values fail
         here and never fall through to the config default.
 
+        This is the project + environment half of resolution only; the CLI
+        overlay sits on top of it. :func:`lintro.ai.effective_config.
+        resolve_effective_ai_config` is the single production caller that
+        composes both (#2299) — surfaces call that function, never this
+        method directly.
+
         Args:
             data: Raw ``ai`` section from config, or None when absent.
-            diagnostics: Whether this parse may emit user-facing diagnostics.
+            diagnostics: Whether this parse may emit user-facing diagnostics
+                — the dropped-unknown-key warning and the validators'
+                migration hints. Display-only callers pass False, because
+                they render values the execution path already reported on and
+                must not duplicate its output.
 
         Returns:
             Validated config together with provenance for ``provider``,

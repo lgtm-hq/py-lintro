@@ -33,6 +33,10 @@ from rich.console import Console
 
 from lintro.ai.availability import require_ai
 from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import (
+    AICliOverrides,
+    resolve_effective_ai_config,
+)
 from lintro.ai.exceptions import (
     AIConfigOverrideError,
     AIError,
@@ -90,7 +94,6 @@ from lintro.ai.review.state_store import (
     write_state_part,
 )
 from lintro.ai.transport import (
-    apply_cli_overrides,
     apply_resolved_transport,
     format_resolved_profile_log,
     resolve_max_cost_with_source,
@@ -538,13 +541,15 @@ def review_command(
 
     require_ai()
     try:
-        resolved_ai = apply_cli_overrides(
-            AIConfig.resolve_from_mapping(lintro_config.ai),
-            provider=provider_override,
-            model=model_override,
-            transport=transport,
-            review=review_override,
-            max_cost_usd=max_cost_usd_override,
+        resolved_ai = resolve_effective_ai_config(
+            lintro_config.ai,
+            cli_overrides=AICliOverrides(
+                provider=provider_override,
+                model=model_override,
+                transport=transport,
+                review=review_override,
+                max_cost_usd=max_cost_usd_override,
+            ),
         )
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc

@@ -7,23 +7,24 @@ normative decision record is
 
 ## Ownership boundaries
 
-| Concern                                             | Owner today                                             | Target                                         |
-| --------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------- |
-| Typed `AIConfig` from raw `ai:` mapping             | `AIConfig.resolve_from_mapping()` → `ResolvedAIConfig`  | Same resolver; #1923 extends it                |
-| Invocation transport / timeout / cost-cap overrides | CLI review: `apply_cli_overrides` on `ResolvedAIConfig` | Same resolver pipeline (#1970 / #1923 / #2024) |
-| Monotonic cost-cap clamp                            | MCP adapter (`resolve_budget_policy`)                   | Shared domain prep; adapters keep policy       |
-| Diff review preparation                             | Duplicated in CLI + MCP                                 | `prepare_review` / `execute_review` (Phase 3)  |
-| Review execution facade                             | `run_review` / `run_review_async`                       | Unchanged facade; internals split (Phase 4)    |
-| Provider client `aclose()` API                      | Not yet (#1885)                                         | Provider-side only in #1885                    |
-| Provider close call-site wiring                     | N/A until #1885                                         | Phase 5 of #1972                               |
+| Concern                                             | Owner today                                                                                | Target                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| Effective `ResolvedAIConfig` for one invocation     | `resolve_effective_ai_config()` (#2299), the one caller of `AIConfig.resolve_from_mapping` | Same resolver; #1923 extends it                |
+| Invocation transport / timeout / cost-cap overrides | `AICliOverrides` on that resolver, for lint and review alike                               | Same resolver pipeline (#1970 / #1923 / #2024) |
+| Monotonic cost-cap clamp                            | MCP adapter (`resolve_budget_policy`)                                                      | Shared domain prep; adapters keep policy       |
+| Diff review preparation                             | Duplicated in CLI + MCP                                                                    | `prepare_review` / `execute_review` (Phase 3)  |
+| Review execution facade                             | `run_review` / `run_review_async`                                                          | Unchanged facade; internals split (Phase 4)    |
+| Provider client `aclose()` API                      | Not yet (#1885)                                                                            | Provider-side only in #1885                    |
+| Provider close call-site wiring                     | N/A until #1885                                                                            | Phase 5 of #1972                               |
 
 ## Shared preparation (current duplicated steps)
 
 Both the CLI (`lintro review`) and MCP (`lintro_review`) currently:
 
-1. Resolve AI config. CLI review uses `AIConfig.resolve_from_mapping` plus
-   `apply_cli_overrides` (keeps provenance). MCP uses `resolve_ai_config`, which unwraps
-   the same env-aware parse.
+1. Resolve AI config through `resolve_effective_ai_config`. CLI review passes its flags
+   as `AICliOverrides`; MCP passes none, because its one per-call knob (`max_cost_usd`)
+   is a downstream clamp rather than an overlay. Both get the same `ResolvedAIConfig`,
+   values and provenance alike (#2299).
 2. Gate on `ai.review` being enabled (adapter-specific error shape).
 3. Collect review context, classify changed files, select/format checklist items.
 4. Optionally build a lint digest.
@@ -68,6 +69,9 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
   config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
   MCP error mapping.
+- `tests/unit/ai/test_effective_config_parity.py` — one resolver: check, fix, review
+  CLI, MCP and doctor resolve identical values and sources, and the two cap rules stay
+  split (CLI/env may raise or lift; MCP's per-call argument only clamps).
 
 ## File-level resume (#2154 / ADR-0007)
 
