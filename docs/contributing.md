@@ -90,11 +90,10 @@ commits before merge.
    and yamllint. Add `--extra full` to also install the wrapped tools the group lacks
    (pylint, pydoclint, import-linter), which CI installs for dogfooding.
 
-   The `full` and `ai` extras cannot share an environment and uv refuses to install both
-   (#2378): pydoclint (via `full`) and anthropic (via `ai`) depend on two different
-   distributions that both own the top-level `docstring_parser` module, so whichever
-   installs second breaks pydoclint. Work on `lintro review` in a separate environment
-   synced with `uv sync --extra ai`.
+   `pyproject.toml` marker-disables anthropic's `docstring-parser` dependency via
+   `[tool.uv] override-dependencies` so it cannot collide with pydoclint's
+   `docstring-parser-fork` — both install the same `docstring_parser` module, and
+   installing both silently breaks pydoclint. See issue #2378 before touching it.
 
 3. Run tests:
 

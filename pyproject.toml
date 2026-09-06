@@ -489,18 +489,21 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 
 [tool.uv]
-# The `full` and `ai` extras cannot share an environment (#2378). `full` pulls
-# pydoclint -> docstring-parser-fork; `ai` pulls anthropic -> docstring-parser.
-# Both distributions own the top-level `docstring_parser` module, so whichever
-# installs second shadows the other and pydoclint dies on import
-# (`cannot import name 'DocstringYields' from 'docstring_parser.common'`).
-# `lintro chk` then classifies pydoclint as skipped and the DOC gate silently
-# stops running locally. No version pin fixes this — no upstream
-# docstring-parser release exports the fork-only symbols pydoclint needs — so
-# the conflict is declared instead and uv refuses the broken sync outright.
-# Contributors who need `lintro review` sync `--extra ai` into its own
-# environment; see AGENTS.md.
-conflicts = [[{ extra = "full" }, { extra = "ai" }]]
+# pydoclint (the `full` extra) depends on `docstring-parser-fork`; anthropic (the
+# `ai` extra) depends on `docstring-parser`. Both distributions install the same
+# top-level `docstring_parser` package, so an environment carrying both ends up
+# with one shadowing the other — pydoclint then dies on import with
+# `cannot import name 'DocstringYields' from 'docstring_parser.common'`, and
+# `lintro chk` reports it as skipped rather than failed, silently dropping the DOC
+# gate. No version pin helps: those symbols exist only in the fork. The `ai`
+# Docker image and the dogfooding environment both need `full` and `ai` together,
+# so drop anthropic's requirement and let the fork own the module (#2378). The
+# fork is a superset of upstream, and anthropic touches only
+# `docstring_parser.parse` / `.Docstring` in its optional `@beta_tool` helper,
+# which the fork provides and lintro does not use. `uv.lock` must therefore
+# resolve `docstring-parser-fork` and no `docstring-parser`;
+# `tests/unit/test_docstring_parser_override.py` fails if that ever regresses.
+override-dependencies = ["docstring-parser ; sys_platform == 'never'"]
 
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)

@@ -75,22 +75,20 @@ required):
   requests `extras: 'full'` in `test-ci.yml`; the `full` extra adds the dogfooding
   linters the group does not carry (pylint, pydoclint, import-linter). The remaining
   extras are runtime-facing: `tools`, `ai`, `mcp`, `typing`.
-- **The `full` and `ai` extras are mutually exclusive and uv now refuses to install
-  both** (#2378). `full` pulls pydoclint, which needs `docstring-parser-fork`; `ai`
-  pulls anthropic, which needs `docstring-parser`. Both distributions own the top-level
-  `docstring_parser` module, so an environment carrying both has a pydoclint that dies
-  on import — and `lintro chk` reports it as **skipped**, exits 0, and quietly stops
-  running the DOC gate. No version pin can fix that (no upstream `docstring-parser`
-  release exports the fork-only symbols pydoclint imports), so `[tool.uv] conflicts` in
-  `pyproject.toml` declares the conflict and `uv sync --dev --extra full --extra ai`
-  fails loudly instead. Contributors working on `lintro review` put the `ai` extra in a
-  **separate** environment — `UV_PROJECT_ENVIRONMENT=.venv-ai uv sync --extra ai`, with
-  that variable kept set for the follow-up `uv run` commands — because a plain
-  `uv sync --extra ai` rebuilds the project's own `.venv` and takes the dogfooding
-  linters back out of it. If you already had both installed, dropping `ai` is not enough
-  to recover: uv's uninstall guts the shared `docstring_parser/` directory, so run
-  `uv sync --dev --extra full --reinstall-package docstring-parser-fork` (or delete
-  `.venv`).
+- **`pyproject.toml` drops anthropic's `docstring-parser` requirement on purpose**
+  (#2378). pydoclint (the `full` extra) needs `docstring-parser-fork`; anthropic (the
+  `ai` extra) needs `docstring-parser`. Both distributions install the same top-level
+  `docstring_parser` package, so an environment carrying both — the `ai` Docker image
+  and any `--extra full --extra ai` sync — ends up with one shadowing the other, and
+  pydoclint dies on import with
+  `cannot import name 'DocstringYields' from 'docstring_parser.common'`. `lintro chk`
+  then reports pydoclint as **skipped**, exits 0, and silently stops running the DOC
+  gate. No version pin fixes it: those symbols exist only in the fork.
+  `[tool.uv] override-dependencies` therefore marker-disables anthropic's requirement
+  and lets the fork, a superset, own the module — anthropic touches only
+  `docstring_parser.parse` / `.Docstring`, in the optional `@beta_tool` helper lintro
+  does not use. Never re-add `docstring-parser` to the resolution;
+  `tests/unit/test_docstring_parser_override.py` fails if it comes back.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds

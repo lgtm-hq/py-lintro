@@ -94,7 +94,12 @@ def test_tools_extra_does_not_include_semgrep() -> None:
     assert_that(any(item.startswith("sqlfluff") for item in tools)).is_true()
     assert_that(any(item.startswith("pip-audit") for item in tools)).is_true()
     uv = pyproject["tool"]["uv"]
-    assert_that(uv).does_not_contain_key("override-dependencies")
+    # The guard is that no uv override re-introduces semgrep into the shared
+    # resolver, not that the table is empty: #2378 added an unrelated
+    # `docstring-parser` override, checked by
+    # tests/unit/test_docstring_parser_override.py.
+    overrides = uv.get("override-dependencies", [])
+    assert_that(any(item.startswith("semgrep") for item in overrides)).is_false()
 
 
 def test_uv_lock_has_no_semgrep_package() -> None:
