@@ -24,8 +24,8 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
-from lintro.ai.review.orchestrator import _payload_to_partial
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.response_pipeline import payload_to_partial
 from lintro.ai.review.verdict import VERDICT_LABELS, VERDICT_RUBRIC_FINE_PRINT
 
 _T = TypeVar("_T")
@@ -115,7 +115,7 @@ def _payload() -> dict[str, Any]:
 
 def test_payload_to_partial_carries_narrative_fields() -> None:
     """A chunk partial keeps the structured narrative alongside the flat text."""
-    partial = _payload_to_partial(response=_response(), payload=_payload())
+    partial = payload_to_partial(response=_response(), payload=_payload())
 
     assert_that(partial.summary).is_equal_to("Adds narrative outputs.")
     assert_that(_require(partial.pr_summary).walkthrough[0].text).is_equal_to(
@@ -129,7 +129,7 @@ def test_payload_to_partial_carries_narrative_fields() -> None:
 
 def test_payload_to_partial_degrades_on_legacy_payload() -> None:
     """A findings-only legacy payload still produces a usable partial."""
-    partial = _payload_to_partial(
+    partial = payload_to_partial(
         response=_response(),
         payload={"summary": "Merge with fixes.", "checklist": [], "findings": []},
     )

@@ -20,7 +20,7 @@ from lintro.ai.review.merge import (
     merge_review_results,
     merge_verdict_reasoning,
 )
-from lintro.ai.review.orchestrator import _payload_to_partial
+from lintro.ai.review.response_pipeline import payload_to_partial
 from tests.unit.ai.review.golden.golden_fixtures import GOLDEN_RESPONSES
 from tests.unit.ai.review.golden.golden_io import (
     assert_golden_json,
@@ -45,7 +45,7 @@ def _golden_partials() -> list[ChunkReviewPartial]:
             provider="golden-provider",
         )
         partials.append(
-            _payload_to_partial(response=response, payload=load_payload(name=name)),
+            payload_to_partial(response=response, payload=load_payload(name=name)),
         )
     return partials
 

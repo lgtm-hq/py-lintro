@@ -752,7 +752,7 @@ async def test_a_full_run_downgrades_a_contradicted_p1(tmp_path: Path) -> None:
     provider.capabilities.supports_sessions = False
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(return_value=_contradicting_response()),
     ):
         result = await run_review_async(
@@ -807,7 +807,7 @@ async def test_a_full_run_guards_a_claim_about_a_rename_source(tmp_path: Path) -
     provider.capabilities.supports_sessions = False
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(
             return_value=_contradicting_response(
                 claim="tests/test_old_a.py is untouched in this round.",

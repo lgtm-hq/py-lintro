@@ -122,7 +122,7 @@ def _run(
         calls.append(kwargs)
         return queue.pop(0)
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
             provider=_provider(),
@@ -277,7 +277,7 @@ def test_failed_retry_still_recovers_the_original_answer() -> None:
             raise item
         return item
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
             provider=_provider(),
@@ -310,7 +310,7 @@ def test_cost_cap_on_the_retry_is_not_swallowed() -> None:
             raise item
         return item
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
             provider=_provider(),

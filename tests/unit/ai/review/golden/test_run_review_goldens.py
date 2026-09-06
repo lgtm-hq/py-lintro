@@ -117,7 +117,11 @@ def _run_golden_review() -> ReviewResult:
     """
     with (
         patch(
-            "lintro.ai.review.orchestrator.make_boundary_marker",
+            "lintro.ai.review.checklist_pass.make_boundary_marker",
+            return_value=GOLDEN_BOUNDARY,
+        ),
+        patch(
+            "lintro.ai.review.adversarial_pass.make_boundary_marker",
             return_value=GOLDEN_BOUNDARY,
         ),
         patch(
@@ -129,7 +133,7 @@ def _run_golden_review() -> ReviewResult:
             return_value=golden_chunks(),
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_replay_call_ai,
         ),
     ):

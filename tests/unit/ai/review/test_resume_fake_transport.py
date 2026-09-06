@@ -101,7 +101,7 @@ def _run(
             provider="fake",
         )
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_call_ai):
         return run_review(
             context,
             provider=provider,
@@ -257,7 +257,7 @@ def _run_capped(
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai),
+        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_call_ai),
     ):
         return run_review(
             context,

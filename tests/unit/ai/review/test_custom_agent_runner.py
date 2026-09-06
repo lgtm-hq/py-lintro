@@ -183,7 +183,7 @@ def _patch_builtin_call(*, content: str) -> _Patcher:
         An active ``unittest.mock`` patcher for the orchestrator's ``call_ai``.
     """
     return patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         return_value=AIResponse(
             content=content,
             model="claude-sonnet-4-20250514",

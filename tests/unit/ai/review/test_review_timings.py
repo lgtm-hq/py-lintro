@@ -31,6 +31,7 @@ from lintro.ai.review.timings import (
     format_duration,
     format_timing_summary,
 )
+from tests.unit.ai.review.conftest import patch_review_call_ai
 
 _MODEL = "claude-sonnet-4-20250514"
 
@@ -207,7 +208,7 @@ def _run(
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=_chunks(count=chunk_count),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call),
+        patch_review_call_ai(side_effect=_call),
     ):
         return run_review(
             _context(tmp_path=tmp_path, count=chunk_count),
