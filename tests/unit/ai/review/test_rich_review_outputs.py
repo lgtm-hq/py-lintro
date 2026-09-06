@@ -12,6 +12,11 @@ from lintro.ai.cli_schemas import REVIEW_CLI_SCHEMA
 from lintro.ai.prompts.review import REVIEW_OUTPUT_SCHEMA, format_output_rules
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.merge import (
+    ChunkReviewPartial,
+    merge_pr_summaries,
+    merge_review_results,
+)
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -19,12 +24,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
-from lintro.ai.review.orchestrator import (
-    _ChunkReviewPartial,
-    _payload_to_partial,
-    merge_pr_summaries,
-    merge_review_results,
-)
+from lintro.ai.review.orchestrator import _payload_to_partial
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.verdict import VERDICT_LABELS, VERDICT_RUBRIC_FINE_PRINT
 
@@ -66,7 +66,7 @@ def _partial(
     pr_summary: ReviewSummary | None = None,
     verdict_reasoning: VerdictReasoning | None = None,
     file_assessments: tuple[FileAssessment, ...] = (),
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Build a chunk partial carrying only the narrative fields under test.
 
     Args:
@@ -78,7 +78,7 @@ def _partial(
     Returns:
         The constructed partial.
     """
-    return _ChunkReviewPartial(
+    return ChunkReviewPartial(
         summary=summary,
         checklist=(),
         findings=(),
