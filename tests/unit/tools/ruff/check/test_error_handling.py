@@ -126,5 +126,4 @@ def test_execute_ruff_check_version_check_failure(
 
     result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-    assert_that(result.output).is_equal_to("Skipping ruff: version too old")
-    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result).is_same_as(version_error_result)

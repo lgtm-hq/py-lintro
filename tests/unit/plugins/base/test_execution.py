@@ -744,7 +744,7 @@ def test_prepare_returns_tool_result_when_version_check_fails(
         prepared = fake_tool_plugin.prepare(paths=["."], options={})
 
     assert_that(prepared).is_instance_of(ToolResult)
-    assert_that(prepared).is_equal_to(skip_result)
+    assert_that(prepared).is_same_as(skip_result)
 
 
 def test_prepare_returns_tool_result_when_no_files_found(

@@ -31,4 +31,4 @@ def test_execute_ruff_fix_version_check_fails(
 
     result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
-    assert_that(result).is_equal_to(version_error)
+    assert_that(result).is_same_as(version_error)

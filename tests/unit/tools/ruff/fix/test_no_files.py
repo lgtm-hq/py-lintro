@@ -19,18 +19,17 @@ def test_execute_ruff_fix_no_paths(
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
-    mock_ruff_tool.prepare.return_value = ToolResult(
+    early_result = ToolResult(
         name="ruff",
         success=True,
         output="No files to fix.",
         issues_count=0,
     )
+    mock_ruff_tool.prepare.return_value = early_result
 
     result = execute_ruff_fix(mock_ruff_tool, [])
 
-    assert_that(result.success).is_true()
-    assert_that(result.output).is_equal_to("No files to fix.")
-    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result).is_same_as(early_result)
 
 
 def test_execute_ruff_fix_no_python_files_found(
@@ -43,15 +42,14 @@ def test_execute_ruff_fix_no_python_files_found(
         mock_ruff_tool: Mock RuffTool instance for testing.
         tmp_path: Temporary directory path for testing.
     """
-    mock_ruff_tool.prepare.return_value = ToolResult(
+    early_result = ToolResult(
         name="ruff",
         success=True,
         output="No py/pyi files found to check.",
         issues_count=0,
     )
+    mock_ruff_tool.prepare.return_value = early_result
 
     result = execute_ruff_fix(mock_ruff_tool, [str(tmp_path)])
 
-    assert_that(result.success).is_true()
-    assert_that(result.output).is_equal_to("No py/pyi files found to check.")
-    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result).is_same_as(early_result)
