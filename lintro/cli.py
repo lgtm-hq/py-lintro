@@ -1,5 +1,10 @@
 """Command-line interface for Lintro."""
 
+# Annotations stay strings so a `TYPE_CHECKING`-only name (`rich.table.Table`
+# below) is never evaluated at def time. Without this, importing the CLI raises
+# `NameError` on Python < 3.14, which has no PEP 649 lazy annotations.
+from __future__ import annotations
+
 import codecs
 import contextlib
 import importlib
