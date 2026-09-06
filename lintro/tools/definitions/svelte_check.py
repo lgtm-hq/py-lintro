@@ -32,6 +32,7 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
+from lintro.tools.core.node_modules import ensure_node_modules
 
 # Constants for Svelte-check configuration
 SVELTE_CHECK_DEFAULT_TIMEOUT: int = 120
@@ -215,58 +216,15 @@ class SvelteCheckPlugin(BaseToolPlugin):
                 "[svelte-check] No svelte.config.* found — proceeding with defaults",
             )
 
-        # Check if dependencies need installing
-        from lintro.utils.node_deps import install_node_deps, should_install_deps
-
-        try:
-            needs_install = should_install_deps(cwd_path)
-        except PermissionError as e:
-            logger.warning("[svelte-check] {}", e)
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output=f"Skipping svelte-check: {e}",
-                issues_count=0,
-                skipped=True,
-                skip_reason="directory not writable",
-            )
-
-        if needs_install:
-            auto_install = merged_options.get("auto_install", False)
-            if auto_install:
-                logger.info("[svelte-check] Auto-installing Node.js dependencies...")
-                install_ok, install_output = install_node_deps(cwd_path)
-                if install_ok:
-                    logger.info(
-                        "[svelte-check] Dependencies installed successfully",
-                    )
-                else:
-                    logger.warning(
-                        "[svelte-check] Auto-install failed, skipping: {}",
-                        install_output,
-                    )
-                    return ToolResult(
-                        name=self.definition.name,
-                        success=True,
-                        output=(
-                            f"Skipping svelte-check: auto-install failed.\n"
-                            f"{install_output}"
-                        ),
-                        issues_count=0,
-                        skipped=True,
-                        skip_reason="auto-install failed",
-                    )
-            else:
-                return ToolResult(
-                    name=self.definition.name,
-                    output=(
-                        "node_modules not found. "
-                        "Use --auto-install to install dependencies."
-                    ),
-                    issues_count=0,
-                    skipped=True,
-                    skip_reason="node_modules not found",
-                )
+        # Dependencies must be on disk before svelte-check can resolve them.
+        skip_result = ensure_node_modules(
+            plugin=self,
+            cwd=cwd_path,
+            auto_install=bool(merged_options.get("auto_install", False)),
+            tool_label="svelte-check",
+        )
+        if skip_result is not None:
+            return skip_result
 
         # Build command
         cmd = self._build_command(
