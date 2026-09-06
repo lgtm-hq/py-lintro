@@ -18,15 +18,13 @@ from lintro.ai.review.github_constants import (
     STICKY_MARKER,
 )
 
-# ``_fit_body``/``_RenderLimits`` are imported deliberately. The floor-of-one
+# ``fit_body``/``RenderLimits`` are driven directly here. The floor-of-one
 # invariant they encode cannot be reached through ``build_sticky_comment``:
 # every model-supplied string the renderer embeds is itself length-capped, so
 # no genuine finding set can make a one-finding body overflow. Driving the
-# search with a stub assembler is the only way to prove the floor holds, and a
-# test that cannot fail is worth less than one coupled to a private name.
+# search with a stub assembler is the only way to prove the floor holds.
+from lintro.ai.review.github_contract import RenderLimits, SectionCounts, fit_body
 from lintro.ai.review.github_sticky import (
-    _fit_body,
-    _RenderLimits,
     advance_review_state,
     build_sticky_comment,
 )
@@ -777,22 +775,20 @@ def test_pruning_never_settles_on_zero_open_findings() -> None:
     A binary search with a floor of zero would happily pick the body that
     lists no findings at all when even one overflows — producing exactly the
     substanceless verdict the whole design exists to prevent. Driven through
-    ``_fit_body`` with a stub assembler because every model-supplied string the
+    ``fit_body`` with a stub assembler because every model-supplied string the
     real renderer embeds is itself length-capped, so no single genuine finding
     can push a real body over the limit.
     """
     seen: list[int | None] = []
 
-    def assemble(*, limits: _RenderLimits) -> str:
+    def assemble(*, limits: RenderLimits) -> str:
         """Return an always-oversized body and record the counts tried."""
         seen.append(limits.open)
         return "x" * (MAX_COMMENT_CHARS + 1_000)
 
-    body = _fit_body(
+    body = fit_body(
         assemble=assemble,
-        prior_run_count=0,
-        open_count=8,
-        resolved_count=0,
+        counts=SectionCounts(prior_runs=0, open=8, resolved=0),
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)

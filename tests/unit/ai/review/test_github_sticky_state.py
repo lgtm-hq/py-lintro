@@ -411,16 +411,14 @@ def test_leftover_blob_still_decodes_for_migration() -> None:
 
 
 def test_floor_overflow_no_longer_appends_a_state_block() -> None:
-    """``_fit_body_with_state`` is leftover; new stickies append nothing."""
-    from lintro.ai.review.github_sticky import _fit_body_with_state
+    """``fit_body_with_state`` is leftover; new stickies append nothing."""
+    from lintro.ai.review.github_contract import SectionCounts, fit_body_with_state
 
     monster_run = RunRecord(round=1, sha="realsha", narrative="n" * 70_000)
     state = ReviewState(runs=(monster_run,), findings=(), truncated=False)
-    body = _fit_body_with_state(
+    body = fit_body_with_state(
         assemble=lambda *, limits: "visible body",
-        prior_run_count=0,
-        open_count=0,
-        resolved_count=0,
+        counts=SectionCounts(prior_runs=0, open=0, resolved=0),
         state=state,
     )
 
