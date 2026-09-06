@@ -194,12 +194,28 @@ a golden can see:
 | `severity_gate.py`   | `cross_chunk_gate.py`                              | The P1 evidence gate vs. the cross-chunk contradiction guard  |
 | `preparation.py`     | `preparation_resolvers.py`                         | Request/result types and entry points vs. field resolution    |
 
-`tests/unit/ai/review/test_review_module_sizes.py` is the ratchet that keeps this true:
-no module directly in `lintro/ai/review/` may exceed 500 lines. The GitHub-surface
-modules are named exceptions owned by #1974, and the `chunker/` and `context/`
-subpackages are part of the wider burn-down owned by #1995. The repo-wide
-`[tool.lintro.module_size]` gate warns at 800 lines, so it cannot hold this line on its
-own.
+The same slice bundled the last three signatures in the package that took more than 8
+arguments into frozen `kw_only` request objects, the shape `PromptInputs` and
+`ChunkReviewRequest` already use:
+
+| Function                  | Was | Request object           |
+| ------------------------- | --: | ------------------------ |
+| `classify_files`          |   9 | `ClassifyFilesRequest`   |
+| `run_custom_agent_passes` |  10 | `CustomAgentPassRequest` |
+| `run_synthesis_pass`      |  12 | `SynthesisPassRequest`   |
+
+Their `PLR0913` entries left the #2291 structural baseline with them, which also took
+`synthesis.py` back over 500 lines — so its response reading
+(`parse_synthesis_findings`, `deduplicate_synthesis_findings`) moved to
+`lintro/ai/review/synthesis_response.py`.
+
+`tests/unit/ai/review/test_review_module_sizes.py` is the ratchet that keeps both true:
+no module directly in `lintro/ai/review/` may exceed 500 lines, and no function in one
+may take more than 8 parameters. The GitHub-surface modules are named exceptions owned
+by #1974, and the `chunker/` and `context/` subpackages are part of the wider burn-down
+owned by #1995. The repo-wide `[tool.lintro.module_size]` gate warns at 800 lines, so it
+cannot hold the first line on its own, and the second is otherwise only held by the
+absence of a baseline entry someone could add.
 
 ## Exit and error contracts
 

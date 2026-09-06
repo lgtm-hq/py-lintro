@@ -21,6 +21,7 @@ from lintro.ai.exceptions import (
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.custom_agent_runner import (
+    CustomAgentPassRequest,
     build_custom_agent_prompt,
     run_custom_agent_passes,
     scope_diff_to_files,
@@ -265,11 +266,13 @@ def test_run_custom_agent_passes_attributes_findings(tmp_path: Path) -> None:
     with _patch_agent_call(content=provider.complete.return_value.content):
         results = asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=CostBudget(),
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=CostBudget(),
+                ),
             ),
         )
 
@@ -291,11 +294,13 @@ def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> No
     with _patch_agent_call(content=provider.complete.return_value.content):
         results = asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=CostBudget(),
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=CostBudget(),
+                ),
             ),
         )
 
@@ -312,11 +317,13 @@ def test_run_custom_agent_passes_tolerates_unparseable_response(
     with _patch_agent_call(content="not json at all"):
         results = asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=CostBudget(),
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=CostBudget(),
+                ),
             ),
         )
 
@@ -336,11 +343,13 @@ def test_run_custom_agent_passes_skips_agent_on_provider_error(
     ):
         results = asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=CostBudget(),
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=CostBudget(),
+                ),
             ),
         )
 
@@ -357,11 +366,13 @@ def test_run_custom_agent_passes_propagates_cost_cap(tmp_path: Path) -> None:
     try:
         asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=budget,
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=budget,
+                ),
             ),
         )
     except AICostBudgetExceededError as error:
@@ -381,12 +392,14 @@ def test_run_custom_agent_passes_reports_each_completed_pass(
     with _patch_agent_call(content=_agent_response(findings=[])):
         asyncio.run(
             run_custom_agent_passes(
-                selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
-                context=_context(),
-                provider=provider,
-                ai_config=_ai_config(),
-                budget=CostBudget(),
-                on_pass_complete=lambda result: seen.append(result.agent_name),
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    budget=CostBudget(),
+                    on_pass_complete=lambda result: seen.append(result.agent_name),
+                ),
             ),
         )
 

@@ -25,7 +25,10 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
 from lintro.ai.review.checklist_pass import max_checklist_id
 from lintro.ai.review.chunk_runner import review_all_chunks
-from lintro.ai.review.custom_agent_runner import run_custom_agent_passes
+from lintro.ai.review.custom_agent_runner import (
+    CustomAgentPassRequest,
+    run_custom_agent_passes,
+)
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
@@ -41,7 +44,11 @@ from lintro.ai.review.session import (
     is_timeout_stop,
     timeout_reason,
 )
-from lintro.ai.review.synthesis import run_synthesis_pass, should_run_synthesis
+from lintro.ai.review.synthesis import (
+    SynthesisPassRequest,
+    run_synthesis_pass,
+    should_run_synthesis,
+)
 from lintro.ai.review.timings import ReviewPhase
 
 if TYPE_CHECKING:
@@ -165,19 +172,21 @@ async def run_passes(
         )
     if plan.resume.queue:
         await run_custom_agent_passes(
-            selected=plan.agent_selection.selected,
-            context=context,
-            provider=options.provider,
-            ai_config=plan.ai_config,
-            budget=plan.budget,
-            repo_root=plan.repo_root,
-            workspace_root=options.workspace_root,
-            # Never reuse the built-in review's durable session: each agent
-            # is an independent, narrowly scoped pass with its own
-            # instructions.
-            use_one_shot=True,
-            on_pass_complete=progress.custom_results.append,
-            on_agent_failed=progress.custom_agents_failed.append,
+            request=CustomAgentPassRequest(
+                selected=plan.agent_selection.selected,
+                context=context,
+                provider=options.provider,
+                ai_config=plan.ai_config,
+                budget=plan.budget,
+                repo_root=plan.repo_root,
+                workspace_root=options.workspace_root,
+                # Never reuse the built-in review's durable session: each
+                # agent is an independent, narrowly scoped pass with its own
+                # instructions.
+                use_one_shot=True,
+                on_pass_complete=progress.custom_results.append,
+                on_agent_failed=progress.custom_agents_failed.append,
+            ),
         )
     return partials
 
@@ -276,24 +285,26 @@ async def finalize_completed_run(
     assert synthesis_config is not None
     with plan.timings.phase(name=ReviewPhase.SYNTHESIS):
         synthesis_pass = await run_synthesis_pass(
-            context=context,
-            summaries=chunk_summaries(chunks=plan.chunks, partials=partials),
-            existing_findings=outcome.filtered_findings,
-            provider=options.provider,
-            ai_config=plan.ai_config,
-            config=synthesis_config,
-            policy=plan.policy,
-            budget=plan.budget,
-            repo_root=plan.repo_root,
-            # Never reuse the built-in review's durable session: the pass is a
-            # standalone whole-PR question, not a chunk.
-            use_one_shot=True,
-            diff_budget=plan.diff_budget,
-            # The chunk fan-out already raced this event so a SIGTERM can
-            # persist coverage inside the runner's shutdown window; the extra
-            # call gets the same treatment, and a stop that lands here is
-            # recorded as a failed pass.
-            stop=interrupt,
+            request=SynthesisPassRequest(
+                context=context,
+                summaries=chunk_summaries(chunks=plan.chunks, partials=partials),
+                existing_findings=outcome.filtered_findings,
+                provider=options.provider,
+                ai_config=plan.ai_config,
+                config=synthesis_config,
+                policy=plan.policy,
+                budget=plan.budget,
+                repo_root=plan.repo_root,
+                # Never reuse the built-in review's durable session: the pass
+                # is a standalone whole-PR question, not a chunk.
+                use_one_shot=True,
+                diff_budget=plan.diff_budget,
+                # The chunk fan-out already raced this event so a SIGTERM can
+                # persist coverage inside the runner's shutdown window; the
+                # extra call gets the same treatment, and a stop that lands
+                # here is recorded as a failed pass.
+                stop=interrupt,
+            ),
         )
     findings = outcome.filtered_findings + synthesis_pass.findings
     return replace(

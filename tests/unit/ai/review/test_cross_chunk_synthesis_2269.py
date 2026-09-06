@@ -58,7 +58,7 @@ from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
-from lintro.ai.review.synthesis import run_synthesis_pass
+from lintro.ai.review.synthesis import SynthesisPassRequest, run_synthesis_pass
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     cross_chunk_paths,
@@ -1690,16 +1690,18 @@ async def test_an_interrupt_abandons_the_extra_call_and_degrades() -> None:
 
     with patch("lintro.ai.review.synthesis.call_ai", side_effect=_never_returns):
         result = await run_synthesis_pass(
-            context=_pr_context(),
-            summaries=(),
-            existing_findings=(),
-            provider=_mock_provider(),
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            config=ReviewSynthesisConfig(enabled=True),
-            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
-            budget=CostBudget(max_cost_usd=1.0),
-            diff_budget=100_000,
-            stop=stop,
+            request=SynthesisPassRequest(
+                context=_pr_context(),
+                summaries=(),
+                existing_findings=(),
+                provider=_mock_provider(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                config=ReviewSynthesisConfig(enabled=True),
+                policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+                budget=CostBudget(max_cost_usd=1.0),
+                diff_budget=100_000,
+                stop=stop,
+            ),
         )
 
     assert_that(started.is_set()).is_true()
@@ -1717,15 +1719,17 @@ async def test_without_a_stop_event_the_call_is_awaited_normally() -> None:
 
     with patch("lintro.ai.review.synthesis.call_ai", side_effect=_answers):
         result = await run_synthesis_pass(
-            context=_pr_context(),
-            summaries=(),
-            existing_findings=(),
-            provider=_mock_provider(),
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            config=ReviewSynthesisConfig(enabled=True),
-            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
-            budget=CostBudget(max_cost_usd=1.0),
-            diff_budget=100_000,
+            request=SynthesisPassRequest(
+                context=_pr_context(),
+                summaries=(),
+                existing_findings=(),
+                provider=_mock_provider(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                config=ReviewSynthesisConfig(enabled=True),
+                policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+                budget=CostBudget(max_cost_usd=1.0),
+                diff_budget=100_000,
+            ),
         )
 
     assert_that(result.outcome.failed).is_false()

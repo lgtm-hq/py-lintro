@@ -28,6 +28,7 @@ __all__ = [
     "BROADCAST_FILENAMES",
     "MAX_FLAGS_PER_ROUND",
     "ClassifiedFile",
+    "ClassifyFilesRequest",
     "classify_files",
     "coverage_counts",
     "directly_changed_paths",
@@ -118,21 +119,15 @@ def review_eligible_paths(
     return tuple(sorted(set(eligible)))
 
 
-def classify_files(
-    *,
-    eligible_paths: Sequence[str],
-    current_hashes: Mapping[str, str],
-    coverage: Sequence[CoverageRecord],
-    groups: Sequence[Sequence[str]] = (),
-    import_importers: Mapping[str, set[str]] | None = None,
-    flags: Sequence[FlaggedFile] = (),
-    pending_invalidations: Sequence[tuple[str, str]] = (),
-    consumed_flags: Sequence[tuple[str, str]] = (),
-    force_full: bool = False,
-) -> tuple[ClassifiedFile, ...]:
-    """Classify each eligible file for this resume round.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ClassifyFilesRequest:
+    """Everything one resume round's classification reads.
 
-    Args:
+    Grouping the round's inputs keeps :func:`classify_files` to one argument
+    and makes a new input a field here rather than another keyword threaded
+    through every caller (issue #2301).
+
+    Attributes:
         eligible_paths: Review-eligible paths at HEAD.
         current_hashes: Current normalized patch hash per path.
         coverage: Prior coverage records (possibly empty).
@@ -143,13 +138,34 @@ def classify_files(
             capped round.
         consumed_flags: ``(path, hash)`` pairs already honored once.
         force_full: When True, treat every file as never-reviewed.
+    """
+
+    eligible_paths: Sequence[str]
+    current_hashes: Mapping[str, str]
+    coverage: Sequence[CoverageRecord]
+    groups: Sequence[Sequence[str]] = ()
+    import_importers: Mapping[str, set[str]] | None = None
+    flags: Sequence[FlaggedFile] = ()
+    pending_invalidations: Sequence[tuple[str, str]] = ()
+    consumed_flags: Sequence[tuple[str, str]] = ()
+    force_full: bool = False
+
+
+def classify_files(*, request: ClassifyFilesRequest) -> tuple[ClassifiedFile, ...]:
+    """Classify each eligible file for this resume round.
+
+    Args:
+        request: The round's inputs.
 
     Returns:
         One classification per eligible path, in path order.
     """
-    by_path = latest_coverage_by_path(coverage)
-    covered_hashes = {(record.path, record.patch_hash) for record in coverage}
-    if force_full:
+    eligible_paths = request.eligible_paths
+    current_hashes = request.current_hashes
+
+    by_path = latest_coverage_by_path(request.coverage)
+    covered_hashes = {(record.path, record.patch_hash) for record in request.coverage}
+    if request.force_full:
         return tuple(
             ClassifiedFile(
                 path=path,
@@ -178,24 +194,24 @@ def classify_files(
     broadcast = _broadcast_paths(eligible_paths)
     group_invalidated = _group_invalidated(
         eligible_paths=eligible_paths,
-        groups=groups,
+        groups=request.groups,
         directly_changed=directly_changed,
         broadcast=broadcast,
     )
-    pending_group, pending_import = _pending_sets(pending_invalidations)
+    pending_group, pending_import = _pending_sets(request.pending_invalidations)
     group_invalidated.update(pending_group)
-    graph = import_importers or {}
+    graph = request.import_importers or {}
     import_invalidated: set[str] = set()
     for imported in directly_changed:
         import_invalidated.update(graph.get(imported, set()))
     import_invalidated.update(pending_import)
 
     allowed_flags = _allowed_flags(
-        flags=flags,
+        flags=request.flags,
         eligible_paths=set(eligible_paths),
         current_hashes=current_hashes,
         covered_hashes=covered_hashes,
-        consumed_flags=consumed_flags,
+        consumed_flags=request.consumed_flags,
     )
 
     classified: list[ClassifiedFile] = []

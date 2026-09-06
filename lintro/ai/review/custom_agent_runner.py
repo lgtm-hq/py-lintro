@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "CustomAgentPassRequest",
     "CustomAgentPassResult",
     "build_custom_agent_prompt",
     "run_custom_agent_passes",
@@ -233,27 +234,15 @@ def _findings_from_response(
     )
 
 
-async def run_custom_agent_passes(
-    *,
-    selected: tuple[SelectedCustomAgent, ...],
-    context: ReviewContext,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    budget: CostBudget,
-    repo_root: str = "",
-    workspace_root: Path | None = None,
-    use_one_shot: bool = True,
-    on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None,
-    on_agent_failed: Callable[[str], None] | None = None,
-) -> tuple[CustomAgentPassResult, ...]:
-    """Run every selected custom review agent against its scoped diff.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CustomAgentPassRequest:
+    """Everything one run's custom-agent passes need.
 
-    Passes run sequentially. A cost-cap stop propagates so the caller can
-    finalize a partial review; any other provider failure is logged and that
-    single agent is skipped, because one bad workspace-authored agent must not
-    discard an otherwise complete review.
+    Grouping the run-scope inputs keeps :func:`run_custom_agent_passes` to one
+    argument and makes a new input a field here rather than another keyword
+    threaded through the caller (issue #2301).
 
-    Args:
+    Attributes:
         selected: Agents scoped to at least one changed file.
         context: Collected review diff context.
         provider: The run's default provider.
@@ -268,6 +257,33 @@ async def run_custom_agent_passes(
         on_agent_failed: Optional callback invoked with the agent's name when
             a non-budget provider error skips it, so a caller can count it
             toward skipped-agent metadata (issue #1245).
+    """
+
+    selected: tuple[SelectedCustomAgent, ...]
+    context: ReviewContext
+    provider: BaseAIProvider
+    ai_config: AIConfig
+    budget: CostBudget
+    repo_root: str = ""
+    workspace_root: Path | None = None
+    use_one_shot: bool = True
+    on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None
+    on_agent_failed: Callable[[str], None] | None = None
+
+
+async def run_custom_agent_passes(
+    *,
+    request: CustomAgentPassRequest,
+) -> tuple[CustomAgentPassResult, ...]:
+    """Run every selected custom review agent against its scoped diff.
+
+    Passes run sequentially. A cost-cap stop propagates so the caller can
+    finalize a partial review; any other provider failure is logged and that
+    single agent is skipped, because one bad workspace-authored agent must not
+    discard an otherwise complete review.
+
+    Args:
+        request: The run-scope inputs every pass reads.
 
     Returns:
         Results for every agent that completed a pass.
@@ -275,6 +291,17 @@ async def run_custom_agent_passes(
     Raises:
         AICostBudgetExceededError: When the session cost cap is reached.
     """
+    selected = request.selected
+    context = request.context
+    provider = request.provider
+    ai_config = request.ai_config
+    budget = request.budget
+    repo_root = request.repo_root
+    workspace_root = request.workspace_root
+    use_one_shot = request.use_one_shot
+    on_pass_complete = request.on_pass_complete
+    on_agent_failed = request.on_agent_failed
+
     results: list[CustomAgentPassResult] = []
     provider_cache: dict[str, BaseAIProvider] = {}
     for entry in selected:
