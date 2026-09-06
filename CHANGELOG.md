@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.6] - 2026-09-06
+
+### Changed
+
+- **ai**: move per-chunk review passes out of the orchestrator (#2394) (480ba92)
+- **tools**: fold ruff and pytest implementations into tool packages (#2392) (a4c6ed6)
+- **ai**: move cross-chunk review merge out of the orchestrator (#2388) (f4b822e)
+- **unit**: registry isolation, split leftovers, and randomised order (#2375) (49e4efb)
+- **tools**: share cargo-root and `node_modules` helpers (PR F) (#2389) (97487c1)
+
+### Fixed
+
+- **golangci-lint**: allow parallel runners so findings never vanish (#2396) (2cb6fcd)
+
 ## [0.147.5] - 2026-09-06
 
 ### Changed

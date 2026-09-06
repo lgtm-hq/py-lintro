@@ -8,7 +8,7 @@ backend-path = ["."]
 
 [project]
 name = "lintro"
-version = "0.147.5"
+version = "0.147.6"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
