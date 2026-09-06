@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.enums.pytest_enums import PytestSpecialMode
-from lintro.tools.implementations.pytest.pytest_option_validators import (
+from lintro.tools.pytest.pytest_option_validators import (
     validate_pytest_options,
 )
 

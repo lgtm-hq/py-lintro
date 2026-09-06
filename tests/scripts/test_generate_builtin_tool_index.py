@@ -62,6 +62,33 @@ def test_collect_registering_module_names_skips_helper_modules(
     )
 
 
+def test_collect_registering_module_names_counts_reexport_shims(
+    tmp_path: Path,
+) -> None:
+    """A shim for a per-tool package still contributes a registry entry.
+
+    #2311 moves a tool's plugin to ``lintro/tools/<tool>/definition.py`` and
+    leaves a re-export shim behind in the definitions package. The shim has no
+    ``@register_tool`` of its own, but importing it imports the module that
+    does, so the binary smoke test must still expect the tool.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    (tmp_path / "ruff.py").write_text(
+        "from lintro.tools.ruff.definition import RuffPlugin\n\n"
+        '__all__ = ["RuffPlugin"]\n',
+    )
+    (tmp_path / "black.py").write_text(_registering_module())
+    (tmp_path / "helper.py").write_text(
+        "from lintro.tools.core.cargo import find_cargo_root\n",
+    )
+
+    assert_that(builtin_index.collect_registering_module_names(tmp_path)).is_equal_to(
+        ["black", "ruff"],
+    )
+
+
 def test_collect_registering_module_names_ignores_comments_and_docstrings(
     tmp_path: Path,
 ) -> None:

@@ -26,7 +26,6 @@ from lintro.tools.definitions.mypy import MypyPlugin
 from lintro.tools.definitions.osv_scanner import OsvScannerPlugin
 from lintro.tools.definitions.oxlint import OxlintPlugin
 from lintro.tools.definitions.pydoclint import PydoclintPlugin
-from lintro.tools.definitions.ruff import RuffPlugin
 from lintro.tools.definitions.semgrep import SemgrepPlugin
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
@@ -34,6 +33,7 @@ from lintro.tools.definitions.taplo import TaploPlugin
 from lintro.tools.definitions.tsc import TscPlugin
 from lintro.tools.definitions.vue_tsc import VueTscPlugin
 from lintro.tools.definitions.yamllint import YamllintPlugin
+from lintro.tools.ruff.definition import RuffPlugin
 
 # =============================================================================
 # Simple URL-pattern tools (no subprocess needed)

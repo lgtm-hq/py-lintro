@@ -10,7 +10,7 @@ from loguru import logger
 from lintro.parsers.base_parser import strip_ansi_codes
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 def check_plugin_installed(plugin_name: str) -> bool:

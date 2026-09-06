@@ -454,7 +454,8 @@ lintro/
 ├── plugins/                 # Plugin system
 └── tools/
     ├── core/               # Tool management
-    └── implementations/    # Concrete tool classes
+    ├── definitions/        # Plugin modules (re-export shims for moved tools)
+    └── <tool>/             # Per-tool package: definition.py + its helpers
 ```
 
 ### Target Structure (Future)

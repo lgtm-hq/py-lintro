@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
-from lintro.tools.implementations.pytest.collection import (
+from lintro.tools.pytest.collection import (
     PYTEST_FLAKY_CACHE_FILE,
     PYTEST_FLAKY_FAILURE_RATE,
     PYTEST_FLAKY_MIN_RUNS,

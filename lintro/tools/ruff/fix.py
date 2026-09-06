@@ -17,13 +17,13 @@ from lintro.parsers.ruff.ruff_parser import (
 from lintro.tools.core.timeout_utils import create_timeout_result
 
 # Re-exported so callers keep a single source of truth for the default Ruff
-# timeout (defined in lintro.tools.definitions.ruff). Importing here preserves
+# timeout (defined in lintro.tools.ruff.definition). Importing here preserves
 # the historical ``from ...ruff.fix import RUFF_DEFAULT_TIMEOUT`` entry point.
-from lintro.tools.definitions.ruff import RUFF_DEFAULT_TIMEOUT
+from lintro.tools.ruff.definition import RUFF_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
 __all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_fix"]
 
@@ -84,7 +84,7 @@ def execute_ruff_fix(
         ToolResult: ToolResult instance.
     """
     from lintro.models.core.tool_result import ToolResult
-    from lintro.tools.implementations.ruff.commands import (
+    from lintro.tools.ruff.commands import (
         build_ruff_check_command,
         build_ruff_format_command,
     )

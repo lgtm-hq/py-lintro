@@ -9,8 +9,8 @@ from typing import Any
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pytest.pytest_issue import PytestIssue
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
-from lintro.tools.implementations.pytest.pytest_output_processor import (
+from lintro.tools.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.pytest_output_processor import (
     build_output_with_failures,
     check_total_time_warning,
     detect_and_log_flaky_tests,

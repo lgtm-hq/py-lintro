@@ -4,7 +4,7 @@ This module contains validation logic extracted from PytestTool.set_options()
 to improve maintainability and reduce file size.
 """
 
-from lintro.tools.implementations.pytest.collection import (
+from lintro.tools.pytest.collection import (
     get_parallel_workers_from_preset,
 )
 

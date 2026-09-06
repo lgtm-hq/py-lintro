@@ -5,7 +5,7 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
-from lintro.tools.implementations.pytest.pytest_output_processor import (
+from lintro.tools.pytest.pytest_output_processor import (
     build_output_with_failures,
     detect_and_log_slow_tests,
     parse_pytest_output_with_fallback,

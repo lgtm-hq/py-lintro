@@ -12,7 +12,7 @@ from loguru import logger
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
 from lintro.parsers.pytest.pytest_parser import extract_pytest_summary
-from lintro.tools.implementations.pytest.coverage_processor import (
+from lintro.tools.pytest.coverage_processor import (
     parse_coverage_summary,
 )
 

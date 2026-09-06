@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from assertpy import assert_that
 from loguru import logger
 
-from lintro.tools.implementations.ruff.fix import execute_ruff_fix
+from lintro.tools.ruff.fix import execute_ruff_fix
 
 
 def test_execute_ruff_fix_unsafe_fixes_enabled(

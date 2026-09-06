@@ -12,14 +12,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
-from lintro.tools.implementations.pytest.markers import (
+from lintro.tools.pytest.markers import (
     check_plugin_installed,
     get_pytest_version_info,
     list_installed_plugins,
 )
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 def handle_list_plugins(tool: "PytestPlugin") -> ToolResult:

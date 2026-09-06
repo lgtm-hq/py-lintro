@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from lintro.enums.env_bool import EnvBool
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
 
 def _get_list_option(options: dict[str, Any], key: str) -> list[str]:

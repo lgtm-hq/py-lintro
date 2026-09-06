@@ -20,7 +20,7 @@ Mirror the closest existing tool:
 | Tool type              | Reference                                |
 | ---------------------- | ---------------------------------------- |
 | Simple linter (no fix) | `lintro/tools/definitions/actionlint.py` |
-| Linter + formatter     | `lintro/tools/definitions/ruff.py`       |
+| Linter + formatter     | `lintro/tools/ruff/definition.py`        |
 | Security scanner       | `lintro/tools/definitions/bandit.py`     |
 | Shell tool             | `lintro/tools/definitions/shellcheck.py` |
 
@@ -53,7 +53,10 @@ overview of how Lintro dogfoods its own codebase.
 
 ## Step 1 — Plugin definition
 
-Create `lintro/tools/definitions/<tool>.py`.
+Create `lintro/tools/definitions/<tool>.py`. A tool that needs helper modules of its own
+gets a package instead — `lintro/tools/<tool>/definition.py` next to its helpers, with
+`lintro/tools/definitions/<tool>.py` left as a re-export shim so discovery finds it (see
+`lintro/tools/ruff/`).
 
 Structure (mirrored from your reference tool):
 
@@ -572,7 +575,8 @@ python3 scripts/ci/generate-builtin-tool-index.py --check
 Implementation checklist:
 
 - [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-      `ToolDefinition`
+      `ToolDefinition`; for a tool with helper modules, those three live in
+      `lintro/tools/<tool>/definition.py` and this module is the re-export shim
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)

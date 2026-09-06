@@ -303,31 +303,24 @@ max-statements = 50
 "lintro/tools/definitions/buf.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/mypy.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/oxlint.py" = ["PLR0913"]
-"lintro/tools/definitions/pytest.py" = ["C901", "PLR0912"]
-"lintro/tools/definitions/ruff.py" = ["PLR0913"]
 "lintro/tools/definitions/spectral.py" = ["PLR0912"]
 "lintro/tools/definitions/stylelint.py" = ["PLR0912"]
 "lintro/tools/definitions/yamllint.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/implementations/pytest/collection.py" = ["PLR0912"]
-"lintro/tools/implementations/pytest/coverage_processor.py" = [
-  "C901",
-  "PLR0912",
-]
-"lintro/tools/implementations/pytest/output_parsers.py" = [
-  "C901",
-  "PLR0912",
-  "PLR0915",
-]
-"lintro/tools/implementations/pytest/pytest_command_builder.py" = ["PLR0912"]
-"lintro/tools/implementations/pytest/pytest_option_validators.py" = [
+"lintro/tools/pytest/collection.py" = ["PLR0912"]
+"lintro/tools/pytest/coverage_processor.py" = ["C901", "PLR0912"]
+"lintro/tools/pytest/definition.py" = ["C901", "PLR0912"]
+"lintro/tools/pytest/output_parsers.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/pytest/pytest_command_builder.py" = ["PLR0912"]
+"lintro/tools/pytest/pytest_option_validators.py" = [
   "C901",
   "PLR0912",
   "PLR0913",
   "PLR0915",
 ]
-"lintro/tools/implementations/ruff/check.py" = ["PLR0915"]
-"lintro/tools/implementations/ruff/commands.py" = ["PLR0912"]
-"lintro/tools/implementations/ruff/fix.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/ruff/check.py" = ["PLR0915"]
+"lintro/tools/ruff/commands.py" = ["PLR0912"]
+"lintro/tools/ruff/definition.py" = ["PLR0913"]
+"lintro/tools/ruff/fix.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/utils/console/logger.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/utils/console/pre_execution_summary.py" = ["PLR0912"]
 "lintro/utils/display_helpers.py" = ["PLR0912"]
@@ -422,8 +415,10 @@ exclude = [
 ]
 
 # Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker
-# runs on the tool-definition package only, so the copy-pasted definition
-# template cannot grow while #2311 factors it out. pylint has no per-finding
+# runs on the tool-definition modules only, so the copy-pasted definition
+# template cannot grow while #2311 factors it out. `include` follows the
+# definitions as #2311 moves them into per-tool packages, so a tool that leaves
+# `lintro/tools/definitions` does not leave the gate. pylint has no per-finding
 # baseline, so the ratchet is a count: `duplicate_code_baseline` is the number
 # of R0801 blocks present when the gate landed, and the run fails when the
 # count is higher. Lower this number in the PR that removes duplication; never
@@ -436,7 +431,11 @@ exclude = [
 # that reports a phantom finding is the only way this can move, and the fix is
 # to delete the duplication. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
-include = ["lintro/tools/definitions"]
+include = [
+  "lintro/tools/definitions",
+  "lintro/tools/pytest",
+  "lintro/tools/ruff",
+]
 duplicate_code_baseline = 0
 
 [tool.lintro.ruff]
@@ -759,12 +758,6 @@ ignore_imports = [
   "lintro.tools.definitions.pylint -> lintro.plugins.base",                         # owned by #2311
   "lintro.tools.definitions.pylint -> lintro.plugins.protocol",                     # owned by #2311
   "lintro.tools.definitions.pylint -> lintro.plugins.registry",                     # owned by #2311
-  "lintro.tools.definitions.pytest -> lintro.plugins.base",                         # owned by #2311
-  "lintro.tools.definitions.pytest -> lintro.plugins.protocol",                     # owned by #2311
-  "lintro.tools.definitions.pytest -> lintro.plugins.registry",                     # owned by #2311
-  "lintro.tools.definitions.ruff -> lintro.plugins.base",                           # owned by #2311
-  "lintro.tools.definitions.ruff -> lintro.plugins.protocol",                       # owned by #2311
-  "lintro.tools.definitions.ruff -> lintro.plugins.registry",                       # owned by #2311
   "lintro.tools.definitions.rustfmt -> lintro.plugins.base",                        # owned by #2311
   "lintro.tools.definitions.rustfmt -> lintro.plugins.protocol",                    # owned by #2311
   "lintro.tools.definitions.rustfmt -> lintro.plugins.registry",                    # owned by #2311
@@ -808,6 +801,12 @@ ignore_imports = [
   "lintro.tools.definitions.yamllint -> lintro.plugins.base",                       # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.pytest.definition -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.pytest.definition -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.pytest.definition -> lintro.plugins.registry",                      # owned by #2311
+  "lintro.tools.ruff.definition -> lintro.plugins.base",                            # owned by #2311
+  "lintro.tools.ruff.definition -> lintro.plugins.protocol",                        # owned by #2311
+  "lintro.tools.ruff.definition -> lintro.plugins.registry",                        # owned by #2311
   # 61 edges owned by #2312
   "lintro.utils.async_tool_executor -> lintro.plugins.base",                                    # owned by #2312
   "lintro.utils.doctor_report -> lintro.ai.doctor_checks",                                      # owned by #2312

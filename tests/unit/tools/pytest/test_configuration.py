@@ -5,7 +5,7 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.enums.pytest_enums import PytestSpecialMode
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.pytest_config import PytestConfiguration
 
 # =============================================================================
 # Tests for PytestConfiguration class

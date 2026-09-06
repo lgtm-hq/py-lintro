@@ -14,11 +14,11 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.pytest import PytestPlugin
-from lintro.tools.implementations.pytest.coverage_source import (
+from lintro.tools.pytest.coverage_source import (
     resolve_coverage_sources,
 )
-from lintro.tools.implementations.pytest.pytest_command_builder import (
+from lintro.tools.pytest.definition import PytestPlugin
+from lintro.tools.pytest.pytest_command_builder import (
     add_coverage_options,
     build_check_command,
 )

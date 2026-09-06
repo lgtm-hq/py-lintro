@@ -18,7 +18,7 @@ from lintro.enums.output_format import OutputFormat
 from lintro.formatters.formatter import format_issues
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
-from lintro.tools.definitions.ruff import RuffPlugin
+from lintro.tools.ruff.definition import RuffPlugin
 from lintro.utils.output.file_writer import write_output_file
 
 # Relies on internal enrichment function to simulate the post-execution

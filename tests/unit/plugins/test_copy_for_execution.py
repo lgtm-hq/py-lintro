@@ -20,8 +20,8 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 
 if TYPE_CHECKING:
-    from lintro.tools.implementations.pytest.pytest_executor import PytestExecutor
-    from lintro.tools.implementations.pytest.pytest_result_processor import (
+    from lintro.tools.pytest.pytest_executor import PytestExecutor
+    from lintro.tools.pytest.pytest_result_processor import (
         PytestResultProcessor,
     )
     from tests.unit.plugins.conftest import FakeToolPlugin
@@ -123,7 +123,7 @@ def test_concurrent_invocations_do_not_clobber_options() -> None:
 
 def test_copy_for_execution_shares_readonly_caches() -> None:
     """Non-option attributes are shallow-copied (shared) for efficiency."""
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
     template = RuffPlugin()
     clone = template.copy_for_execution()
@@ -142,7 +142,7 @@ def test_copy_for_execution_isolates_pytest_config() -> None:
     config (and re-wired collaborators) so configuring one copy never leaks
     into the template or its collaborators.
     """
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
     template = PytestPlugin()
     clone = template.copy_for_execution()
@@ -171,7 +171,7 @@ def test_concurrent_pytest_invocations_do_not_clobber_config() -> None:
     lands in the mutable ``pytest_config``, and all run concurrently. Each
     copy must read back exactly its own value.
     """
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
     template = PytestPlugin()
 
@@ -214,7 +214,7 @@ def test_reset_options_clears_stale_pytest_config() -> None:
     reset must clear the inherited pytest-specific state (and re-point the
     collaborators) so a stale ``maxfail`` cannot leak into the invocation.
     """
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
     template = PytestPlugin()
     template.set_options(maxfail=5)
