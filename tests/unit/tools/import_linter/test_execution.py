@@ -119,7 +119,9 @@ def test_check_runs_once_regardless_of_file_count(
     assert_that(calls[0]["cwd"]).is_equal_to(str(project_with_contracts))
     # check() must go through _build_command: the flags are part of the contract
     # (no banner in parsed output, no cache directory written into the project).
-    cmd = list(cast("list[str]", calls[0]["cmd"]))
+    recorded_cmd = calls[0]["cmd"]
+    assert_that(recorded_cmd).is_instance_of(list)
+    cmd = [str(part) for part in cast("list[str]", recorded_cmd)]
     assert_that(cmd[0]).is_equal_to("lint-imports")
     assert_that(cmd).contains("--no-logo", "--no-cache")
     assert_that(cmd).contains(str(project_with_contracts / "pyproject.toml"))

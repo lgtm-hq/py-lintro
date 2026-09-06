@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
+from collections.abc import Sequence
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -375,19 +376,19 @@ def test_ruff_caches_resolved_name(mock_run: MagicMock) -> None:
     Args:
         mock_run: Mocked subprocess.run.
     """
-    invocations: list[str] = []
+    invocations: list[list[str]] = []
 
-    def fake_run(*_args: object, **_kwargs: object) -> MagicMock:
-        """Record one ruff invocation and answer with the rule name.
+    def fake_run(*args: Sequence[object], **_kwargs: object) -> MagicMock:
+        """Record the ruff argv and answer with the rule name.
 
         Args:
-            *_args: Ignored positional subprocess arguments.
+            *args: Positional subprocess arguments; the first is the argv.
             **_kwargs: Ignored keyword subprocess arguments.
 
         Returns:
             A completed process carrying ruff's JSON rule description.
         """
-        invocations.append("ruff")
+        invocations.append([str(part) for part in args[0]])
         return MagicMock(
             returncode=0,
             stdout=json.dumps({"name": "line-too-long"}),
@@ -400,6 +401,7 @@ def test_ruff_caches_resolved_name(mock_run: MagicMock) -> None:
     second = plugin.doc_url("E501")
 
     assert_that(invocations).is_length(1)
+    assert_that(invocations[0]).contains("E501")
     assert_that(first).is_equal_to("https://docs.astral.sh/ruff/rules/line-too-long/")
     assert_that(second).is_equal_to(first)
 
