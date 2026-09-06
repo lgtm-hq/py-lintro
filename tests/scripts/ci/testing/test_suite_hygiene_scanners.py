@@ -143,22 +143,36 @@ def test_mock_only_scanner_reports_planted_bookkeeping_tests(tmp_path: Path) -> 
     ["scan_duplicate_test_bodies", "scan_mock_only_tests"],
     ids=["duplicates", "mock-only"],
 )
+@pytest.mark.parametrize(
+    "root_kind",
+    ["missing", "regular-file"],
+)
 def test_scanner_rejects_a_root_that_is_not_a_directory(
     module_name: str,
+    root_kind: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A ``--root`` that is not a directory exits 2 instead of reporting zero.
 
+    Both shapes reach the same ``is_dir()`` guard, and both would otherwise
+    report a clean gate: ``rglob`` yields nothing on a missing path *and* on a
+    regular file.
+
     Args:
         module_name: Scanner module stem under ``scripts/ci/testing``.
-        tmp_path: Pytest temporary directory providing a path that is absent.
+        root_kind: Whether ``--root`` names an absent path or a regular file.
+        tmp_path: Pytest temporary directory providing the bad root.
         capsys: Pytest capture fixture for the error message.
     """
     scanner = _load(module_name)
-    missing = tmp_path / "does-not-exist"
+    if root_kind == "regular-file":
+        bad_root = tmp_path / "not-a-directory.py"
+        bad_root.write_text("def test_x() -> None:\n    assert True\n")
+    else:
+        bad_root = tmp_path / "does-not-exist"
 
-    exit_code = scanner.main(["--root", str(missing)])
+    exit_code = scanner.main(["--root", str(bad_root)])
 
     assert_that(exit_code).is_equal_to(2)
     assert_that(capsys.readouterr().err).contains("not a directory")
@@ -273,4 +287,39 @@ def test_scanner_main_exits_zero_on_a_clean_tree(
     assert_that(exit_code).is_equal_to(0)
     # Tokenised: ``contains("0 ")`` also matches a "10 duplicate group(s)"
     # report, which is the opposite of a clean tree.
+    assert_that(capsys.readouterr().out.split()).contains("0")
+
+
+# =============================================================================
+# The default root is the repository tests tree, not the working directory
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["scan_duplicate_test_bodies", "scan_mock_only_tests"],
+    ids=["duplicates", "mock-only"],
+)
+def test_scanner_main_without_root_scans_the_repository_tests_tree(
+    module_name: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main([])`` gates the same tree the no-arg library finders do.
+
+    CI runs the scanners as CLIs without ``--root``, so the default has to be
+    the repository ``tests/`` tree rather than the working directory: a
+    cwd-relative default would sweep ``.venv`` and site-packages and make the
+    zero-count gate host-dependent.
+
+    Args:
+        module_name: Scanner module stem under ``scripts/ci/testing``.
+        capsys: Pytest capture fixture for the printed report.
+    """
+    scanner = _load(module_name)
+
+    assert_that(scanner.REPO_ROOT / "tests").is_equal_to(ROOT / "tests")
+
+    exit_code = scanner.main([])
+
+    assert_that(exit_code).is_equal_to(0)
     assert_that(capsys.readouterr().out.split()).contains("0")

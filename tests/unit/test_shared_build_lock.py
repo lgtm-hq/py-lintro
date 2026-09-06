@@ -89,16 +89,24 @@ def test_reclaim_leaves_a_successor_lock_taken_after_the_liveness_check(
 
     tokens = iter([stale_token, successor_token])
 
-    def _read(_lock: Path) -> str:
-        """Hand back the stale token first and the successor's token next.
+    def _read(lock_path: Path) -> str:
+        """Return the next scripted token, landing the successor on disk.
+
+        Writing the successor's bytes as the stale token is handed out makes
+        the lock file itself hold what a real successor would have written, so
+        the helper's re-read compare is exercised against the filesystem
+        rather than against the stub alone.
 
         Args:
-            _lock: Ignored; the test drives a single lock file.
+            lock_path: Lock path the reclaim helper is reading.
 
         Returns:
             The next token in the scripted sequence.
         """
-        return next(tokens)
+        token = next(tokens)
+        if token == stale_token:
+            lock_path.write_text(successor_token, encoding="utf-8")
+        return token
 
     monkeypatch.setattr(
         "tests.conftest._read_lock_token",
@@ -108,7 +116,7 @@ def test_reclaim_leaves_a_successor_lock_taken_after_the_liveness_check(
     reclaimed = _reclaim_stale_lock(lock=lock)
 
     assert_that(reclaimed).is_false()
-    assert_that(lock.exists()).is_true()
+    assert_that(lock.read_text(encoding="utf-8")).is_equal_to(successor_token)
 
 
 def test_release_only_removes_the_lock_this_worker_still_owns(

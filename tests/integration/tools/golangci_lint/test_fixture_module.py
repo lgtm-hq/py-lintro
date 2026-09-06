@@ -74,14 +74,34 @@ def test_check_detects_violations(tmp_path: Path) -> None:
         assert_that(issue.line).is_greater_than(0)
 
 
-def test_doc_url_resolves_for_detected_linter(tmp_path: Path) -> None:
-    """The plugin resolves a doc URL for a detected sub-linter code."""
+def test_doc_url_resolves_for_every_detected_linter(tmp_path: Path) -> None:
+    """Every sub-linter code the fixture produces resolves to a doc URL.
+
+    Taking ``next(iter(codes))`` off a set picked a different code per
+    process, because set iteration order follows the interpreter's hash seed.
+    golangci-lint reports package-level build and config diagnostics with an
+    empty ``FromLinter``, for which ``doc_url`` documents ``None``, so which
+    code the assertion happened to draw decided whether the test passed
+    (#2375). Checking the sorted codes removes the draw.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the staged fixture.
+    """
     module = _stage_fixture(tmp_path)
     plugin = GolangciLintPlugin()
     result = plugin.check([str(module)], {})
     assert_that(result.issues).is_not_none()
     issues = cast(list[GolangciLintIssue], result.issues)
-    codes = {issue.code for issue in issues}
-    assert_that(plugin.doc_url(next(iter(codes)))).starts_with(
-        "https://golangci-lint.run",
-    )
+    codes = sorted({issue.code for issue in issues})
+
+    # The fixture seeds these two sub-linters; asserting them by name keeps the
+    # test meaningful whatever extra diagnostics a toolchain version adds.
+    assert_that(codes).contains("errcheck", "ineffassign")
+    for code in codes:
+        if not code:
+            # A finding with no originating sub-linter has no per-linter page.
+            assert_that(plugin.doc_url(code)).is_none()
+            continue
+        assert_that(plugin.doc_url(code)).described_as(code).starts_with(
+            "https://golangci-lint.run",
+        )

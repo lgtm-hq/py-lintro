@@ -203,7 +203,7 @@ def test_test_function_forwards_scope_and_verbosity_to_the_pipeline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``exclude``, ``include_venv`` and ``verbose`` reach the pipeline call.
+    """Every wrapper pass-through reaches the pipeline call unchanged.
 
     The wrapper delegates to :func:`lintro.api.core.test`, which builds the
     pipeline arguments; recording that mapping is the only place the
@@ -239,8 +239,9 @@ def test_test_function_forwards_scope_and_verbosity_to_the_pipeline(
         include_venv=True,
         output=None,
         output_format="grid",
-        group_by="file",
+        group_by="code",
         verbose=True,
+        raw_output=True,
         tool_options=None,
         yes=True,
     )
@@ -250,8 +251,51 @@ def test_test_function_forwards_scope_and_verbosity_to_the_pipeline(
     assert_that(call["exclude"]).is_equal_to("build,dist")
     assert_that(call["include_venv"]).is_true()
     assert_that(call["verbose"]).is_true()
+    assert_that(call["raw_output"]).is_true()
+    assert_that(call["group_by"]).is_equal_to("code")
+    assert_that(call["yes"]).is_true()
     assert_that(call["tools"]).is_equal_to("pytest")
     assert_that(call["paths"]).is_equal_to([str(project)])
+
+
+def test_test_function_defaults_empty_paths_to_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No paths means the current directory, not an empty path list.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture, used to record the call.
+    """
+    forwarded: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> int:
+        """Record one pipeline invocation and report a clean run.
+
+        Args:
+            **kwargs: Keyword arguments the API layer built for the pipeline.
+
+        Returns:
+            A successful exit code.
+        """
+        forwarded.append(dict(kwargs))
+        return 0
+
+    monkeypatch.setattr("lintro.api.core.run_lint_with_ai", _record)
+
+    test(
+        paths=(),
+        exclude=None,
+        include_venv=False,
+        output=None,
+        output_format="grid",
+        group_by="file",
+        verbose=False,
+        tool_options=None,
+        yes=True,
+    )
+
+    assert_that(forwarded).is_length(1)
+    assert_that(forwarded[0]["paths"]).is_equal_to(["."])
 
 
 @pytest.mark.slow
