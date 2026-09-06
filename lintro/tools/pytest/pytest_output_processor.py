@@ -14,8 +14,10 @@ from lintro.tools.pytest.coverage_processor import (
     parse_coverage_summary,
 )
 from lintro.tools.pytest.formatters import (
+    FAILURE_SECTION_MAX_CHARS,
     _extract_brief_message,
     build_output_with_failures,
+    extract_failure_section,
     format_pytest_issue,
     format_pytest_issues_table,
     process_test_summary,
@@ -35,6 +37,7 @@ from lintro.tools.pytest.test_analytics import (
 
 __all__ = [
     # Constants
+    "FAILURE_SECTION_MAX_CHARS",
     "PYTEST_FLAKY_FAILURE_RATE",
     "PYTEST_FLAKY_MIN_RUNS",
     "PYTEST_SLOW_TEST_THRESHOLD",
@@ -51,6 +54,7 @@ __all__ = [
     # Formatters
     "_extract_brief_message",
     "build_output_with_failures",
+    "extract_failure_section",
     "format_pytest_issue",
     "format_pytest_issues_table",
     "process_test_summary",

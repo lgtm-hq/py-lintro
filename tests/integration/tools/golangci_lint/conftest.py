@@ -72,3 +72,26 @@ def golangci_clean_module(tmp_path: Path) -> str:
         'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("ok")\n}\n',
     )
     return str(dst)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_go_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ambient Go environment settings out of the fixture runs.
+
+    golangci-lint builds the module before linting, so a ``GOFLAGS`` or
+    ``GOWORK`` inherited from the surrounding checkout (``-mod=vendor``, a
+    workspace naming modules the staged fixture does not contain) makes the
+    build fail and the seeded findings disappear, leaving only a position-less
+    ``(module)`` diagnostic. The staged fixtures are self-contained
+    stdlib-only modules, so neither variable can help them. ``GOFLAGS`` is
+    cleared; ``GOWORK`` is pinned to ``off`` rather than cleared, because an
+    unset ``GOWORK`` still lets Go discover a ``go.work`` above the temporary
+    directory. ``GOCACHE``/``GOMODCACHE`` are deliberately left alone: Go's
+    caches are content-addressed and concurrency-safe, and a per-test cache
+    would recompile the standard library for every test.
+
+    Args:
+        monkeypatch: Pytest environment patcher.
+    """
+    monkeypatch.delenv("GOFLAGS", raising=False)
+    monkeypatch.setenv("GOWORK", "off")

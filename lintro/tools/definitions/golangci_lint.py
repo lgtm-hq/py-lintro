@@ -136,6 +136,15 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
 def _build_golangci_lint_command(fix: bool = False) -> list[str]:
     """Build the ``golangci-lint run`` command.
 
+    ``--allow-parallel-runners`` is always passed. Without it golangci-lint
+    takes an exclusive ``golangci-lint.lock`` file lock in the system temp
+    directory on start, and any second instance running at the same time exits
+    3 with ``parallel golangci-lint is running`` and an empty ``Issues`` array
+    — no findings, no timeout, no diagnostic in the JSON. lintro is routinely
+    run concurrently (a parallel test suite, an editor integration, two repos
+    at once), and its own per-module loop is sequential, so the lock buys
+    nothing and only turns concurrency into silently missing findings (#2391).
+
     Args:
         fix: Whether to include the ``--fix`` flag.
 
@@ -148,6 +157,7 @@ def _build_golangci_lint_command(fix: bool = False) -> list[str]:
         "--output.json.path",
         "stdout",
         "--show-stats=false",
+        "--allow-parallel-runners",
     ]
     if fix:
         cmd.append("--fix")

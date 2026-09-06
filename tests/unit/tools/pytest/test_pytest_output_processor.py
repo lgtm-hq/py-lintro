@@ -74,6 +74,7 @@ def test_pytest_output_processor_all_attribute() -> None:
     from lintro.tools.pytest import pytest_output_processor
 
     expected = {
+        "FAILURE_SECTION_MAX_CHARS",
         "PYTEST_FLAKY_FAILURE_RATE",
         "PYTEST_FLAKY_MIN_RUNS",
         "PYTEST_SLOW_TEST_THRESHOLD",
@@ -86,6 +87,7 @@ def test_pytest_output_processor_all_attribute() -> None:
         "parse_coverage_summary",
         "_extract_brief_message",
         "build_output_with_failures",
+        "extract_failure_section",
         "format_pytest_issue",
         "format_pytest_issues_table",
         "process_test_summary",

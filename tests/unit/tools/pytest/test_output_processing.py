@@ -6,8 +6,10 @@ from assertpy import assert_that
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
 from lintro.tools.pytest.pytest_output_processor import (
+    FAILURE_SECTION_MAX_CHARS,
     build_output_with_failures,
     detect_and_log_slow_tests,
+    extract_failure_section,
     parse_pytest_output_with_fallback,
     process_test_summary,
 )
@@ -114,6 +116,79 @@ def test_build_output_with_failures_includes_summary() -> None:
     assert_that(output).contains('"passed": 10')
 
 
+_RAW_PYTEST_OUTPUT = """collected 2 items
+
+=================================== FAILURES ===================================
+____________________ test_check_detects_violations _____________________
+E   AssertionError: Expected <['typecheck']> to contain <errcheck>
+raw output='Error: parallel golangci-lint is running'
+=========================== short test summary info ============================
+FAILED tests/integration/x.py::test_check_detects_violations
+========================= 1 failed, 1 passed in 6.25s ==========================
+"""
+
+
+def test_extract_failure_section_returns_pytest_block() -> None:
+    """The raw FAILURES block is returned without the trailing sections."""
+    section = extract_failure_section(_RAW_PYTEST_OUTPUT)
+    assert_that(section).contains("AssertionError")
+    assert_that(section).contains("parallel golangci-lint is running")
+    assert_that(section).does_not_contain("short test summary info")
+
+
+def test_extract_failure_section_empty_without_failures() -> None:
+    """Output with no FAILURES banner yields no section."""
+    assert_that(extract_failure_section("2 passed in 1.0s")).is_equal_to("")
+    assert_that(extract_failure_section(None)).is_equal_to("")
+
+
+def test_extract_failure_section_truncates_long_output() -> None:
+    """A mass failure cannot bury the summary it is appended to."""
+    body = "\n".join(f"E   line {i}" for i in range(20_000))
+    section = extract_failure_section(f"=== FAILURES ===\n{body}\n")
+    assert_that(len(section)).is_less_than_or_equal_to(FAILURE_SECTION_MAX_CHARS)
+    assert_that(section).contains("truncated by lintro")
+
+
+def test_build_output_with_failures_appends_raw_failure_section() -> None:
+    """A failing run carries pytest's own failure text, not just the table."""
+    summary_data = {
+        "passed": 1,
+        "failed": 1,
+        "skipped": 0,
+        "error": 0,
+        "duration": 6.25,
+        "total": 2,
+    }
+    issue = PytestIssue(
+        file="tests/integration/x.py",
+        line=1,
+        test_name="test_check_detects_violations",
+        test_status="FAILED",
+        message="AssertionError",
+    )
+    output = build_output_with_failures(
+        summary_data,
+        [issue],
+        _RAW_PYTEST_OUTPUT,
+    )
+    assert_that(output).contains("parallel golangci-lint is running")
+
+
+def test_build_output_with_failures_omits_section_when_all_pass() -> None:
+    """A green run gains no failure section."""
+    summary_data = {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "error": 0,
+        "duration": 1.0,
+        "total": 2,
+    }
+    output = build_output_with_failures(summary_data, [], _RAW_PYTEST_OUTPUT)
+    assert_that(output).does_not_contain("FAILURES")
+
+
 # =============================================================================
 # Tests for parse_pytest_output_with_fallback function
 # =============================================================================
@@ -156,3 +231,30 @@ def test_fallback_to_text_when_format_fails() -> None:
     )
     # Should fall back to text and find the failure
     assert_that(issues).is_length(1)
+
+
+def test_extract_failure_section_covers_error_only_runs() -> None:
+    """A collection/fixture error prints only ERRORS and is still reproduced."""
+    raw = (
+        "==================================== ERRORS ====================================\n"
+        "________________ ERROR at setup of test_check_detects_violations ________________\n"
+        "E   fixture 'missing' not found\n"
+        "=========================== short test summary info ============================\n"
+    )
+    section = extract_failure_section(raw)
+    assert_that(section).contains("fixture 'missing' not found")
+    assert_that(section).does_not_contain("short test summary info")
+
+
+def test_extract_failure_section_spans_errors_and_failures() -> None:
+    """When pytest prints both banners, both bodies are reproduced."""
+    raw = (
+        "=== ERRORS ===\n"
+        "E   setup exploded\n"
+        "=== FAILURES ===\n"
+        "E   assertion exploded\n"
+        "=== short test summary info ===\n"
+    )
+    section = extract_failure_section(raw)
+    assert_that(section).contains("setup exploded")
+    assert_that(section).contains("assertion exploded")
