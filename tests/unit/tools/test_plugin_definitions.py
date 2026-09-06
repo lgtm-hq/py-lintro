@@ -57,7 +57,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.YAMLLINT,
-        "lintro.tools.definitions.yamllint.YamllintPlugin",
+        "lintro.tools.yamllint.definition.YamllintPlugin",
         False,
         ToolType.LINTER,
         ["YAML", "linter"],

@@ -26,6 +26,11 @@ from lintro.tools.cargo_audit import definition as cargo_audit_package
 from lintro.tools.cargo_deny import definition as cargo_deny_package
 from lintro.tools.clippy import definition as clippy_package
 from lintro.tools.commitlint import definition as commitlint_package
+from lintro.tools.definitions import _ts_checker_base as ts_checker_base_shim
+from lintro.tools.definitions import _ts_checker_command as ts_checker_command_shim
+from lintro.tools.definitions import (
+    _ts_checker_execution as ts_checker_execution_shim,
+)
 from lintro.tools.definitions import actionlint as actionlint_shim
 from lintro.tools.definitions import astro_check as astro_check_shim
 from lintro.tools.definitions import bandit as bandit_shim
@@ -62,6 +67,13 @@ from lintro.tools.definitions import spectral as spectral_shim
 from lintro.tools.definitions import sqlfluff as sqlfluff_shim
 from lintro.tools.definitions import stylelint as stylelint_shim
 from lintro.tools.definitions import svelte_check as svelte_check_shim
+from lintro.tools.definitions import taplo as taplo_shim
+from lintro.tools.definitions import trufflehog as trufflehog_shim
+from lintro.tools.definitions import tsc as tsc_shim
+from lintro.tools.definitions import typos as typos_shim
+from lintro.tools.definitions import vale as vale_shim
+from lintro.tools.definitions import vue_tsc as vue_tsc_shim
+from lintro.tools.definitions import yamllint as yamllint_shim
 from lintro.tools.dotenv_linter import definition as dotenv_linter_package
 from lintro.tools.gitleaks import definition as gitleaks_package
 from lintro.tools.golangci_lint import definition as golangci_lint_package
@@ -89,6 +101,16 @@ from lintro.tools.spectral import definition as spectral_package
 from lintro.tools.sqlfluff import definition as sqlfluff_package
 from lintro.tools.stylelint import definition as stylelint_package
 from lintro.tools.svelte_check import definition as svelte_check_package
+from lintro.tools.taplo import definition as taplo_package
+from lintro.tools.trufflehog import definition as trufflehog_package
+from lintro.tools.ts_checker import base as ts_checker_base_package
+from lintro.tools.ts_checker import command as ts_checker_command_package
+from lintro.tools.ts_checker import execution as ts_checker_execution_package
+from lintro.tools.tsc import definition as tsc_package
+from lintro.tools.typos import definition as typos_package
+from lintro.tools.vale import definition as vale_package
+from lintro.tools.vue_tsc import definition as vue_tsc_package
+from lintro.tools.yamllint import definition as yamllint_package
 
 #: Repository root, so the child interpreter runs against this checkout.
 REPO_ROOT: Path = Path(__file__).resolve().parents[3]
@@ -146,6 +168,13 @@ MOVED_TOOLS: list[tuple[ModuleType, ModuleType, str, str]] = [
     (sqlfluff_shim, sqlfluff_package, "SqlfluffPlugin", "sqlfluff"),
     (stylelint_shim, stylelint_package, "StylelintPlugin", "stylelint"),
     (svelte_check_shim, svelte_check_package, "SvelteCheckPlugin", "svelte-check"),
+    (taplo_shim, taplo_package, "TaploPlugin", "taplo"),
+    (trufflehog_shim, trufflehog_package, "TrufflehogPlugin", "trufflehog"),
+    (tsc_shim, tsc_package, "TscPlugin", "tsc"),
+    (typos_shim, typos_package, "TyposPlugin", "typos"),
+    (vale_shim, vale_package, "ValePlugin", "vale"),
+    (vue_tsc_shim, vue_tsc_package, "VueTscPlugin", "vue-tsc"),
+    (yamllint_shim, yamllint_package, "YamllintPlugin", "yamllint"),
 ]
 
 #: Readable parametrisation ids, one per entry of :data:`MOVED_TOOLS`.
@@ -235,4 +264,44 @@ def test_oxlint_doctor_shim_re_exports_the_package_module() -> None:
     for attribute in oxlint_doctor_package.__all__:
         assert_that(getattr(oxlint_doctor_shim, attribute)).is_same_as(
             getattr(oxlint_doctor_package, attribute),
+        )
+
+
+#: ``(shim module, package module)`` for the helper modules that back the
+#: ``tsc``/``vue-tsc`` family. They register no tool of their own, so they get
+#: their own guard rather than a :data:`MOVED_TOOLS` entry.
+TS_CHECKER_HELPERS: list[tuple[ModuleType, ModuleType]] = [
+    (ts_checker_base_shim, ts_checker_base_package),
+    (ts_checker_command_shim, ts_checker_command_package),
+    (ts_checker_execution_shim, ts_checker_execution_package),
+]
+
+#: Readable parametrisation ids, one per entry of :data:`TS_CHECKER_HELPERS`.
+TS_CHECKER_HELPER_IDS: list[str] = ["base", "command", "execution"]
+
+
+@pytest.mark.parametrize(
+    ("shim", "package"),
+    TS_CHECKER_HELPERS,
+    ids=TS_CHECKER_HELPER_IDS,
+)
+def test_ts_checker_shim_re_exports_the_package_module(
+    shim: ModuleType,
+    package: ModuleType,
+) -> None:
+    """The helper shim exposes the package's objects, not copies of them.
+
+    The TypeScript-checker helpers register no tool: ``tsc`` and ``vue-tsc``
+    subclass and call them. The two ``__all__`` lists are compared as well as
+    the objects behind them, so a shim can neither drop a name nor grow one the
+    helper does not declare.
+
+    Args:
+        shim: Module under ``lintro.tools.definitions`` kept for back-compat.
+        package: Module inside :mod:`lintro.tools.ts_checker`.
+    """
+    assert_that(list(shim.__all__)).is_equal_to(list(package.__all__))
+    for attribute in package.__all__:
+        assert_that(getattr(shim, attribute)).is_same_as(
+            getattr(package, attribute),
         )

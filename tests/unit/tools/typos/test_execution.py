@@ -11,7 +11,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.typos import TyposPlugin
+from lintro.tools.typos.definition import TyposPlugin
 
 
 def _typo_line(path: str, typo: str, correction: str) -> str:
@@ -426,7 +426,7 @@ def test_large_file_lists_are_split_into_batches(
 
     # Force one path per batch so the batching loop is actually exercised.
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_record),
     ):
         result = typos_plugin.check(targets, {})
@@ -456,7 +456,7 @@ def test_check_surfaces_a_failed_batch_alongside_findings(
         return _proc(stdout=_typo_line("aaa_good.txt", "teh", "the"), returncode=2)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.check([str(good), str(bad)], {})
@@ -490,7 +490,7 @@ def test_fix_does_not_write_when_one_detect_batch_fails(
         return _proc(stdout=_typo_line("aaa_good.txt", "teh", "the"), returncode=2)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.fix([str(good), str(bad)], {})
@@ -525,7 +525,7 @@ def test_fix_reports_a_failed_write_batch(
         return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.fix([str(good), str(bad)], {})
@@ -640,7 +640,7 @@ def test_check_timeout_keeps_findings_from_earlier_batches(
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.check(targets, {})
@@ -674,7 +674,7 @@ def test_fix_write_pass_stops_after_a_failing_batch(
         return _proc(returncode=1, stderr="error: read-only file system\n")
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.fix(targets, {})
@@ -706,7 +706,7 @@ def test_fix_write_pass_timeout_flags_possible_disk_changes(
         return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.fix(targets, {})
@@ -737,7 +737,7 @@ def test_fix_failed_detect_keeps_sibling_findings(
         return _proc(stdout=_typo_line(name, "teh", "the"), returncode=2)
 
     with (
-        patch("lintro.tools.definitions.typos.chunk_paths", _one_file_per_batch),
+        patch("lintro.tools.typos.definition.chunk_paths", _one_file_per_batch),
         patch.object(typos_plugin, "_run_subprocess_result", side_effect=_respond),
     ):
         result = typos_plugin.fix(targets, {})

@@ -9,7 +9,7 @@ from assertpy import assert_that
 
 from lintro.parsers.trufflehog.trufflehog_issue import TrufflehogIssue
 from lintro.plugins.base import ExecutionContext
-from lintro.tools.definitions.trufflehog import TrufflehogPlugin
+from lintro.tools.trufflehog.definition import TrufflehogPlugin
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
     run_check_with_stderr,

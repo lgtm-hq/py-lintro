@@ -12,7 +12,7 @@ from assertpy import assert_that
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.vale.vale_issue import ValeIssue
-from lintro.tools.definitions.vale import ValePlugin
+from lintro.tools.vale.definition import ValePlugin
 from tests.test_samples_helpers import copy_sample
 
 from .conftest import make_ctx, vale_output

@@ -86,6 +86,14 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/sqlfluff",
     "lintro/tools/stylelint",
     "lintro/tools/svelte_check",
+    "lintro/tools/taplo",
+    "lintro/tools/trufflehog",
+    "lintro/tools/ts_checker",
+    "lintro/tools/tsc",
+    "lintro/tools/typos",
+    "lintro/tools/vale",
+    "lintro/tools/vue_tsc",
+    "lintro/tools/yamllint",
 )
 
 #: Ceiling on the baseline, recorded when the gate landed and deliberately not

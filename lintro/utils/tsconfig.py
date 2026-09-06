@@ -8,8 +8,8 @@ Provides utilities for:
 - Partitioning discovered files across sub-projects ("deepest tsconfig wins")
 - Creating temporary tsconfig.json files (shared by tsc and vue-tsc plugins)
 
-These utilities are consumed by :mod:`lintro.tools.definitions.tsc` and
-:mod:`lintro.tools.definitions.vue_tsc`.
+These utilities are consumed by :mod:`lintro.tools.tsc.definition` and
+:mod:`lintro.tools.vue_tsc.definition`.
 """
 
 from __future__ import annotations

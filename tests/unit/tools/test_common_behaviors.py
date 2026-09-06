@@ -93,7 +93,7 @@ TOOLS_THAT_CANNOT_FIX = [
         id="hadolint",
     ),
     pytest.param(
-        "lintro.tools.definitions.yamllint.YamllintPlugin",
+        "lintro.tools.yamllint.definition.YamllintPlugin",
         "cannot automatically fix",
         id="yamllint",
     ),
