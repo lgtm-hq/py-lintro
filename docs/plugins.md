@@ -355,10 +355,11 @@ Two families of tools cannot run from the directory lintro discovered their file
 requirement rather than reimplementing it.
 
 **Cargo workspaces.** `cargo clippy`, `cargo fmt` and `cargo deny` must be launched from
-a directory that owns a `Cargo.toml`, but lintro hands the plugin `*.rs` paths.
-`find_cargo_root()` walks every path upward to the nearest manifest and reconciles the
-results: one package wins outright, several fall back to their common ancestor and only
-if that ancestor is itself a workspace root.
+a directory that owns a `Cargo.toml`, but lintro hands the plugin whatever its file
+patterns matched — `*.rs` for clippy and rustfmt, `Cargo.toml` and `deny.toml` for
+cargo-deny. `find_cargo_root()` walks every path upward to the nearest manifest and
+reconciles the results: one package wins outright, several fall back to their common
+ancestor and only if that ancestor owns a `Cargo.toml` of its own.
 
 ```python
 from lintro.tools.core.cargo import find_cargo_root

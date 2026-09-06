@@ -1,10 +1,10 @@
 """Shared Cargo workspace discovery for Rust tool definitions.
 
 ``cargo clippy``, ``cargo fmt`` and ``cargo deny`` all have to be invoked from a
-directory that owns a ``Cargo.toml``; the paths lintro hands a plugin are the
-discovered ``*.rs`` files instead. Every Rust definition therefore walked each
-path upward to the nearest manifest and reconciled the results into a single
-working directory. This module holds that walk once.
+directory that owns a ``Cargo.toml``; the paths lintro hands a plugin are
+whatever its file patterns matched instead. Every Rust definition therefore
+walked each path upward to the nearest manifest and reconciled the results into
+a single working directory. This module holds that walk once.
 
 Example:
     >>> from lintro.tools.core.cargo import find_cargo_root
@@ -55,8 +55,9 @@ def find_cargo_root(
 
     Each path is walked upward to the nearest ``Cargo.toml``. When the paths
     resolve to a single package that package's directory is returned; when they
-    straddle several packages the common ancestor is used, but only if it too
-    owns a ``Cargo.toml`` (that is, only if it is a real workspace root).
+    straddle several packages the common ancestor is used, but only if it owns
+    a ``Cargo.toml`` of its own. The manifest's contents are not read, so an
+    ancestor package works as well as an explicit ``[workspace]``.
 
     Args:
         paths: File or directory paths to search upward from.

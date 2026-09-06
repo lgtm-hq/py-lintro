@@ -93,6 +93,33 @@ def test_check_no_astro_config_proceeds_with_defaults(
     assert_that(kwargs["cmd"]).contains("check")
 
 
+def test_check_skips_when_node_modules_is_missing(
+    astro_check_plugin: AstroCheckPlugin,
+    tmp_path: Path,
+) -> None:
+    """The shared node_modules gate is wired into ``check`` before the command.
+
+    astro-check ships inside the project it lints, so an uninstalled project
+    is a skip rather than a failure — and the subprocess must never be reached.
+
+    Args:
+        astro_check_plugin: The AstroCheckPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    astro_file = tmp_path / "test.astro"
+    astro_file.write_text("---\nconst message = 'Hello';\n---\n<h1>{message}</h1>")
+    (tmp_path / "package.json").write_text('{"name": "demo"}\n')
+
+    with patch.object(astro_check_plugin, "_run_subprocess") as mock_run:
+        result = astro_check_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.skipped).is_true()
+    assert_that(result.skip_reason).is_equal_to("node_modules not found")
+    assert_that(result.output).contains("--auto-install")
+    mock_run.assert_not_called()
+
+
 def test_check_with_mocked_subprocess_success(
     astro_check_plugin: AstroCheckPlugin,
     tmp_path: Path,

@@ -83,6 +83,24 @@ def test_several_packages_resolve_to_their_workspace_root(tmp_path: Path) -> Non
     assert_that(resolved).is_equal_to(tmp_path.resolve())
 
 
+def test_several_packages_resolve_to_an_ancestor_package_too(tmp_path: Path) -> None:
+    """The ancestor only has to own a manifest, not declare a ``[workspace]``.
+
+    The helper never reads the manifest, so a plain parent ``[package]`` is as
+    good a launch directory as an explicit workspace root.
+
+    Args:
+        tmp_path: Temporary directory used as the parent package.
+    """
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
 def test_several_packages_without_a_workspace_resolve_to_nothing(
     tmp_path: Path,
 ) -> None:
