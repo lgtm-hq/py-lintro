@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
 
 from lintro.enums.severity_level import SeverityLevel
 from lintro.parsers.import_linter.import_linter_issue import ImportLinterIssue
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("lint-imports") is None,
-    reason="import-linter (lint-imports) not installed",
+# import-linter ships its CLI as ``lint-imports``, the same binary the plugin
+# invokes; the version floor is looked up under the lintro tool name.
+pytestmark = require_tool(
+    "lint-imports",
+    label="import-linter",
+    pin="import_linter",
 )
 
 
