@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+from lintro.ai.review.vocab import SHARED_MANIFEST_NAMES
+
 _NON_EXECUTABLE_WORKFLOW_SUFFIXES = frozenset(
     {".cfg", ".ini", ".json", ".md", ".rst", ".toml", ".txt", ".yaml", ".yml"},
 )
@@ -17,17 +19,9 @@ _ACTION_BUILD_ARTIFACT_DIRS = frozenset(
 )
 _ACTION_SOURCE_LAYOUT_DIRS = frozenset({"source", "src"})
 # Manifests that define a local action's runtime dependencies or entrypoint, so
-# changes to them are relevant to the workflow that invokes the action.
-_ACTION_MANIFEST_NAMES = frozenset(
-    {
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "bun.lock",
-        "bun.lockb",
-        "yarn.lock",
-    },
-)
+# changes to them are relevant to the workflow that invokes the action. Sourced
+# from the shared vocabulary in ``lintro.ai.review.vocab`` (issue #1973).
+_ACTION_MANIFEST_NAMES: frozenset[str] = SHARED_MANIFEST_NAMES
 
 
 def _resolve_github_action_root(*, path: PurePosixPath) -> PurePosixPath | None:
