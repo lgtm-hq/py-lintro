@@ -416,7 +416,9 @@ exclude = [
 # baseline, so the ratchet is a count: `duplicate_code_baseline` is the number
 # of R0801 blocks present when the gate landed, and the run fails when the
 # count is higher. Lower this number in the PR that removes duplication; never
-# raise it. #2311 is done when it reaches 0. See
+# raise it, and lower `MAX_ALLOWED_DUPLICATE_CODE_BASELINE` in
+# tests/unit/test_duplicate_code_baseline.py in the same commit — the two are
+# compared exactly. #2311 is done when it reaches 0. See
 # lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = ["lintro/tools/definitions"]

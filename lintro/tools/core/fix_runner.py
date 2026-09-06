@@ -92,6 +92,18 @@ class PerFileFixPolicy:
     summarize: bool = True
     label: str = "Fixing files"
 
+    def __post_init__(self) -> None:
+        """Reject a policy that verifies without a message for a failed verify.
+
+        Raises:
+            ValueError: If verification is enabled with an empty
+                ``verify_failure_message``, which would let a broken
+                verification run read as a clean fix.
+        """
+        if self.verify is not VerifyMode.NEVER and not self.verify_failure_message:
+            msg = "verify_failure_message is required when verify is not NEVER"
+            raise ValueError(msg)
+
 
 @dataclass
 class _FixTally:
@@ -477,7 +489,7 @@ def run_per_file_fix(
             else summary
         )
     else:
-        final_output = result.build_output(timeout=ctx.timeout)
+        final_output = per_file_output or None
 
     logger.debug(
         f"[{type(plugin).__name__}] Fix complete: initial={initial_total}, "

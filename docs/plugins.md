@@ -244,9 +244,10 @@ def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
     )
 ```
 
-`VerifyMode` picks how surviving issues are counted: `NEVER` trusts the fix command's
-exit status, `AFTER_SUCCESS` re-checks only after a clean fix, and `ALWAYS` re-checks
-even when the fix exits non-zero (for tools that apply fixes partially).
+`VerifyMode` picks how surviving issues are counted: `NEVER` skips re-checking entirely
+and trusts the fix command's exit status, `AFTER_SUCCESS` re-checks only after a clean
+fix, and `ALWAYS` re-checks even when the fix exits non-zero (for tools that apply fixes
+partially).
 
 ### Execution Isolation (important for correctness)
 
