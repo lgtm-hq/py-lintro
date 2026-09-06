@@ -58,6 +58,7 @@ from lintro.ai.review.lifecycle.comments import (
 )
 from lintro.ai.review.lifecycle.decision import ExistingComment
 from lintro.ai.review.lifecycle.round import regression_notes, run_thread_lifecycle
+from lintro.ai.review.lifecycle.state import resolve_prior_state
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.inline_post_request import InlinePostRequest
@@ -153,7 +154,7 @@ def post_review_to_github(
         return False
 
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
-    prior_state = _resolve_prior_state(
+    prior_state = resolve_prior_state(
         prior_state=settings.prior_state,
         sticky_state=sticky_state,
     )
@@ -296,28 +297,6 @@ def post_review_to_github(
     if settings.captured_comment_ids is not None and comment_ids:
         settings.captured_comment_ids.update(comment_ids)
     return success
-
-
-def _resolve_prior_state(
-    *,
-    prior_state: ReviewState | None,
-    sticky_state: ReviewState,
-) -> ReviewState:
-    """Pick the state this round continues from.
-
-    Args:
-        prior_state: State already loaded for this invocation, if any.
-        sticky_state: State recovered from the sticky comment's own body.
-
-    Returns:
-        ReviewState: The loaded state when it carries anything, otherwise
-        whatever the comment itself still holds.
-    """
-    if prior_state is None or not (
-        prior_state.coverage or prior_state.runs or prior_state.findings
-    ):
-        return sticky_state
-    return prior_state
 
 
 def _post_round_findings(
