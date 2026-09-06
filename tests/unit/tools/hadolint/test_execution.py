@@ -10,7 +10,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
 from lintro.parsers.hadolint.hadolint_issue import HadolintIssue
-from lintro.tools.definitions.hadolint import HadolintPlugin
+from lintro.tools.hadolint.definition import HadolintPlugin
 from tests.test_samples_helpers import copy_sample
 
 # =============================================================================

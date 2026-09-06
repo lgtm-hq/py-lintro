@@ -21,7 +21,7 @@ TOOL_SPECS = [
     (ToolName.RUFF, "lintro.tools.ruff.definition", "RuffPlugin", 30, 85, True),
     (ToolName.BLACK, "lintro.tools.black.definition", "BlackPlugin", 30, 90, True),
     (ToolName.CLIPPY, "lintro.tools.clippy.definition", "ClippyPlugin", 120, 85, True),
-    (ToolName.MYPY, "lintro.tools.definitions.mypy", "MypyPlugin", 60, 82, False),
+    (ToolName.MYPY, "lintro.tools.mypy.definition", "MypyPlugin", 60, 82, False),
     (
         ToolName.YAMLLINT,
         "lintro.tools.definitions.yamllint",
@@ -32,7 +32,7 @@ TOOL_SPECS = [
     ),
     (
         ToolName.HADOLINT,
-        "lintro.tools.definitions.hadolint",
+        "lintro.tools.hadolint.definition",
         "HadolintPlugin",
         30,
         50,
@@ -48,7 +48,7 @@ TOOL_SPECS = [
     ),
     (
         ToolName.MARKDOWNLINT,
-        "lintro.tools.definitions.markdownlint",
+        "lintro.tools.markdownlint.definition",
         "MarkdownlintPlugin",
         30,
         30,

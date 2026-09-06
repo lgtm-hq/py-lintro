@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 # Tests for valid options

@@ -12,7 +12,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxfmt.oxfmt_issue import OxfmtIssue
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.oxfmt import OxfmtPlugin
+    from lintro.tools.oxfmt.definition import OxfmtPlugin
 
 
 def test_check_returns_success_when_no_issues(

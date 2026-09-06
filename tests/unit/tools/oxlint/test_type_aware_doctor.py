@@ -9,15 +9,15 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_status import ToolStatus
-from lintro.tools.definitions import oxlint_doctor
-from lintro.tools.definitions.oxlint_doctor import (
+from lintro.tools.oxlint import doctor as oxlint_doctor
+from lintro.tools.oxlint.doctor import (
     TSGOLINT_INSTALL_HINT,
     OxlintCheckResult,
     check_oxlint_type_aware,
     oxlintrc_type_aware_enabled,
 )
 
-MODULE = "lintro.tools.definitions.oxlint_doctor"
+MODULE = "lintro.tools.oxlint.doctor"
 
 
 def _status(results: list[OxlintCheckResult], name: str) -> ToolStatus:

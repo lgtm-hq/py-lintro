@@ -15,7 +15,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.command_builders import pinned_npm_spec
-from lintro.tools.definitions.html_validate import (
+from lintro.tools.html_validate.definition import (
     HtmlValidatePlugin,
     contains_glob_syntax,
 )

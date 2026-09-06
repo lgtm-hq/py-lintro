@@ -16,8 +16,8 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins import execution_preparation
-from lintro.tools.definitions.oxlint import OxlintPlugin
-from lintro.tools.definitions.prettier import PrettierPlugin
+from lintro.tools.oxlint.definition import OxlintPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
 
 if TYPE_CHECKING:
     from pathlib import Path

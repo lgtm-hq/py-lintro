@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.import_linter import (
+from lintro.tools.import_linter.definition import (
     ImportLinterPlugin,
     find_import_linter_config,
 )

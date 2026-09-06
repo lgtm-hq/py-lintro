@@ -40,7 +40,7 @@ from lintro.tools.core.tool_registry import (
     ManifestRegistry,
 )
 from lintro.tools.core.update_channels import format_advisory_line
-from lintro.tools.definitions.oxlint_doctor import (
+from lintro.tools.oxlint.doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
 )

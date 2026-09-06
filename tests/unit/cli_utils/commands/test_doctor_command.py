@@ -932,7 +932,7 @@ def test_doctor_tools_filter_known_tool() -> None:
 
 def test_doctor_oxlint_type_aware_failure_exit_1() -> None:
     """A failing oxlint type-aware check causes exit 1 and shows the hint."""
-    from lintro.tools.definitions.oxlint_doctor import OxlintCheckResult
+    from lintro.tools.oxlint.doctor import OxlintCheckResult
 
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()

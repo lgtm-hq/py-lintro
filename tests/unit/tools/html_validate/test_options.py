@@ -5,7 +5,7 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.html_validate import HtmlValidatePlugin
+from lintro.tools.html_validate.definition import HtmlValidatePlugin
 
 
 def test_definition_metadata(html_validate_plugin: HtmlValidatePlugin) -> None:

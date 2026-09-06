@@ -20,11 +20,6 @@ from lintro.tools.bandit.definition import BanditPlugin
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
 from lintro.tools.cargo_deny.definition import CargoDenyPlugin
 from lintro.tools.clippy.definition import ClippyPlugin
-from lintro.tools.definitions.hadolint import HadolintPlugin
-from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
-from lintro.tools.definitions.mypy import MypyPlugin
-from lintro.tools.definitions.osv_scanner import OsvScannerPlugin
-from lintro.tools.definitions.oxlint import OxlintPlugin
 from lintro.tools.definitions.pydoclint import PydoclintPlugin
 from lintro.tools.definitions.semgrep import SemgrepPlugin
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
@@ -33,6 +28,11 @@ from lintro.tools.definitions.taplo import TaploPlugin
 from lintro.tools.definitions.tsc import TscPlugin
 from lintro.tools.definitions.vue_tsc import VueTscPlugin
 from lintro.tools.definitions.yamllint import YamllintPlugin
+from lintro.tools.hadolint.definition import HadolintPlugin
+from lintro.tools.markdownlint.definition import MarkdownlintPlugin
+from lintro.tools.mypy.definition import MypyPlugin
+from lintro.tools.osv_scanner.definition import OsvScannerPlugin
+from lintro.tools.oxlint.definition import OxlintPlugin
 from lintro.tools.ruff.definition import RuffPlugin
 
 # =============================================================================

@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.oxfmt import (
+from lintro.tools.oxfmt.definition import (
     OXFMT_DEFAULT_PRIORITY,
     OXFMT_DEFAULT_TIMEOUT,
     OxfmtPlugin,

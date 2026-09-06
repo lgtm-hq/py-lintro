@@ -20,7 +20,7 @@ from lintro.ai.provider_enum import AIProvider
 from lintro.config.lintro_config import LintroConfig
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.registry import ToolRegistry
-from lintro.tools.definitions.idiom_review import IdiomReviewPlugin
+from lintro.tools.idiom_review.definition import IdiomReviewPlugin
 
 
 def _write_py(tmp_path: Path) -> str:

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.core.command_builders import pinned_npm_spec
-from lintro.tools.definitions.markdownlint import (
+from lintro.tools.markdownlint.definition import (
     MARKDOWNLINT_DEFAULT_TIMEOUT,
     MarkdownlintPlugin,
 )

@@ -26,8 +26,8 @@ from lintro.tools.core.batch_runner import (
     BatchSuccess,
     batch_check_result,
 )
-from lintro.tools.definitions.oxfmt import OxfmtPlugin
-from lintro.tools.definitions.oxlint import OxlintPlugin
+from lintro.tools.oxfmt.definition import OxfmtPlugin
+from lintro.tools.oxlint.definition import OxlintPlugin
 
 #: One oxfmt "needs formatting" line, in the ``--list-different`` format.
 OXFMT_DIFFERENT: str = "app.ts\n"

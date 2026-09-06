@@ -21,7 +21,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.pip_audit import (
+from lintro.tools.pip_audit.definition import (
     PIP_AUDIT_DEFAULT_TIMEOUT,
     PipAuditPlugin,
     _build_targets,
