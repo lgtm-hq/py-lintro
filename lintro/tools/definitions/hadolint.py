@@ -7,7 +7,6 @@ It also uses ShellCheck to lint the Bash code inside RUN instructions.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,9 +23,9 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.hadolint.hadolint_parser import parse_hadolint_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.check_runner import run_per_file_check
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -197,45 +196,6 @@ class HadolintPlugin(BaseToolPlugin):
 
         return cmd
 
-    def _process_single_file(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileProcessingResult:
-        """Process a single Dockerfile with hadolint.
-
-        Args:
-            file_path: Path to the Dockerfile to process.
-            timeout: Timeout in seconds for the hadolint command.
-
-        Returns:
-            FileProcessingResult with processing outcome.
-        """
-        cmd = self._build_command() + [str(file_path)]
-        try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
-            issues = parse_hadolint_output(output=output)
-            return FileProcessingResult(
-                success=success,
-                output=output,
-                issues=issues,
-            )
-        except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
-                timed_out=True,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
-            )
-
     def doc_url(self, code: str) -> str | None:
         """Return documentation URL for the given code.
 
@@ -271,20 +231,11 @@ class HadolintPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Process files using the shared file processor
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=lambda f: self._process_single_file(f, ctx.timeout),
-            timeout=ctx.timeout,
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success and result.total_issues == 0,
-            output=result.build_output(timeout=ctx.timeout),
-            issues_count=result.total_issues,
-            timed_out=result.timed_out,
-            issues=result.all_issues,
+        return run_per_file_check(
+            ctx,
+            plugin=self,
+            command=lambda f: [*self._build_command(), str(f)],
+            parse=lambda output: parse_hadolint_output(output=output),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

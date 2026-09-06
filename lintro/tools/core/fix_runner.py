@@ -32,6 +32,7 @@ from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
+from lintro.tools.core.check_runner import check_one_file
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
@@ -148,6 +149,9 @@ def _run_check_step(
 ) -> FileProcessingResult:
     """Run one check-style invocation and classify its outcome.
 
+    Delegates to the check runner so the fix loop and the check loop classify
+    a timeout, an OS error and a non-zero exit identically.
+
     Args:
         plugin: Plugin whose subprocess helper runs the command.
         cmd: Fully built command line.
@@ -159,33 +163,13 @@ def _run_check_step(
     Returns:
         FileProcessingResult describing the check outcome.
     """
-    try:
-        success, output = plugin._run_subprocess(cmd=cmd, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return FileProcessingResult(
-            success=False,
-            output="",
-            issues=[],
-            skipped=True,
-            timed_out=True,
-        )
-    except (OSError, ValueError, RuntimeError) as exc:
-        return FileProcessingResult(
-            success=False,
-            output="",
-            issues=[],
-            error=str(exc),
-        )
-
-    issues = list(parse(output))
-    if not success and not issues:
-        return FileProcessingResult(
-            success=False,
-            output=output,
-            issues=[],
-            error=failure_message,
-        )
-    return FileProcessingResult(success=success, output=output, issues=issues)
+    return check_one_file(
+        plugin=plugin,
+        cmd=cmd,
+        parse=parse,
+        timeout=timeout,
+        failure_message=failure_message,
+    )
 
 
 def _failed_fix(

@@ -210,6 +210,36 @@ The `BaseToolPlugin` base class provides useful methods:
 - `_get_executable_command(tool_name)` - Get command with proper path
 - `_discover_files(paths, patterns)` - Find files matching patterns
 
+### Per-file check runs
+
+Tools that lint one file at a time should not write their own loop either. Call
+`lintro.tools.core.check_runner.run_per_file_check()` from `check()` with the command
+builder and the parser; it runs the command per file, turns a timeout or an OS error
+into a per-file failure, and aggregates every issue into a single `ToolResult`.
+
+```python
+from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
+
+
+def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options)
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_per_file_check(
+        ctx,
+        plugin=self,
+        command=lambda f: [*self._build_command(), str(f)],
+        parse=lambda output: parse_mytool_output(output=output),
+    )
+```
+
+`PerFileCheckPolicy` is optional and carries the only two classification choices the
+runner cannot infer: `issues_imply_failure` marks a file unsuccessful when the parser
+found issues even though the command exited zero, and `failure_message` records an
+execution error when the command exits non-zero _without_ producing a parseable issue
+(leave it `None` when the tool's exit status is a reliable verdict on its own). `label`
+renames the progress bar.
+
 ### Per-file fix runs
 
 Tools that fix one file at a time should not write their own loop. Call
@@ -248,6 +278,13 @@ def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
 and trusts the fix command's exit status, `AFTER_SUCCESS` re-checks only after a clean
 fix, and `ALWAYS` re-checks even when the fix exits non-zero (for tools that apply fixes
 partially).
+
+Both runners classify a single check-style invocation through the same
+`check_runner.check_one_file()` step, so a timeout, an execution error and a parser
+failure are reported identically whether the tool is checking or fixing. A non-zero exit
+that produced no parseable issue is the one outcome the two sides can differ on: it
+becomes an execution error only when a message is configured, and `failure_message` is
+optional on the check side while `check_failure_message` is mandatory on the fix side.
 
 ### Execution Isolation (important for correctness)
 

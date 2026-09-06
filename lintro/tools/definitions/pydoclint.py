@@ -10,7 +10,6 @@ See docs/tool-analysis/pydoclint-analysis.md for recommended settings.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -18,9 +17,9 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pydoclint.pydoclint_parser import parse_pydoclint_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
 
 # Constants for Pydoclint configuration
 PYDOCLINT_DEFAULT_TIMEOUT: int = 30
@@ -74,45 +73,6 @@ class PydoclintPlugin(BaseToolPlugin):
 
         return cmd
 
-    def _process_single_file(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileProcessingResult:
-        """Process a single Python file with pydoclint.
-
-        Args:
-            file_path: Path to the Python file to process.
-            timeout: Timeout in seconds for the pydoclint command.
-
-        Returns:
-            FileProcessingResult with processing outcome.
-        """
-        cmd = self._build_command() + [str(file_path)]
-        try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
-            issues = parse_pydoclint_output(output=output)
-            return FileProcessingResult(
-                success=success and len(issues) == 0,
-                output=output,
-                issues=issues,
-            )
-        except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
-                timed_out=True,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
-            )
-
     def doc_url(self, code: str) -> str | None:
         """Return pydoclint documentation URL.
 
@@ -142,19 +102,12 @@ class PydoclintPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=lambda f: self._process_single_file(f, ctx.timeout),
-            timeout=ctx.timeout,
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success and result.total_issues == 0,
-            output=result.build_output(timeout=ctx.timeout),
-            issues_count=result.total_issues,
-            timed_out=result.timed_out,
-            issues=result.all_issues,
+        return run_per_file_check(
+            ctx,
+            plugin=self,
+            command=lambda f: [*self._build_command(), str(f)],
+            parse=lambda output: parse_pydoclint_output(output=output),
+            policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

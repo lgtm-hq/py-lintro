@@ -411,12 +411,13 @@ exclude = [
 # of R0801 blocks present when the gate landed, and the run fails when the
 # count is higher. Lower this number in the PR that removes duplication; never
 # raise it, and lower `MAX_ALLOWED_DUPLICATE_CODE_BASELINE` in
-# tests/unit/test_duplicate_code_baseline.py in the same commit — the two are
-# compared exactly. #2311 is done when it reaches 0. See
-# lintro/utils/duplicate_code.py.
+# tests/unit/test_duplicate_code_baseline.py in the same commit — that test
+# asserts this value is `<=` the ceiling recorded there, so leaving the ceiling
+# behind would silently allow the baseline to climb back. #2311 is done when it
+# reaches 0. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = ["lintro/tools/definitions"]
-duplicate_code_baseline = 29
+duplicate_code_baseline = 17
 
 [tool.lintro.ruff]
 
@@ -615,11 +616,13 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 146 edges owned by #2311
+  # 142 edges owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
   "lintro.tools -> lintro.plugins",                                                 # owned by #2311
+  "lintro.tools.core.check_runner -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.core.check_runner -> lintro.plugins.file_processor",                # owned by #2311
   "lintro.tools.core.command_builders -> lintro.plugins.subprocess_executor",       # owned by #2311
   "lintro.tools.core.fix_runner -> lintro.plugins.base",                            # owned by #2311
   "lintro.tools.core.fix_runner -> lintro.plugins.file_processor",                  # owned by #2311
@@ -658,7 +661,6 @@ ignore_imports = [
   "lintro.tools.definitions.commitlint -> lintro.plugins.protocol",                 # owned by #2311
   "lintro.tools.definitions.commitlint -> lintro.plugins.registry",                 # owned by #2311
   "lintro.tools.definitions.dotenv_linter -> lintro.plugins.base",                  # owned by #2311
-  "lintro.tools.definitions.dotenv_linter -> lintro.plugins.file_processor",        # owned by #2311
   "lintro.tools.definitions.dotenv_linter -> lintro.plugins.protocol",              # owned by #2311
   "lintro.tools.definitions.dotenv_linter -> lintro.plugins.registry",              # owned by #2311
   "lintro.tools.definitions.gitleaks -> lintro.plugins.base",                       # owned by #2311
@@ -668,7 +670,6 @@ ignore_imports = [
   "lintro.tools.definitions.golangci_lint -> lintro.plugins.protocol",              # owned by #2311
   "lintro.tools.definitions.golangci_lint -> lintro.plugins.registry",              # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.hadolint -> lintro.plugins.file_processor",             # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.hadolint -> lintro.plugins.registry",                   # owned by #2311
   "lintro.tools.definitions.html_validate -> lintro.plugins.base",                  # owned by #2311
@@ -704,7 +705,6 @@ ignore_imports = [
   "lintro.tools.definitions.prettier -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.prettier -> lintro.plugins.registry",                   # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.base",                      # owned by #2311
-  "lintro.tools.definitions.pydoclint -> lintro.plugins.file_processor",            # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.protocol",                  # owned by #2311
   "lintro.tools.definitions.pydoclint -> lintro.plugins.registry",                  # owned by #2311
   "lintro.tools.definitions.pylint -> lintro.plugins.base",                         # owned by #2311
@@ -723,18 +723,15 @@ ignore_imports = [
   "lintro.tools.definitions.semgrep -> lintro.plugins.protocol",                    # owned by #2311
   "lintro.tools.definitions.semgrep -> lintro.plugins.registry",                    # owned by #2311
   "lintro.tools.definitions.shellcheck -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.shellcheck -> lintro.plugins.file_processor",           # owned by #2311
   "lintro.tools.definitions.shellcheck -> lintro.plugins.protocol",                 # owned by #2311
   "lintro.tools.definitions.shellcheck -> lintro.plugins.registry",                 # owned by #2311
   "lintro.tools.definitions.shfmt -> lintro.plugins.base",                          # owned by #2311
-  "lintro.tools.definitions.shfmt -> lintro.plugins.file_processor",                # owned by #2311
   "lintro.tools.definitions.shfmt -> lintro.plugins.protocol",                      # owned by #2311
   "lintro.tools.definitions.shfmt -> lintro.plugins.registry",                      # owned by #2311
   "lintro.tools.definitions.spectral -> lintro.plugins.base",                       # owned by #2311
   "lintro.tools.definitions.spectral -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.spectral -> lintro.plugins.registry",                   # owned by #2311
   "lintro.tools.definitions.sqlfluff -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.sqlfluff -> lintro.plugins.file_processor",             # owned by #2311
   "lintro.tools.definitions.sqlfluff -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.sqlfluff -> lintro.plugins.registry",                   # owned by #2311
   "lintro.tools.definitions.stylelint -> lintro.plugins.base",                      # owned by #2311

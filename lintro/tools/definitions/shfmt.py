@@ -7,7 +7,6 @@ issues in diff mode.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,9 +16,9 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.shfmt.shfmt_parser import parse_shfmt_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.check_runner import run_per_file_check
 from lintro.tools.core.fix_runner import PerFileFixPolicy, run_per_file_fix
 from lintro.tools.core.option_validators import (
     filter_none_options,
@@ -163,47 +162,6 @@ class ShfmtPlugin(BaseToolPlugin):
 
         return args
 
-    def _process_single_file(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileProcessingResult:
-        """Process a single file in check mode.
-
-        Args:
-            file_path: Path to the shell script to check.
-            timeout: Timeout in seconds for the shfmt command.
-
-        Returns:
-            FileProcessingResult with processing outcome.
-        """
-        try:
-            success, output = self._run_subprocess(
-                cmd=self._diff_command(file_path),
-                timeout=timeout,
-            )
-            issues = parse_shfmt_output(output=output)
-            return FileProcessingResult(
-                success=success,
-                output=output,
-                issues=issues,
-            )
-        except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
-                timed_out=True,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
-            )
-
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with shfmt.
 
@@ -218,19 +176,11 @@ class ShfmtPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=lambda f: self._process_single_file(f, ctx.timeout),
-            timeout=ctx.timeout,
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success and result.total_issues == 0,
-            output=result.build_output(timeout=ctx.timeout),
-            issues_count=result.total_issues,
-            timed_out=result.timed_out,
-            issues=result.all_issues,
+        return run_per_file_check(
+            ctx,
+            plugin=self,
+            command=self._diff_command,
+            parse=lambda output: parse_shfmt_output(output=output),
         )
 
     def _diff_command(self, file_path: str) -> list[str]:
