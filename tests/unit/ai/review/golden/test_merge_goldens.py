@@ -21,16 +21,10 @@ from lintro.ai.review.orchestrator import (
     merge_review_results,
     merge_verdict_reasoning,
 )
+from tests.unit.ai.review.golden.golden_fixtures import GOLDEN_RESPONSES
 from tests.unit.ai.review.golden.golden_io import (
     assert_golden_json,
     load_payload,
-)
-
-#: Fixed provider responses replayed by the merge goldens. Token and cost
-#: counters are pinned so the merged totals are reproducible.
-_RESPONSES: tuple[tuple[str, int, int, float], ...] = (
-    ("chunk_1.json", 1200, 340, 0.021),
-    ("chunk_2.json", 900, 260, 0.017),
 )
 
 
@@ -41,7 +35,7 @@ def _golden_partials() -> list[_ChunkReviewPartial]:
         One partial per payload file, in chunk order.
     """
     partials: list[_ChunkReviewPartial] = []
-    for name, input_tokens, output_tokens, cost in _RESPONSES:
+    for name, input_tokens, output_tokens, cost in GOLDEN_RESPONSES:
         response = AIResponse(
             content="",
             model="golden-model",

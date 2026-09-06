@@ -46,9 +46,10 @@ CLI_ONLY_KWARGS: frozenset[str] = frozenset(
 )
 
 #: Shared keyword arguments whose *values* cannot be compared directly:
-#: ``provider`` is a per-surface provider instance and
-#: ``context_collection_seconds`` is wall-clock. Both are asserted separately
-#: below rather than skipped outright.
+#: ``provider`` is a per-surface provider instance (asserted by identity and
+#: construction below) and ``context_collection_seconds`` is wall-clock
+#: (asserted as a non-negative float on each surface, never compared across
+#: them). Neither is silently skipped.
 UNCOMPARABLE_SHARED_KWARGS: frozenset[str] = frozenset(
     {
         "provider",
@@ -130,7 +131,7 @@ def _stub_result() -> ReviewResult:
     return ReviewResult(metadata=_metadata(), summary="Review complete.")
 
 
-def _write_parity_workspace(tmp_path: Path) -> Path:
+def _write_parity_workspace(tmp_path: Path, *, exclude_paths: str = "") -> Path:
     """Create a git workspace both surfaces can review.
 
     The three changed files mirror the golden fixture's shapes (a text
@@ -139,11 +140,14 @@ def _write_parity_workspace(tmp_path: Path) -> Path:
 
     Args:
         tmp_path: Pytest temporary directory.
+        exclude_paths: Optional ``ai.exclude_paths`` glob written into the
+            workspace config. Empty leaves the production default (no globs).
 
     Returns:
         Resolved workspace root on a branch ahead of ``main``.
     """
     workspace = tmp_path.resolve()
+    excludes = f"  exclude_paths:\n    - '{exclude_paths}'\n" if exclude_paths else ""
     (workspace / ".lintro-config.yaml").write_text(
         "ai:\n"
         "  enabled: true\n"
@@ -151,6 +155,7 @@ def _write_parity_workspace(tmp_path: Path) -> Path:
         "  provider: anthropic\n"
         "  model: test-model\n"
         "  max_cost_usd: 1.0\n"
+        f"{excludes}"
         "review:\n"
         "  synthesis:\n"
         "    enabled: true\n"
@@ -178,30 +183,48 @@ def _capture_calls(
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+    exclude_paths: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
     """Drive both surfaces over one workspace and capture their calls.
 
     Args:
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
+        exclude_paths: Optional ``ai.exclude_paths`` glob for the workspace.
 
     Returns:
-        Tuple of the CLI and MCP ``run_review`` call mappings, each with the
-        positional review context under the ``context`` key.
+        Tuple of the CLI and MCP ``run_review`` call mappings — each with the
+        positional review context under the ``context`` key — and the configs
+        every ``get_provider`` call was made with, in call order.
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
     import lintro.ai.review.orchestrator as orchestrator
     from lintro.config import config_loader
 
-    workspace = _write_parity_workspace(tmp_path)
+    workspace = _write_parity_workspace(tmp_path, exclude_paths=exclude_paths)
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
-    monkeypatch.setattr(
-        providers,
-        "get_provider",
-        lambda config, **_kwargs: _FakeProvider(),
-    )
+    # One factory serves both surfaces, so the provider each adapter receives
+    # is decided by how many times production asks for one — not by the patch
+    # style. With a per-surface stub the "each builds its own" assertion could
+    # never fail, however production changed (#2302 moves this ownership).
+    provider_configs: list[Any] = []
+
+    def _build_provider(config: Any, **_kwargs: Any) -> _FakeProvider:
+        """Return a fresh provider and record the config it was built from.
+
+        Args:
+            config: Effective AI config the adapter resolved.
+            **_kwargs: Remaining ``get_provider`` arguments, unused here.
+
+        Returns:
+            A new provider stand-in per call.
+        """
+        provider_configs.append(config)
+        return _FakeProvider()
+
+    monkeypatch.setattr(providers, "get_provider", _build_provider)
     loaded = config_loader.load_config(config_path=workspace / ".lintro-config.yaml")
     monkeypatch.setattr(config_loader, "get_config", lambda: loaded)
 
@@ -238,7 +261,7 @@ def _capture_calls(
         patch("lintro.cli_utils.commands.review.render_review_output"),
         patch(
             "lintro.cli_utils.commands.review.get_provider",
-            return_value=_FakeProvider(),
+            side_effect=_build_provider,
         ),
         patch("lintro.cli_utils.commands.review._execute_advisory", return_value=[]),
     ):
@@ -247,7 +270,7 @@ def _capture_calls(
     assert_that(cli_result.exit_code).is_equal_to(0)
     assert_that(cli_calls).is_length(1)
     assert_that(mcp_calls).is_length(1)
-    return cli_calls[0], mcp_calls[0]
+    return cli_calls[0], mcp_calls[0], provider_configs
 
 
 def test_cli_and_mcp_build_the_same_review_context(
@@ -260,7 +283,10 @@ def test_cli_and_mcp_build_the_same_review_context(
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    cli_call, mcp_call = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    cli_call, mcp_call, _ = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
 
     assert_that(asdict(cli_call["context"])).is_equal_to(asdict(mcp_call["context"]))
     paths = {file.path for file in cli_call["context"].changed_files}
@@ -277,7 +303,10 @@ def test_cli_and_mcp_pass_equal_shared_run_review_kwargs(
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    cli_call, mcp_call = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    cli_call, mcp_call, _ = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
     cli_kwargs = {key: value for key, value in cli_call.items() if key != "context"}
     mcp_kwargs = {key: value for key, value in mcp_call.items() if key != "context"}
 
@@ -285,6 +314,13 @@ def test_cli_and_mcp_pass_equal_shared_run_review_kwargs(
     assert_that(shared).is_not_empty()
     for key in sorted(shared):
         assert_that(cli_kwargs[key]).described_as(key).is_equal_to(mcp_kwargs[key])
+
+    # The wall-clock kwarg cannot be compared across surfaces, but both must
+    # still report a real measurement rather than defaulting to nothing.
+    for kwargs in (cli_kwargs, mcp_kwargs):
+        seconds = kwargs["context_collection_seconds"]
+        assert_that(seconds).is_instance_of(float)
+        assert_that(seconds).is_greater_than_or_equal_to(0.0)
 
 
 def test_only_the_allowlisted_kwargs_differ_between_the_surfaces(
@@ -300,7 +336,10 @@ def test_only_the_allowlisted_kwargs_differ_between_the_surfaces(
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    cli_call, mcp_call = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    cli_call, mcp_call, _ = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
     cli_kwargs = set(cli_call) - {"context"}
     mcp_kwargs = set(mcp_call) - {"context"}
 
@@ -308,23 +347,62 @@ def test_only_the_allowlisted_kwargs_differ_between_the_surfaces(
     assert_that(mcp_kwargs - cli_kwargs).is_empty()
 
 
-def test_both_surfaces_build_their_own_provider_with_the_same_identity(
+def test_each_surface_builds_its_own_provider_from_an_equivalent_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provider instances differ per surface but resolve to the same identity.
+    """Each adapter constructs a provider of its own from the same effective config.
 
-    Provider lifetime moves into the run session in Phase 5 (#2302); this
-    records the pre-move state so that change is visible.
+    Both surfaces are served by one ``get_provider`` factory that returns a new
+    instance per call, so the identity assertion fails the moment production
+    starts sharing a single provider — which is exactly what Phase 5 (#2302)
+    changes when it moves provider lifetime into the run session.
 
     Args:
         tmp_path: Pytest temporary directory.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    cli_call, mcp_call = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
-
-    assert_that(cli_call["provider"]).is_not_same_as(mcp_call["provider"])
-    assert_that(cli_call["provider"].name).is_equal_to(mcp_call["provider"].name)
-    assert_that(cli_call["provider"].model_name).is_equal_to(
-        mcp_call["provider"].model_name,
+    cli_call, mcp_call, provider_configs = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
     )
+
+    assert_that(provider_configs).is_length(2)
+    mcp_config, cli_config = provider_configs
+    assert_that(cli_config.provider).is_equal_to(mcp_config.provider)
+    assert_that(cli_config.model).is_equal_to(mcp_config.model)
+    assert_that(cli_call["provider"]).is_not_same_as(mcp_call["provider"])
+
+
+def test_exclude_paths_is_the_one_context_axis_the_surfaces_disagree_on(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ai.exclude_paths`` shapes the CLI's context and is ignored by MCP.
+
+    The equal-context test above runs with the production default (no globs),
+    where the divergence is invisible. This pins it: the CLI forwards
+    ``exclude_globs=list(ai_config.exclude_paths)`` into
+    ``collect_review_context`` and MCP's ``_collect_context`` passes nothing, so
+    an excluded file is dropped and recorded as skipped on one surface and
+    reviewed on the other. Phase 3 (#2300) must close this deliberately, not by
+    accident — and this test says which direction it moved.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    cli_call, mcp_call, _ = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        exclude_paths="tokens.py",
+    )
+    cli_paths = {file.path for file in cli_call["context"].changed_files}
+    mcp_paths = {file.path for file in mcp_call["context"].changed_files}
+
+    assert_that(cli_paths).does_not_contain("tokens.py")
+    assert_that(mcp_paths).contains("tokens.py")
+    assert_that(
+        {skipped.path for skipped in cli_call["context"].skipped_files},
+    ).contains("tokens.py")
+    assert_that(mcp_call["context"].skipped_files).is_empty()

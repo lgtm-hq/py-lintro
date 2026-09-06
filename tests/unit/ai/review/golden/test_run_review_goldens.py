@@ -28,6 +28,7 @@ from lintro.ai.review.orchestrator import (
 from lintro.ai.review.timings import ReviewTimings
 from tests.unit.ai.review.golden.golden_fixtures import (
     GOLDEN_BOUNDARY,
+    GOLDEN_RESPONSES,
     RENAMED_FROM,
     golden_checklist_items,
     golden_checklist_text,
@@ -89,13 +90,15 @@ async def _replay_call_ai(*, user_prompt: str, budget: Any = None, **_: Any) -> 
     # renamed path itself also appears in chunk 1's whole-PR file list, so it
     # cannot discriminate the chunks.
     is_second_chunk = RENAMED_FROM in user_prompt
-    name = "chunk_2.json" if is_second_chunk else "chunk_1.json"
+    name, input_tokens, output_tokens, cost = GOLDEN_RESPONSES[
+        1 if is_second_chunk else 0
+    ]
     response = AIResponse(
         content=dump_json(value=load_payload(name=name)),
         model=GOLDEN_MODEL,
-        input_tokens=900 if is_second_chunk else 1200,
-        output_tokens=260 if is_second_chunk else 340,
-        cost_estimate=0.017 if is_second_chunk else 0.021,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_estimate=cost,
         provider=GOLDEN_PROVIDER,
     )
     if budget is not None:

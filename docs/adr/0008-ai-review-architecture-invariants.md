@@ -32,10 +32,14 @@ that already holds.
 Lintro's AI review subsystem holds these invariants across every refactor in #1972.
 
 **1. `run_review` is the facade.** Adapters call
-`lintro.ai.review.orchestrator.run_review` and nothing deeper. It is the one sync/async
-boundary: `asyncio.run` is entered exactly once so a single event loop, and therefore a
-single provider client, serves a whole review. Moving phases into new modules may not
-add a second public entry point for review execution.
+`lintro.ai.review.orchestrator.run_review` for review _execution_, and it is the one
+sync/async boundary: `asyncio.run` is entered exactly once so a single event loop, and
+therefore a single provider client, serves a whole review. Moving phases into new
+modules may not add a second public entry point for review execution. This is about
+execution, not module access: the CLI also imports `guard_changed_paths` from the same
+module and calls it _after_ the run, which is a pure post-run helper rather than a
+second execution facade. [ADR-0006](0006-ai-effective-config-and-review-execution.md)
+records the same seam as `run_review` / `run_review_async`.
 
 **2. Every provider call goes through `call_ai`.** `lintro.ai.invoke.call_ai` is the
 sole dispatch point for retries, fallback, budget accounting, and transport selection.
@@ -67,8 +71,13 @@ lifecycle abstraction may be added.
 **6. Config is resolved once per invocation (target).** `resolve_ai_config` is the
 intended single resolver; post-resolution ad hoc override paths are debt that Phase 2
 ([#2299](https://github.com/lgtm-hq/py-lintro/issues/2299)) removes rather than a
-pattern to copy. Security-relevant caps stay monotonic: an invocation may lower a
-configured cap, never raise it.
+pattern to copy. Cap monotonicity is **per surface**, not global, and Phase 2 must
+preserve the split rather than flatten it: CLI flags and `LINTRO_AI_*` overlays may
+raise or lift `ai.max_cost_usd` (`--max-cost-usd`, `LINTRO_AI_MAX_COST_USD`, overlay
+`uncapped`), while MCP's per-call `max_cost_usd` argument stays a monotonic clamp that
+may only lower the effective ceiling. See
+[ADR-0006](0006-ai-effective-config-and-review-execution.md), which records both halves
+as accepted product behaviour.
 
 **7. Behaviour-preserving means byte-identical goldens.** Prompt bytes, finding order
 and severity, checklist merge precedence, merged-result shape, run metadata fields, and

@@ -120,9 +120,13 @@ def golden_review_context() -> ReviewContext:
 def golden_chunks() -> list[ReviewChunk]:
     """Return the two fixed chunks the multi-chunk goldens replay.
 
-    Chunk boundaries are pinned here rather than derived from the token
-    budget so the merge and metadata goldens stay stable when the budget
-    heuristics change.
+    This partition is **synthetic and deliberately not** what
+    ``resolve_review_chunks`` produces for the same context — the real planner
+    groups by directory prefix and puts the binary file in its own chunk, which
+    ``chunk_plan.golden`` characterises separately. Pinning the boundaries here
+    keeps the prompt, merge and metadata goldens stable when the budget or
+    grouping heuristics change, so a planner change reddens exactly one golden
+    instead of all of them.
 
     Returns:
         Two chunks covering the text file and the rename.
@@ -143,6 +147,16 @@ def golden_chunks() -> list[ReviewChunk]:
             relationship=REL_SINGLE_FILE,
         ),
     ]
+
+
+#: One row per fixed provider response: payload file, input tokens, output
+#: tokens, and cost. Both the merge goldens (which build partials directly)
+#: and the ``run_review`` replay read this table, so the two suites cannot
+#: drift into disagreeing about the same run.
+GOLDEN_RESPONSES: tuple[tuple[str, int, int, float], ...] = (
+    ("chunk_1.json", 1200, 340, 0.021),
+    ("chunk_2.json", 900, 260, 0.017),
+)
 
 
 def golden_checklist_items() -> list[ChecklistItem]:
