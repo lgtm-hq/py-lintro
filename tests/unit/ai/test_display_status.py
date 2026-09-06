@@ -15,8 +15,8 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.ai.config import AIConfig
-from lintro.ai.display.status import render_ai_status
 from lintro.ai.enums import AITransport
+from lintro.ai.interface import render_ai_status
 from lintro.ai.registry import AIProvider
 
 

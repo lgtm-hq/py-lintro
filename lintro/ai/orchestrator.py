@@ -25,7 +25,6 @@ from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
 from lintro.ai.summary import generate_summary
-from lintro.ai.transport import apply_transport_override
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
 
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
     from lintro.ai.models.fix_suggestion import AIFixSuggestion
     from lintro.ai.models.summary import AISummary
     from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
@@ -47,9 +47,8 @@ def run_ai_enhancement(
     lintro_config: LintroConfig,
     logger: ThreadSafeConsoleLogger,
     output_format: str,
-    ai_config: AIConfig | None = None,
+    ai_config: ResolvedAIConfig | None = None,
     ai_fix: bool = False,
-    transport: str | None = None,
 ) -> AIResult:
     """Run AI enhancement from synchronous code.
 
@@ -64,11 +63,11 @@ def run_ai_enhancement(
         lintro_config: Full lintro configuration.
         logger: Thread-safe console logger.
         output_format: Output format (e.g. "terminal", "json").
-        ai_config: Pre-resolved AI configuration. Passed by callers that
-            already resolved it so the raw ``ai:`` mapping is parsed once
-            per run; resolved here when omitted.
+        ai_config: Effective AI configuration plus provenance, already
+            resolved for this invocation (CLI overlays such as
+            ``--transport`` included) so the raw ``ai:`` mapping is resolved
+            once per run; resolved here without overlays when omitted.
         ai_fix: Whether to generate AI fix suggestions.
-        transport: Optional CLI override for ``ai.transport``.
 
     Returns:
         AIResult with structured outcome data for exit code decisions.
@@ -82,7 +81,6 @@ def run_ai_enhancement(
             output_format=output_format,
             ai_config=ai_config,
             ai_fix=ai_fix,
-            transport=transport,
         ),
     )
 
@@ -94,9 +92,8 @@ async def run_ai_enhancement_async(
     lintro_config: LintroConfig,
     logger: ThreadSafeConsoleLogger,
     output_format: str,
-    ai_config: AIConfig | None = None,
+    ai_config: ResolvedAIConfig | None = None,
     ai_fix: bool = False,
-    transport: str | None = None,
 ) -> AIResult:
     """Run AI-powered enhancement for check/fix actions.
 
@@ -106,11 +103,11 @@ async def run_ai_enhancement_async(
         lintro_config: Full lintro configuration.
         logger: Thread-safe console logger.
         output_format: Output format (e.g. "terminal", "json").
-        ai_config: Pre-resolved AI configuration. Passed by callers that
-            already resolved it so the raw ``ai:`` mapping is parsed once
-            per run; resolved here when omitted.
+        ai_config: Effective AI configuration plus provenance, already
+            resolved for this invocation (CLI overlays such as
+            ``--transport`` included) so the raw ``ai:`` mapping is resolved
+            once per run; resolved here without overlays when omitted.
         ai_fix: Whether to generate AI fix suggestions.
-        transport: Optional CLI override for ``ai.transport``.
 
     Returns:
         AIResult with structured outcome data for exit code decisions.
@@ -120,27 +117,31 @@ async def run_ai_enhancement_async(
         SystemExit: Re-raised immediately.
         Exception: Re-raised when ``fail_on_ai_error`` is True.
     """
-    from lintro.ai.interface import resolve_ai_config
+    from lintro.ai.interface import resolve_effective_ai_config
 
-    base_ai_config = (
-        ai_config if ai_config is not None else resolve_ai_config(lintro_config)
+    resolved = (
+        ai_config
+        if ai_config is not None
+        else resolve_effective_ai_config(lintro_config)
     )
+    effective_config: AIConfig = resolved.config
     try:
         require_ai()
 
-        ai_config = apply_transport_override(base_ai_config, transport)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
-        provider = get_provider(ai_config, workspace_root=workspace_root)
+        provider = get_provider(effective_config, workspace_root=workspace_root)
         is_json = output_format.lower() == OutputFormat.JSON
 
         # P5-4: Verbose — log provider, model, and workspace at info level
-        if ai_config.verbose:
+        if effective_config.verbose:
             provider_name = (
-                ai_config.provider.value if ai_config.provider is not None else "unset"
+                effective_config.provider.value
+                if effective_config.provider is not None
+                else "unset"
             )
             loguru_logger.info(
                 f"AI: provider={provider_name}, "
-                f"model={ai_config.model or 'default'}, "
+                f"model={effective_config.model or 'default'}, "
                 f"workspace_root={workspace_root}",
             )
 
@@ -148,7 +149,7 @@ async def run_ai_enhancement_async(
             return await _run_ai_check(
                 all_results=all_results,
                 provider=provider,
-                ai_config=ai_config,
+                ai_config=effective_config,
                 logger=logger,
                 is_json=is_json,
                 ai_fix=ai_fix,
@@ -159,7 +160,7 @@ async def run_ai_enhancement_async(
             return await _run_ai_fix(
                 all_results=all_results,
                 provider=provider,
-                ai_config=ai_config,
+                ai_config=effective_config,
                 logger=logger,
                 is_json=is_json,
                 workspace_root=workspace_root,
@@ -168,7 +169,7 @@ async def run_ai_enhancement_async(
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as e:
-        if base_ai_config.fail_on_ai_error:
+        if effective_config.fail_on_ai_error:
             raise
         loguru_logger.opt(exception=e).debug(
             f"AI enhancement failed ({type(e).__name__}): {e}",

@@ -9,7 +9,7 @@ lives in the AI package so the core summary renderer
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.resolved_ai_config import (
@@ -28,18 +28,25 @@ AI_STATUS_NO_CONFIG = "[dim]disabled (no config)[/dim]"
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | ResolvedAIConfig | Mapping[str, Any] | None,
+    ai_config: AIConfig | ResolvedAIConfig | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
+    This renderer never resolves configuration. It reports a value some
+    caller already resolved (#2299):
+    :func:`lintro.ai.interface.render_ai_status` is the seam that turns the
+    core executor's raw ``ai:`` mapping into a
+    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`, through the same
+    resolver execution uses. What that seam can pass is limited by what the
+    core summary hands it: project and environment layers, without the
+    invocation's flags (see
+    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_).
+
     Args:
-        ai_config: Raw ``ai:`` mapping as held by the core executor, an
-            already-parsed :class:`AIConfig`, a :class:`ResolvedAIConfig`
-            carrying provenance, or None when unavailable. A mapping is
-            parsed here with diagnostics off, because rendering a summary
-            must not emit unknown-key warnings or migration hints (the
-            resolver on the AI entry path already reports them).
+        ai_config: A :class:`ResolvedAIConfig` carrying provenance, a bare
+            :class:`AIConfig` (rendered without provenance annotations), or
+            None when no configuration is available.
         is_ci: Whether the run is in a CI environment (affects the
             ``auto_apply`` warning wording).
 
@@ -58,13 +65,6 @@ def render_ai_status(
         resolved_for_cost = ai_config
         sources = ai_config.sources
         ai_config = ai_config.config
-    elif isinstance(ai_config, Mapping):
-        from lintro.ai.config import AIConfig as _AIConfig
-
-        resolved = _AIConfig.resolve_from_mapping(ai_config, diagnostics=False)
-        resolved_for_cost = resolved
-        sources = resolved.sources
-        ai_config = resolved.config
 
     if not ai_config.enabled:
         disabled = "[dim]disabled[/dim]"

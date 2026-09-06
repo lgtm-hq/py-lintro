@@ -7,6 +7,8 @@ from assertpy import assert_that
 from rich.console import Console
 
 from lintro.ai.config import AIConfig
+from lintro.ai.config_overrides import apply_cli_overrides
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.provider_enum import AIProvider
@@ -16,7 +18,6 @@ from lintro.ai.review.github_render import format_run_mechanics
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.transport import (
-    apply_cli_overrides,
     apply_resolved_transport,
     resolve_max_cost_with_source,
 )
@@ -547,13 +548,13 @@ def test_whitespace_only_env_is_treated_as_unset(
     assert_that(resolved.source_of("model")).is_equal_to(ConfigSource.DEFAULT)
 
 
-def test_from_mapping_returns_the_resolved_config(
+def test_resolver_returns_the_effective_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``from_mapping`` applies env overlays and returns the effective config."""
+    """The resolver applies env overlays and returns the effective config."""
     monkeypatch.setenv("LINTRO_AI_PROVIDER", "cursor")
 
-    config = AIConfig.from_mapping(_mapping(provider="anthropic"))
+    config = resolve_effective_ai_config(_mapping(provider="anthropic")).config
 
     assert_that(config.provider).is_equal_to(AIProvider.CURSOR)
 
@@ -629,7 +630,7 @@ def test_format_max_cost_label_keeps_sub_cent_precision(
 
 def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-execution status shows env provenance for provider/model/transport."""
-    from lintro.ai.display.status import render_ai_status
+    from lintro.ai.interface import render_ai_status
 
     monkeypatch.setattr(
         "lintro.ai.availability.is_provider_available",
@@ -651,7 +652,7 @@ def test_status_annotates_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_status_annotates_env_max_cost_usd(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pre-execution status shows env provenance for the cost cap (#2024)."""
-    from lintro.ai.display.status import render_ai_status
+    from lintro.ai.interface import render_ai_status
 
     monkeypatch.setattr(
         "lintro.ai.availability.is_provider_available",
@@ -672,7 +673,7 @@ def test_status_annotates_profile_cap_as_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A YAML profile cap is shown as config, not uncapped default (#2024)."""
-    from lintro.ai.display.status import render_ai_status
+    from lintro.ai.interface import render_ai_status
 
     monkeypatch.setattr(
         "lintro.ai.availability.is_provider_available",
@@ -696,7 +697,7 @@ def test_status_annotates_profile_cap_as_config(
 
 def test_status_marks_enabled_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     """``LINTRO_AI_ENABLED=0`` is visible on the disabled status line."""
-    from lintro.ai.display.status import render_ai_status
+    from lintro.ai.interface import render_ai_status
 
     monkeypatch.setenv("LINTRO_AI_ENABLED", "0")
 

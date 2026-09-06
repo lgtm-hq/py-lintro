@@ -74,16 +74,18 @@ session so `aclose()` is called exactly once, including on failure and cancellat
 including the per-agent providers in `custom_agent_runner.py`. Until then, no second
 lifecycle abstraction may be added.
 
-**6. Config is resolved once per invocation (target).** `resolve_ai_config` is the
-intended single resolver; post-resolution ad hoc override paths are debt that Phase 2
-([#2299](https://github.com/lgtm-hq/py-lintro/issues/2299)) removes rather than a
-pattern to copy. Cap monotonicity is **per surface**, not global, and Phase 2 must
-preserve the split rather than flatten it: CLI flags and `LINTRO_AI_*` overlays may
-raise or lift `ai.max_cost_usd` (`--max-cost-usd`, `LINTRO_AI_MAX_COST_USD`, overlay
-`uncapped`), while MCP's per-call `max_cost_usd` argument stays a monotonic clamp that
-may only lower the effective ceiling. See
-[ADR-0006](0006-ai-effective-config-and-review-execution.md), which records both halves
-as accepted product behaviour.
+**6. Config is resolved once per invocation.**
+`lintro.ai.effective_config.resolve_effective_ai_config` is the single resolver, and the
+single production caller of `AIConfig.resolve_from_mapping`; Phase 2
+([#2299](https://github.com/lgtm-hq/py-lintro/issues/2299)) delivered it and deleted the
+post-resolution override paths, so an ad hoc `model_copy` on a resolved config is debt
+rather than a pattern to copy. Cap monotonicity is **per surface**, not global, and the
+split may not be flattened: CLI flags and `LINTRO_AI_*` overlays may raise or lift
+`ai.max_cost_usd` (`--max-cost-usd`, `LINTRO_AI_MAX_COST_USD`, overlay `uncapped`),
+while MCP's per-call `max_cost_usd` argument stays a monotonic clamp that may only lower
+the effective ceiling. See [ADR-0006](0006-ai-effective-config-and-review-execution.md),
+which records both halves as accepted product behaviour. #2299's own acceptance criteria
+proposed a global monotonic cap; that criterion is superseded by this invariant.
 
 **7. Behaviour-preserving means byte-identical goldens.** Prompt bytes, finding order
 and severity, checklist merge precedence, merged-result shape, run metadata fields, and
@@ -120,6 +122,8 @@ owner approval before merge (roadmap #2288, execution protocol item 5).
 - `lintro/ai/review/prompt_redaction.py` — the redaction choke point.
 - `tests/unit/ai/review/golden/` — the golden suite and its fixture.
 - `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP preparation parity.
+- `tests/unit/ai/test_effective_config_parity.py` — the invariant-6 checks: one
+  resolver, one `resolve_from_mapping` call site, and the per-surface cap split.
 - [ADR-0006](0006-ai-effective-config-and-review-execution.md) — effective AI config and
   the shared review path.
 - Issues [#1972](https://github.com/lgtm-hq/py-lintro/issues/1972),

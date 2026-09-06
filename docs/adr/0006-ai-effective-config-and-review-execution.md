@@ -13,9 +13,11 @@ not those foundations.
 
 Today:
 
-- `resolve_ai_config()` returns only `AIConfig`. Invocation overrides then apply
-  independently via `apply_transport_override()` / `model_copy()`, and display code can
-  reparse the raw `ai:` mapping.
+- `resolve_ai_config()` returned only `AIConfig`. Invocation overrides then applied
+  independently via a post-resolution `model_copy()`, and display code could reparse the
+  raw `ai:` mapping. [#2299](https://github.com/lgtm-hq/py-lintro/issues/2299) removed
+  both: `lintro.ai.effective_config.resolve_effective_ai_config` is now the one
+  resolver, and it is the only production caller of `AIConfig.resolve_from_mapping`.
 - The `lintro review` CLI and the MCP `lintro_review` toolkit each perform largely the
   same preparation (resolve config, collect context, classify files, select checklist,
   optional lint digest, sensitivity, provider, `run_review`) with adapter-specific
@@ -40,14 +42,14 @@ Existing suites already pin large parts of review behavior
 `tests/unit/cli/test_review_command.py`). Phase 1 therefore adds only the gaps below
 rather than re-testing those topics:
 
-| Gap                          | Why it matters                                                                                     | Phase 1 lock                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability                               | `tests/unit/test_core_ai_import_boundary.py` |
-| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`                                         | preparation characterization tests           |
-| Effective-config seam parity | MCP via `resolve_ai_config`; CLI review via `resolve_from_mapping` + `apply_cli_overrides` (#1970) | config parity tests                          |
-| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2                                     | exit semantics tests                         |
-| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                     | error-mapping characterization               |
-| MCP run-metadata key set     | Agents depend on a stable `run` object                                                             | metadata key characterization                |
+| Gap                          | Why it matters                                                                                             | Phase 1 lock                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability                                       | `tests/unit/test_core_ai_import_boundary.py` |
+| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`                                                 | preparation characterization tests           |
+| Effective-config seam parity | MCP via `resolve_ai_config`; CLI review via `resolve_from_mapping` + CLI overlay (#1970); unified by #2299 | config parity tests                          |
+| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2                                             | exit semantics tests                         |
+| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                             | error-mapping characterization               |
+| MCP run-metadata key set     | Agents depend on a stable `run` object                                                                     | metadata key characterization                |
 
 Prompt golden fixtures landed in Phase 1 after all —
 [ADR-0008](0008-ai-review-architecture-invariants.md) records the invariants and #2298
@@ -88,11 +90,13 @@ Contract invariants:
   monotonic clamp: it may lower the effective ceiling, never raise it. #2024 originally
   mapped overlay `0` to uncapped; #2154 / ADR-0007 superseded that.
 
-Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
-`ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies
-`--provider`/`--model`/`--transport`/`--max-cost-usd` on that object via
-`apply_cli_overrides`; other surfaces consume `resolve_ai_config()` which unwraps the
-same env-aware parse.
+Issue #1970 implemented the initial parse (`AIConfig.resolve_from_mapping` returning
+`ResolvedAIConfig`); #2299 put one function in front of it,
+`lintro.ai.effective_config.resolve_effective_ai_config(mapping, *, cli_overrides, diagnostics)`.
+This epic must not introduce a second resolver. CLI review passes
+`--provider`/`--model`/`--transport`/`--max-cost-usd` as `AICliOverrides`; `check`/`fmt`
+pass `--transport` the same way; other surfaces pass none and consume the same value,
+with `resolve_ai_config()` as the values-only unwrap.
 
 ### B. Shared review domain request and preparation
 
@@ -169,6 +173,21 @@ direction is AI (and CLI/MCP adapters) importing core. Runtime import edges from
 time.
 
 ## Consequences
+
+### Migration (#2299)
+
+Three internal entry points were removed when the resolver was unified. None was part of
+the public `lintro` API, so this is not a breaking change for CLI or `lintro.api`
+consumers; code reaching into `lintro.ai` internals moves as follows:
+
+| Removed                                                | Use instead                                                                       |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `AIConfig.from_mapping(data)`                          | `resolve_effective_ai_config(data).config`                                        |
+| `lintro.ai.transport.apply_transport_override(cfg, t)` | `resolve_effective_ai_config(mapping, cli_overrides=AICliOverrides(transport=t))` |
+| `lintro.ai.transport.apply_cli_overrides` (re-export)  | `lintro.ai.config_overrides.apply_cli_overrides`, or the resolver                 |
+
+`AIConfig.resolve_from_mapping` still exists but is the project + environment half only;
+surfaces call `resolve_effective_ai_config` rather than reaching past it.
 
 - #1970 / #1923 / #1235 extend one resolver contract instead of inventing parallel
   override layers.

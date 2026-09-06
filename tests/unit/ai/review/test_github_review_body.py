@@ -284,6 +284,63 @@ def test_empty_transport_is_omitted_even_when_source_is_set(
     assert_that(body).does_not_contain("| transport |")
 
 
+def test_blank_transport_is_omitted_even_when_source_is_set(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A whitespace-only transport is omitted, not rendered as a bare source.
+
+    The guard has to run on the *sanitized* transport: ``"   "`` is truthy,
+    so guarding the raw value let ``format_sourced_value`` turn it into
+    ``"    (config)"`` and emit a transport cell with no transport in it
+    (#1972 owner comment, 2026-08-14 item 2; #2299).
+    """
+    sourced = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            transport_source="config",
+        ),
+    )
+
+    body = _body(
+        result=sourced,
+        prior_state=ReviewState(),
+        transport="   ",
+        auth_mode="api_key",
+    )
+
+    assert_that(body).does_not_contain("| transport |")
+    assert_that(body).does_not_contain("(config)")
+
+
+def test_a_blank_transport_longer_than_the_limit_is_still_omitted(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Truncation must not resurrect a blank transport as an ellipsis.
+
+    ``sanitize_comment_text(" " * 41, limit=40)`` is ``"…"``, so testing for
+    presence *after* truncating would render ``"… (config)"`` — the same dead
+    guard one step further along (#2299).
+    """
+    sourced = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            transport_source="config",
+        ),
+    )
+
+    body = _body(
+        result=sourced,
+        prior_state=ReviewState(),
+        transport=" " * 41,
+        auth_mode="api_key",
+    )
+
+    assert_that(body).does_not_contain("| transport |")
+    assert_that(body).does_not_contain("…")
+
+
 def test_run_stats_show_uncapped_max_cost_with_source(
     sample_review_result: ReviewResult,
 ) -> None:

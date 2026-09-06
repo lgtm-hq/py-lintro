@@ -24,6 +24,7 @@ from lintro.models.core.sarif_enrichment import AISarifEnrichment
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
+    from lintro.ai.effective_config import AICliOverrides
     from lintro.ai.models import AIResult
     from lintro.ai.resolved_ai_config import ResolvedAIConfig
     from lintro.config.lintro_config import LintroConfig
@@ -36,6 +37,7 @@ __all__ = [
     "enhance_artifact",
     "render_ai_status",
     "resolve_ai_config",
+    "resolve_effective_ai_config",
     "sarif_enrichment_from_results",
 ]
 
@@ -84,30 +86,62 @@ def sarif_enrichment_from_results(
     )
 
 
-def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:
-    """Parse the raw ``ai:`` mapping on a config into an :class:`AIConfig`.
+def resolve_effective_ai_config(
+    lintro_config: LintroConfig,
+    *,
+    cli_overrides: AICliOverrides | None = None,
+) -> ResolvedAIConfig:
+    """Resolve the effective AI config, with provenance, for one invocation.
 
     :class:`~lintro.config.lintro_config.LintroConfig` stores the ``ai:``
     section verbatim as a mapping so that :mod:`lintro.config` never imports
-    :mod:`lintro.ai` (issue #724). Every caller that needs typed AI settings
-    goes through this function. Environment overlays (``LINTRO_AI_*``) are
-    applied inside :meth:`AIConfig.from_mapping` so every surface sees the
-    same effective values (#1970).
+    :mod:`lintro.ai` (issue #724). This is the seam where the mapping becomes
+    typed: it forwards to
+    :func:`lintro.ai.effective_config.resolve_effective_ai_config`, the one
+    resolver every surface shares (#2299).
 
     Unknown keys are dropped with a warning, so resolving is also what makes
-    a typo'd ``ai.*`` key discoverable. Callers should resolve once per run
-    and pass the result down rather than re-resolving, which would repeat
-    that warning.
+    a typo'd ``ai.*`` key discoverable. Callers resolve once per run and pass
+    the result down rather than re-resolving, which would repeat that
+    warning and risk disagreeing with what actually executed.
+
+    Args:
+        lintro_config: Full Lintro configuration.
+        cli_overrides: Flags passed on this invocation, or None when the
+            surface has none.
+
+    Returns:
+        Effective AI configuration plus per-field provenance.
+    """
+    from lintro.ai.effective_config import (
+        NO_CLI_OVERRIDES,
+    )
+    from lintro.ai.effective_config import (
+        resolve_effective_ai_config as _resolve,
+    )
+
+    return _resolve(
+        lintro_config.ai,
+        cli_overrides=cli_overrides if cli_overrides is not None else NO_CLI_OVERRIDES,
+    )
+
+
+def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:
+    """Return the effective :class:`AIConfig` for a run without provenance.
+
+    A thin unwrap of :func:`resolve_effective_ai_config` for the surfaces
+    that only need the values — doctor's presence checks and the advisory
+    tools. Surfaces that render provenance, or that carry CLI overrides, use
+    :func:`resolve_effective_ai_config` instead.
 
     Args:
         lintro_config: Full Lintro configuration.
 
     Returns:
-        The parsed AI configuration, with model defaults for omitted fields.
+        The effective AI configuration, with model defaults for omitted
+        fields.
     """
-    from lintro.ai.config import AIConfig
-
-    return AIConfig.from_mapping(lintro_config.ai)
+    return resolve_effective_ai_config(lintro_config).config
 
 
 def _warn_ai_fix_disabled(
@@ -196,7 +230,16 @@ def run_ai_layer(
     Raises:
         Exception: Re-raised when ``ai.fail_on_ai_error`` is enabled.
     """
-    ai_config = resolve_ai_config(lintro_config)
+    from lintro.ai.effective_config import AICliOverrides
+
+    # The lint path's ``--transport`` is an ordinary CLI overlay on the one
+    # resolver, not a post-resolution ``model_copy`` (#2299): resolving it
+    # here is what gives ``check``/``fmt`` the same provenance as review.
+    resolved = resolve_effective_ai_config(
+        lintro_config,
+        cli_overrides=AICliOverrides(transport=transport),
+    )
+    ai_config = resolved.config
     effective_ai_fix = ai_fix or ai_config.default_fix
     _warn_ai_fix_disabled(
         action=action,
@@ -210,9 +253,8 @@ def run_ai_layer(
 
     ai_hook = AIPostExecutionHook(
         lintro_config,
-        ai_config=ai_config,
+        resolved_ai_config=resolved,
         ai_fix=effective_ai_fix,
-        transport=transport,
     )
     if not ai_hook.should_run(action):
         return AIOutcome(ran=False, force_failure=False)
@@ -253,10 +295,22 @@ def render_ai_status(
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
+    This is where the raw ``ai:`` mapping the core executor holds becomes a
+    resolved value, through the same resolver execution uses, so the renderer
+    itself only ever sees typed input (#2299). Diagnostics are off for that
+    resolution because the execution path already reported the unknown-key
+    warning and the migration hints.
+
+    The summary reflects the **project and environment layers**. The core
+    pre-execution summary hands over the raw mapping without the invocation's
+    flags, so a lint-path ``--transport`` override is applied at execution and
+    is not visible here; threading it through is
+    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_.
+
     Args:
         ai_config: Raw ``ai:`` mapping from the config (what the core
-            executor holds), an already-parsed :class:`AIConfig`, or None
-            when unavailable.
+            executor holds), an already-parsed :class:`AIConfig`, a
+            :class:`ResolvedAIConfig`, or None when unavailable.
         is_ci: Whether the run is in a CI environment.
 
     Returns:
@@ -265,6 +319,10 @@ def render_ai_status(
     """
     from lintro.ai.display.status import render_ai_status as _render_ai_status
 
+    if isinstance(ai_config, Mapping):
+        from lintro.ai.effective_config import resolve_effective_ai_config as _resolve
+
+        ai_config = _resolve(ai_config, diagnostics=False)
     return _render_ai_status(ai_config=ai_config, is_ci=is_ci)
 
 

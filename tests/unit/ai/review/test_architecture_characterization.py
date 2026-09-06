@@ -18,7 +18,10 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import (
+    AICliOverrides,
+    resolve_effective_ai_config,
+)
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError
 from lintro.ai.interface import resolve_ai_config
@@ -31,7 +34,6 @@ from lintro.ai.review.error_contract import (
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.transport import apply_transport_override
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.toolkits import review as mcp_review
@@ -44,6 +46,8 @@ MCP_REVIEW_PATH = PROJECT_ROOT / "lintro/mcp/toolkits/review.py"
 # Domain helpers both adapters must keep calling until Phase 3 extracts them.
 _SHARED_PREPARATION_CALLS: frozenset[str] = frozenset(
     {
+        # #2299 folded both adapters' private resolution onto one resolver.
+        "resolve_effective_ai_config",
         "collect_review_context",
         "classify_changed_files",
         "get_all_checklist_items",
@@ -258,11 +262,13 @@ def test_cli_and_mcp_review_adapters_call_shared_preparation_helpers() -> None:
 
     assert_that(_SHARED_PREPARATION_CALLS.issubset(cli_calls)).is_true()
     assert_that(_SHARED_PREPARATION_CALLS.issubset(mcp_calls)).is_true()
-    # CLI keeps provenance via resolve_from_mapping (#1970); MCP still goes
-    # through resolve_ai_config, which applies the same env layer internally.
-    assert_that(cli_calls).contains("resolve_from_mapping")
-    assert_that(cli_calls).contains("apply_cli_overrides")
-    assert_that(mcp_calls).contains("resolve_ai_config")
+    # Both adapters resolve through the one resolver (#2299). The CLI is the
+    # only one with flags, so it is also the only one building an overrides
+    # value; MCP's single per-call knob stays a downstream budget clamp.
+    assert_that(cli_calls).contains("AICliOverrides")
+    assert_that(mcp_calls).does_not_contain("AICliOverrides")
+    assert_that(cli_calls).does_not_contain("resolve_from_mapping")
+    assert_that(mcp_calls).does_not_contain("resolve_from_mapping")
 
 
 def test_cli_owns_posting_and_exit_helpers_mcp_does_not() -> None:
@@ -297,20 +303,24 @@ def test_resolve_ai_config_is_the_single_typed_ai_seam() -> None:
 
     resolved = resolve_ai_config(config)
 
-    assert_that(resolved).is_equal_to(AIConfig.from_mapping(raw))
+    assert_that(resolved).is_equal_to(resolve_effective_ai_config(raw).config)
     assert_that(resolved.review_enabled).is_true()
     assert_that(resolved.max_cost_usd).is_equal_to(1.25)
 
 
 def test_cli_transport_override_does_not_mutate_base_config() -> None:
-    """CLI transport override copies config; base resolution stays untouched."""
-    base = AIConfig(enabled=True, review=True, transport=AITransport.API)
+    """The transport flag overlays a copy; base resolution stays untouched."""
+    raw = {"enabled": True, "review": True, "transport": "api"}
+    base = resolve_effective_ai_config(raw)
 
-    overridden = apply_transport_override(base, "cli")
+    overridden = resolve_effective_ai_config(
+        raw,
+        cli_overrides=AICliOverrides(transport="cli"),
+    )
 
-    assert_that(base.transport).is_equal_to(AITransport.API)
-    assert_that(overridden.transport).is_equal_to(AITransport.CLI)
-    assert_that(overridden is base).is_false()
+    assert_that(base.config.transport).is_equal_to(AITransport.API)
+    assert_that(overridden.config.transport).is_equal_to(AITransport.CLI)
+    assert_that(overridden.config is base.config).is_false()
 
 
 def test_mcp_budget_policy_is_monotonic_never_raises_cap() -> None:
