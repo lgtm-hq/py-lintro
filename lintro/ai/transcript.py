@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -24,6 +23,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.secrets import redact_secrets
 
 __all__ = [
+    "DEFAULT_COMMAND_LABEL",
     "TRANSCRIPT_DIR",
     "TranscriptDirection",
     "TranscriptWriter",
@@ -44,6 +44,14 @@ ENV_TRANSCRIPT = "LINTRO_AI_TRANSCRIPT"
 
 DEFAULT_RETENTION = 10
 """Default number of transcript files to keep."""
+
+DEFAULT_COMMAND_LABEL = "ai"
+"""Filename label used when a caller does not name the command it runs under.
+
+Transcript filenames are cosmetic: every event payload already carries the
+provider, transport and direction. The label is therefore only ever what a
+caller states about itself -- lintro does not guess it from ``sys.argv`` (#1998).
+"""
 
 _REDACTED = "[REDACTED]"
 _SENSITIVE_KEY_RE = re.compile(
@@ -83,41 +91,8 @@ def is_transcript_enabled(*, config_enabled: bool = False) -> bool:
     return config_enabled
 
 
-def _infer_command() -> str:
-    """Best-effort CLI command name for the transcript filename."""
-    known = {
-        "check",
-        "chk",
-        "format",
-        "fmt",
-        "review",
-        "doctor",
-        "test",
-        "config",
-        "init",
-        "setup",
-        "install",
-        "list-tools",
-        "versions",
-        "licenses",
-        "completions",
-        "badge",
-    }
-    for arg in sys.argv[1:]:
-        if arg.startswith("-"):
-            continue
-        if arg in {"chk", "check"}:
-            return "check"
-        if arg in {"fmt", "format"}:
-            return "format"
-        if arg in known:
-            return arg
-        break
-    return "ai"
-
-
 def _sanitize_command(command: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", command.strip()) or "ai"
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", command.strip()) or DEFAULT_COMMAND_LABEL
     return cleaned[:64]
 
 
@@ -150,7 +125,7 @@ class TranscriptWriter:
         self,
         *,
         workspace_root: Path,
-        command: str = "ai",
+        command: str = DEFAULT_COMMAND_LABEL,
         retention: int = DEFAULT_RETENTION,
         enabled: bool = True,
     ) -> None:
@@ -289,7 +264,9 @@ def maybe_start_transcript(
         workspace_root: Project root for the cache directory.
         config_enabled: ``ai.transcript_logging`` value.
         retention: ``ai.transcript_retention`` value.
-        command: Optional CLI command label; inferred from argv when omitted.
+        command: Optional CLI command label embedded in the transcript
+            filename. Defaults to ``DEFAULT_COMMAND_LABEL`` when omitted;
+            lintro never infers it from ``sys.argv``.
 
     Returns:
         The active writer when logging is enabled, otherwise ``None``.
@@ -301,7 +278,7 @@ def maybe_start_transcript(
         return _active_writer
     _active_writer = TranscriptWriter(
         workspace_root=workspace_root,
-        command=command or _infer_command(),
+        command=command or DEFAULT_COMMAND_LABEL,
         retention=retention,
         enabled=True,
     )

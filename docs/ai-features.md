@@ -1645,6 +1645,11 @@ Raw provider request/response traffic can be written as NDJSON under
 - Payloads are secret-redacted before write; API keys and auth headers are never logged
 - Older transcript files are pruned (default: keep last 10 runs via
   `ai.transcript_retention`)
+- Files are named `<UTC timestamp>-<label>.ndjson`. The label is `review` for a review
+  (CLI or MCP) and `ai` for everything else — lintro states it from the call site rather
+  than guessing it from the command line, so the label never drifts behind the CLI
+  surface. Every event payload already carries the provider, transport and direction, so
+  the label is cosmetic.
 
 ### Important notes
 

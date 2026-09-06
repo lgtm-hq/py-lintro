@@ -1011,6 +1011,7 @@ def _run_round(
         provider = get_provider(
             prepared.ai_config,
             workspace_root=prepared.workspace_root,
+            transcript_command="review",
         )
         result = _stamp_metadata(
             result=execute_review(prepared, provider=provider, policy=policy),
