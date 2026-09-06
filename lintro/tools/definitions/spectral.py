@@ -29,12 +29,12 @@ from lintro.parsers.spectral.spectral_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
     validate_str,
 )
-from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.path_filtering import find_project_root
 from lintro.utils.path_utils import find_file_upward
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
@@ -337,17 +337,10 @@ class SpectralPlugin(BaseToolPlugin):
                     cwd=ctx.cwd,
                 )
             except subprocess.TimeoutExpired:
-                timeout_result = create_timeout_result(
-                    tool=self,
+                return batch_timeout_result(
+                    plugin=self,
                     timeout=ctx.timeout,
                     cmd=cmd,
-                )
-                return ToolResult(
-                    name=self.definition.name,
-                    success=timeout_result.success,
-                    timed_out=timeout_result.timed_out,
-                    output=timeout_result.output,
-                    issues_count=timeout_result.issues_count,
                     cwd=ctx.cwd,
                 )
 

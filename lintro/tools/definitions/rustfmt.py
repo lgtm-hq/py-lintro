@@ -23,12 +23,17 @@ from lintro.parsers.rustfmt.rustfmt_parser import parse_rustfmt_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchOutput,
+    batch_fix_timeout_result,
+    run_batch_check,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
 )
 from lintro.tools.core.timeout_utils import (
-    create_timeout_result,
     run_subprocess_with_timeout,
 )
 
@@ -186,42 +191,18 @@ class RustfmtPlugin(BaseToolPlugin):
 
         cmd = _build_rustfmt_check_command()
 
-        try:
-            success_cmd, output = run_subprocess_with_timeout(
-                tool=self,
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
+        # `cargo fmt --check` exits non-zero both for diffs and for real
+        # failures, so keep the raw output whenever anything went wrong.
+        return run_batch_check(
+            ctx,
+            plugin=self,
+            cmd=cmd,
+            parse=lambda output: parse_rustfmt_output(output=output),
+            policy=BatchCheckPolicy(
+                output=BatchOutput.ON_ISSUES_OR_EXIT_FAILURE,
                 tool_name="rustfmt",
-            )
-        except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
-                timeout=ctx.timeout,
-                cmd=cmd,
-                tool_name="rustfmt",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
-            )
-
-        issues = parse_rustfmt_output(output=output)
-        issues_count = len(issues)
-
-        # Preserve output when command failed, even if no issues were parsed
-        should_show_output = issues_count > 0 or not success_cmd
-
-        return ToolResult(
-            name=self.definition.name,
-            success=bool(success_cmd) and issues_count == 0,
-            output=output if should_show_output else None,
-            issues_count=issues_count,
-            issues=issues,
+            ),
+            cwd=str(cargo_root),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -268,22 +249,12 @@ class RustfmtPlugin(BaseToolPlugin):
             )
         except subprocess.TimeoutExpired:
             # Timeout on initial check - can't determine issue counts
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=[],
                 cmd=check_cmd,
                 tool_name="rustfmt",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
-                initial_issues_count=0,
-                fixed_issues_count=0,
-                remaining_issues_count=0,
             )
 
         initial_issues = parse_rustfmt_output(output=output_check)
@@ -300,23 +271,12 @@ class RustfmtPlugin(BaseToolPlugin):
                 tool_name="rustfmt",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=initial_issues,
                 cmd=fix_cmd,
                 tool_name="rustfmt",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         # If fix command failed, return early with the fix output
@@ -343,23 +303,12 @@ class RustfmtPlugin(BaseToolPlugin):
                 tool_name="rustfmt",
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_fix_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
+                initial_issues=initial_issues,
                 cmd=check_cmd,
                 tool_name="rustfmt",
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=initial_count,
-                issues=initial_issues,
-                initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
-                initial_issues=initial_issues if initial_issues else None,
             )
 
         remaining_issues = parse_rustfmt_output(output=output_after)

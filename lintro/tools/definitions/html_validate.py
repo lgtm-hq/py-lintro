@@ -38,11 +38,11 @@ from lintro.parsers.html_validate.html_validate_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
 )
-from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for html-validate configuration
@@ -229,23 +229,18 @@ class HtmlValidatePlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            timed_out = batch_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
                 cmd=cmd,
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=self._append_fallback_guidance(
-                    output=timeout_result.output,
-                    used_registry_fallback=used_registry_fallback,
-                    command=fallback_command,
-                ),
-                issues_count=timeout_result.issues_count,
                 cwd=ctx.cwd,
             )
+            timed_out.output = self._append_fallback_guidance(
+                output=timed_out.output,
+                used_registry_fallback=used_registry_fallback,
+                command=fallback_command,
+            )
+            return timed_out
 
         # JSON is written to stdout; stderr carries diagnostics only.
         issues = parse_html_validate_output(output=result.stdout)

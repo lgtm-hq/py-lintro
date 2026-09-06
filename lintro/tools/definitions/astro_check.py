@@ -31,11 +31,11 @@ from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.option_validators import (
     OptionSchema,
     validate_option_types,
 )
-from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.env import get_subprocess_env
 
 # Constants for Astro check configuration
@@ -350,18 +350,11 @@ class AstroCheckPlugin(BaseToolPlugin):
                 cwd_path,
                 cmd,
             )
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
                 cmd=cmd,
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
+                issues=[],
             )
         except FileNotFoundError as e:
             return ToolResult(

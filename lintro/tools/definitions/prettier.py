@@ -9,7 +9,6 @@ re-printing code.
 from __future__ import annotations
 
 import json
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,14 @@ from lintro.parsers.prettier.prettier_parser import parse_prettier_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchCommands,
+    BatchFixPolicy,
+    BatchSuccess,
+    run_batch_check,
+    run_batch_fix,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -240,6 +247,33 @@ class PrettierPlugin(BaseToolPlugin):
             cwd=cwd,
         )
 
+    def _execution_error_result(
+        self,
+        *,
+        exc: Exception,
+        cwd: str | None = None,
+    ) -> ToolResult:
+        """Create a ToolResult for a Prettier invocation that could not run.
+
+        Args:
+            exc: Exception raised while launching or running Prettier.
+            cwd: Working directory for the tool result.
+
+        Returns:
+            ToolResult: Not-found guidance when the binary is missing, and a
+            generic execution failure otherwise.
+        """
+        if isinstance(exc, FileNotFoundError):
+            return self._create_not_found_result(cwd=cwd)
+        logger.error(f"Failed to run prettier: {exc}")
+        return ToolResult(
+            name=self.definition.name,
+            success=False,
+            output=f"Prettier execution failed: {exc}",
+            issues_count=0,
+            cwd=cwd,
+        )
+
     def _create_timeout_result(
         self,
         timeout_val: int,
@@ -365,43 +399,27 @@ class PrettierPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        try:
-            result = self._run_subprocess(
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
-        except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
-            if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result(cwd=ctx.cwd)
-            logger.error(f"Failed to run prettier: {e}")
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=f"Prettier execution failed: {e}",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-
-        output: str = result[1]
-        issues: list[PrettierIssue] = parse_prettier_output(output=output)
-        issues_count: int = len(issues)
-        success: bool = issues_count == 0
-
-        # Standardize: suppress Prettier's informational output when no issues
-        final_output: str | None = output
-        if success:
-            final_output = None
-
-        return ToolResult(
-            name=self.definition.name,
-            success=success,
-            output=final_output,
-            issues_count=issues_count,
-            issues=issues,
+        # Standardize: suppress Prettier's informational output when no issues.
+        # Prettier exits non-zero purely to report unformatted files, so the
+        # parsed list — not the exit status — is the verdict.
+        return run_batch_check(
+            ctx,
+            plugin=self,
+            cmd=cmd,
+            parse=lambda output: parse_prettier_output(output=output),
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.ISSUES_ONLY,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
+            on_timeout=lambda: self._create_timeout_result(
+                timeout_val=ctx.timeout,
+                cwd=ctx.cwd,
+            ),
+            on_error=lambda exc: self._execution_error_result(
+                exc=exc,
+                cwd=ctx.cwd,
+            ),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -472,33 +490,6 @@ class PrettierPlugin(BaseToolPlugin):
             f"[PrettierPlugin] Checking: {' '.join(check_cmd)} (cwd={ctx.cwd})",
         )
 
-        try:
-            check_result = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
-        except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
-            if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result(cwd=ctx.cwd)
-            logger.error(f"Failed to run prettier: {e}")
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=f"Prettier execution failed: {e}",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-
-        check_output: str = check_result[1]
-
-        # Parse initial issues
-        initial_issues: list[PrettierIssue] = parse_prettier_output(output=check_output)
-        initial_count: int = len(initial_issues)
-
-        # Now fix the issues
         fix_cmd: list[str] = self._get_executable_command(
             tool_name="prettier",
             cwd=ctx.cwd,
@@ -512,110 +503,30 @@ class PrettierPlugin(BaseToolPlugin):
         fix_cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
 
-        try:
-            fix_result = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(
-                timeout_val=ctx.timeout,
-                initial_issues=initial_issues,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
-        except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
-            if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result(cwd=ctx.cwd)
-            logger.error(f"Failed to run prettier: {e}")
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=f"Prettier execution failed: {e}",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-
-        fix_output: str = fix_result[1]
-
-        # Check for remaining issues after fixing
-        try:
-            final_check_result = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(
-                timeout_val=ctx.timeout,
-                initial_issues=initial_issues,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
-        except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
-            if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result(cwd=ctx.cwd)
-            logger.error(f"Failed to run prettier: {e}")
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=f"Prettier execution failed: {e}",
-                issues_count=0,
-                cwd=ctx.cwd,
-            )
-
-        final_check_output: str = final_check_result[1]
-        remaining_issues: list[PrettierIssue] = parse_prettier_output(
-            output=final_check_output,
-        )
-        remaining_count: int = len(remaining_issues)
-
-        # Calculate fixed issues
-        fixed_count: int = max(0, initial_count - remaining_count)
-
-        # Build output message
-        output_lines: list[str] = []
-        if fixed_count > 0:
-            output_lines.append(f"Fixed {fixed_count} formatting issue(s)")
-
-        if remaining_count > 0:
-            output_lines.append(
-                f"Found {remaining_count} issue(s) that cannot be auto-fixed",
-            )
-            for issue in remaining_issues[:5]:
-                output_lines.append(f"  {issue.file} - {issue.message}")
-            if len(remaining_issues) > 5:
-                output_lines.append(f"  ... and {len(remaining_issues) - 5} more")
-
-        elif remaining_count == 0 and fixed_count > 0:
-            output_lines.append("All formatting issues were successfully auto-fixed")
-
-        # Add verbose raw formatting output only when explicitly requested
-        if (
-            self.options.get("verbose_fix_output", False)
-            and fix_output
-            and fix_output.strip()
-        ):
-            output_lines.append(f"Formatting output:\n{fix_output}")
-
-        final_output: str | None = "\n".join(output_lines) if output_lines else None
-
-        # Success means no remaining issues
-        success: bool = remaining_count == 0
-
-        # Combine initial and remaining issues
-        all_issues = (initial_issues or []) + (remaining_issues or [])
-
-        return ToolResult(
-            name=self.definition.name,
-            success=success,
-            output=final_output,
-            issues_count=remaining_count,
-            issues=all_issues,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+        return run_batch_fix(
+            ctx,
+            plugin=self,
+            commands=BatchCommands(check=check_cmd, fix=fix_cmd),
+            parse=lambda output: parse_prettier_output(output=output),
+            policy=BatchFixPolicy(
+                fixed_label="formatting issue",
+                all_fixed_message=(
+                    "All formatting issues were successfully auto-fixed"
+                ),
+                verbose_output_label="Formatting output",
+                verbose=bool(self.options.get("verbose_fix_output", False)),
+                report_initial_issues=True,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
+            on_timeout=lambda detected: self._create_timeout_result(
+                timeout_val=ctx.timeout,
+                initial_issues=list(detected) or None,
+                initial_count=len(detected),
+                cwd=ctx.cwd,
+            ),
+            on_error=lambda exc: self._execution_error_result(
+                exc=exc,
+                cwd=ctx.cwd,
+            ),
         )

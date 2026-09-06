@@ -31,7 +31,7 @@ from lintro.parsers.svelte_check.svelte_check_parser import parse_svelte_check_o
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.tools.core.batch_runner import batch_timeout_result
 
 # Constants for Svelte-check configuration
 SVELTE_CHECK_DEFAULT_TIMEOUT: int = 120
@@ -282,18 +282,11 @@ class SvelteCheckPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            timeout_result = create_timeout_result(
-                tool=self,
+            return batch_timeout_result(
+                plugin=self,
                 timeout=ctx.timeout,
                 cmd=cmd,
-            )
-            return ToolResult(
-                name=self.definition.name,
-                success=timeout_result.success,
-                timed_out=timeout_result.timed_out,
-                output=timeout_result.output,
-                issues_count=timeout_result.issues_count,
-                issues=timeout_result.issues,
+                issues=[],
             )
         except FileNotFoundError as e:
             return ToolResult(

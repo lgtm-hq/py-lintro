@@ -150,7 +150,10 @@ def _run_check_step(
     """Run one check-style invocation and classify its outcome.
 
     Delegates to the check runner so the fix loop and the check loop classify
-    a timeout, an OS error and a non-zero exit identically.
+    a timeout, an OS error and a parser failure identically. A non-zero exit
+    without parsed issues is deliberately *not* shared: the fix loop always
+    supplies a ``failure_message`` for it, while the check loop's default
+    policy leaves it reported as an unsuccessful file.
 
     Args:
         plugin: Plugin whose subprocess helper runs the command.

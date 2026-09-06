@@ -286,6 +286,68 @@ that produced no parseable issue is the one outcome the two sides can differ on:
 becomes an execution error only when a message is configured, and `failure_message` is
 optional on the check side while `check_failure_message` is mandatory on the fix side.
 
+### Batch check and fix runs
+
+Tools that hand their whole file list to one invocation use
+`lintro.tools.core.batch_runner` instead. `run_batch_check()` runs the command once,
+parses it and classifies the outcome; `run_batch_fix()` runs check -> fix -> re-check
+and scores the difference.
+
+```python
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchCommands,
+    BatchFixPolicy,
+    BatchSuccess,
+    run_batch_check,
+    run_batch_fix,
+)
+
+
+def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options)
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_batch_check(
+        ctx,
+        plugin=self,
+        cmd=[*self._build_command(), *ctx.rel_files],
+        parse=lambda output: parse_mytool_output(output=output),
+        policy=BatchCheckPolicy(
+            success=BatchSuccess.ISSUES_ONLY,
+            report_cwd=True,
+        ),
+        cwd=ctx.cwd,
+    )
+```
+
+`BatchCheckPolicy` carries the two classification choices. `BatchSuccess` says what the
+verdict is derived from: `ISSUES_ONLY` for a tool that exits non-zero purely to report
+findings, `EXIT_STATUS` for one whose exit code is the whole verdict, and
+`EXIT_AND_ISSUES` (the default) when both must be clean. `BatchOutput` says when the raw
+output is surfaced — `NEVER`, `ON_FAILURE` (the default),
+`ON_EXIT_FAILURE_WITHOUT_ISSUES` for tools where unparseable output is the only sign of
+a compilation or config error, and `ON_ISSUES_OR_EXIT_FAILURE`. Both policies also carry
+`tool_name` (the name timeout messages use when it differs from the registered one) and
+`report_cwd` (whether the working directory is recorded on the `ToolResult`, which tools
+emitting issue paths relative to it need).
+
+`run_batch_fix()` takes both fully built command lines as a
+`BatchCommands(check=..., fix=...)` bundle — the check command runs twice, once before
+the fix and once to score it — plus a `BatchFixPolicy` holding the wording of the
+summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`) and two reporting
+switches: `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
+tools that render a two-table view, and `always_report_initial_issues` passes an empty
+list rather than `None` when nothing was detected.
+
+Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
+the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it
+only when the tool has its own timeout message. Leave `on_error` out to let a launch
+failure propagate. Those two result builders are exported on their own, so a tool whose
+middle section is bespoke — a missing-config skip, a per-module loop, a dependency-error
+hint — can still share the timeout and result-construction shapes without adopting the
+whole runner.
+
 ### Execution Isolation (important for correctness)
 
 Registered plugin instances are process-wide singletons with mutable option state.

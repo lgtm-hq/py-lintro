@@ -6,7 +6,6 @@ It formats code with minimal configuration, enforcing a consistent code style.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +20,14 @@ from lintro.parsers.oxfmt.oxfmt_parser import parse_oxfmt_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchCommands,
+    BatchFixPolicy,
+    BatchSuccess,
+    run_batch_check,
+    run_batch_fix,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_bool,
@@ -253,32 +260,23 @@ class OxfmtPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        try:
-            result = self._run_subprocess(
-                cmd=cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
-
-        output: str = result[1]
-        issues: list[OxfmtIssue] = parse_oxfmt_output(output=output)
-        issues_count: int = len(issues)
-        success: bool = issues_count == 0
-
-        # Standardize: suppress oxfmt's informational output when no issues
-        final_output: str | None = output
-        if success:
-            final_output = None
-
-        return ToolResult(
-            name=self.definition.name,
-            success=success,
-            output=final_output,
-            issues_count=issues_count,
-            issues=issues,
+        # Standardize: suppress oxfmt's informational output when no issues.
+        # oxfmt exits non-zero purely to signal "some file differs", so the
+        # parsed list — not the exit status — is the verdict.
+        return run_batch_check(
+            ctx,
+            plugin=self,
+            cmd=cmd,
+            parse=lambda output: parse_oxfmt_output(output=output),
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.ISSUES_ONLY,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
+            on_timeout=lambda: self._create_timeout_result(
+                timeout_val=ctx.timeout,
+                cwd=ctx.cwd,
+            ),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -327,22 +325,6 @@ class OxfmtPlugin(BaseToolPlugin):
             f"[OxfmtPlugin] Checking: {' '.join(check_cmd)} (cwd={ctx.cwd})",
         )
 
-        try:
-            check_result = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
-
-        check_output: str = check_result[1]
-
-        # Parse initial issues
-        initial_issues: list[OxfmtIssue] = parse_oxfmt_output(output=check_output)
-        initial_count: int = len(initial_issues)
-
-        # Now fix the issues
         fix_cmd: list[str] = self._get_executable_command(
             tool_name="oxfmt",
             cwd=ctx.cwd,
@@ -356,85 +338,25 @@ class OxfmtPlugin(BaseToolPlugin):
         fix_cmd.extend(ctx.rel_files)
         logger.debug(f"[OxfmtPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
 
-        try:
-            fix_result = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(
-                timeout_val=ctx.timeout,
-                initial_issues=initial_issues,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
-
-        fix_output: str = fix_result[1]
-
-        # Check for remaining issues after fixing
-        try:
-            final_check_result = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._create_timeout_result(
-                timeout_val=ctx.timeout,
-                initial_issues=initial_issues,
-                initial_count=initial_count,
-                cwd=ctx.cwd,
-            )
-
-        final_check_output: str = final_check_result[1]
-        remaining_issues: list[OxfmtIssue] = parse_oxfmt_output(
-            output=final_check_output,
-        )
-        remaining_count: int = len(remaining_issues)
-
-        # Calculate fixed issues
-        fixed_count: int = max(0, initial_count - remaining_count)
-
-        # Build output message
-        output_lines: list[str] = []
-        if fixed_count > 0:
-            output_lines.append(f"Fixed {fixed_count} formatting issue(s)")
-
-        if remaining_count > 0:
-            output_lines.append(
-                f"Found {remaining_count} issue(s) that cannot be auto-fixed",
-            )
-            for issue in remaining_issues[:5]:
-                output_lines.append(f"  {issue.file} - {issue.message}")
-            if len(remaining_issues) > 5:
-                output_lines.append(f"  ... and {len(remaining_issues) - 5} more")
-        elif fixed_count > 0:
-            # remaining_count == 0 is implied by the elif
-            output_lines.append("All formatting issues were successfully auto-fixed")
-
-        # Add verbose raw formatting output only when explicitly requested
-        if (
-            merged_options.get("verbose_fix_output", False)
-            and fix_output
-            and fix_output.strip()
-        ):
-            output_lines.append(f"Formatting output:\n{fix_output}")
-
-        final_output: str | None = "\n".join(output_lines) if output_lines else None
-
-        # Success means no remaining issues
-        success: bool = remaining_count == 0
-
-        return ToolResult(
-            name=self.definition.name,
-            success=success,
-            output=final_output,
-            issues_count=remaining_count,
-            issues=remaining_issues or [],
-            initial_issues=initial_issues if initial_issues else None,
-            initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
+        return run_batch_fix(
+            ctx,
+            plugin=self,
+            commands=BatchCommands(check=check_cmd, fix=fix_cmd),
+            parse=lambda output: parse_oxfmt_output(output=output),
+            policy=BatchFixPolicy(
+                fixed_label="formatting issue",
+                all_fixed_message=(
+                    "All formatting issues were successfully auto-fixed"
+                ),
+                verbose_output_label="Formatting output",
+                verbose=bool(merged_options.get("verbose_fix_output", False)),
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
+            on_timeout=lambda detected: self._create_timeout_result(
+                timeout_val=ctx.timeout,
+                initial_issues=list(detected) or None,
+                initial_count=len(detected),
+                cwd=ctx.cwd,
+            ),
         )
