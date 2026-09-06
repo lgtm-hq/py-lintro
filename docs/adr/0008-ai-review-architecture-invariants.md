@@ -67,12 +67,14 @@ The boundary is a ratchet, not an empty set: the contract still carries 15
 by [#2331](https://github.com/lgtm-hq/py-lintro/issues/2331)). Entries may be deleted,
 never added, so the review decomposition may not treat the direction as already clean.
 
-**5. Provider lifetime belongs to the run, not the adapter (target).** Today CLI and MCP
-each build their own provider and neither calls `aclose()`; Phase 5
-([#2302](https://github.com/lgtm-hq/py-lintro/issues/2302)) moves ownership into the run
-session so `aclose()` is called exactly once, including on failure and cancellation and
-including the per-agent providers in `custom_agent_runner.py`. Until then, no second
-lifecycle abstraction may be added.
+**5. Provider lifetime belongs to the run, not the adapter.** CLI and MCP still build
+their own provider, but neither closes it: Phase 5
+([#2302](https://github.com/lgtm-hq/py-lintro/issues/2302)) moved ownership into
+`ReviewSession`, which `run_review_async` enters once per run. `aclose()` is called
+exactly once per provider — on failure, graceful stop and cancellation alike, and
+including the per-agent providers in `custom_agent_runner.py`'s `provider_cache`. No
+second lifecycle abstraction may be added beside it, and no module outside
+`lintro/ai/providers/` other than `lintro/ai/review/session.py` may call `aclose()`.
 
 **6. Config is resolved once per invocation.**
 `lintro.ai.effective_config.resolve_effective_ai_config` is the single resolver, and the

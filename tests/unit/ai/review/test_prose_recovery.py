@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -74,6 +74,9 @@ def _provider() -> MagicMock:
         A provider double suitable for single-chunk reviews.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)

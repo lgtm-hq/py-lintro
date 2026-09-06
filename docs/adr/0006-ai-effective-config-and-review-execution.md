@@ -25,8 +25,9 @@ Today:
 - `lintro/ai/review/orchestrator.py` owns sync/async boundary, session/budget lifetime,
   chunk planning, prompts/passes, response recovery, merge/filter, and metadata
   finalization in one module.
-- Provider HTTP clients have no `close`/`aclose` yet (#1885); once that API exists,
-  call-site ownership must still be decided (#1972 Phase 5).
+- Provider HTTP clients had no `close`/`aclose` (#1885); once that API existed,
+  call-site ownership still had to be decided (#1972 Phase 5, settled by #2302 — see
+  section D).
 
 Epic #1972 coordinates structural work around the existing AI backlog. It does **not**
 absorb #1970 (env/CLI overrides + provenance), #1923 (transport profiles), #1885
@@ -152,21 +153,31 @@ All provider invocations continue through `call_ai`. Prompt redaction remains a
 mandatory choke point. No prompt, finding, severity, or exit-code behavior may change as
 part of file movement.
 
-### D. Explicit provider/session ownership (after #1885)
+### D. Explicit provider/session ownership (settled by #2302)
 
 Issue #1885 owns the **provider-side API only** (`aclose()` on base + providers,
-stale-loop client handling). Phase 5 of #1972 owns **all call-site wiring**: which layer
-calls `aclose()`, exactly-once semantics on failure/cancellation, and closing the 1+N
-providers in `custom_agent_runner.py`'s `provider_cache`.
+stale-loop client handling). Phase 5 of #1972
+([#2302](https://github.com/lgtm-hq/py-lintro/issues/2302)) settled **all call-site
+wiring** for the review run.
 
-The top-level AI run/session owns provider lifetime and closes it exactly once. Do not
-add a competing lifecycle abstraction (for example a second context-manager layer)
-before or beside #1885.
+`ReviewSession` in `lintro/ai/review/session.py` is the owner. `run_review_async` enters
+it once per run, so the provider the adapter constructed and every provider a custom
+agent's `model` override adds to `custom_agent_runner.py`'s `provider_cache` are closed
+exactly once — on completion, on a provider failure, on a cost-cap or timeout stop, and
+on cancellation. Closing is idempotent and never stops early: one provider whose
+teardown raises does not orphan the rest, the failure is logged, and it is re-raised
+only when the run itself succeeded (a failing run keeps its own exception). Outside
+`lintro/ai/providers/`, which defines the API, `session.py` is the only module in
+`lintro` that calls `aclose()`; a test asserts that. Do not add a competing lifecycle
+abstraction (for example a second context-manager layer) beside it.
 
-Providers are constructed at five sites today (`cli_utils/commands/review.py`,
-`mcp/toolkits/review.py`, `tools/definitions/idiom_review.py`, `ai/orchestrator.py`,
-`ai/liveness.py`). Closing inside the review orchestrator would be a use-after-close
-hazard for MCP session reuse; ownership stays with the constructing run/session.
+Adapters still _construct_ the provider (`cli_utils/commands/review.py`,
+`mcp/toolkits/review.py`) so each labels its own construction failure, but they must not
+reuse it after `execute_review` returns. The MCP use-after-close hazard this ADR
+originally recorded does not arise: `get_provider` caches nothing, so every MCP call
+builds its own provider. The three non-review construction sites
+(`tools/definitions/idiom_review.py`, `ai/orchestrator.py`, `ai/liveness.py`) are not
+review runs and keep their own lifetimes; #2302 did not widen its scope to them.
 
 ### Exit semantics (unchanged)
 
@@ -217,8 +228,8 @@ surfaces call `resolve_effective_ai_config` rather than reaching past it.
   for both surfaces.
 - Phase 4 can split the orchestrator behind `run_review` without changing product
   behavior.
-- Phase 5 can wire `aclose()` at construction sites after #1885 without a competing
-  lifecycle design.
+- Phase 5 wired `aclose()` into the run session after #1885 without a competing
+  lifecycle design (#2302).
 - Characterization tests added in Phase 1 document the current seams; they must stay
   green across later phases unless an explicit product change is accepted.
 

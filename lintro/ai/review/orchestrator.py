@@ -15,6 +15,13 @@ below it is async. ``run_review_async`` is three steps and no more:
 3. :func:`~lintro.ai.review.result_assembly.assemble_review_result` turns the
    plan and the outcome into the :class:`ReviewResult` every surface renders.
 
+Around those three steps sits the run's
+:class:`~lintro.ai.review.session.ReviewSession`: entering it here, at the one
+top of the run every surface goes through, is what makes the providers a review
+builds -- the one it was handed and one per custom-agent ``model`` override --
+close exactly once on every exit path, completion and cancellation alike
+(issue #2302).
+
 Prompts, merge policy, per-chunk passes and result assembly all live in their
 own modules; this one owns the sequence and nothing else. See
 ``docs/architecture/AI-REVIEW-EXECUTION.md``.
@@ -32,7 +39,7 @@ from lintro.ai.review.result_assembly import (
 )
 from lintro.ai.review.run_execution import execute_run
 from lintro.ai.review.run_planning import plan_run
-from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.session import ReviewSession, ReviewSessionOptions
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
@@ -113,11 +120,44 @@ async def run_review_async(
     :func:`~lintro.ai.review.run_execution.execute_run`. A cost-cap, timeout or
     SIGTERM stop does not: it is handled there and returned as a partial result.
 
+    The whole run is wrapped in a :class:`~lintro.ai.review.session.ReviewSession`
+    (#2302), so the provider the caller supplied and every provider a
+    custom-agent ``model`` override builds are closed exactly once when the run
+    ends, however it ends.
+
     Args:
         context: Collected review diff context.
         options: Session options for the run — provider, AI config, depth,
             checklist, sensitivity, resume state, and stop event. See
             :class:`~lintro.ai.review.session.ReviewSessionOptions`.
+
+    Returns:
+        Complete review result with metadata, checklist, and findings.
+    """
+    async with ReviewSession(provider=options.provider) as session:
+        return await _run_review_steps(context, options=options, session=session)
+
+
+async def _run_review_steps(
+    context: ReviewContext,
+    *,
+    options: ReviewSessionOptions,
+    session: ReviewSession,
+) -> ReviewResult:
+    """Plan, execute and assemble one review, inside an entered session.
+
+    Split from :func:`run_review_async` so the session's ``async with`` wraps
+    every exit path of the run — including the empty-diff early return and the
+    depth ``ValueError`` — without indenting the three steps behind it.
+
+    Args:
+        context: Collected review diff context.
+        options: Session options for the run.
+        session: The entered session that owns the run's providers. It is
+            passed down rather than carried on ``options`` because it is run
+            state, not an adapter setting, and
+            :class:`~lintro.ai.review.session.ReviewSessionOptions` is the
+            adapter-facing surface.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -144,7 +184,12 @@ async def run_review_async(
     )
 
     plan = plan_run(context=context, options=options, timings=timings)
-    outcome = await execute_run(context=context, options=options, plan=plan)
+    outcome = await execute_run(
+        context=context,
+        options=options,
+        plan=plan,
+        session=session,
+    )
     return assemble_review_result(
         context=context,
         options=options,

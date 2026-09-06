@@ -12,7 +12,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
 
@@ -73,6 +73,9 @@ def _stub_provider() -> MagicMock:
         because ``call_ai`` is replaced.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.name = GOLDEN_PROVIDER
     provider.model_name = GOLDEN_MODEL
     provider.capabilities = ProviderCapabilities(supports_sessions=False)

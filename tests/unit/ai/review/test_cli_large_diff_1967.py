@@ -371,6 +371,9 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
@@ -416,6 +419,9 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
@@ -485,6 +491,9 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     ai_config = AIConfig(enabled=True, review=True, transport=AITransport.CLI)

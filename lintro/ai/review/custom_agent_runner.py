@@ -257,6 +257,12 @@ class CustomAgentPassRequest:
         on_agent_failed: Optional callback invoked with the agent's name when
             a non-budget provider error skips it, so a caller can count it
             toward skipped-agent metadata (issue #1245).
+        provider_cache: The run session's cache of providers built for
+            ``model`` overrides, keyed by model name. Passing the session's
+            own dict is what makes those providers session-owned and closed
+            with the run (issue #2302); ``None`` falls back to a cache that
+            lives only as long as this call, which is what a direct caller
+            with no session gets.
     """
 
     selected: tuple[SelectedCustomAgent, ...]
@@ -269,6 +275,7 @@ class CustomAgentPassRequest:
     use_one_shot: bool = True
     on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None
     on_agent_failed: Callable[[str], None] | None = None
+    provider_cache: dict[str, BaseAIProvider] | None = None
 
 
 async def run_custom_agent_passes(
@@ -303,7 +310,11 @@ async def run_custom_agent_passes(
     on_agent_failed = request.on_agent_failed
 
     results: list[CustomAgentPassResult] = []
-    provider_cache: dict[str, BaseAIProvider] = {}
+    # The session owns the providers an override builds, so its cache is
+    # filled in place rather than a local one being discarded here (#2302).
+    provider_cache = request.provider_cache
+    if provider_cache is None:
+        provider_cache = {}
     for entry in selected:
         agent = entry.agent
         budget.check()

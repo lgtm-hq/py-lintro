@@ -14,8 +14,8 @@ normative decision record is
 | Monotonic cost-cap clamp                            | MCP adapter (`resolve_budget_policy`)                                                      | Shared domain prep; adapters keep policy       |
 | Diff review preparation                             | `prepare_review` / `execute_review` (#2300)                                                | Done (Phase 3)                                 |
 | Review execution facade                             | `run_review` / `run_review_async`                                                          | Done (Phase 4); internals split across modules |
-| Provider client `aclose()` API                      | Not yet (#1885)                                                                            | Provider-side only in #1885                    |
-| Provider close call-site wiring                     | N/A until #1885                                                                            | Phase 5 of #1972                               |
+| Provider client `aclose()` API                      | `BaseAIProvider.aclose()` and provider overrides (#1885)                                   | Provider-side only in #1885                    |
+| Provider close call-site wiring                     | `ReviewSession` in `session.py`, entered by `run_review_async` (#2302)                     | Done (Phase 5)                                 |
 
 ## Shared preparation (`lintro/ai/review/preparation.py`)
 
@@ -37,9 +37,12 @@ Since #2300 both the CLI (`lintro review`) and MCP (`lintro_review`) run one sha
    checklist, optionally build the lint digest, resolve sensitivity, and resolve custom
    agents from the request's `CustomAgentMode` (both adapters forward
    `review.custom_agents`).
-4. Each adapter constructs its own provider — provider lifetime stays with the
-   constructing surface until #1972 Phase 5 — and calls `execute_review`, which is the
-   single `run_review` call site.
+4. Each adapter constructs its own provider — so each labels its own construction
+   failure — and calls `execute_review`, which is the single `run_review` call site.
+   Lifetime is not the adapter's: since #2302 the run enters a `ReviewSession` that
+   closes that provider, and any provider a custom agent's `model` override builds,
+   exactly once on every exit path. An adapter must not reuse the provider after
+   `execute_review` returns.
 5. Each adapter translates failures into its own contract.
 
 `ReviewExecutionPolicy` carries what is genuinely adapter-only into `execute_review`:

@@ -333,9 +333,13 @@ def execute_review(
 ) -> ReviewResult:
     """Run the prepared review through the orchestrator facade.
 
-    The provider is supplied by the adapter rather than built here: provider
-    lifetime stays with the surface that constructed it (ADR-0006 section D,
-    pending #1972 Phase 5), and each adapter labels its own failures with it.
+    The provider is supplied by the adapter rather than built here so each
+    adapter can label its own construction failures with it, but its *lifetime*
+    belongs to the run: :func:`~lintro.ai.review.orchestrator.run_review_async`
+    wraps the run in a :class:`~lintro.ai.review.session.ReviewSession` that
+    closes this provider — and any provider a custom-agent ``model`` override
+    builds — exactly once when the run ends (ADR-0006 section D, #2302). An
+    adapter must not reuse the provider after this call returns.
 
     Args:
         prepared: The prepared review from :func:`prepare_review`.
