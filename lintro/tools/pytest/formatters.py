@@ -263,19 +263,23 @@ def format_pytest_issues_table(issues: list[PytestIssue]) -> str:
 #: cannot bury the summary it is appended to.
 FAILURE_SECTION_MAX_CHARS: int = 20_000
 
-#: Section headers pytest prints after the failure bodies. The failure section
-#: runs from the ``FAILURES`` banner up to the first of these.
+#: Banners that open a body pytest prints per failing test. ``ERRORS`` comes
+#: first when both are present, and is the only one an error-during-setup run
+#: emits at all.
+_FAILURE_SECTION_START_MARKERS: tuple[str, ...] = ("= ERRORS =", "= FAILURES =")
+
+#: Section headers pytest prints after those bodies. The reproduced section
+#: runs from the first start marker up to the first of these.
 _FAILURE_SECTION_END_MARKERS: tuple[str, ...] = (
     "= short test summary info =",
     "= warnings summary =",
     "= slowest ",
     "= PASSES =",
-    "= ERRORS =",
 )
 
 
 def extract_failure_section(raw_output: str | None) -> str:
-    """Return pytest's own ``FAILURES`` block from a captured run.
+    """Return pytest's own ``ERRORS``/``FAILURES`` block from a captured run.
 
     The table lintro builds from parsed issues truncates each message to one
     short line, which is enough to see *that* a test failed and never enough to
@@ -283,6 +287,10 @@ def extract_failure_section(raw_output: str | None) -> str:
     the log, so an intermittent failure there could not be diagnosed at all
     (#2391). Reproducing pytest's own section restores the assertion text and
     the captured stdout/stderr of the failing test.
+
+    Both banners are recognised: a collection or fixture failure prints only
+    ``ERRORS``, so anchoring on ``FAILURES`` alone would leave exactly the
+    runs with no assertion text at all still undiagnosable.
 
     Args:
         raw_output: Raw pytest output, or None when it was not captured.
@@ -296,7 +304,11 @@ def extract_failure_section(raw_output: str | None) -> str:
         return ""
     lines = raw_output.splitlines()
     start = next(
-        (i for i, line in enumerate(lines) if "= FAILURES =" in line),
+        (
+            i
+            for i, line in enumerate(lines)
+            if any(marker in line for marker in _FAILURE_SECTION_START_MARKERS)
+        ),
         None,
     )
     if start is None:

@@ -45,7 +45,7 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 
 - Executes `golangci-lint run --output.json.path stdout --show-stats=false`
   `--allow-parallel-runners ./...`
-- Autofix path runs `golangci-lint run --fix ./...`, then re-checks
+- Autofix path runs the same command plus `--fix`, then re-checks
 - Parses JSON `Issues[]` into structured issues (linter, position, message, severity,
   fixable)
 - Discovers the Go module root (`go.mod`) from provided paths
@@ -82,7 +82,8 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 ```bash
 golangci-lint run --output.json.path stdout --show-stats=false \
   --allow-parallel-runners ./...
-golangci-lint run --fix ./...
+golangci-lint run --output.json.path stdout --show-stats=false \
+  --allow-parallel-runners --fix ./...
 ```
 
 ### Lintro Wrapper

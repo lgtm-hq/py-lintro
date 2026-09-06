@@ -436,3 +436,68 @@ def test_fix_initial_check_timeout_reports_no_phantom_issue(
     assert_that(result.success).is_false()
     assert_that(result.initial_issues_count).is_equal_to(0)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+
+
+def _argv(call: Any) -> list[str]:
+    """Return the argv a ``_run_subprocess`` call was made with.
+
+    Args:
+        call: A recorded ``unittest.mock`` call.
+
+    Returns:
+        The command list, whether it was passed positionally or by keyword.
+    """
+    if call.args:
+        return cast(list[str], call.args[0])
+    return cast(list[str], call.kwargs["cmd"])
+
+
+def test_check_invokes_golangci_lint_with_parallel_runners_allowed(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """check() puts ``--allow-parallel-runners`` on the real argv.
+
+    Pinned through the public entry point rather than the private command
+    builder: what matters is that the flag reaches the subprocess, because
+    without it a second concurrent instance exits 3 with an empty ``Issues``
+    array and the findings silently disappear (#2391).
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        return_value=(True, GOLANGCI_JSON_NO_ISSUES),
+    ) as run:
+        golangci_lint_plugin.check([str(tmp_path)], {})
+
+    assert_that(_argv(run.call_args)).contains("--allow-parallel-runners")
+
+
+def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """fix() carries the same flag on every golangci-lint invocation.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        return_value=(True, GOLANGCI_JSON_NO_ISSUES),
+    ) as run:
+        golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(run.call_count).is_greater_than(0)
+    for call in run.call_args_list:
+        assert_that(_argv(call)).contains("--allow-parallel-runners")

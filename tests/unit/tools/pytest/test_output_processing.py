@@ -233,3 +233,30 @@ def test_fallback_to_text_when_format_fails() -> None:
     )
     # Should fall back to text and find the failure
     assert_that(issues).is_length(1)
+
+
+def test_extract_failure_section_covers_error_only_runs() -> None:
+    """A collection/fixture error prints only ERRORS and is still reproduced."""
+    raw = (
+        "==================================== ERRORS ====================================\n"
+        "________________ ERROR at setup of test_check_detects_violations ________________\n"
+        "E   fixture 'missing' not found\n"
+        "=========================== short test summary info ============================\n"
+    )
+    section = extract_failure_section(raw)
+    assert_that(section).contains("fixture 'missing' not found")
+    assert_that(section).does_not_contain("short test summary info")
+
+
+def test_extract_failure_section_spans_errors_and_failures() -> None:
+    """When pytest prints both banners, both bodies are reproduced."""
+    raw = (
+        "=== ERRORS ===\n"
+        "E   setup exploded\n"
+        "=== FAILURES ===\n"
+        "E   assertion exploded\n"
+        "=== short test summary info ===\n"
+    )
+    section = extract_failure_section(raw)
+    assert_that(section).contains("setup exploded")
+    assert_that(section).contains("assertion exploded")
