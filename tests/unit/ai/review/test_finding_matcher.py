@@ -20,7 +20,6 @@ from lintro.ai.review.finding_matcher import (
     normalize_title,
     review_findings_from_unposted,
 )
-from lintro.ai.review.github_sticky import matcher_reviewed_paths
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.finding_occurrence import (
     FindingOccurrence,
@@ -30,6 +29,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.sticky import matcher_reviewed_paths
 
 
 def _finding(

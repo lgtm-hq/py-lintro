@@ -55,7 +55,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/ai/review/finding_matcher.py": ("PLR0915",),
     "lintro/ai/review/github.py": ("PLR0913",),
     "lintro/ai/review/github_lifecycle.py": ("PLR0913",),
-    "lintro/ai/review/github_sticky.py": ("PLR0913",),
     "lintro/ai/review/models/finding_record.py": ("C901", "PLR0912"),
     "lintro/ai/summary.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/api/core.py": ("PLR0913",),
@@ -148,8 +147,8 @@ BASELINE: dict[str, tuple[str, ...]] = {
 #: suppression that a previous ratchet step removed. Both may only go *down*,
 #: and both are pinned to the exact live counts (issue #1739): any slack here
 #: is room for exactly that reintroduction.
-BASELINE_MAX_FILES: int = 90
-BASELINE_MAX_SUPPRESSIONS: int = 175
+BASELINE_MAX_FILES: int = 89
+BASELINE_MAX_SUPPRESSIONS: int = 174
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->

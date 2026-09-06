@@ -23,13 +23,14 @@ from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github import _post_inline_findings, post_review_to_github
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.output import (
     INLINE_POST_FAILURE_KEY,
     render_inline_post_failure_json,
 )
+from lintro.ai.review.sticky import build_sticky_comment
 
 #: Message GitHub returns when it throttles content creation on a token.
 _RATE_LIMIT_MESSAGE = (
@@ -289,12 +290,14 @@ def test_sticky_row_reports_the_kind_supplied_by_the_caller(
 ) -> None:
     """The public sticky builder renders whatever cause it is handed."""
     body = build_sticky_comment(
-        result=sample_review_result,
-        inline_failure=InlinePostFailure(
-            reason="GitHub rate limit (HTTP 403)",
-            findings=sample_review_result.findings,
-            kind=InlinePostFailureKind.RATE_LIMITED,
-            status=403,
+        request=StickyRequest(
+            result=sample_review_result,
+            inline_failure=InlinePostFailure(
+                reason="GitHub rate limit (HTTP 403)",
+                findings=sample_review_result.findings,
+                kind=InlinePostFailureKind.RATE_LIMITED,
+                status=403,
+            ),
         ),
     )
 

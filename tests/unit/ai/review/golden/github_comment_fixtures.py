@@ -16,7 +16,6 @@ from __future__ import annotations
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
-from lintro.ai.review.github_sticky import matcher_reviewed_paths
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -25,6 +24,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.sticky import matcher_reviewed_paths
 
 #: Head commit of the round the goldens render.
 GOLDEN_HEAD_SHA: str = "0d15ea5edeadbeef0d15ea5edeadbeef0d15ea5e"

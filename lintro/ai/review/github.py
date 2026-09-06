@@ -48,7 +48,9 @@ from lintro.ai.review.github_lifecycle import (
 )
 from lintro.ai.review.github_render import (
     REGRESSED_TITLE_SUFFIX,
+    Section,
     _partition_findings,
+    assemble,
     format_convergence_banner,
     format_finding_comment,
     format_inline_post_cause,
@@ -56,14 +58,6 @@ from lintro.ai.review.github_render import (
     sanitize_comment_text,
 )
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import (
-    build_sticky_bodies,
-    build_sticky_comment,
-    matcher_reviewed_paths,
-    parse_review_state,
-    parse_review_state_v2,
-    render_state_sticky,
-)
 from lintro.ai.review.inline_fix import (
     finding_suggested_change,
     normalize_diff_path,
@@ -78,7 +72,16 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.output import render_inline_post_failure_json
+from lintro.ai.review.sticky import (
+    build_sticky_bodies,
+    build_sticky_comment,
+    matcher_reviewed_paths,
+    parse_review_state,
+    parse_review_state_v2,
+    render_state_sticky,
+)
 
 __all__ = [
     "GITHUB_COMMENT_HARD_LIMIT",
@@ -172,20 +175,22 @@ def post_review_to_github(
     ) -> str:
         """Render the primary sticky body against the unchanged prior state."""
         primary, archive = build_sticky_bodies(
-            result=result,
-            prior_state=prior_state,
-            head_sha=head_sha,
-            checklist_display=checklist_display,
-            question_map=prompt_questions,
-            diff_lines=diff_lines,
-            transport=transport,
-            auth_mode=auth_mode,
-            cost_basis=cost_basis,
-            inline_failure=inline_failure,
-            inline_comment_ids=comment_ids,
-            repo=gh_reporter.repo or "",
-            pr_number=gh_reporter.pr_number,
-            departed_paths=departed_paths,
+            request=StickyRequest(
+                result=result,
+                prior_state=prior_state,
+                head_sha=head_sha,
+                checklist_display=checklist_display,
+                question_map=prompt_questions,
+                diff_lines=diff_lines,
+                transport=transport,
+                auth_mode=auth_mode,
+                cost_basis=cost_basis,
+                inline_failure=inline_failure,
+                inline_comment_ids=comment_ids,
+                repo=gh_reporter.repo or "",
+                pr_number=gh_reporter.pr_number,
+                departed_paths=departed_paths,
+            ),
         )
         render.archive = archive  # type: ignore[attr-defined]
         return primary
@@ -1042,9 +1047,17 @@ def _inline_body(*, body: str, key: str, note: str) -> str:
         The body to post. The marker is hidden (an HTML comment) and sits last,
         so it never affects how the comment reads.
     """
-    marker = finding_marker(key=key)
-    parts = [part for part in (note, body, marker) if part]
-    return "\n\n".join(parts)
+    # ``budget=None``: an inline comment carries no prunable section, and it
+    # has never been capped. Capping it here would be a behaviour change in an
+    # overflow path this issue does not own; the assembly is what converges.
+    return assemble(
+        sections=[
+            Section(name="provenance", text=note),
+            Section(name="finding", text=body),
+            Section(name="marker", text=finding_marker(key=key)),
+        ],
+        budget=None,
+    )
 
 
 def _post_inline_findings(

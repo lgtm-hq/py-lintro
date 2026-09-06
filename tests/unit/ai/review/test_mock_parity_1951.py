@@ -31,7 +31,6 @@ from lintro.ai.review.github_render import (
     format_finding_comment,
 )
 from lintro.ai.review.github_review_body import REVIEW_BODY_FOOTER
-from lintro.ai.review.github_sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -39,8 +38,10 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
 
@@ -88,17 +89,19 @@ def test_open_finding_title_links_to_its_inline_comment(
 ) -> None:
     """A finding whose thread is known renders its title as a link to it."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    state = advance_review_state(result=result, head_sha="sha1")
+    state = advance_review_state(request=StickyRequest(result=result, head_sha="sha1"))
     key = state.findings[0].key
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            head_sha="sha1",
-            inline_comment_ids={key: 424242},
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                head_sha="sha1",
+                inline_comment_ids={key: 424242},
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -113,10 +116,12 @@ def test_open_finding_without_a_comment_id_renders_unlinked(
     """No thread means no link — never a dead one."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
-            head_sha="sha1",
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+                head_sha="sha1",
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -129,13 +134,15 @@ def test_open_finding_renders_unlinked_without_repo_context(
 ) -> None:
     """A known comment id is not enough: the URL also needs repo and PR."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    state = advance_review_state(result=result)
+    state = advance_review_state(request=StickyRequest(result=result))
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            inline_comment_ids={state.findings[0].key: 99},
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                inline_comment_ids={state.findings[0].key: 99},
+            ),
         ),
     )
 
@@ -156,15 +163,17 @@ def test_a_model_written_bracket_cannot_break_out_of_the_link(
         base=sample_review_result,
         findings=(_finding(title=hostile),),
     )
-    state = advance_review_state(result=result)
+    state = advance_review_state(request=StickyRequest(result=result))
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            inline_comment_ids={state.findings[0].key: 424242},
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                inline_comment_ids={state.findings[0].key: 424242},
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -191,12 +200,19 @@ def test_history_row_reports_open_after_the_round_and_what_it_fixed(
         base=sample_review_result,
         findings=(_finding(title="Leak"), _finding(title="Race", line=20)),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -214,9 +230,11 @@ def test_history_row_falls_back_for_state_without_the_new_counts(
 
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=()),
-            prior_state=prior_state,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=()),
+                prior_state=prior_state,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -285,12 +303,16 @@ def test_history_recap_renders_the_rounds_narrative(
             walkthrough=(),
         ),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -308,9 +330,11 @@ def test_history_recap_falls_back_to_counts_without_a_narrative(
 
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=()),
-            prior_state=prior_state,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=()),
+                prior_state=prior_state,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -351,7 +375,9 @@ def test_narrative_keeps_only_the_first_sentence(
 ) -> None:
     """A recap is one line; the rest of a paragraph is not persisted."""
     result = _with(base=sample_review_result, findings=(), summary=summary)
-    stored = advance_review_state(result=result, head_sha="sha1").runs[-1]
+    stored = advance_review_state(
+        request=StickyRequest(result=result, head_sha="sha1"),
+    ).runs[-1]
 
     assert_that(stored.narrative).is_equal_to(expected)
 
@@ -472,7 +498,9 @@ def test_verdict_explainer_renders_on_every_round(
     """The title carries the derived verdict on every round."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=findings),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=findings),
+            ),
         ),
     )
     labels = {
@@ -489,7 +517,9 @@ def test_verdict_explainer_sits_directly_under_the_pill(
     """The mockup puts the derived verdict in the title, not a separate pill."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+            ),
         ),
     )
 
@@ -518,7 +548,9 @@ def test_fix_all_panel_caption_names_the_open_table(
     """The panel covers the table right above it, which is what it now says."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+            ),
         ),
     )
 

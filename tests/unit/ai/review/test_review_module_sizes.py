@@ -13,9 +13,12 @@ package is covered by the ratchet from the moment it is added, and shrinking
 #1974's list as those modules land needs no change here.
 
 Scope is the ``lintro/ai/review`` package directory itself, which is what
-#2301's slices enumerated. Its ``chunker/`` and ``context/`` subpackages are
-part of the wider >500-line burn-down owned by #1995 and are not ratcheted
-here; extend this to ``rglob`` when that issue lands.
+#2301's slices enumerated, plus the ``sticky/`` subpackage #2304 split
+``github_sticky.py`` into — a split that moved 2,174 lines out of the glob
+would otherwise have bought the ratchet's silence rather than passing it. Its
+``chunker/`` and ``context/`` subpackages are part of the wider >500-line
+burn-down owned by #1995 and are not ratcheted here; extend this to ``rglob``
+when that issue lands.
 
 The second ratchet is #2301's other structural criterion: no function in the
 package takes more than 8 parameters. Ruff's ``PLR0913`` enforces that repo-wide
@@ -44,18 +47,32 @@ MAX_REVIEW_FUNCTION_PARAMETERS: int = 8
 
 REVIEW_PACKAGE = Path(__file__).resolve().parents[4] / "lintro" / "ai" / "review"
 
+#: Subpackages ratcheted alongside the package directory itself. ``sticky/``
+#: is #2304's split of ``github_sticky.py``; entries are added here whenever a
+#: module in scope is split into a package rather than sibling modules.
+RATCHETED_SUBPACKAGES: tuple[str, ...] = ("sticky",)
+
 #: GitHub-surface modules split by #1974, not by #2301. Entries leave this set
 #: as that issue lands; nothing is ever added to it.
 GITHUB_SURFACE_MODULES: frozenset[str] = frozenset(
     {
         "github.py",
-        "github_errors.py",
         "github_lifecycle.py",
-        "github_render.py",
-        "github_review_body.py",
-        "github_sticky.py",
     },
 )
+
+
+def _ratcheted_modules() -> list[Path]:
+    """List every module the ratchets cover.
+
+    Returns:
+        list[Path]: Modules directly in ``lintro/ai/review`` plus those in the
+        subpackages named by :data:`RATCHETED_SUBPACKAGES`.
+    """
+    paths = list(REVIEW_PACKAGE.glob("*.py"))
+    for package in RATCHETED_SUBPACKAGES:
+        paths.extend((REVIEW_PACKAGE / package).glob("*.py"))
+    return sorted(paths)
 
 
 def _module_line_counts() -> dict[str, int]:
@@ -68,7 +85,7 @@ def _module_line_counts() -> dict[str, int]:
     root = REVIEW_PACKAGE.parents[2]
     return {
         path.relative_to(root).as_posix(): count_module_lines(file_path=str(path))
-        for path in sorted(REVIEW_PACKAGE.glob("*.py"))
+        for path in _ratcheted_modules()
     }
 
 
@@ -129,7 +146,7 @@ def test_no_review_function_exceeds_the_parameter_ratchet() -> None:
     carry their ``PLR0913`` entries.
     """
     offenders: dict[str, int] = {}
-    for path in sorted(REVIEW_PACKAGE.glob("*.py")):
+    for path in _ratcheted_modules():
         if path.name in GITHUB_SURFACE_MODULES:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

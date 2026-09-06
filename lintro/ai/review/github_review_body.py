@@ -29,8 +29,9 @@ from lintro.ai.review.agent_prompts import (
     render_agent_prompt_panel,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
-from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
 from lintro.ai.review.github_render import (
+    Section,
+    assemble,
     format_badge_tables,
     format_coverage_limited_warning,
     format_cross_chunk_note,
@@ -58,8 +59,6 @@ _SHORT_SHA = 7
 
 #: Maximum file entries listed before the files collapsible summarizes the rest.
 _MAX_LISTED_FILES = 60
-
-_TRUNCATION_NOTICE = "\n\n> ✂️ Comment truncated to fit GitHub's size limit."
 
 
 def build_review_body(
@@ -93,36 +92,48 @@ def build_review_body(
         Markdown body for the review, capped to GitHub's comment size limit.
     """
     round_number = prior_state.next_round
-    sections = [
-        _header(
-            result=result,
-            match=match,
-            prior_state=prior_state,
-            round_number=round_number,
-            head_sha=head_sha,
-        ),
-        _prompt_section(
-            result=result,
-            round_number=round_number,
-        ),
-        _run_stats_section(
-            result=result,
-            transport=transport,
-            auth_mode=auth_mode,
-            config_source=config_source,
-        ),
-        _commits_section(
-            result=result,
-            prior_state=prior_state,
-            round_number=round_number,
-            head_sha=head_sha,
-            new_commits=new_commits,
-        ),
-        _files_section(result=result),
-        REVIEW_BODY_FOOTER,
-    ]
-    body = "\n\n".join(section for section in sections if section)
-    return _cap(body=body)
+    return assemble(
+        sections=[
+            Section(
+                name="header",
+                text=_header(
+                    result=result,
+                    match=match,
+                    prior_state=prior_state,
+                    round_number=round_number,
+                    head_sha=head_sha,
+                ),
+            ),
+            Section(
+                name="prompt",
+                text=_prompt_section(
+                    result=result,
+                    round_number=round_number,
+                ),
+            ),
+            Section(
+                name="run_stats",
+                text=_run_stats_section(
+                    result=result,
+                    transport=transport,
+                    auth_mode=auth_mode,
+                    config_source=config_source,
+                ),
+            ),
+            Section(
+                name="commits",
+                text=_commits_section(
+                    result=result,
+                    prior_state=prior_state,
+                    round_number=round_number,
+                    head_sha=head_sha,
+                    new_commits=new_commits,
+                ),
+            ),
+            Section(name="files", text=_files_section(result=result)),
+            Section(name="footer", text=REVIEW_BODY_FOOTER),
+        ],
+    )
 
 
 def _short(sha: str) -> str:
@@ -451,18 +462,3 @@ def _files_section(*, result: ReviewResult) -> str:
     return "\n".join(
         [f"<details><summary>{summary}</summary>", "", *entries, "", "</details>"],
     )
-
-
-def _cap(*, body: str) -> str:
-    """Trim an over-long body, leaving an explicit truncation marker.
-
-    Args:
-        body: Assembled review body.
-
-    Returns:
-        The body, truncated with a visible notice when over the size cap.
-    """
-    if len(body) <= MAX_COMMENT_CHARS:
-        return body
-    keep = MAX_COMMENT_CHARS - len(_TRUNCATION_NOTICE)
-    return body[:keep].rstrip() + _TRUNCATION_NOTICE

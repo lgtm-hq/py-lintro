@@ -30,13 +30,14 @@ from lintro.ai.review.github_contract import (
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_render import format_finding_comment
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import (
+from lintro.ai.review.models.finding_match_result import FindingMatchResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sticky import (
     build_sticky_bodies,
     build_sticky_comment,
     render_state_sticky,
 )
-from lintro.ai.review.models.finding_match_result import FindingMatchResult
-from lintro.ai.review.models.review_state import ReviewState
 from tests.unit.ai.review.golden.github_comment_fixtures import (
     GOLDEN_HEAD_SHA,
     GOLDEN_PR_NUMBER,
@@ -115,7 +116,7 @@ def _sticky_kwargs() -> dict[str, Any]:
 
 def test_sticky_comment_golden() -> None:
     """``build_sticky_comment`` renders the pinned board byte for byte."""
-    body = build_sticky_comment(**_sticky_kwargs())
+    body = build_sticky_comment(request=StickyRequest(**_sticky_kwargs()))
 
     assert_golden(name="github/sticky_comment.golden", actual=body)
 
@@ -127,7 +128,7 @@ def test_sticky_bodies_golden() -> None:
     soft limit, so the pinned two-round input must keep it ``None`` — a golden
     that quietly grew an archive comment would be a second comment on the PR.
     """
-    primary, archive = build_sticky_bodies(**_sticky_kwargs())
+    primary, archive = build_sticky_bodies(request=StickyRequest(**_sticky_kwargs()))
 
     assert_golden(name="github/sticky_primary.golden", actual=primary)
     assert_that(archive).is_none()

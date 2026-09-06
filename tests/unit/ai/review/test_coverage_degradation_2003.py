@@ -38,7 +38,6 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 )
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -46,6 +45,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.response_pipeline import (
@@ -53,6 +53,7 @@ from lintro.ai.review.response_pipeline import (
     invoke_chunk_review,
 )
 from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.sticky import build_sticky_comment
 from lintro.mcp.toolkits.review import _run_metadata
 
 _CAP = CoverageDegradation(
@@ -123,9 +124,11 @@ def _sticky(*, result: ReviewResult) -> str:
         The rendered sticky comment body.
     """
     return build_sticky_comment(
-        result=result,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=result,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -787,8 +790,8 @@ def test_sticky_history_marks_a_prior_capped_round(
     Args:
         sample_review_result: Shared review result fixture.
     """
-    from lintro.ai.review.github_sticky import build_sticky_bodies
     from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import build_sticky_bodies
 
     limited = RunRecord(round=1, sha="abc1234", coverage_limited=True).to_dict()
     unlimited = RunRecord(round=1, sha="abc1234").to_dict()
@@ -798,17 +801,21 @@ def test_sticky_history_marks_a_prior_capped_round(
     with_marker = "\n".join(
         body or ""
         for body in build_sticky_bodies(
-            result=sample_review_result,
-            prior_runs=[limited],
-            transport="cli",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_runs=[limited],
+                transport="cli",
+            ),
         )
     )
     without_marker = "\n".join(
         body or ""
         for body in build_sticky_bodies(
-            result=sample_review_result,
-            prior_runs=[unlimited],
-            transport="cli",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_runs=[unlimited],
+                transport="cli",
+            ),
         )
     )
 
@@ -825,18 +832,25 @@ def test_advanced_state_persists_coverage_limited_from_a_capped_result(
     Args:
         sample_review_result: Shared review result fixture.
     """
-    from lintro.ai.review.github_sticky import advance_review_state
     from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import advance_review_state
 
     capped_state = advance_review_state(
-        result=_with_degradations(result=sample_review_result, degradations=(_CAP,)),
-        head_sha="abc1234",
-        transport="cli",
+        request=StickyRequest(
+            result=_with_degradations(
+                result=sample_review_result,
+                degradations=(_CAP,),
+            ),
+            head_sha="abc1234",
+            transport="cli",
+        ),
     )
     clean_state = advance_review_state(
-        result=sample_review_result,
-        head_sha="abc1234",
-        transport="cli",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="abc1234",
+            transport="cli",
+        ),
     )
 
     capped_run = capped_state.runs[-1]

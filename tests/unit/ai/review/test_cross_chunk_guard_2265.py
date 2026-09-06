@@ -35,7 +35,6 @@ from lintro.ai.review.finding_matcher import (
 )
 from lintro.ai.review.github_render import format_cross_chunk_note
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_context import ReviewContext
@@ -43,6 +42,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review_async
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.session import ReviewSessionOptions
@@ -53,6 +53,7 @@ from lintro.ai.review.severity_gate import (
     cross_chunk_contradictions,
     describe_cross_chunk_contradictions,
 )
+from lintro.ai.review.sticky import build_sticky_comment
 
 _CHANGED = ("scripts/migrate_docs_content.py", "tests/unit/test_migrate_docs.py")
 
@@ -165,9 +166,11 @@ def _sticky(*, result: ReviewResult) -> str:
         The rendered sticky comment body.
     """
     return build_sticky_comment(
-        result=result,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=result,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 

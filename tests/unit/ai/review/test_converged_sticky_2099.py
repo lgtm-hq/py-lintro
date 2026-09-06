@@ -9,14 +9,15 @@ from assertpy import assert_that
 
 from lintro.ai.review.github import post_review_converged_to_github
 from lintro.ai.review.github_constants import STATE_MARKER_PREFIX
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-)
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+)
 
 # One real round persisted, so the skipped round is round 2.
 _DECISION = ConvergenceDecision(
@@ -33,10 +34,12 @@ _DECISION = ConvergenceDecision(
 def prior_body(sample_review_result: ReviewResult) -> str:
     """Render a successful round-1 sticky the skipped round stamps onto."""
     return build_sticky_comment(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -44,10 +47,12 @@ def prior_body(sample_review_result: ReviewResult) -> str:
 def prior_state(sample_review_result: ReviewResult) -> ReviewState:
     """Artifact state persisted by a successful round."""
     return advance_review_state(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 

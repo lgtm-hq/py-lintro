@@ -44,7 +44,6 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
 from lintro.ai.review.github_render import format_synthesis_note_line
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.chunk_summary import ChunkSummary
@@ -53,11 +52,13 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.sticky import build_sticky_comment
 from lintro.ai.review.synthesis import SynthesisPassRequest, run_synthesis_pass
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
@@ -415,7 +416,9 @@ def _github_surfaces(*, result: Any) -> tuple[str, str]:
         match=match,
         head_sha="deadbeef",
     )
-    sticky = build_sticky_comment(result=result, head_sha="deadbeef")
+    sticky = build_sticky_comment(
+        request=StickyRequest(result=result, head_sha="deadbeef"),
+    )
     return body, sticky
 
 

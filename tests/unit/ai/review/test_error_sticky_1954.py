@@ -24,16 +24,17 @@ from lintro.ai.review.github_errors import (
     condense_provider_error,
     format_error_comment,
 )
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-    render_state_sticky,
-)
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+    render_state_sticky,
+)
 
 #: Banner headline for the round that fails in these tests, taken from the
 #: production template so a copy change cannot silently defang the assertions.
@@ -44,10 +45,12 @@ _ROUND_2_FAILED = FAILURE_BANNER_HEADLINE.format(round_number=2)
 def prior_body(sample_review_result: ReviewResult) -> str:
     """Render a successful round-1 sticky to fail the next round against."""
     return build_sticky_comment(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -55,10 +58,12 @@ def prior_body(sample_review_result: ReviewResult) -> str:
 def prior_state(sample_review_result: ReviewResult) -> ReviewState:
     """Artifact state persisted by a successful round."""
     return advance_review_state(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
