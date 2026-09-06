@@ -45,6 +45,24 @@ def _git(*args: str, cwd: Path) -> None:
     run_git(["git", *args], cwd=cwd)
 
 
+def _git_init(*, cwd: Path) -> None:
+    """Initialise a throwaway repository with a committable identity.
+
+    :func:`_git` blanks the global and system config, so git has no configured
+    ``user.email``/``user.name`` to commit with. It succeeds anyway on hosts
+    where it can synthesise one from the OS user and hostname, and fails with
+    "Author identity unknown" where it cannot — making the fixture depend on
+    the machine. Set the identity locally, the way
+    :func:`tests.unit.conftest.init_git_repo` already does (#2315).
+
+    Args:
+        cwd: Directory to turn into a repository.
+    """
+    _git("init", "-q", cwd=cwd)
+    _git("config", "user.email", "test@example.com", cwd=cwd)
+    _git("config", "user.name", "Test User", cwd=cwd)
+
+
 def _assert_no_crash(*, result: Result) -> None:
     """Assert a CLI invocation ended by exiting, not by raising.
 
@@ -75,7 +93,7 @@ def _repo_with_one_changed_file(*, tmp_path: Path) -> Path:
     Returns:
         Path: The repository root.
     """
-    _git("init", "-q", cwd=tmp_path)
+    _git_init(cwd=tmp_path)
     (tmp_path / "baseline.py").write_text("import os\n", encoding="utf-8")
     _git("add", "-A", cwd=tmp_path)
     _git("commit", "-qm", "init", cwd=tmp_path)
@@ -243,7 +261,7 @@ def test_diff_equals_syntax_allows_ref_when_path_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``--diff=main`` works when a ``main/`` directory also exists."""
-    _git("init", "-q", cwd=tmp_path)
+    _git_init(cwd=tmp_path)
     _git("commit", "--allow-empty", "-qm", "init", cwd=tmp_path)
     _git("branch", "-M", "main", cwd=tmp_path)
     (tmp_path / "main").mkdir()

@@ -38,3 +38,23 @@ def test_canary_raises_is_a_real_assertion() -> None:
     with pytest.raises(ValueError):
         collaborator("payload")
     collaborator.assert_called_once()
+
+
+class _Holder:
+    """Plain object the attribute-assignment canary writes onto."""
+
+    other: int = 3
+
+
+def test_canary_attribute_assignment_does_not_taint_the_object() -> None:
+    """Assigning bookkeeping to an attribute must not taint the object itself.
+
+    ``ast.walk`` over the assignment target also visits the ``Load``-context
+    ``holder``. Tainting it would misclassify the real assertion below, so
+    this canary must stay unreported (#2375).
+    """
+    collaborator = MagicMock()
+    collaborator("payload")
+    holder = _Holder()
+    holder.captured = collaborator.call_args
+    assert_that(holder.other).is_equal_to(3)

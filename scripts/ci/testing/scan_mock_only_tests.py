@@ -136,6 +136,12 @@ def _tainted_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     ``assert_that(captured)`` is still an assertion about how a mock was
     called, so the intermediate name has to carry the taint.
 
+    Only names actually being bound are tainted. ``ast.walk`` over an
+    assignment target also visits the ``Load``-context names inside an
+    attribute or subscript, so ``self.x = mock.call_args`` would otherwise
+    taint ``self`` and misclassify every later ``assert_that(self.anything)``
+    as mock bookkeeping (#2315).
+
     Args:
         func: Function definition to scan.
 
@@ -158,7 +164,7 @@ def _tainted_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
             for name in ast.walk(target):
-                if isinstance(name, ast.Name):
+                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
                     tainted.add(name.id)
     return tainted
 

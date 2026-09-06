@@ -115,8 +115,9 @@ def test_duplicate_scanner_reports_a_planted_duplicate_pair(tmp_path: Path) -> N
 def test_mock_only_scanner_reports_planted_bookkeeping_tests(tmp_path: Path) -> None:
     """The mock-only scanner flags the direct helper and the tainted local.
 
-    The observable-result and ``pytest.raises`` canaries must stay unflagged,
-    which pins the two exemptions the scanner grew during the sweep.
+    The observable-result, ``pytest.raises`` and attribute-assignment canaries
+    must stay unflagged, which pins the two exemptions the scanner grew during
+    the sweep plus the ``Store``-context-only taint rule.
 
     Args:
         tmp_path: Pytest temporary directory holding the planted canary.

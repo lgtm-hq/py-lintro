@@ -11,6 +11,7 @@ to be asserted through mock call bookkeeping are covered at the CLI level in
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -35,20 +36,55 @@ def _write_project(*, tmp_path: Path, body: str) -> Path:
     return project
 
 
+def _pytest_summary(*, report_text: str) -> dict[str, int]:
+    """Extract pytest's outcome counts from a rendered Lintro report.
+
+    Comparing parsed integers rather than searching for ``'"passed": 1'``
+    matters: that substring also matches ``"passed": 10`` (#2375).
+
+    Args:
+        report_text: Full text of the report file the run wrote.
+
+    Returns:
+        The outcome counts keyed by name, defaulting each to ``0``.
+
+    Raises:
+        AssertionError: If the report carries no recognisable counts.
+    """
+    counts = {
+        name: int(value)
+        for name, value in re.findall(
+            r'"(passed|failed|skipped|errors)":\s*(\d+)',
+            report_text,
+        )
+    }
+    if not counts:
+        raise AssertionError(f"no pytest counts in report: {report_text[:400]}")
+    return {
+        key: counts.get(key, 0) for key in ("passed", "failed", "skipped", "errors")
+    }
+
+
 @pytest.mark.slow
 def test_test_function_runs_the_suite_and_writes_the_report_file(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A passing suite returns cleanly and its outcome reaches the report file.
 
     Args:
         tmp_path: Pytest temporary directory for the generated project.
+        monkeypatch: Pytest monkeypatch fixture, used to run from the project.
     """
     project = _write_project(
         tmp_path=tmp_path,
         body="def test_generated_passes() -> None:\n    assert True\n",
     )
     report = tmp_path / "report.txt"
+    # The plugin auto-enables --junitxml at a path relative to the cwd, so two
+    # nested runs would race on one report.xml in the repository root under
+    # ``-n auto``. Run from the throwaway project instead (#2375).
+    monkeypatch.chdir(project)
 
     test(
         paths=(str(project),),
@@ -64,12 +100,14 @@ def test_test_function_runs_the_suite_and_writes_the_report_file(
 
     written = report.read_text(encoding="utf-8")
     assert_that(written).contains("Lintro Test Report")
-    assert_that(written).contains('"passed": 1')
-    assert_that(written).contains('"failed": 0')
+    summary = _pytest_summary(report_text=written)
+    assert_that(summary["passed"]).is_equal_to(1)
+    assert_that(summary["failed"]).is_equal_to(0)
 
 
 def test_test_function_normalizes_bare_tool_options_to_the_pytest_prefix(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bare ``collect_only`` fragment reaches pytest as ``pytest:collect_only``.
 
@@ -79,6 +117,7 @@ def test_test_function_normalizes_bare_tool_options_to_the_pytest_prefix(
 
     Args:
         tmp_path: Pytest temporary directory for the generated project.
+        monkeypatch: Pytest monkeypatch fixture, used to run from the project.
     """
     project = _write_project(
         tmp_path=tmp_path,
@@ -92,6 +131,10 @@ def test_test_function_normalizes_bare_tool_options_to_the_pytest_prefix(
         ),
     )
     report = tmp_path / "report.txt"
+    # The plugin auto-enables --junitxml at a path relative to the cwd, so two
+    # nested runs would race on one report.xml in the repository root under
+    # ``-n auto``. Run from the throwaway project instead (#2375).
+    monkeypatch.chdir(project)
 
     test(
         paths=(str(project),),
@@ -146,17 +189,23 @@ def test_test_function_writes_json_when_asked_for_json_output(
 @pytest.mark.slow
 def test_test_function_exits_with_the_failing_suite_exit_code(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failing suite exits non-zero and the failure lands in the report.
 
     Args:
         tmp_path: Pytest temporary directory for the generated project.
+        monkeypatch: Pytest monkeypatch fixture, used to run from the project.
     """
     project = _write_project(
         tmp_path=tmp_path,
         body="def test_generated_fails() -> None:\n    assert False\n",
     )
     report = tmp_path / "report.txt"
+    # The plugin auto-enables --junitxml at a path relative to the cwd, so two
+    # nested runs would race on one report.xml in the repository root under
+    # ``-n auto``. Run from the throwaway project instead (#2375).
+    monkeypatch.chdir(project)
 
     with pytest.raises(SystemExit) as exc_info:
         test(
@@ -173,5 +222,6 @@ def test_test_function_exits_with_the_failing_suite_exit_code(
 
     assert_that(exc_info.value.code).is_equal_to(1)
     written = report.read_text(encoding="utf-8")
-    assert_that(written).contains('"failed": 1')
+    summary = _pytest_summary(report_text=written)
+    assert_that(summary["failed"]).is_equal_to(1)
     assert_that(written).contains("test_generated_fails")
