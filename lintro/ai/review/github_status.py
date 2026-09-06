@@ -18,6 +18,7 @@ from lintro.ai.review.finding_matcher import count_blocking_findings
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.lifecycle.comments import load_sticky_comment, upsert_comment
+from lintro.ai.review.lifecycle.state import resolve_prior_state
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
@@ -27,28 +28,6 @@ __all__ = [
     "post_review_converged_to_github",
     "post_review_error_to_github",
 ]
-
-
-def _resolve_state(
-    *,
-    prior_state: ReviewState | None,
-    sticky_state: ReviewState,
-) -> ReviewState:
-    """Pick the state to re-render the board from.
-
-    Args:
-        prior_state: State already loaded for this invocation, if any.
-        sticky_state: State recovered from the sticky comment's own body.
-
-    Returns:
-        ReviewState: The loaded state when it carries anything, otherwise
-        whatever the comment itself still holds.
-    """
-    if prior_state is None or not (
-        prior_state.coverage or prior_state.runs or prior_state.findings
-    ):
-        return sticky_state
-    return prior_state
 
 
 def post_review_error_to_github(
@@ -87,7 +66,10 @@ def post_review_error_to_github(
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
-    state = _resolve_state(prior_state=prior_state, sticky_state=sticky_state)
+    state = resolve_prior_state(
+        prior_state=prior_state,
+        sticky_state=sticky_state,
+    )
     body = format_error_comment(
         error=error,
         provider=provider,
@@ -137,7 +119,10 @@ def post_review_converged_to_github(
         logger.warning("GitHub PR context not available — skipping converged stamp")
         return False
     existing, sticky_state = load_sticky_comment(reporter=gh_reporter)
-    state = _resolve_state(prior_state=prior_state, sticky_state=sticky_state)
+    state = resolve_prior_state(
+        prior_state=prior_state,
+        sticky_state=sticky_state,
+    )
     if not state.runs:
         # Nothing recoverable to re-render: overwriting the live board with
         # the empty-state page would erase the findings a reviewer is still

@@ -38,6 +38,7 @@ __all__ = [
     "departed_paths",
     "load_prior_review_state",
     "persist_review_state",
+    "resolve_prior_state",
 ]
 
 #: Workflow filename recorded on every persisted state part.
@@ -79,6 +80,33 @@ def load_prior_review_state(
     if local.coverage or local.runs or local.findings:
         return local
     return ReviewState()
+
+
+def resolve_prior_state(
+    *,
+    prior_state: ReviewState | None,
+    sticky_state: ReviewState,
+) -> ReviewState:
+    """Pick the state a round continues from.
+
+    The loaded state wins whenever it carries anything at all. An empty one
+    means this invocation found no artifact and no ledger entry, and the
+    fallback is whatever an older lintro left behind in the sticky comment's
+    own body. Every posting surface asks the same question, so they ask it
+    here rather than each re-deriving the predicate.
+
+    Args:
+        prior_state: State already loaded for this invocation, if any.
+        sticky_state: State recovered from the sticky comment's own body.
+
+    Returns:
+        ReviewState: The state to render and match against.
+    """
+    if prior_state is None or not (
+        prior_state.coverage or prior_state.runs or prior_state.findings
+    ):
+        return sticky_state
+    return prior_state
 
 
 def persist_review_state(
