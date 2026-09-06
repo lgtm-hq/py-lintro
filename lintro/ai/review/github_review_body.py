@@ -260,12 +260,14 @@ def _run_stats_section(
     # Guard on the *sanitized* transport, not the raw one: appending a
     # provenance suffix to an empty value makes it truthy, which would let a
     # blank transport render as a bare " (config)" row (#1972 owner comment,
-    # 2026-08-14 item 2).
-    sanitized_transport = sanitize_comment_text(transport, limit=40).strip()
+    # 2026-08-14 item 2). Test for presence before truncating, too: a blank
+    # longer than the limit truncates to the ellipsis, which is truthy again
+    # and would render "… (config)".
+    sanitized_transport = sanitize_comment_text(transport).strip()
     transport_label = ""
     if sanitized_transport:
         transport_label = format_sourced_value(
-            sanitized_transport,
+            sanitize_comment_text(sanitized_transport, limit=40),
             metadata.transport_source or None,
         )
     if transport_label and auth_mode:

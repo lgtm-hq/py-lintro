@@ -14,6 +14,7 @@ per-call ``max_cost_usd`` argument may only lower the resolved ceiling.
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -142,15 +143,74 @@ def test_no_surface_applies_a_post_resolution_transport_override() -> None:
     assert_that(hits).is_empty()
 
 
-def test_every_surface_shares_the_same_resolver_object() -> None:
-    """The CLI review module imports the resolver rather than copying it."""
+def test_the_review_cli_imports_the_resolver_rather_than_copying_it() -> None:
+    """The CLI review module holds the shared resolver object itself."""
     import lintro.cli_utils.commands.review as review_module
-    import lintro.mcp.toolkits.review as mcp_module
 
     assert_that(vars(review_module)["resolve_effective_ai_config"]).is_same_as(
         resolve_effective_ai_config,
     )
-    assert_that(mcp_module.__dict__).does_not_contain_key("resolve_from_mapping")
+
+
+def test_mcp_resolution_goes_through_the_shared_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Patching the one resolver changes what MCP resolves.
+
+    MCP imports the resolver inside the function, so identity cannot be read
+    off its module namespace. Redirecting
+    :mod:`lintro.ai.effective_config` and watching the substitute come out of
+    MCP's own entry point proves the shared call path behaviourally, which a
+    symbol check could not.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Stand-in MCP workspace root.
+    """
+    import lintro.ai.availability as availability
+    import lintro.ai.effective_config as effective_config
+    import lintro.config.config_loader as config_loader
+    from lintro.mcp.toolkits.review import _resolve_ai_config
+
+    sentinel = resolve_effective_ai_config(
+        {**RAW_AI_SECTION, "model": "sentinel-model"},
+    )
+    calls: list[Mapping[str, object] | None] = []
+
+    def _fake_resolver(
+        mapping: Mapping[str, object] | None,
+        **kwargs: object,
+    ) -> ResolvedAIConfig:
+        """Stand in for the shared resolver.
+
+        Args:
+            mapping: Raw ``ai:`` mapping the caller passed.
+            **kwargs: Resolver keyword arguments, recorded but unused.
+
+        Returns:
+            A fixed resolved config the caller cannot have built itself.
+        """
+        calls.append(mapping)
+        return sentinel
+
+    monkeypatch.setattr(availability, "is_ai_available", lambda: True)
+    monkeypatch.setattr(
+        config_loader,
+        "get_config",
+        lambda: LintroConfig(ai=dict(RAW_AI_SECTION)),
+    )
+    monkeypatch.setattr(
+        effective_config,
+        "resolve_effective_ai_config",
+        _fake_resolver,
+    )
+
+    _lintro_config, resolved = _resolve_ai_config(workspace=tmp_path)
+
+    assert_that(resolved).is_same_as(sentinel)
+    assert_that(calls).is_length(1)
+    assert_that(dict(calls[0] or {})).is_equal_to(dict(RAW_AI_SECTION))
 
 
 # ---------------------------------------------------------------------------

@@ -33,11 +33,15 @@ def render_ai_status(
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
-    This renderer never resolves configuration. It reports what was already
-    resolved, so the summary cannot disagree with what executes (#2299):
+    This renderer never resolves configuration. It reports a value some
+    caller already resolved (#2299):
     :func:`lintro.ai.interface.render_ai_status` is the seam that turns the
     core executor's raw ``ai:`` mapping into a
-    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`.
+    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`, through the same
+    resolver execution uses. What that seam can pass is limited by what the
+    core summary hands it: project and environment layers, without the
+    invocation's flags (see
+    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_).
 
     Args:
         ai_config: A :class:`ResolvedAIConfig` carrying provenance, a bare

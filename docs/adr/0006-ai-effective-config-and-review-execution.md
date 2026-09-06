@@ -174,6 +174,21 @@ time.
 
 ## Consequences
 
+### Migration (#2299)
+
+Three internal entry points were removed when the resolver was unified. None was part of
+the public `lintro` API, so this is not a breaking change for CLI or `lintro.api`
+consumers; code reaching into `lintro.ai` internals moves as follows:
+
+| Removed                                                | Use instead                                                                       |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `AIConfig.from_mapping(data)`                          | `resolve_effective_ai_config(data).config`                                        |
+| `lintro.ai.transport.apply_transport_override(cfg, t)` | `resolve_effective_ai_config(mapping, cli_overrides=AICliOverrides(transport=t))` |
+| `lintro.ai.transport.apply_cli_overrides` (re-export)  | `lintro.ai.config_overrides.apply_cli_overrides`, or the resolver                 |
+
+`AIConfig.resolve_from_mapping` still exists but is the project + environment half only;
+surfaces call `resolve_effective_ai_config` rather than reaching past it.
+
 - #1970 / #1923 / #1235 extend one resolver contract instead of inventing parallel
   override layers.
 - Phase 3 can extract shared preparation behind characterization locks without changing

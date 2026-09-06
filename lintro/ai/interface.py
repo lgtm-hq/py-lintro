@@ -296,10 +296,16 @@ def render_ai_status(
     """Render the pre-execution AI status lines.
 
     This is where the raw ``ai:`` mapping the core executor holds becomes a
-    resolved value: the renderer itself only ever sees typed input, so status
-    cannot resolve differently from execution (#2299). Diagnostics are off
-    for that resolution because the execution path already reported the
-    unknown-key warning and the migration hints.
+    resolved value, through the same resolver execution uses, so the renderer
+    itself only ever sees typed input (#2299). Diagnostics are off for that
+    resolution because the execution path already reported the unknown-key
+    warning and the migration hints.
+
+    The summary reflects the **project and environment layers**. The core
+    pre-execution summary hands over the raw mapping without the invocation's
+    flags, so a lint-path ``--transport`` override is applied at execution and
+    is not visible here; threading it through is
+    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_.
 
     Args:
         ai_config: Raw ``ai:`` mapping from the config (what the core

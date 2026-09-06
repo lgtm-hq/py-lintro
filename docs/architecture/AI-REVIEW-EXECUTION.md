@@ -21,10 +21,13 @@ normative decision record is
 
 Both the CLI (`lintro review`) and MCP (`lintro_review`) currently:
 
-1. Resolve AI config through `resolve_effective_ai_config`. CLI review passes its flags
-   as `AICliOverrides`; MCP passes none, because its one per-call knob (`max_cost_usd`)
-   is a downstream clamp rather than an overlay. Both get the same `ResolvedAIConfig`,
-   values and provenance alike (#2299).
+1. Resolve AI config through `resolve_effective_ai_config` — one resolver pipeline for
+   both adapters (#2299). What each passes into it differs by design: CLI review passes
+   its flags as `AICliOverrides`, which may change values and stamp `flag` provenance,
+   while MCP passes none because its one per-call knob (`max_cost_usd`) is a downstream
+   monotonic clamp (`resolve_budget_policy`) rather than an overlay. Given identical
+   resolver inputs the two produce identical values _and_ provenance; the parity suite
+   asserts exactly that.
 2. Gate on `ai.review` being enabled (adapter-specific error shape).
 3. Collect review context, classify changed files, select/format checklist items.
 4. Optionally build a lint digest.
@@ -69,9 +72,10 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
   config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
   MCP error mapping.
-- `tests/unit/ai/test_effective_config_parity.py` — one resolver: check, fix, review
-  CLI, MCP and doctor resolve identical values and sources, and the two cap rules stay
-  split (CLI/env may raise or lift; MCP's per-call argument only clamps).
+- `tests/unit/ai/test_effective_config_parity.py` — one resolver: for identical resolver
+  inputs, check, fix, review CLI, MCP and doctor resolve identical values and sources,
+  and the two cap rules stay split (CLI/env may raise or lift; MCP's per-call argument
+  only clamps).
 
 ## File-level resume (#2154 / ADR-0007)
 
