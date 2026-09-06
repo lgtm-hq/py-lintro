@@ -178,26 +178,23 @@ _BUILD_LOCK_TIMEOUT_SECONDS = 300.0
 _BUILD_POLL_SECONDS = 0.5
 
 
-def _lock_owner_pid(*, lock: Path) -> int | None:
-    """Read the pid recorded in a build lock file.
+def _read_lock_token(*, lock: Path) -> str | None:
+    """Read the ownership token a build lock carries.
 
     Args:
         lock: Path to the lock file.
 
     Returns:
-        The recorded pid, or ``None`` when the file is gone or its contents
-        are not a token this code wrote.
+        The raw token, or ``None`` when the file is gone or unreadable.
     """
     try:
-        token = lock.read_text(encoding="utf-8")
+        return lock.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
-    pid, _, _uuid = token.partition(":")
-    return int(pid) if pid.isdigit() else None
 
 
-def _owner_is_gone(*, lock: Path) -> bool:
-    """Report whether the process that wrote a lock has died.
+def _owner_is_gone(*, token: str) -> bool:
+    """Report whether the process that wrote a lock token has died.
 
     Age is not evidence: a slow but live build can hold the lock past any
     threshold, and unlinking it there would let two ``uv build`` runs share the
@@ -205,13 +202,17 @@ def _owner_is_gone(*, lock: Path) -> bool:
     owner cannot come back and finish.
 
     Args:
-        lock: Path to the lock file.
+        token: Ownership token read from a lock file, ``"<pid>:<uuid>"``.
 
     Returns:
         True when the recorded owner is provably dead.
     """
-    pid = _lock_owner_pid(lock=lock)
-    if pid is None or pid <= 0:
+    pid_text, _, _uuid = token.partition(":")
+    if not pid_text.isdigit():
+        # Not a token this code wrote: never treat it as reclaimable.
+        return False
+    pid = int(pid_text)
+    if pid <= 0:
         return False
     try:
         os.kill(pid, 0)
@@ -221,6 +222,53 @@ def _owner_is_gone(*, lock: Path) -> bool:
         # A pid we may not signal is still a running process.
         return False
     return False
+
+
+def _reclaim_stale_lock(*, lock: Path) -> bool:
+    """Remove a build lock whose recorded owner is gone.
+
+    The liveness check and the unlink are two separate steps, so a successor
+    can take the lock in between. Comparing the token again immediately before
+    unlinking — the same compare the release path uses — keeps this from
+    deleting that successor's lock and letting two ``uv build`` runs overlap.
+
+    Args:
+        lock: Path to the lock file.
+
+    Returns:
+        True when this call removed the lock, False when it left it alone.
+    """
+    token = _read_lock_token(lock=lock)
+    if token is None or not _owner_is_gone(token=token):
+        return False
+    # Re-read rather than trusting the token from before the liveness check.
+    if _read_lock_token(lock=lock) != token:
+        return False
+    try:
+        lock.unlink()
+    except (FileNotFoundError, OSError):
+        return False
+    return True
+
+
+def _release_lock(*, lock: Path, token: str) -> bool:
+    """Remove a build lock, but only while this worker still owns it.
+
+    Args:
+        lock: Path to the lock file.
+        token: Token this worker wrote when it acquired the lock.
+
+    Returns:
+        True when this call removed the lock, False when the file had already
+        been reclaimed by somebody else.
+    """
+    if _read_lock_token(lock=lock) != token:
+        return False
+    try:
+        lock.unlink()
+    except (FileNotFoundError, OSError):
+        return False
+    return True
 
 
 @pytest.fixture(scope="session")
@@ -272,8 +320,7 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
         except FileExistsError as exc:
             # A worker that died before its ``finally`` leaves the lock behind
             # forever. Reclaim it only when its recorded owner is gone.
-            if _owner_is_gone(lock=lock):
-                lock.unlink(missing_ok=True)
+            if _reclaim_stale_lock(lock=lock):
                 continue
             if time.monotonic() > deadline:
                 raise TimeoutError(
@@ -297,11 +344,7 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
             os.close(handle)
             # Release only the lock this worker still owns: if it was reclaimed
             # as stale, the file now belongs to whoever took over.
-            try:
-                if lock.read_text(encoding="utf-8") == token:
-                    lock.unlink(missing_ok=True)
-            except (FileNotFoundError, OSError):
-                pass
+            _release_lock(lock=lock, token=token)
 
     # Every caller takes the first match, so more than one artifact of a kind
     # would make which distribution is under test a coin toss.

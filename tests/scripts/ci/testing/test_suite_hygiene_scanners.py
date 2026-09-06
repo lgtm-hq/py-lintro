@@ -196,28 +196,40 @@ def test_scanner_library_call_raises_on_a_missing_root(
 
 
 @pytest.mark.parametrize(
-    ("module_name", "canary_stem"),
+    ("module_name", "canary_stem", "expected_names"),
     [
-        ("scan_duplicate_test_bodies", "canary_duplicates"),
-        ("scan_mock_only_tests", "canary_mock_only"),
+        (
+            "scan_duplicate_test_bodies",
+            "canary_duplicates",
+            ["test_canary_copy", "test_canary_original"],
+        ),
+        (
+            "scan_mock_only_tests",
+            "canary_mock_only",
+            ["test_canary_direct_mock_assert", "test_canary_tainted_local"],
+        ),
     ],
     ids=["duplicates", "mock-only"],
 )
 def test_scanner_main_exits_one_on_a_planted_canary(
     module_name: str,
     canary_stem: str,
+    expected_names: list[str],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """``main`` prints the offenders it found and exits ``1``.
+    """``main`` prints every offender it found and exits ``1``.
 
     A ``main`` that dropped the findings on the floor and always returned
     ``0`` would still satisfy the ``--root`` validation tests, so the
-    print-and-fail branch needs a canary of its own.
+    print-and-fail branch needs a canary of its own. Pinning the whole
+    offender list rather than one substring also catches a ``main`` that
+    prints the first finding and stops.
 
     Args:
         module_name: Scanner module stem under ``scripts/ci/testing``.
         canary_stem: Canary file stem under ``canary/``, without any suffix.
+        expected_names: Every offending test name the report must list.
         tmp_path: Pytest temporary directory holding the planted canary.
         capsys: Pytest capture fixture for the printed report.
     """
@@ -227,7 +239,14 @@ def test_scanner_main_exits_one_on_a_planted_canary(
     exit_code = scanner.main(["--root", str(planted)])
 
     assert_that(exit_code).is_equal_to(1)
-    assert_that(capsys.readouterr().out).contains("test_canary")
+    # Both scanners end an offender line with the test name, so the last
+    # whitespace-separated token of each reported line is the name.
+    reported = sorted(
+        line.split()[-1]
+        for line in capsys.readouterr().out.splitlines()
+        if "test_canary" in line
+    )
+    assert_that(reported).is_equal_to(sorted(expected_names))
 
 
 @pytest.mark.parametrize(
@@ -252,4 +271,6 @@ def test_scanner_main_exits_zero_on_a_clean_tree(
     exit_code = scanner.main(["--root", str(tmp_path)])
 
     assert_that(exit_code).is_equal_to(0)
-    assert_that(capsys.readouterr().out).contains("0 ")
+    # Tokenised: ``contains("0 ")`` also matches a "10 duplicate group(s)"
+    # report, which is the opposite of a clean tree.
+    assert_that(capsys.readouterr().out.split()).contains("0")

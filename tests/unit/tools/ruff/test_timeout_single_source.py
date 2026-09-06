@@ -19,6 +19,33 @@ from lintro.tools.implementations.ruff.check import (
 from lintro.tools.implementations.ruff.fix import RUFF_DEFAULT_TIMEOUT as FIX_TIMEOUT
 
 
+def _argv_tokens(*, calls: list[dict[str, object]]) -> list[list[str]]:
+    """Return each recorded call's argv as a token list.
+
+    Joining argv into one string makes the ruff verbs ambiguous: ``check``
+    also appears inside ``ruff format --check``, and ``format`` inside
+    ``--output-format``. Comparing whole tokens keeps each identity unique
+    (#2375).
+
+    Args:
+        calls: Recorded subprocess keyword mappings, each carrying ``cmd``.
+
+    Returns:
+        One token list per call, in call order.
+
+    Raises:
+        TypeError: If a recorded ``cmd`` is not a list, which would otherwise
+            be coerced silently into a list of characters.
+    """
+    argvs: list[list[str]] = []
+    for call in calls:
+        cmd = call["cmd"]
+        if not isinstance(cmd, list):
+            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
+        argvs.append([str(part) for part in cmd])
+    return argvs
+
+
 def test_ruff_timeout_single_source_check() -> None:
     """The check module re-exports the definition constant (import identity)."""
     assert_that(CHECK_TIMEOUT).is_equal_to(DEFINITION_TIMEOUT)
@@ -40,10 +67,6 @@ def test_ruff_check_routes_through_prepare_execution(
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
-
-    Raises:
-        TypeError: If a recorded ``cmd`` is not a list, which would otherwise
-            be coerced silently into a list of characters.
     """
     from lintro.tools.implementations.ruff.check import execute_ruff_check
 
@@ -87,13 +110,9 @@ def test_ruff_check_routes_through_prepare_execution(
 
     # Both the lint and the format --check subprocess must honour the context.
     assert_that(observed).is_length(2)
-    argvs: list[str] = []
-    for call in observed:
-        cmd = call["cmd"]
-        if not isinstance(cmd, list):
-            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
-        argvs.append(" ".join(str(part) for part in cmd))
+    argvs = _argv_tokens(calls=observed)
     assert_that(argvs[0]).contains("check")
+    assert_that(argvs[0]).does_not_contain("format")
     assert_that(argvs[1]).contains("format")
     assert_that(argvs[1]).contains("--check")
     assert_that([call["timeout"] for call in observed]).is_equal_to([77, 77])
@@ -115,10 +134,6 @@ def test_ruff_fix_routes_through_prepare_execution(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
         sample_ruff_json_empty_output: Sample empty JSON output from ruff.
-
-    Raises:
-        TypeError: If a recorded ``cmd`` is not a list, which would otherwise
-            be coerced silently into a list of characters.
     """
     from lintro.tools.implementations.ruff.fix import execute_ruff_fix
 
@@ -153,14 +168,13 @@ def test_ruff_fix_routes_through_prepare_execution(
     assert_that([call["timeout"] for call in observed]).is_equal_to(
         [91, 91, 91, 91],
     )
-    argvs: list[str] = []
-    for call in observed:
-        cmd = call["cmd"]
-        if not isinstance(cmd, list):
-            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
-        argvs.append(" ".join(str(part) for part in cmd))
+    argvs = _argv_tokens(calls=observed)
+    assert_that(argvs[0]).contains("check")
+    assert_that(argvs[0]).does_not_contain("format")
+    assert_that(argvs[0]).does_not_contain("--fix")
     assert_that(argvs[1]).contains("format")
     assert_that(argvs[1]).contains("--check")
+    assert_that(argvs[2]).contains("check")
     assert_that(argvs[2]).contains("--fix")
     assert_that(argvs[3]).contains("format")
     assert_that(argvs[3]).does_not_contain("--check")
@@ -240,7 +254,9 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
         fix_result = plugin.fix(["/test/project"], {})
 
     assert_that(prepared).is_length(2)
-    assert_that(set(check_timeouts)).is_equal_to({64})
-    assert_that(set(fix_timeouts)).is_equal_to({64})
+    # Pin the counts as well as the value: set equality alone would accept a
+    # single recorded call on either path.
+    assert_that(check_timeouts).is_equal_to([64, 64])
+    assert_that(fix_timeouts).is_equal_to([64, 64, 64, 64])
     assert_that(check_result.success).is_true()
     assert_that(fix_result.success).is_true()

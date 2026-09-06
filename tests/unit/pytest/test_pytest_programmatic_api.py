@@ -3,9 +3,9 @@
 These drive the programmatic ``test()`` wrapper against a real throwaway
 project rather than patching the pipeline, so each assertion reads a value a
 caller can actually see: the report file lintro writes, its format, and the
-exit code the wrapper raises (#2315). The pure option pass-throughs that used
-to be asserted through mock call bookkeeping are covered at the CLI level in
-``test_pytest_cli_options.py``.
+exit code the wrapper raises (#2315). The pure option pass-throughs go
+through ``lintro.api.core.test``, which the wrapper delegates to, so the one
+forwarding test below records what that layer hands the pipeline (#2375).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -187,7 +188,70 @@ def test_test_function_writes_json_when_asked_for_json_output(
 
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert_that(payload["action"]).is_equal_to("test")
-    assert_that([entry["tool"] for entry in payload["results"]]).contains("pytest")
+    pytest_entries = [
+        entry for entry in payload["results"] if entry["tool"] == "pytest"
+    ]
+    assert_that(pytest_entries).is_length(1)
+    # The envelope keys are emitted for any pytest result, so assert on what
+    # the nested run actually did: it collected the generated test and stopped.
+    output = str(pytest_entries[0]["output"])
+    assert_that(output).contains("Collected 1 test(s):")
+    assert_that(output).contains("test_generated_passes")
+
+
+def test_test_function_forwards_scope_and_verbosity_to_the_pipeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``exclude``, ``include_venv`` and ``verbose`` reach the pipeline call.
+
+    The wrapper delegates to :func:`lintro.api.core.test`, which builds the
+    pipeline arguments; recording that mapping is the only place the
+    pass-throughs are observable without running a real suite per option.
+
+    Args:
+        tmp_path: Pytest temporary directory for the generated project.
+        monkeypatch: Pytest monkeypatch fixture, used to record the call.
+    """
+    project = _write_project(
+        tmp_path=tmp_path,
+        body="def test_generated_passes() -> None:\n    assert True\n",
+    )
+    forwarded: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> int:
+        """Record one pipeline invocation and report a clean run.
+
+        Args:
+            **kwargs: Keyword arguments the API layer built for the pipeline.
+
+        Returns:
+            A successful exit code.
+        """
+        forwarded.append(dict(kwargs))
+        return 0
+
+    monkeypatch.setattr("lintro.api.core.run_lint_with_ai", _record)
+
+    test(
+        paths=(str(project),),
+        exclude="build,dist",
+        include_venv=True,
+        output=None,
+        output_format="grid",
+        group_by="file",
+        verbose=True,
+        tool_options=None,
+        yes=True,
+    )
+
+    assert_that(forwarded).is_length(1)
+    call = forwarded[0]
+    assert_that(call["exclude"]).is_equal_to("build,dist")
+    assert_that(call["include_venv"]).is_true()
+    assert_that(call["verbose"]).is_true()
+    assert_that(call["tools"]).is_equal_to("pytest")
+    assert_that(call["paths"]).is_equal_to([str(project)])
 
 
 @pytest.mark.slow
