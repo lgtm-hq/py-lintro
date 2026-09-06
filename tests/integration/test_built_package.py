@@ -12,6 +12,7 @@ import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -20,38 +21,25 @@ from assertpy import assert_that
 
 
 @pytest.mark.slow
-def test_built_wheel_imports() -> None:
-    """Test that lintro can be built and imported as a wheel.
+def test_built_wheel_imports(built_distributions: Path) -> None:
+    """Test that lintro can be installed and imported as a wheel.
 
     This test:
-    1. Builds lintro as a wheel
-    2. Installs it in a fresh virtual environment
-    3. Attempts to import critical modules
-    4. Verifies no circular import errors occur
+    1. Installs the session's wheel in a fresh virtual environment
+    2. Attempts to import critical modules
+    3. Verifies no circular import errors occur
 
     This catches issues that only manifest when lintro is installed as a
     dependency (built distribution) rather than in editable mode.
-    """
-    project_root = Path(__file__).parent.parent.parent
 
+    Args:
+        built_distributions: Directory holding the session's wheel and sdist.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         venv_path = tmpdir_path / "test_venv"
-        dist_dir = tmpdir_path / "dist"
 
-        # Step 1: Build the wheel
-        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["uv", "build", "--out-dir", str(dist_dir)],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert_that(build_result.returncode).is_equal_to(0)
-        assert_that(dist_dir.exists()).is_true()
-
-        # Find the built wheel
-        wheels = list(dist_dir.glob("*.whl"))
+        wheels = list(built_distributions.glob("*.whl"))
         assert_that(wheels).is_not_empty()
         wheel_path = wheels[0]
 
@@ -122,25 +110,17 @@ def test_built_wheel_imports() -> None:
 
 
 @pytest.mark.slow
-def test_built_wheel_with_full_extra() -> None:
-    """Test that lintro[full] extra installs bundled Python tools."""
-    project_root = Path(__file__).parent.parent.parent
+def test_built_wheel_with_full_extra(built_distributions: Path) -> None:
+    """Test that lintro[full] extra installs bundled Python tools.
 
+    Args:
+        built_distributions: Directory holding the session's wheel and sdist.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         venv_path = tmpdir_path / "test_venv"
-        dist_dir = tmpdir_path / "dist"
 
-        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["uv", "build", "--out-dir", str(dist_dir)],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert_that(build_result.returncode).is_equal_to(0)
-
-        wheels = list(dist_dir.glob("*.whl"))
+        wheels = list(built_distributions.glob("*.whl"))
         assert_that(wheels).is_not_empty()
         wheel_path = wheels[0]
 
@@ -214,6 +194,63 @@ def _build_distributions(dist_dir: Path) -> None:
     ).is_equal_to(0)
 
 
+_BUILD_LOCK_TIMEOUT_SECONDS = 900.0
+_BUILD_POLL_SECONDS = 0.5
+
+
+@pytest.fixture(scope="session")
+def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the wheel and the sdist once for the whole session.
+
+    ``uv build`` keeps its scratch state inside the project directory —
+    ``build/``, ``lintro.egg-info/`` and the sdist staging tree — so two builds
+    running at once corrupt each other. Under ``pytest -n auto`` that produced
+    both outright build failures ("could not delete ...: No such file or
+    directory") and, worse, wheels silently missing packages. One build behind
+    a lock file, shared by every xdist worker, makes the artifacts
+    deterministic and cuts the suite from four builds to one.
+
+    Args:
+        tmp_path_factory: Session-scoped temporary directory factory.
+
+    Returns:
+        Directory holding the built wheel and source distribution.
+
+    Raises:
+        TimeoutError: If another worker holds the build lock for too long.
+    """
+    # Under xdist each worker gets ``.../pytest-<n>/popen-gw<k>`` and the
+    # session root they share is its parent. Without xdist ``getbasetemp()``
+    # already is that root, and its own parent persists across sessions, which
+    # would hand a later run a stale wheel.
+    basetemp = tmp_path_factory.getbasetemp()
+    shared_root = basetemp.parent if os.environ.get("PYTEST_XDIST_WORKER") else basetemp
+    dist_dir = shared_root / "lintro-dist"
+    marker = shared_root / "lintro-dist.complete"
+    lock = shared_root / "lintro-dist.lock"
+
+    deadline = time.monotonic() + _BUILD_LOCK_TIMEOUT_SECONDS
+    while not marker.exists():
+        try:
+            handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as exc:
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for the shared build lock at {lock}",
+                ) from exc
+            time.sleep(_BUILD_POLL_SECONDS)
+            continue
+        try:
+            dist_dir.mkdir(exist_ok=True)
+            _build_distributions(dist_dir=dist_dir)
+            marker.touch()
+        finally:
+            os.close(handle)
+            lock.unlink(missing_ok=True)
+
+    return dist_dir
+
+
 def _source_packages() -> set[str]:
     """Collect every package directory in the lintro source tree.
 
@@ -229,24 +266,25 @@ def _source_packages() -> set[str]:
 
 
 @pytest.mark.slow
-def test_built_distributions_ship_the_whole_package_and_no_tests() -> None:
+def test_built_distributions_ship_the_whole_package_and_no_tests(
+    built_distributions: Path,
+) -> None:
     """Verify the find directive ships every subpackage and nothing extra.
 
     Guards ``[tool.setuptools.packages.find]`` (#1225): every source package
     must reach the wheel without a hand-maintained list, the PEP 561 marker
     must ship, and neither distribution may carry the repo-only test trees.
+
+    Args:
+        built_distributions: Directory holding the session's wheel and sdist.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        dist_dir = Path(tmpdir) / "dist"
-        _build_distributions(dist_dir=dist_dir)
+    wheels = list(built_distributions.glob("*.whl"))
+    sdists = list(built_distributions.glob("*.tar.gz"))
+    assert_that(wheels).is_not_empty()
+    assert_that(sdists).is_not_empty()
 
-        wheels = list(dist_dir.glob("*.whl"))
-        sdists = list(dist_dir.glob("*.tar.gz"))
-        assert_that(wheels).is_not_empty()
-        assert_that(sdists).is_not_empty()
-
-        with zipfile.ZipFile(wheels[0]) as wheel:
-            wheel_names = set(wheel.namelist())
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        wheel_names = set(wheel.namelist())
 
         missing = sorted(
             package
@@ -304,19 +342,20 @@ def test_built_distributions_ship_the_whole_package_and_no_tests() -> None:
 
 @pytest.mark.slow
 @pytest.mark.timeout(600)
-def test_built_sdist_installs_and_runs() -> None:
+def test_built_sdist_installs_and_runs(built_distributions: Path) -> None:
     """Verify the sdist installs into a clean venv and the CLI runs.
 
     The sdist is what PyPI consumers build from when no wheel matches, so the
     trimmed MANIFEST.in must still carry everything the build needs.
+
+    Args:
+        built_distributions: Directory holding the session's wheel and sdist.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
-        dist_dir = tmpdir_path / "dist"
         venv_path = tmpdir_path / "test_venv"
-        _build_distributions(dist_dir=dist_dir)
 
-        sdists = list(dist_dir.glob("*.tar.gz"))
+        sdists = list(built_distributions.glob("*.tar.gz"))
         assert_that(sdists).is_not_empty()
 
         subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
