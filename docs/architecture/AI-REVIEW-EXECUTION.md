@@ -245,7 +245,7 @@ Phase 1 locks the gaps listed in ADR-0006:
   only divergence left is the named `ReviewExecutionPolicy` allowlist. It also pins the
   `execute_review` packing: every `ReviewSessionOptions` field an adapter fills is
   asserted against its named source (`PreparedReview` or `ReviewExecutionPolicy`), and
-  the only fields left at a default are the two no adapter sets. MCP's post-prep
+  the only fields left at a default are `timeout` and `stop`. MCP's post-prep
   `with_max_cost_usd` clamp is the one thing it applies to the prepared review
   afterwards.
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:

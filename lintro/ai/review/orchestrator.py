@@ -7,10 +7,11 @@ below it is async. ``run_review_async`` is three steps and no more:
    policy, the diff budget, the chunks, the resume plan, the custom-agent
    selection and the concurrency ceiling into one
    :class:`~lintro.ai.review.run_planning.ReviewRunPlan`.
-2. :func:`execute_run` makes the provider calls — the chunk fan-out in
-   :mod:`lintro.ai.review.chunk_runner`, the custom-agent passes, the merge,
-   and the optional cross-chunk synthesis pass — and finalizes whether the run
-   completed or stopped gracefully on a cost cap, timeout or SIGTERM.
+2. :func:`~lintro.ai.review.run_execution.execute_run` makes the provider
+   calls — the chunk fan-out in :mod:`lintro.ai.review.chunk_runner`, the
+   custom-agent passes, the merge, and the optional cross-chunk synthesis
+   pass — and finalizes whether the run completed or stopped gracefully on a
+   cost cap, timeout or SIGTERM.
 3. :func:`~lintro.ai.review.result_assembly.assemble_review_result` turns the
    plan and the outcome into the :class:`ReviewResult` every surface renders.
 
@@ -101,13 +102,15 @@ async def run_review_async(
 
     Three steps, one per collaborator:
     :func:`~lintro.ai.review.run_planning.plan_run` resolves what the run will
-    do, :func:`execute_run` makes the provider calls, and
+    do, :func:`~lintro.ai.review.run_execution.execute_run` makes the provider
+    calls, and
     :func:`~lintro.ai.review.result_assembly.assemble_review_result` turns the
     two into the reported result.
 
     A non-recoverable failure (``AIError`` for provider authentication or a
     genuine provider error, ``ReviewExecutionError`` for a chunk that failed
-    mid-run) propagates out of :func:`execute_run`. A cost-cap, timeout or
+    mid-run) propagates out of
+    :func:`~lintro.ai.review.run_execution.execute_run`. A cost-cap, timeout or
     SIGTERM stop does not: it is handled there and returned as a partial result.
 
     Args:
