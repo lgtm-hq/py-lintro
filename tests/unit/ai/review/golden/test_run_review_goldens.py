@@ -121,6 +121,10 @@ def _run_golden_review() -> ReviewResult:
             return_value=GOLDEN_BOUNDARY,
         ),
         patch(
+            "lintro.ai.review.prompts.make_boundary_marker",
+            return_value=GOLDEN_BOUNDARY,
+        ),
+        patch(
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=golden_chunks(),
         ),

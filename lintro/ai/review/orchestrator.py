@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shlex
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -31,18 +30,10 @@ from lintro.ai.model_pricing import (
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
-    REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
-    REVIEW_GIT_NATIVE_DIFF_INLINE,
-    REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
-    REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SCHEMA_REMINDER_TEMPLATE,
     REVIEW_SYSTEM,
-    REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
-    format_lint_results_section,
-    format_output_rules,
-    format_pr_changed_files_for_prompt,
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
@@ -116,6 +107,12 @@ from lintro.ai.review.progress import (
     StepTrackingProgress,
 )
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.prompts import (
+    PromptInputs,
+    build_git_native_review_prompt,
+    build_review_prompt,
+    estimate_prompt_overhead,
+)
 from lintro.ai.review.response_recovery import (
     build_schema_reminder_prompt,
     resolve_schema_retry_timeout,
@@ -160,6 +157,7 @@ if TYPE_CHECKING:
     from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
+    "PromptInputs",
     "ReviewSessionOptions",
     "guard_changed_paths",
     "build_git_native_review_prompt",
@@ -176,7 +174,6 @@ __all__ = [
     "run_review_async",
     "strip_json_fences",
 ]
-_PROMPT_OVERHEAD_TOKENS = 12_000
 # Depth ≥ 2 generates 5–10 checklist questions per chunk. Parallel chunks get
 # disjoint id ranges so merge_checklist_answers does not collide across chunks.
 _GENERATED_CHECKLIST_ID_STRIDE = 32
@@ -976,7 +973,7 @@ async def run_review_async(
         model=options.provider.model_name,
         override=options.context_window_override,
     )
-    prompt_overhead = _estimate_prompt_overhead(
+    prompt_overhead = estimate_prompt_overhead(
         context=context,
         checklist_text=options.checklist_text,
         classifications=options.classifications,
@@ -1577,199 +1574,6 @@ def _finalize_partials(
     return merged, filtered, len(filtered)
 
 
-def build_review_prompt(
-    *,
-    chunk: ReviewChunk,
-    context: ReviewContext,
-    checklist_text: str,
-    checklist_count: int,
-    interaction_paths: str,
-    lint_results: str | None = None,
-    extra_checklist: str = "",
-    strictness_section: str = "",
-    max_findings: int | None = None,
-) -> tuple[str, str]:
-    """Build system and user prompts for a review chunk.
-
-    Args:
-        chunk: Semantic diff chunk to review.
-        context: Full review context for PR metadata and file list.
-        checklist_text: Formatted checklist for the prompt.
-        checklist_count: Number of checklist items in the prompt.
-        interaction_paths: Domain-triggered interaction path text.
-        lint_results: Optional lint digest for prompt injection.
-        extra_checklist: Additional generated checklist rows for depth 2.
-        strictness_section: Sensitivity instructions for the review pass.
-        max_findings: Optional per-call findings ceiling for CLI transport.
-
-    Returns:
-        Tuple of (system_prompt, user_prompt).
-    """
-    pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
-    pr_title = redact_prompt_text(text=pr_title, source="PR title")
-    pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
-    redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
-    changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist = checklist_text
-    if extra_checklist.strip():
-        combined_checklist = f"{checklist_text}\n\n{extra_checklist.strip()}"
-        checklist_count += extra_checklist.strip().count("\n") + (
-            1 if extra_checklist.strip() else 0
-        )
-
-    user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
-        pr_title=pr_title,
-        base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
-        head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
-        pr_summary=pr_summary,
-        deferred_scope_section="",
-        external_review_section="",
-        changed_file_count=len(changed_files),
-        changed_files=redact_prompt_text(
-            text=format_changed_files_for_prompt(files=changed_files),
-            source="changed files",
-        ),
-        pr_changed_files=redact_prompt_text(
-            text=format_pr_changed_files_for_prompt(
-                files=context.changed_files,
-                chunk_paths=set(chunk.files),
-            ),
-            source="changed files",
-        ),
-        interaction_paths=interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
-        boundary=make_boundary_marker(),
-        diff=redacted_diff,
-        lint_results_section=redact_prompt_text(
-            text=format_lint_results_section(digest=lint_results),
-            source="lint results",
-        ),
-        strictness_section=strictness_section,
-        output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(
-            checklist_count=checklist_count,
-            max_findings=max_findings,
-        ),
-    )
-    return REVIEW_SYSTEM, user_prompt
-
-
-def build_git_native_review_prompt(
-    *,
-    chunk: ReviewChunk,
-    context: ReviewContext,
-    checklist_text: str,
-    checklist_count: int,
-    interaction_paths: str,
-    lint_results: str | None = None,
-    extra_checklist: str = "",
-    strictness_section: str = "",
-    embed_diff: bool = False,
-    allow_unredacted_git_native: bool = False,
-    max_findings: int | None = None,
-) -> tuple[str, str]:
-    """Build git-native prompts for CLI-backed review (all providers).
-
-    Redaction is a security invariant and wins by default. When ``embed_diff``
-    is False the builder would normally emit a delegated ``git diff`` command,
-    which lets the provider produce the diff itself and thus bypasses lintro's
-    secret-redaction choke point. Unless ``allow_unredacted_git_native`` is
-    explicitly True, the builder instead falls back to embedding the redacted
-    diff so no unredacted diff can reach the provider.
-
-    Args:
-        chunk: Semantic diff chunk to review.
-        context: Full review context for PR metadata and file list.
-        checklist_text: Formatted checklist for the prompt.
-        checklist_count: Number of checklist items in the prompt.
-        interaction_paths: Domain-triggered interaction path text.
-        lint_results: Optional lint digest for prompt injection.
-        extra_checklist: Additional generated checklist rows for depth 2.
-        strictness_section: Sensitivity instructions for the review pass.
-        embed_diff: When True, inline the diff instead of agentic git commands.
-        allow_unredacted_git_native: Explicit opt-out permitting the delegated
-            ``git diff`` command path (which bypasses secret redaction) when
-            ``embed_diff`` is False. Defaults to False so redaction always
-            wins and the diff is embedded and redacted instead.
-        max_findings: Optional per-call findings ceiling for CLI transport.
-
-    Returns:
-        Tuple of (system_prompt, user_prompt).
-    """
-    # Redaction wins by default: never delegate diff retrieval to the provider
-    # unless the caller has explicitly opted out of the redaction guarantee.
-    if not embed_diff and not allow_unredacted_git_native:
-        embed_diff = True
-    pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
-    pr_title = redact_prompt_text(text=pr_title, source="PR title")
-    pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
-    changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist = checklist_text
-    if extra_checklist.strip():
-        combined_checklist = f"{checklist_text}\n\n{extra_checklist.strip()}"
-        checklist_count += extra_checklist.strip().count("\n") + (
-            1 if extra_checklist.strip() else 0
-        )
-
-    git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
-    boundary = make_boundary_marker()
-    if embed_diff:
-        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
-            boundary=boundary,
-            diff=redact_prompt_text(text=chunk.diff, source="diff"),
-        )
-    elif context.head_ref == "WORKTREE":
-        diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(
-            base_ref=context.base_ref,
-            git_diff_paths=git_diff_paths,
-        )
-    else:
-        diff_section = REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND.format(
-            base_ref=context.base_ref,
-            head_ref=context.head_ref,
-            git_diff_paths=git_diff_paths,
-        )
-    user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
-        pr_title=pr_title,
-        base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
-        head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
-        pr_summary=pr_summary,
-        deferred_scope_section="",
-        external_review_section="",
-        changed_file_count=len(changed_files),
-        changed_files=redact_prompt_text(
-            text=format_changed_files_for_prompt(files=changed_files),
-            source="changed files",
-        ),
-        pr_changed_files=redact_prompt_text(
-            text=format_pr_changed_files_for_prompt(
-                files=context.changed_files,
-                chunk_paths=set(chunk.files),
-            ),
-            source="changed files",
-        ),
-        interaction_paths=interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
-        boundary=boundary,
-        diff_section=diff_section,
-        lint_results_section=redact_prompt_text(
-            text=format_lint_results_section(digest=lint_results),
-            source="lint results",
-        ),
-        strictness_section=strictness_section,
-        output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(
-            checklist_count=checklist_count,
-            max_findings=max_findings,
-        ),
-    )
-    return REVIEW_SYSTEM, user_prompt
-
-
 def parse_review_response(*, content: str) -> dict[str, Any]:
     """Parse and validate AI review JSON response.
 
@@ -2192,35 +1996,28 @@ async def _invoke_chunk_review(
         )
     started = time.monotonic()
     while True:
+        prompt_inputs = PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text=checklist_text,
+            checklist_count=checklist_count,
+            interaction_paths=interaction_paths,
+            lint_results=lint_results,
+            extra_checklist=extra_checklist,
+            strictness_section=strictness_section,
+            max_findings=findings_cap,
+        )
         if use_git_native:
             embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
             system_prompt, user_prompt = build_git_native_review_prompt(
-                chunk=chunk,
-                context=context,
-                checklist_text=checklist_text,
-                checklist_count=checklist_count,
-                interaction_paths=interaction_paths,
-                lint_results=lint_results,
-                extra_checklist=extra_checklist,
-                strictness_section=strictness_section,
+                inputs=prompt_inputs,
                 embed_diff=embed_diff,
                 allow_unredacted_git_native=(
                     ai_config.review_allow_unredacted_git_native
                 ),
-                max_findings=findings_cap,
             )
         else:
-            system_prompt, user_prompt = build_review_prompt(
-                chunk=chunk,
-                context=context,
-                checklist_text=checklist_text,
-                checklist_count=checklist_count,
-                interaction_paths=interaction_paths,
-                lint_results=lint_results,
-                extra_checklist=extra_checklist,
-                strictness_section=strictness_section,
-                max_findings=findings_cap,
-            )
+            system_prompt, user_prompt = build_review_prompt(inputs=prompt_inputs)
         try:
             response = await call_ai(
                 provider=provider,
@@ -2656,31 +2453,6 @@ def _parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
             ),
         )
     return tuple(answers)
-
-
-def _estimate_prompt_overhead(
-    *,
-    context: ReviewContext,
-    checklist_text: str,
-    classifications: list[FileClassification],
-    lint_results: str | None,
-) -> int:
-    """Estimate non-diff prompt token overhead."""
-    paths = generate_interaction_paths(
-        classifications=classifications,
-        changed_files=[file.path for file in context.changed_files],
-    )
-    overhead_text = "\n".join(
-        [
-            REVIEW_SYSTEM,
-            checklist_text,
-            paths,
-            context.pr_metadata.body if context.pr_metadata else "",
-            lint_results or "",
-        ],
-    )
-    estimated = estimate_tokens(overhead_text)
-    return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
 
 
 def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:

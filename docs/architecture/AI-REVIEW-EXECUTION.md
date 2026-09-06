@@ -73,6 +73,21 @@ graceful-stop predicates (`is_cost_cap_stop`, `cost_cap_reason`, `is_timeout_sto
 `timeout_reason`) and the `aborted_before_completion` wrapper live in the same module,
 since deciding whether a run stopped gracefully is session-level, not chunk-level.
 
+### Prompt construction (`lintro/ai/review/prompts.py`, #2301)
+
+The second slice moves the two chunk prompt builders — `build_review_prompt` for the API
+transport and `build_git_native_review_prompt` for CLI-backed providers — and the
+non-diff token estimate `estimate_prompt_overhead` out of the orchestrator. The shared
+render inputs (chunk, context, checklist text and count, interaction paths, lint digest,
+generated checklist rows, strictness section, findings cap) travel as one frozen
+`PromptInputs`; only the git-native diff-delivery flags stay as separate keywords, since
+they are the one thing the two builders do not share. `redact_prompt_text` and
+`make_boundary_marker` now fire inside this module, which makes it the redaction choke
+point for prompt bytes: the git-native builder still embeds the redacted diff unless the
+caller explicitly opts out. The emitted bytes are unchanged and the #2298 prompt goldens
+pass without regeneration; the orchestrator re-exports both builders so the facade is
+untouched.
+
 ## Exit and error contracts
 
 - Exit `0` — successful review, no P1 findings.
