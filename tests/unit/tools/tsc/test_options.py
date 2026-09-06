@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.tsc import (
+from lintro.tools.tsc.definition import (
     TSC_DEFAULT_PRIORITY,
     TSC_DEFAULT_TIMEOUT,
     TSC_FILE_PATTERNS,

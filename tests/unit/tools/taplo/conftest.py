@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.taplo import TaploPlugin
+from lintro.tools.taplo.definition import TaploPlugin
 
 
 @pytest.fixture

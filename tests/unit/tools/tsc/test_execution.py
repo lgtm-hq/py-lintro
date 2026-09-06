@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.tsc import TscPlugin
+from lintro.tools.tsc.definition import TscPlugin
 from tests.test_samples_helpers import copy_sample
 
 # =============================================================================

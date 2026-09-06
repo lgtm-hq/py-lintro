@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
 
 
 @pytest.fixture

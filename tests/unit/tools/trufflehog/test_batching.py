@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.trufflehog import TrufflehogPlugin
+from lintro.tools.trufflehog.definition import TrufflehogPlugin
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
     sample_finding_line,

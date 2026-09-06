@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from lintro.tools.definitions.vale import ValePlugin
+from lintro.tools.vale.definition import ValePlugin
 
 
 @pytest.fixture

@@ -24,7 +24,7 @@ TOOL_SPECS = [
     (ToolName.MYPY, "lintro.tools.mypy.definition", "MypyPlugin", 60, 82, False),
     (
         ToolName.YAMLLINT,
-        "lintro.tools.definitions.yamllint",
+        "lintro.tools.yamllint.definition",
         "YamllintPlugin",
         15,
         40,

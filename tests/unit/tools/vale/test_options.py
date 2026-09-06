@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.vale import ValePlugin
+from lintro.tools.vale.definition import ValePlugin
 
 
 def test_definition_metadata(vale_plugin: ValePlugin) -> None:

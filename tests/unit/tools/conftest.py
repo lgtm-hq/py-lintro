@@ -21,8 +21,8 @@ from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 
 if TYPE_CHECKING:
     from lintro.tools.clippy.definition import ClippyPlugin
-    from lintro.tools.definitions.tsc import TscPlugin
     from lintro.tools.mypy.definition import MypyPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
 
 @pytest.fixture
@@ -106,7 +106,7 @@ def tsc_plugin() -> TscPlugin:
     Returns:
         A TscPlugin instance.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     return TscPlugin()
 

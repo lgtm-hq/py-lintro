@@ -17,7 +17,7 @@ from lintro.tools.core.version_parsing import (
     get_install_hints,
     get_minimum_versions,
 )
-from lintro.tools.definitions.typos import (
+from lintro.tools.typos.definition import (
     BINARY_PATH_SUFFIXES,
     TYPOS_DEFAULT_TIMEOUT,
     TyposPlugin,
