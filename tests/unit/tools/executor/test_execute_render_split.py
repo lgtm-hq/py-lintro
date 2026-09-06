@@ -20,13 +20,18 @@ from assertpy import assert_that
 import lintro.utils.tool_executor as te
 from lintro.enums.action import Action
 from lintro.models.core.run_artifact import RunArtifact
+from lintro.models.core.severity_counts import SeverityCounts
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.run_renderer import render_run
 from lintro.utils.execution.tool_configuration import SkippedTool, ToolsToRunResult
-from lintro.utils.health_score import health_score_for_results
+from lintro.utils.severity_baseline import (
+    read_severity_baseline,
+    write_severity_baseline,
+)
+from lintro.utils.severity_counts import count_severities
 from lintro.utils.tool_executor import execute_run
 
 
@@ -59,11 +64,18 @@ class _FakeTool:
         Returns:
             ToolResult: The canned result for this double.
         """
+        # Parsed issues, not a bare count: ``count_severities`` reads
+        # severities off this list, so a fixture with an empty one would make
+        # the execute phase's tally unobservable.
+        issues: list[Any] = [
+            RuffIssue(file="a.py", line=index + 1, code="F401", message="unused")
+            for index in range(self._issues_count)
+        ]
         return ToolResult(
             name="ruff",
             success=self._issues_count == 0,
             issues_count=self._issues_count,
-            issues=[],
+            issues=issues,
         )
 
 
@@ -74,9 +86,14 @@ class _FakeOutputManager:
         """Record the run directory this double reports.
 
         Args:
-            run_dir: Directory the render phase would write into.
+            run_dir: Temporary directory to build under. A ``logs`` log root
+                and a pruneable ``logs/run-test`` child are created inside it,
+                mirroring production, so a baseline written into the run
+                directory instead of the log root fails the placement test.
         """
-        self.run_dir = run_dir
+        self.base_dir = run_dir / "logs"
+        self.run_dir = self.base_dir / "run-test"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.reports_written = 0
         self.console_logs: list[str] = []
         self.cleanups = 0
@@ -114,7 +131,6 @@ def _context(
     tmp_path: Path,
     fake_logger: Any,
     output_format: str = "grid",
-    score_only: bool = False,
     group_by: str = "auto",
     profile: bool = False,
 ) -> RunContext:
@@ -124,7 +140,6 @@ def _context(
         tmp_path: Temporary directory standing in for the run directory.
         fake_logger: Console logger double.
         output_format: Output format the run was asked for.
-        score_only: Whether stdout carries only the numeric score.
         group_by: How issues should be grouped in formatted output.
         profile: Whether to emit the per-tool performance profile.
 
@@ -141,7 +156,6 @@ def _context(
         logger=fake_logger,
         lintro_config=get_config(),
         clean_stdout_output=output_format in ("json", "sarif", "csv", "markdown"),
-        score_only=score_only,
         group_by=group_by,
         profile=profile,
     )
@@ -236,7 +250,10 @@ def test_execute_run_returns_an_artifact_and_emits_no_document(
     assert_that(artifact.exit_code).is_equal_to(1)
     assert_that(artifact.action).is_equal_to(Action.CHECK)
     assert_that(artifact.workspace_root).is_equal_to(Path.cwd())
-    assert_that(artifact.health).is_not_none()
+    # A real tally, not a presence check: ``severity_counts`` is a non-Optional
+    # field, so ``is_not_none()`` could never fail. ``RuffIssue`` maps F401 to
+    # WARNING, so the execute phase must report two warnings here.
+    assert_that(artifact.severity_counts).is_equal_to(SeverityCounts(warnings=2))
     assert_that(artifact.early_exit).is_false()
     assert_that(capsys.readouterr().out).is_empty()
 
@@ -322,31 +339,19 @@ def test_execute_run_prints_detection_notice_on_human_output(
     assert_that(_console_texts(fake_logger)).contains("lintro init")
 
 
-@pytest.mark.parametrize(
-    ("output_format", "score_only"),
-    [
-        ("json", False),
-        ("grid", True),
-    ],
-    ids=["json", "score-only"],
-)
-def test_execute_run_hides_detection_notice_on_machine_or_score_output(
+def test_execute_run_hides_detection_notice_on_machine_output(
     monkeypatch: pytest.MonkeyPatch,
     executor_doubles: None,
     tmp_path: Path,
     fake_logger: Any,
-    output_format: str,
-    score_only: bool,
 ) -> None:
-    """JSON stdout and ``--score`` suppress the language-scope notice.
+    """Machine-readable stdout suppresses the language-scope notice.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         executor_doubles: Neutralized executor collaborators.
         tmp_path: Temporary directory standing in for the run directory.
         fake_logger: Console logger double.
-        output_format: Output format the run was asked for.
-        score_only: Whether stdout carries only the numeric score.
     """
     monkeypatch.setattr(
         te,
@@ -365,11 +370,10 @@ def test_execute_run_hides_detection_notice_on_machine_or_score_output(
     ctx = _context(
         tmp_path=tmp_path,
         fake_logger=fake_logger,
-        output_format=output_format,
-        score_only=score_only,
+        output_format="json",
     )
 
-    _run_execute(ctx=ctx, tools=None, output_format=output_format)
+    _run_execute(ctx=ctx, tools=None, output_format="json")
 
     assert_that(_console_texts(fake_logger)).does_not_contain("No config found")
 
@@ -472,7 +476,7 @@ def _artifact_fixture() -> RunArtifact:
         tool_results=results,
         action=Action.CHECK,
         workspace_root=Path.cwd(),
-        health=health_score_for_results(results),
+        severity_counts=count_severities(results),
         total_issues=2,
         total_fixed=0,
         total_remaining=2,
@@ -514,7 +518,7 @@ def test_render_run_enriches_categories_before_json_stdout(
         tool_results=results,
         action=Action.CHECK,
         workspace_root=Path.cwd(),
-        health=health_score_for_results(results),
+        severity_counts=count_severities(results),
         total_issues=1,
         total_fixed=0,
         total_remaining=1,
@@ -578,18 +582,370 @@ def test_render_run_emits_the_console_summary(
     assert_that(calls).contains("print_execution_summary")
 
 
-def test_render_run_emits_only_the_score_when_asked(
+def test_render_run_prints_the_severity_counts(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """A check run always reports what it found, by severity.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2, warnings=1)
+
+    render_run(artifact, ctx=ctx, output_format="grid")
+
+    assert_that(_console_texts(fake_logger)).contains(
+        "Issues: 2 errors, 1 warning, 0 info",
+    )
+
+
+def test_render_run_prints_no_delta_without_a_baseline(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """A first run in a workspace has nothing to compare against.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+
+    render_run(_artifact_fixture(), ctx=ctx, output_format="grid")
+
+    assert_that(_console_texts(fake_logger)).does_not_contain("Change since last run")
+
+
+@pytest.mark.parametrize(
+    ("previous", "expected_line", "expected_color"),
+    [
+        (
+            SeverityCounts(errors=14),
+            "Change since last run: -12 errors",
+            "green",
+        ),
+        (
+            SeverityCounts(errors=1),
+            "Change since last run: +1 error",
+            "red",
+        ),
+        (
+            SeverityCounts(errors=2),
+            "Change since last run: no change",
+            "cyan",
+        ),
+        (
+            SeverityCounts(errors=2, warnings=6, info=1),
+            "Change since last run: -6 warnings, -1 info",
+            "green",
+        ),
+    ],
+    ids=["improved", "regressed", "unchanged", "non-error-severities"],
+)
+def test_render_run_colors_the_delta_by_direction_of_improvement(
+    tmp_path: Path,
+    fake_logger: Any,
+    previous: SeverityCounts,
+    expected_line: str,
+    expected_color: str,
+) -> None:
+    """Fewer issues is green even though the arithmetic sign is negative.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        previous: Counts recorded for the preceding run.
+        expected_line: Delta line the renderer must print.
+        expected_color: Colour that line must be printed in.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = previous
+
+    render_run(artifact, ctx=ctx, output_format="grid")
+
+    colors = {
+        str(kwargs.get("text")): kwargs.get("color")
+        for name, _args, kwargs in fake_logger.calls
+        if name == "console_output"
+    }
+    assert_that(colors).contains_key(expected_line)
+    assert_that(colors[expected_line]).is_equal_to(expected_color)
+
+
+def test_render_run_records_the_baseline_for_the_next_run(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """A check run leaves its counts behind for the next run's delta.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2, info=1)
+
+    render_run(artifact, ctx=ctx, output_format="grid")
+
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
+        SeverityCounts(errors=2, info=1),
+    )
+
+
+def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
+    """Build the run shapes that must never overwrite a real baseline.
+
+    Each one reports zero issues for a reason other than "the project is
+    clean", so recording it would make the next real check report every
+    existing issue as newly introduced.
+
+    Returns:
+        list[tuple[str, RunArtifact]]: ``(id, artifact)`` pairs.
+    """
+    skipped_only = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="hadolint",
+                success=True,
+                skipped=True,
+                skip_reason="hadolint not found",
+            ),
+        ],
+    )
+    no_files = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="ruff",
+                success=True,
+                skipped=False,
+                output="No .py/.pyi files found to check.",
+            ),
+        ],
+    )
+    dry_run = RunArtifact(
+        action=Action.CHECK,
+        dry_run_preview=True,
+        tool_results=[ToolResult(name="ruff", success=True, issues_count=0)],
+    )
+    early = RunArtifact(action=Action.CHECK, early_exit=True)
+    timed_out = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="semgrep",
+                success=False,
+                skipped=False,
+                timed_out=True,
+                output="timed out after 300s",
+            ),
+        ],
+    )
+    real = [ToolResult(name="ruff", success=True, output="All checks passed")]
+    return [
+        ("empty", RunArtifact(action=Action.CHECK)),
+        ("all-skipped", skipped_only),
+        ("no-files-matched", no_files),
+        ("all-timed-out", timed_out),
+        ("dry-run-preview", dry_run),
+        ("early-exit", early),
+        ("fmt", RunArtifact(action=Action.FIX, tool_results=list(real))),
+        ("test", RunArtifact(action=Action.TEST, tool_results=list(real))),
+    ]
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [pair[1] for pair in _unmeasured_artifacts()],
+    ids=[pair[0] for pair in _unmeasured_artifacts()],
+)
+def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
+    tmp_path: Path,
+    fake_logger: Any,
+    artifact: RunArtifact,
+) -> None:
+    """Only a run that actually measured the project may replace the baseline.
+
+    An all-skipped run still carries ``skipped=True`` placeholder results, so
+    a non-empty result list is not evidence that anything was measured; the
+    same holds for a toolset that matched no files and for a ``fmt --dry-run``
+    preview, whose counts are the auto-fixable subset only.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        artifact: A run shape that measured nothing comparable.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    write_severity_baseline(ctx.output_manager.base_dir, SeverityCounts(errors=9))
+
+    render_run(artifact, ctx=ctx, output_format="grid")
+
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
+        SeverityCounts(errors=9),
+    )
+
+
+def test_render_run_does_not_record_a_baseline_for_fmt(
+    tmp_path: Path,
+    fake_logger: Any,
+) -> None:
+    """Only ``check`` records a baseline; ``fmt`` measures something else.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
+    artifact = _artifact_fixture()
+    artifact.action = Action.FIX
+
+    render_run(artifact, ctx=ctx, output_format="grid")
+
+    assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_none()
+
+
+def test_render_run_json_carries_the_counts_and_delta(
     tmp_path: Path,
     fake_logger: Any,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Score-only mode prints a bare number and nothing else."""
-    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, score_only=True)
+    """JSON output publishes the tallies additively under ``summary``.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        capsys: Pytest stdout capture fixture.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
     artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = SeverityCounts(errors=14)
 
-    render_run(artifact, ctx=ctx, output_format="grid")
+    render_run(artifact, ctx=ctx, output_format="json")
 
-    assert_that(capsys.readouterr().out.strip()).is_equal_to(str(artifact.health_score))
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert_that(summary["severity_counts"]).is_equal_to(
+        {"error": 2, "warning": 0, "info": 0, "total": 2},
+    )
+    assert_that(summary["severity_delta"]).is_equal_to(
+        {"error": -12, "warning": 0, "info": 0, "total": -12},
+    )
+    assert_that(summary["total_issues"]).is_equal_to(2)
+
+
+def test_render_run_output_file_json_carries_the_counts_and_delta(
+    tmp_path: Path,
+    fake_logger: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An ``--output`` JSON file carries the same tallies as stdout.
+
+    A consumer reading the file must not have to fall back to parsing the
+    console to learn what the run found.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        capsys: Pytest stdout capture fixture.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = SeverityCounts(errors=14)
+    output_file = tmp_path / "report.json"
+
+    render_run(
+        artifact,
+        ctx=ctx,
+        output_format="json",
+        output_file=str(output_file),
+    )
+    capsys.readouterr()
+
+    summary = json.loads(output_file.read_text(encoding="utf-8"))["summary"]
+    assert_that(summary["severity_counts"]).is_equal_to(
+        {"error": 2, "warning": 0, "info": 0, "total": 2},
+    )
+    assert_that(summary["severity_delta"]).is_equal_to(
+        {"error": -12, "warning": 0, "info": 0, "total": -12},
+    )
+
+
+def test_render_run_json_artifact_carries_the_counts_and_delta(
+    tmp_path: Path,
+    fake_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A configured JSON artifact carries the tallies too.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest stdout capture fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(warnings=5)
+    artifact.previous_severity_counts = SeverityCounts(warnings=1)
+
+    # ``get_config`` caches a process-wide config whose ExecutionConfig is
+    # mutable, so this must be restored or it leaks into every later test.
+    original_artifacts = list(ctx.lintro_config.execution.artifacts)
+    ctx.lintro_config.execution.artifacts = ["json"]
+    try:
+        render_run(artifact, ctx=ctx, output_format="json")
+    finally:
+        ctx.lintro_config.execution.artifacts = original_artifacts
+    capsys.readouterr()
+
+    written = Path(".lintro") / "artifacts" / "json" / "results.json"
+    summary = json.loads(written.read_text(encoding="utf-8"))["summary"]
+    assert_that(summary["severity_counts"]).is_equal_to(
+        {"error": 0, "warning": 5, "info": 0, "total": 5},
+    )
+    assert_that(summary["severity_delta"]).is_equal_to(
+        {"error": 0, "warning": 4, "info": 0, "total": 4},
+    )
+
+
+def test_render_run_json_omits_the_delta_without_a_baseline(
+    tmp_path: Path,
+    fake_logger: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A first run publishes counts but no delta key at all.
+
+    An absent key is unambiguous; a zero delta would read as "nothing changed"
+    for a run that had nothing to compare against.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        capsys: Pytest stdout capture fixture.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = None
+
+    render_run(artifact, ctx=ctx, output_format="json")
+
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert_that(summary).contains_key("severity_counts")
+    assert_that(summary).does_not_contain_key("severity_delta")
 
 
 def test_render_run_writes_the_run_reports(
@@ -683,7 +1039,7 @@ def _profiled_artifact() -> RunArtifact:
         tool_results=results,
         action=Action.CHECK,
         workspace_root=Path.cwd(),
-        health=health_score_for_results(results),
+        severity_counts=count_severities(results),
         total_issues=1,
         total_fixed=0,
         total_remaining=1,

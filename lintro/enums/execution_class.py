@@ -8,7 +8,7 @@ AI *finder* tools (``idiom-review`` and any future sibling) break that
 contract: they ask a model for opinions, so identical input can yield
 different findings, at real API cost and latency. Marking them
 :attr:`ExecutionClass.ADVISORY` keeps them out of ``chk`` (and therefore out
-of the health score) and routes them to ``lintro review`` instead (#1308).
+of its issue counts) and routes them to ``lintro review`` instead (#1308).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ class ExecutionClass(StrEnum):
 
     Attributes:
         DETERMINISTIC: Same input always yields the same findings. Runs under
-            ``lintro chk`` / ``lintro fmt`` and feeds the health score.
+            ``lintro chk`` / ``lintro fmt`` and feeds its issue counts.
         ADVISORY: Nondeterministic, opinion-shaped findings (AI finders).
             Runs under ``lintro review`` only, and never affects the exit
             code unless ``--fail-on-findings`` is passed.

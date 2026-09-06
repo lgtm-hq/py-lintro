@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action
 from lintro.models.core.sarif_enrichment import AISarifEnrichment
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -230,6 +231,8 @@ def _write_artifacts(
     warn_func: Any = None,
     ai_enrichment: AISarifEnrichment | None = None,
     profile_data: ProfileData | None = None,
+    severity_counts: SeverityCounts | None = None,
+    severity_delta: SeverityDelta | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -257,12 +260,16 @@ def _write_artifacts(
             artifacts, so a non-SARIF run never carries AI data.
         profile_data: Optional ``--profile`` payload. Attached to the JSON
             artifact only, so the artifact matches the stdout JSON document.
+        severity_counts: Optional severity tallies, attached to the JSON
+            artifact only, for the same reason.
+        severity_delta: Optional count delta, attached to the JSON artifact
+            only, for the same reason.
     """
     import os
     from pathlib import Path
 
     from lintro.enums.output_format import OutputFormat, normalize_output_format
-    from lintro.utils.output.file_writer import write_output_file
+    from lintro.utils.output.file_writer import JsonReportExtras, write_output_file
 
     artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
     is_gha = os.environ.get("GITHUB_ACTIONS") == "true"
@@ -304,7 +311,15 @@ def _write_artifacts(
                 total_issues=total_issues,
                 total_fixed=total_fixed,
                 ai_enrichment=enrichment,
-                profile_data=(profile_data if fmt == OutputFormat.JSON else None),
+                json_extras=(
+                    JsonReportExtras(
+                        profile_data=profile_data,
+                        severity_counts=severity_counts,
+                        severity_delta=severity_delta,
+                    )
+                    if fmt == OutputFormat.JSON
+                    else None
+                ),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -372,7 +387,8 @@ def _render_stdout_document(
             total_fixed=artifact.total_fixed,
             total_remaining=artifact.total_remaining,
             exit_code=artifact.exit_code,
-            health_score=artifact.health.to_dict() if artifact.health else None,
+            severity_counts=artifact.severity_counts,
+            severity_delta=artifact.severity_delta,
         )
         if ctx.profile:
             from lintro.profiling.report import build_profile_data
@@ -458,17 +474,39 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
                 color="green",
             )
 
-    # Always-on health score line at the end of a check run.
-    if artifact.action == Action.CHECK and artifact.health is not None:
-        health = artifact.health
-        tier_color = {
-            "great": "green",
-            "needs-work": "yellow",
-            "critical": "red",
-        }.get(health.tier.label, "cyan")
+    # Always-on severity counts and count delta at the end of a check run.
+    if artifact.action == Action.CHECK:
+        _render_severity_summary(artifact, logger=logger)
+
+
+def _render_severity_summary(artifact: RunArtifact, *, logger: Any) -> None:
+    """Print the severity-count line and, when known, the count delta.
+
+    Replaces the 0-100 health score deleted in issue #1739. Counts say what
+    the run found; the delta says how that changed since the previous run in
+    this workspace, coloured by direction of improvement (fewer is better).
+
+    Args:
+        artifact: The completed run artifact.
+        logger: Console logger used for the two lines.
+    """
+    from lintro.utils.severity_counts import (
+        counts_color,
+        delta_color,
+        format_counts_line,
+        format_delta_line,
+    )
+
+    counts = artifact.severity_counts
+    logger.console_output(
+        text=format_counts_line(counts),
+        color=counts_color(counts),
+    )
+    delta = artifact.severity_delta
+    if delta is not None:
         logger.console_output(
-            text=f"Health score: {health.score}/100 ({health.tier.label})",
-            color=tier_color,
+            text=format_delta_line(delta),
+            color=delta_color(delta),
         )
 
 
@@ -527,7 +565,10 @@ def _write_run_files(
                 OutputFormat,
                 normalize_output_format,
             )
-            from lintro.utils.output.file_writer import write_output_file
+            from lintro.utils.output.file_writer import (
+                JsonReportExtras,
+                write_output_file,
+            )
 
             fmt = normalize_output_format(output_format)
             if fmt == OutputFormat.SARIF:
@@ -560,7 +601,11 @@ def _write_run_files(
                     action=artifact.action,
                     total_issues=artifact.total_issues,
                     total_fixed=artifact.total_fixed,
-                    profile_data=file_profile,
+                    json_extras=JsonReportExtras(
+                        profile_data=file_profile,
+                        severity_counts=artifact.severity_counts,
+                        severity_delta=artifact.severity_delta,
+                    ),
                 )
         except (OSError, ValueError, TypeError) as e:
             warn_func(f"Warning: Failed to write output file: {e}")
@@ -583,6 +628,8 @@ def _write_run_files(
         warn_func=warn_func,
         ai_enrichment=ai_enrichment,
         profile_data=artifact_profile,
+        severity_counts=artifact.severity_counts,
+        severity_delta=artifact.severity_delta,
     )
 
     # Clean up old run directories to prevent unbounded growth
@@ -590,6 +637,39 @@ def _write_run_files(
         output_manager.cleanup_old_runs()
     except OSError as e:
         warn_func(f"Warning: Failed to clean up old runs: {e}")
+
+
+def _record_severity_baseline(artifact: RunArtifact, *, ctx: RunContext) -> None:
+    """Store this check run's severity counts for the next run to compare.
+
+    Eligibility is :func:`~lintro.utils.meaningful_run.baseline_is_eligible`,
+    the same predicate the read path in
+    :func:`~lintro.utils.execution.run_aggregation.finalize_artifact` uses:
+    a real ``check`` that actually inspected files. A run that must not record
+    a baseline must not compare against one either.
+
+    Args:
+        artifact: The completed run artifact.
+        ctx: Shared run context; supplies the run-log directory.
+    """
+    from lintro.utils.meaningful_run import baseline_is_eligible
+    from lintro.utils.severity_baseline import (
+        resolve_log_root,
+        write_severity_baseline,
+    )
+
+    if not baseline_is_eligible(
+        action=artifact.action,
+        dry_run_preview=artifact.dry_run_preview,
+        tool_results=artifact.tool_results,
+        early_exit=artifact.early_exit,
+    ):
+        return
+
+    log_root = resolve_log_root(ctx.output_manager)
+    if log_root is None:
+        return
+    write_severity_baseline(log_root, artifact.severity_counts)
 
 
 def render_run(
@@ -620,12 +700,9 @@ def render_run(
     if artifact.early_exit:
         return
 
-    health_score = artifact.health_score
+    _record_severity_baseline(artifact, ctx=ctx)
 
     if not artifact.tool_results:
-        # Empty result set (e.g. all tools skipped) still needs numeric stdout.
-        if ctx.score_only:
-            print(health_score)
         return
 
     from lintro.enums.group_by import GroupBy, normalize_group_by
@@ -634,16 +711,12 @@ def render_run(
     if normalize_group_by(ctx.group_by) == GroupBy.CATEGORY:
         enrich_tool_results_with_categories(artifact.tool_results)
 
-    if ctx.score_only:
-        # Score-only wins over JSON/SARIF so stdout stays a bare number.
-        print(health_score)
-    else:
-        _render_stdout_document(
-            artifact,
-            ctx=ctx,
-            output_format=output_format,
-            ai_enrichment=ai_enrichment,
-        )
+    _render_stdout_document(
+        artifact,
+        ctx=ctx,
+        output_format=output_format,
+        ai_enrichment=ai_enrichment,
+    )
 
     # Route warnings to stderr (loguru) for clean-stdout formats so plain-text
     # messages don't corrupt the JSON/SARIF/CSV/Markdown document on stdout.

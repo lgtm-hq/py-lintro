@@ -48,7 +48,7 @@ bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
-lintro badge                       # shields.io health-score badge
+lintro badge                       # shields.io issue-count badge
 lintro check --output-format grid  # Beautiful output
 ```
 

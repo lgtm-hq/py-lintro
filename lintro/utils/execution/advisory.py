@@ -9,7 +9,7 @@ violations (#1308). This module is the counterpart runner that
 
 It is deliberately a thin, sequential runner rather than a second copy of the
 full :mod:`lintro.utils.tool_executor` pipeline: advisory tools never fix,
-never participate in post-checks, and never feed the health score. Findings
+never participate in post-checks, and never feed its issue counts. Findings
 do not change the exit code unless the user opts in with
 ``--fail-on-findings``. An advisory tool that failed to run
 (:attr:`~lintro.enums.tool_run_status.ToolRunStatus.ERRORED` or

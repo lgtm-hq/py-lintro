@@ -112,12 +112,12 @@ def _build_targets(files: list[str]) -> list[list[str]]:
             requirement_targets.append(["-r", str(path.resolve())])
         elif path.name in PIP_AUDIT_PROJECT_FILES:
             resolved = path.resolve()
-            # A ``setup.py`` inside an importable package (its directory has an
-            # ``__init__.py``) is a source module coincidentally named
-            # ``setup.py`` — e.g. lintro's own ``lintro setup`` command — not a
-            # packaging manifest. pip-audit rejects such a directory with
-            # "couldn't find a supported project file", so skip it. A
-            # ``pyproject.toml`` is always a real manifest and is never skipped.
+            # A ``setup.py`` inside an importable package (its directory has
+            # an ``__init__.py``) is a source module coincidentally named
+            # ``setup.py``, not a packaging manifest. pip-audit rejects such a
+            # directory with "couldn't find a supported project file", so skip
+            # it. A ``pyproject.toml`` is always a real manifest and is never
+            # skipped.
             if (
                 resolved.name == "setup.py"
                 and (resolved.parent / "__init__.py").exists()

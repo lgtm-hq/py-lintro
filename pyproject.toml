@@ -349,7 +349,6 @@ max-statements = 50
   "PLR0913",
   "PLR0915",
 ]
-"lintro/cli_utils/commands/setup.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/cli_utils/commands/test.py" = ["PLR0913"]
 "lintro/cli_utils/commands/versions.py" = ["PLR0912", "PLR0915"]
 "lintro/config/config_loader.py" = ["C901", "PLR0912", "PLR0915"]
@@ -844,8 +843,7 @@ ignore_imports = [
   "lintro.tools.definitions.yamllint -> lintro.plugins.base",                       # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.protocol",                   # owned by #2311
   "lintro.tools.definitions.yamllint -> lintro.plugins.registry",                   # owned by #2311
-  # 63 edges owned by #2312
-  "lintro.models.core.run_artifact -> lintro.utils.health_score",                               # owned by #2312
+  # 61 edges owned by #2312
   "lintro.utils.async_tool_executor -> lintro.plugins.base",                                    # owned by #2312
   "lintro.utils.doctor_report -> lintro.ai.doctor_checks",                                      # owned by #2312
   "lintro.utils.doctor_report -> lintro.ai.interface",                                          # owned by #2312
@@ -879,7 +877,6 @@ ignore_imports = [
   "lintro.utils.execution.tool_configuration -> lintro.tools.core.tool_registry",               # owned by #2312
   "lintro.utils.findings -> lintro.formatters.formatter",                                       # owned by #2312
   "lintro.utils.findings -> lintro.parsers.base_issue",                                         # owned by #2312
-  "lintro.utils.health_score -> lintro.config.score_config",                                    # owned by #2312
   "lintro.utils.issue_category -> lintro.parsers.base_issue",                                   # owned by #2312
   "lintro.utils.issue_category -> lintro.plugins.registry",                                     # owned by #2312
   "lintro.utils.json_output -> lintro.formatters.formatter",                                    # owned by #2312

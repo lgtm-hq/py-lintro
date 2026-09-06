@@ -12,7 +12,11 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
 from lintro.models.core.tool_result import ToolResult
-from lintro.utils.output import sanitize_csv_value, write_output_file
+from lintro.utils.output import (
+    JsonReportExtras,
+    sanitize_csv_value,
+    write_output_file,
+)
 
 # --- sanitize_csv_value tests ---
 
@@ -594,7 +598,13 @@ def test_write_json_output_includes_profile_when_provided(
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
-        profile_data={"cumulative_tool_duration": 1.23, "tools": [], "suggestions": []},
+        json_extras=JsonReportExtras(
+            profile_data={
+                "cumulative_tool_duration": 1.23,
+                "tools": [],
+                "suggestions": [],
+            },
+        ),
     )
 
     content = json.loads(output_path.read_text())

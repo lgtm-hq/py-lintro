@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
-    from lintro.utils.health_score import HealthScore
 
 
 @dataclass
@@ -33,14 +33,17 @@ class RunArtifact:
             For a ``fmt --dry-run`` preview this is ``CHECK``, because the run
             executed in read-only check mode.
         workspace_root: Directory the run was invoked from.
-        health: Deterministic 0-100 health score derived from the results.
+        severity_counts: Issue tallies by normalized severity for this run.
+        previous_severity_counts: Severity tallies recorded for the previous
+            run in this workspace, or ``None`` when none was recorded. The
+            renderer reports the difference between the two.
         total_issues: Total issues found across all non-skipped tools.
         total_fixed: Total issues fixed (always 0 outside ``FIX`` mode).
         total_remaining: Issues still outstanding after the run.
         exit_code: Process exit code the run resolved to.
         dry_run_preview: Whether this was a ``fmt --dry-run`` preview.
         main_phase_empty_due_to_filter: Whether post-check filtering left the
-            main phase with no tools to run. Carried here so a re-scored
+            main phase with no tools to run. Carried here so a refreshed
             artifact resolves its exit code the same way the first pass did.
         early_exit: Whether the run stopped before executing any tool (bad
             tool selection, unresolvable ``--diff`` base, or a declined
@@ -51,7 +54,8 @@ class RunArtifact:
     tool_results: list[ToolResult] = field(default_factory=list)
     action: Action = Action.CHECK
     workspace_root: Path = field(default_factory=Path.cwd)
-    health: HealthScore | None = None
+    severity_counts: SeverityCounts = field(default_factory=SeverityCounts)
+    previous_severity_counts: SeverityCounts | None = None
     total_issues: int = 0
     total_fixed: int = 0
     total_remaining: int = 0
@@ -70,12 +74,17 @@ class RunArtifact:
         return self.exit_code == 0
 
     @property
-    def health_score(self) -> int:
-        """Numeric health score for this run.
+    def severity_delta(self) -> SeverityDelta | None:
+        """Change in severity counts since the previous recorded run.
 
         Returns:
-            int: The 0-100 health score, or 0 when the run never got far
-            enough to be scored (see :attr:`early_exit`). Reported as 0 rather
-            than 100 so an un-scored run is never mistaken for a perfect one.
+            SeverityDelta | None: Per-severity ``current - previous``
+            differences, or ``None`` when no previous run was recorded and
+            there is nothing to compare against.
         """
-        return 0 if self.health is None else self.health.score
+        if self.previous_severity_counts is None:
+            return None
+        return SeverityDelta.between(
+            current=self.severity_counts,
+            previous=self.previous_severity_counts,
+        )

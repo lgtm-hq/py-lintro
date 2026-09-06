@@ -23,9 +23,8 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 
 The five tiers above form the `LintroConfig` model's core configuration story
 (`lintro/config/lintro_config.py`). Additional optional sections — `review` (diff-review
-checklist), `score` (health-score weights, see **Health Score** below), and `watch`
-(`lintro watch` defaults; see [Watch Mode](watch-mode.md)) — configure specific commands
-rather than tool resolution.
+checklist) and `watch` (`lintro watch` defaults; see [Watch Mode](watch-mode.md)) —
+configure specific commands rather than tool resolution.
 
 ### Key Principles
 
@@ -264,77 +263,81 @@ The config command shows:
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
-### Health Score
+### Severity Counts and the Count Delta
 
-`lintro check` computes a single, deterministic **0-100 health score** that aggregates
-every issue across every tool into one trackable, CI-gateable, shareable number.
-
-```bash
-lintro check                  # normal output + health score line at the end
-lintro check --score          # print ONLY the score (for scripts/badges)
-lintro check --fail-under 75  # exit 1 if the score is below 75
-lintro check --output-format json   # score included under summary.health_score
-lintro badge                  # markdown shields.io badge for the score
-lintro badge --style flat     # shields.io style variant
-lintro badge --url            # bare badge URL
-lintro badge --json           # score, tier, color, url, and markdown as JSON
-```
-
-`--json` and `--url` are mutually exclusive. `lintro badge` runs a score-only check (or
-accepts `--score N` to skip the run) and prints a shields.io snippet such as
-`![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)`. Badge color
-follows the tiers below: bright green (75+), yellow (50–74), red (<50).
-
-#### Scoring model
-
-Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
-weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+`lintro check` reports what it found by severity, and how that changed since the
+previous check in the same workspace:
 
 ```text
-weighted  = error_weight   * n_errors
-          + warning_weight * n_warnings
-          + info_weight    * n_info
-
-score     = floor( 100 * scale / (scale + weighted) )
+Issues: 3 errors, 1 warning, 0 info
+Change since last run: -12 errors, +1 warning
 ```
 
-With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
-the following guaranteed properties:
+The change line is coloured by the **direction of improvement**, not by the arithmetic
+sign: fewer issues is better, so `-12 errors` is green and `+3 errors` is red. Only the
+severities that actually moved are listed; a run with no movement reads `no change`.
+Severities are compared most-severe first, so trading an error for a warning still reads
+as an improvement.
 
-- **Zero issues → exactly 100.** A clean run is unambiguous.
-- **Any issue → strictly below 100** (`floor` keeps it at most 99).
-- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
-- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
-  severity counts and the configured weights/scale, never on ordering or timing.
+The comparison baseline is stored as `severity-baseline.json` at the root of the log
+directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
+directory, so run pruning never removes it.
 
-The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
-issues, or ~33 `WARNING` issues, with the defaults).
+Only a run that actually measured the project reads or writes it, and the same rule
+governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
+measure something else), is not a `fmt --dry-run` preview (those report as checks but
+count only the auto-fixable subset), and had at least one tool actually inspect files.
+Runs that do not qualify — an empty directory, an all-skipped toolset, a toolset that
+declined to run for want of configuration, an early exit — leave the previous baseline
+in place rather than overwriting it with zeroes, so the next comparison may be against
+an older run rather than the immediately preceding one. A missing or unreadable baseline
+simply omits the change line, and never fails a run.
 
-#### Score tiers
+A **tool timeout** is treated differently by the baseline and by the badge, on purpose.
+A check where one tool timed out but another inspected files still records a baseline:
+the alternative would let a single flaky `semgrep` or `gitleaks` timeout freeze the
+baseline, so the next successful run would report its delta against an arbitrarily old
+measurement. `lintro badge` refuses that same run, because a badge is a public claim and
+"0 issues" would assert something about findings that were never collected.
 
-| Score  | Tier         |
-| ------ | ------------ |
-| 75-100 | `great`      |
-| 50-74  | `needs-work` |
-| 0-49   | `critical`   |
+> **Removed in favour of this (issue #1739).** `lintro` used to compute a 0-100 "health
+> score" along with `check --score` and `check --fail-under N`. The score had no size
+> normalization, so ten errors scored the same in a 200-line project and a 500k-line
+> one, and enabling more tools mechanically lowered it. `--fail-under` gated CI on that
+> fabricated number; it is gone with no replacement, because `chk` already exits
+> non-zero when issues exist.
 
-#### Configuring the weights
+#### The badge
 
-Weights and the smoothing scale are tunable via the `score` section:
-
-```yaml
-# .lintro-config.yaml
-score:
-  error_weight: 10 # penalty per ERROR issue
-  warning_weight: 3 # penalty per WARNING issue
-  info_weight: 1 # penalty per INFO issue
-  scale: 100 # larger = the score decays more slowly
+```bash
+lintro badge                  # markdown shields.io badge for the issue counts
+lintro badge --style flat     # shields.io style variant
+lintro badge --url            # bare badge URL
+lintro badge --json           # counts, message, color, url, and markdown as JSON
 ```
+
+`--json` and `--url` are mutually exclusive. `lintro badge` runs a check and prints a
+shields.io snippet such as
+`![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)`. Badge
+colour is bright green for a clean run, red when any error was found, and yellow when
+only warnings or info issues remain.
+
+Passing any of `--errors N` / `--warnings N` / `--info N` skips the live check entirely
+and treats the severities you omit as zero.
+
+A live badge **refuses to publish** rather than assert a quality claim the run did not
+support. It exits non-zero, printing no snippet, when the check exited early, when any
+tool timed out, and when nothing actually inspected a file — which covers an empty
+directory, an all-skipped toolset, and a toolset that declined to run for want of
+configuration.
 
 #### JSON output
 
-In `--output-format json` the score is added **additively** under
-`summary.health_score`, leaving all existing keys untouched:
+In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
+`total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
+object is **gone** — this is a breaking change for anything that read it.
+`severity_delta` appears only when a comparable baseline exists; on a first run the key
+is absent rather than zero. The **stdout** document looks like this:
 
 ```json
 {
@@ -342,12 +345,27 @@ In `--output-format json` the score is added **additively** under
     "total_issues": 3,
     "total_fixed": 0,
     "total_remaining": 3,
-    "health_score": {
-      "score": 88,
-      "tier": "great",
-      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
-      "weighted_penalty": 10.0
-    }
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
+  }
+}
+```
+
+`--output` files and configured JSON artifacts carry the same two severity keys, but the
+rest of their `summary` object differs from the stdout document by design — it adds
+`timestamp` and `tools_run`, and omits `total_remaining`:
+
+```json
+{
+  "timestamp": "2026-09-06T00:00:00+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "tools_run": 12,
+    "timed_out_tools": [],
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
   }
 }
 ```

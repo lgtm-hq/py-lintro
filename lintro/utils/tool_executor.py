@@ -79,7 +79,6 @@ def build_run_context(
     *,
     action: str | Action,
     output_format: str,
-    score: bool = False,
     debug: bool = False,
     no_art: bool = False,
     dry_run: bool = False,
@@ -95,7 +94,6 @@ def build_run_context(
     Args:
         action: Action to perform ("check", "fmt", "test").
         output_format: Output format requested for the run.
-        score: Whether stdout must carry only the numeric health score.
         debug: Whether to show DEBUG messages on the console.
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
@@ -133,9 +131,6 @@ def build_run_context(
     # stderr and suppress the human summary so stdout carries only the payload
     # (grid remains the default human view).
     clean_stdout_output = output_format.lower() in ("json", "sarif", "csv", "markdown")
-    # Score-only takes priority over machine-readable formats so
-    # ``--score --output-format json`` still prints only the numeric score.
-    score_only = bool(score)
 
     lintro_config = get_config()
 
@@ -146,7 +141,7 @@ def build_run_context(
 
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=clean_stdout_output or score_only,
+        route_stderr=clean_stdout_output,
         art_enabled=art_enabled,
     )
 
@@ -158,7 +153,6 @@ def build_run_context(
         logger=logger,
         lintro_config=lintro_config,
         clean_stdout_output=clean_stdout_output,
-        score_only=score_only,
         group_by=group_by,
         profile=profile,
     )
@@ -388,7 +382,6 @@ def execute_run(
     yes: bool = False,
     run_post_checks: bool = True,
     ignore_conflicts: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     ai_status_lines: list[str] | None = None,
     on_tool_result: Callable[[ToolResult], None] | None = None,
@@ -418,8 +411,6 @@ def execute_run(
         yes: Skip confirmation prompt and proceed immediately.
         run_post_checks: Whether configured post-check tools may run.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
-        fail_under: When set, force exit code 1 if the computed health score
-            is strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL`
             resolves the repository default base; any other value is used as
@@ -436,8 +427,8 @@ def execute_run(
     failed result, so they stay debuggable.
 
     Returns:
-        RunArtifact: The results, totals, health score, and exit code for the
-        run. ``early_exit`` is set when the run stopped before any tool ran.
+        RunArtifact: The results, totals, severity tallies, and exit code for
+        the run. ``early_exit`` is set when the run stopped before any tool ran.
     """
     logger = ctx.logger
 
@@ -462,12 +453,8 @@ def execute_run(
 
     # On a no-config first run the toolset is scoped to detected languages;
     # tell the user what was selected and how to customize. Suppressed for
-    # machine-readable stdout and score-only mode.
-    if (
-        tools_result.scoped_by_detection
-        and not ctx.clean_stdout_output
-        and not ctx.score_only
-    ):
+    # machine-readable stdout.
+    if tools_result.scoped_by_detection and not ctx.clean_stdout_output:
         from lintro.utils.execution.tool_configuration import format_detection_notice
 
         logger.console_output(
@@ -487,7 +474,6 @@ def execute_run(
             total_fixed=0,
             total_remaining=0,
             main_phase_empty_due_to_filter=False,
-            fail_under=fail_under,
         )
 
     if not tools_to_run and skipped_tools:
@@ -574,13 +560,9 @@ def execute_run(
         effective_auto_install = is_container
 
     # Pre-execution config summary. Suppressed for clean-stdout formats
-    # (json/sarif/csv/markdown) and score-only mode because it writes the rich
-    # Configuration box to stdout via its own Console, bypassing route_stderr.
-    if (
-        not ctx.clean_stdout_output
-        and not ctx.score_only
-        and (tools_to_run or skipped_tools)
-    ):
+    # (json/sarif/csv/markdown) because it writes the rich Configuration box
+    # to stdout via its own Console, bypassing route_stderr.
+    if not ctx.clean_stdout_output and (tools_to_run or skipped_tools):
         proceed = confirm_pre_execution(
             tools_to_run=tools_to_run,
             skipped_tools=skipped_tools,
@@ -678,7 +660,6 @@ def execute_run(
         total_fixed=total_fixed,
         total_remaining=total_remaining,
         main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
-        fail_under=fail_under,
     )
 
 
@@ -706,8 +687,6 @@ def run_lint_tools_simple(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
-    score: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
     on_tool_result: Callable[[ToolResult], None] | None = None,
@@ -743,10 +722,6 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
-        score: When True with human-readable output, print only the 0-100
-            health score line and suppress the normal execution summary.
-        fail_under: When set, exit with code 1 if the computed health score is
-            strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
@@ -768,7 +743,6 @@ def run_lint_tools_simple(
     ctx = build_run_context(
         action=action,
         output_format=output_format,
-        score=score,
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
@@ -801,7 +775,6 @@ def run_lint_tools_simple(
             yes=yes,
             run_post_checks=run_post_checks,
             ignore_conflicts=ignore_conflicts,
-            fail_under=fail_under,
             diff_base=diff_base,
             on_tool_result=result_display,
         )

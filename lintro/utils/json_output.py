@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.tool_metadata import normalize_tool_metadata
 
@@ -150,7 +151,8 @@ def create_json_output(
     total_fixed: int,
     total_remaining: int,
     exit_code: int,
-    health_score: dict[str, Any] | None = None,
+    severity_counts: SeverityCounts | None = None,
+    severity_delta: SeverityDelta | None = None,
 ) -> dict[str, Any]:
     """Create JSON output data structure from tool results.
 
@@ -163,9 +165,12 @@ def create_json_output(
             the post-fix remaining count; in CHECK/TEST mode nothing is fixed,
             so it mirrors ``total_issues``.
         exit_code: Exit code for the run.
-        health_score: Optional serialized health score dictionary. When
-            provided it is added additively under ``summary.health_score``
-            without altering any existing keys.
+        severity_counts: Optional issue tallies by normalized severity. When
+            provided they are added additively under
+            ``summary.severity_counts`` without altering any existing keys.
+        severity_delta: Optional change in those tallies since the previous
+            recorded run, added under ``summary.severity_delta``. Negative
+            values mean fewer issues, which is an improvement.
 
     Returns:
         Dictionary containing JSON-serializable results and summary data.
@@ -189,10 +194,12 @@ def create_json_output(
             "timed_out_tools": timed_out_tool_names(results),
         },
     }
-    # Additive: include the health score under summary when supplied so the
-    # existing schema keys remain untouched.
-    if health_score is not None:
-        json_data["summary"]["health_score"] = health_score
+    # Additive: include the severity tallies under summary when supplied so
+    # the existing schema keys remain untouched.
+    if severity_counts is not None:
+        json_data["summary"]["severity_counts"] = severity_counts.to_dict()
+    if severity_delta is not None:
+        json_data["summary"]["severity_delta"] = severity_delta.to_dict()
     for result in results:
         result_data = serialize_tool_result(result, action=action_enum)
         # Extract AI summary from the first result that has one.

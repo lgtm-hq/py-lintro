@@ -124,7 +124,7 @@ def _advisory_tool_error_message(*, name: str) -> str:
     return (
         f"Tool '{name}' is an advisory AI finder and does not run under "
         f"'lintro chk' or 'lintro fmt': its findings are nondeterministic, so "
-        f"they must not gate deterministic checks or the health score. "
+        f"they must not gate deterministic checks or their issue counts. "
         f"Run 'lintro review --advisory-tools {name}' instead."
     )
 

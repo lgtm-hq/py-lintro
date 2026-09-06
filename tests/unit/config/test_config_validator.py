@@ -611,7 +611,7 @@ def test_documented_sections_do_not_warn(
     """Every known top-level section must validate without UNKNOWN_OPTION.
 
     Uses an empty mapping so the case does not depend on section-specific
-    nested fields (``score.enabled`` is not a ScoreConfig key).
+    nested fields.
 
     Args:
         write_config: Fixture writing config content to a temp file.
@@ -624,21 +624,6 @@ def test_documented_sections_do_not_warn(
     unknown = [w for w in result.warnings if w.code == ValidationCode.UNKNOWN_OPTION]
     assert_that(result.is_valid).is_true()
     assert_that(unknown).is_empty()
-
-
-def test_score_section_unknown_key_warns(write_config: Callable[..., Path]) -> None:
-    """Unknown keys nested under ``score`` should warn like other sections.
-
-    Args:
-        write_config: Fixture writing config content to a temp file.
-    """
-    path = write_config("score:\n  error_weight: 5\n  bogus_weight: 1\n")
-
-    result = validate_config_file(path)
-
-    warnings = [w for w in result.warnings if w.location == "score.bogus_weight"]
-    assert_that(warnings).is_length(1)
-    assert_that(warnings[0].code).is_equal_to(ValidationCode.UNKNOWN_OPTION)
 
 
 @pytest.mark.parametrize(

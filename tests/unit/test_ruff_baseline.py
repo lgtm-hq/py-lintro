@@ -72,7 +72,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/cli_utils/commands/install.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/cli_utils/commands/list_tools.py": ("PLR0915",),
     "lintro/cli_utils/commands/review.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
-    "lintro/cli_utils/commands/setup.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/cli_utils/commands/test.py": ("PLR0913",),
     "lintro/cli_utils/commands/versions.py": ("PLR0912", "PLR0915"),
     "lintro/config/config_loader.py": ("C901", "PLR0912", "PLR0915"),
@@ -154,9 +153,11 @@ BASELINE: dict[str, tuple[str, ...]] = {
 #: Ceilings on ``BASELINE`` itself, recorded when the families were switched on
 #: and deliberately *not* derived from ``BASELINE``. Without them a pull request
 #: could edit the mapping and ``pyproject.toml`` together and reintroduce a
-#: suppression that a previous ratchet step removed. Both may only go *down*.
-BASELINE_MAX_FILES: int = 100
-BASELINE_MAX_SUPPRESSIONS: int = 201
+#: suppression that a previous ratchet step removed. Both may only go *down*,
+#: and both are pinned to the exact live counts (issue #1739): any slack here
+#: is room for exactly that reintroduction.
+BASELINE_MAX_FILES: int = 98
+BASELINE_MAX_SUPPRESSIONS: int = 197
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->
