@@ -5,6 +5,7 @@ build
 dist
 node_modules
 .venv
+.venv-ai
 venv
 env
 # Claude Code project memory and config (not source code)

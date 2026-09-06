@@ -83,8 +83,11 @@ required):
   running the DOC gate. No version pin can fix that (no upstream `docstring-parser`
   release exports the fork-only symbols pydoclint imports), so `[tool.uv] conflicts` in
   `pyproject.toml` declares the conflict and `uv sync --dev --extra full --extra ai`
-  fails loudly instead. Contributors working on `lintro review` sync `--extra ai` into a
-  separate environment. If you already had both installed, dropping `ai` is not enough
+  fails loudly instead. Contributors working on `lintro review` put the `ai` extra in a
+  **separate** environment — `UV_PROJECT_ENVIRONMENT=.venv-ai uv sync --extra ai`, with
+  that variable kept set for the follow-up `uv run` commands — because a plain
+  `uv sync --extra ai` rebuilds the project's own `.venv` and takes the dogfooding
+  linters back out of it. If you already had both installed, dropping `ai` is not enough
   to recover: uv's uninstall guts the shared `docstring_parser/` directory, so run
   `uv sync --dev --extra full --reinstall-package docstring-parser-fork` (or delete
   `.venv`).
