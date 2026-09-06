@@ -1,0 +1,12 @@
+🔴 **P1** · `security` · `high confidence`
+
+**Unknown session status grants access**
+
+The else branch treats any unrecognised status as active.
+
+**Root cause:** No explicit default for unknown statuses.
+
+> [!TIP]
+> **Fix:** Default to expired and log the unrecognised value.
+**Review questions:**
+- Does an unknown status fail closed?

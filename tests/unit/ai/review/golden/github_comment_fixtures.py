@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.finding_matcher import fingerprint_for
+from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
+from lintro.ai.review.github_sticky import matcher_reviewed_paths
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -218,4 +220,25 @@ def golden_prior_state() -> ReviewState:
         repo=GOLDEN_REPO,
         pr_number=GOLDEN_PR_NUMBER,
         head_sha=GOLDEN_PRIOR_SHA,
+    )
+
+
+def golden_match() -> FindingMatchResult:
+    """Match this round's findings against the pinned prior state.
+
+    Derived with the production matcher rather than hand-built, so the review
+    body golden covers the carried-finding and resolved-delta wording the
+    matcher actually produces.
+
+    Returns:
+        FindingMatchResult: The round's matching outcome.
+    """
+    result = golden_review_result()
+    prior = golden_prior_state()
+    return match_findings(
+        previous=prior,
+        findings=result.findings,
+        round_number=prior.next_round,
+        head_sha=GOLDEN_HEAD_SHA,
+        reviewed_paths=matcher_reviewed_paths(result=result),
     )

@@ -19,6 +19,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review import github_errors
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import post_review_error_to_github
 from lintro.ai.review.github_contract import (
     MAX_COMMENT_CHARS,
@@ -27,16 +28,20 @@ from lintro.ai.review.github_contract import (
     cap_body,
 )
 from lintro.ai.review.github_errors import format_error_comment
+from lintro.ai.review.github_render import format_finding_comment
+from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.github_sticky import (
     build_sticky_bodies,
     build_sticky_comment,
     render_state_sticky,
 )
+from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_state import ReviewState
 from tests.unit.ai.review.golden.github_comment_fixtures import (
     GOLDEN_HEAD_SHA,
     GOLDEN_PR_NUMBER,
     GOLDEN_REPO,
+    golden_match,
     golden_prior_state,
     golden_review_result,
 )
@@ -225,3 +230,56 @@ def test_cap_body_reserves_room_for_a_trailer() -> None:
     assert_that(budget.body_limit).is_equal_to(800)
     assert_that(len(capped)).is_less_than_or_equal_to(800)
     assert_that(capped).contains("Comment truncated to fit GitHub's size limit")
+
+
+def test_review_body_first_round_golden() -> None:
+    """The per-round review body is pinned for a first-round post.
+
+    ``build_review_body`` is the third body-assembly path #2304 converges on
+    the shared pipeline, so it needs the same byte-for-byte cover the sticky
+    and error surfaces already have.
+    """
+    body = build_review_body(
+        result=golden_review_result(),
+        prior_state=ReviewState(),
+        match=FindingMatchResult(),
+        head_sha=GOLDEN_HEAD_SHA,
+        transport="api",
+        auth_mode="api-key",
+        config_source="pyproject.toml",
+        new_commits=None,
+    )
+
+    assert_golden(name="github/review_body_first_round.golden", actual=body)
+
+
+def test_review_body_over_a_prior_board_golden() -> None:
+    """The review body is pinned for a round carrying prior state."""
+    body = build_review_body(
+        result=golden_review_result(),
+        prior_state=golden_prior_state(),
+        match=golden_match(),
+        head_sha=GOLDEN_HEAD_SHA,
+        transport="api",
+        auth_mode="api-key",
+        config_source="pyproject.toml",
+        new_commits=2,
+    )
+
+    assert_golden(name="github/review_body_prior_board.golden", actual=body)
+
+
+def test_inline_finding_comment_golden() -> None:
+    """The inline finding comment is pinned with its checklist link.
+
+    The finding renderer moves modules in #2304's split of ``github_render``;
+    a golden makes that move provable rather than assumed.
+    """
+    result = golden_review_result()
+    body = format_finding_comment(
+        finding=result.findings[0],
+        checklist_display=ChecklistDisplay.LINKED,
+        question_map={1: "Does an unknown status fail closed?"},
+    )
+
+    assert_golden(name="github/inline_finding_comment.golden", actual=body)
