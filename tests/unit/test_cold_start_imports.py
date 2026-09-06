@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 from assertpy import assert_that
 
+from lintro import __version__
+
 # Packages that must stay out of a bare `import lintro.cli`. Add to this list
 # when a new heavy dependency appears on the cold path; never remove an entry
 # to make a regression pass.
@@ -146,7 +148,7 @@ def test_version_command_loads_nothing_from_the_ai_package() -> None:
     report = _run_probe(_VERSION_PROBE)
 
     assert_that(report.exit_code).is_equal_to(0)
-    assert_that(report.output).contains("version")
+    assert_that(report.output).contains(__version__)
     ai_modules = [name for name in report.modules if name.startswith("lintro.ai")]
 
     assert_that(ai_modules).is_empty()

@@ -3,12 +3,32 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterator
 
 import click
 import pytest
 from assertpy import assert_that
 
 from lintro.cli import _COMMAND_ALIASES, _COMMAND_MODULES, cli
+
+
+@pytest.fixture(autouse=True)
+def isolated_group() -> Iterator[None]:
+    """Restore the module-level group's command cache after each test.
+
+    ``get_command`` caches resolved commands on the singleton, so without this
+    one test's lookups would satisfy another test's assertions.
+
+    Yields:
+        None: Control returns to the test with an empty command cache.
+    """
+    saved = dict(cli.commands)
+    cli.commands.clear()
+    try:
+        yield
+    finally:
+        cli.commands.clear()
+        cli.commands.update(saved)
 
 
 @pytest.fixture
@@ -105,7 +125,29 @@ def test_load_all_commands_populates_the_group(context: click.Context) -> None:
     Args:
         context: Click context fixture.
     """
+    assert_that(cli.commands).is_empty()
+
     cli.load_all_commands(context)
 
     assert_that(set(cli.commands)).contains(*_COMMAND_MODULES)
     assert_that(set(cli.commands)).contains(*_COMMAND_ALIASES)
+
+
+def test_a_broken_table_entry_surfaces_as_an_import_error(
+    context: click.Context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad table entry fails loudly instead of resolving to ``None``.
+
+    Args:
+        context: Click context fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setitem(
+        _COMMAND_MODULES,
+        "check",
+        ("lintro.cli_utils.commands.definitely_not_a_module", "check_command"),
+    )
+
+    with pytest.raises(ModuleNotFoundError):
+        cli.get_command(context, "check")
