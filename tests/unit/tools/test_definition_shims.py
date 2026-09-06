@@ -195,8 +195,13 @@ def test_oxlint_doctor_shim_re_exports_the_package_module() -> None:
     ``oxlint_doctor`` registers no tool: it is the oxlint package's doctor
     helper, imported by discovery only because it sits in the scanned package.
     The shim therefore has its own guard rather than a
-    :data:`MOVED_TOOLS` entry.
+    :data:`MOVED_TOOLS` entry. The two ``__all__`` lists are compared as well
+    as the objects behind them, so the shim can neither drop a name nor grow
+    one the helper does not declare.
     """
+    assert_that(list(oxlint_doctor_shim.__all__)).is_equal_to(
+        list(oxlint_doctor_package.__all__),
+    )
     for attribute in oxlint_doctor_package.__all__:
         assert_that(getattr(oxlint_doctor_shim, attribute)).is_same_as(
             getattr(oxlint_doctor_package, attribute),
