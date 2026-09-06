@@ -115,20 +115,20 @@ def test_ai_runtime_group_carries_the_fork() -> None:
     ).is_false()
 
 
-def test_ai_only_sync_sites_request_the_ai_runtime_group() -> None:
-    """Every uv sync that takes ``ai`` without ``full`` also takes the group.
+def test_ai_runtime_is_a_default_group() -> None:
+    """``ai-runtime`` is a uv default group, so no call site has to opt in.
 
-    These are the two call sites that would otherwise hit the
-    ModuleNotFoundError; a new one must opt in the same way.
+    Requiring `--group ai-runtime` at each `--extra ai` call site coupled those
+    files to `pyproject.toml`. `ai-review.yml` runs under `pull_request_target`,
+    which takes the workflow from the base branch while checking out
+    `base.sha`, so a flag and a group landing in the same commit can still skew
+    apart against an older base. Defaulting the group removes the coupling.
     """
-    for path in (
-        _REPO_ROOT / ".github" / "workflows" / "ai-review.yml",
-        _REPO_ROOT / "scripts" / "ci" / "run-ai-contract-tests.sh",
-    ):
-        text = path.read_text(encoding="utf-8")
-        for line in text.splitlines():
-            if "uv sync" in line and "--extra ai" in line:
-                assert_that(line).contains("--group ai-runtime")
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    default_groups = data["tool"]["uv"]["default-groups"]
+
+    assert_that(default_groups).contains("ai-runtime")
+    assert_that(default_groups).contains("dev")
 
 
 def test_lock_records_the_fork_on_the_ai_runtime_group() -> None:
@@ -141,3 +141,12 @@ def test_lock_records_the_fork_on_the_ai_runtime_group() -> None:
 
     assert_that(names).contains("docstring-parser-fork")
     assert_that(names).does_not_contain("docstring-parser")
+
+    # A marker on this edge would resolve but never install, which is exactly
+    # the failure the group exists to prevent.
+    fork = next(
+        dependency
+        for dependency in group
+        if dependency["name"] == "docstring-parser-fork"
+    )
+    assert_that(fork.get("marker")).is_none()

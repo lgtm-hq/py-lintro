@@ -114,7 +114,7 @@ echo "==> Tier ${TIER} contract tests in ${IMAGE}"
 # --maxfail=0 is explicit rather than inherited: drift across three providers
 # must be reported in full, whatever a future config change does to the default.
 docker "${docker_args[@]}" "$IMAGE" bash -euo pipefail -c "
-	uv sync --locked --extra ai --group dev --group ai-runtime --quiet
+	uv sync --locked --extra ai --group dev --quiet
 	uv run --locked pytest tests/contract -m ${pytest_marker} -p no:randomly --maxfail=0 \\
 		-o cache_dir=/tmp/pytest-cache
 "

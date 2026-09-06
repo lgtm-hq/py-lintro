@@ -522,6 +522,15 @@ check_untyped_defs = true
 # `tests/unit/test_docstring_parser_override.py` fails if that ever regresses.
 override-dependencies = ["docstring-parser ; sys_platform == 'never'"]
 
+# `ai-runtime` joins `dev` as a default group so *every* uv sync carries the
+# fork, including `uv sync --extra ai` with no flags. Requiring callers to pass
+# `--group ai-runtime` coupled them to this file: `ai-review.yml` runs under
+# `pull_request_target`, which takes the workflow from the base branch while
+# checking out `base.sha`, so a flag and a group landing together still skew
+# apart whenever a checked-out base predates them. Defaulting the group removes
+# the coupling — there is no call site to keep in step (#2378).
+default-groups = ["dev", "ai-runtime"]
+
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",
