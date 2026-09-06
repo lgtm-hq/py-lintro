@@ -44,14 +44,21 @@ def test_tool_without_doc_url_method_is_noop() -> None:
 
 
 def test_result_with_no_issues_is_noop() -> None:
-    """Results with no issues should not call doc_url."""
+    """A result with no issues is left untouched and looks up no doc URL."""
+    lookups: list[str] = []
+
+    def _doc_url(code: str) -> str:
+        lookups.append(code)
+        return "https://example.com"
+
     tool = MagicMock()
-    tool.doc_url.return_value = "https://example.com"
+    tool.doc_url.side_effect = _doc_url
     result = ToolResult(name="test", success=True, output="", issues=[])
 
     _enrich_issues_with_doc_urls(tool, result)
 
-    tool.doc_url.assert_not_called()
+    assert_that(result.issues).is_empty()
+    assert_that(lookups).is_empty()
 
 
 def test_issue_with_existing_doc_url_not_overwritten() -> None:

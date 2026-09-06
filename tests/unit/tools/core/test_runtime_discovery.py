@@ -100,17 +100,34 @@ def test_discover_tool_handles_timeout() -> None:
 
 
 def test_discover_tool_uses_cache() -> None:
-    """Use cache by default on second call."""
+    """Second call reuses the cached result instead of probing again."""
+    lookups: list[str] = []
+
+    def fake_which(name: str) -> str:
+        """Record a PATH lookup and report the tool as installed.
+
+        Args:
+            name: Executable being looked up.
+
+        Returns:
+            A fixed path standing in for the resolved executable.
+        """
+        lookups.append(name)
+        return f"/usr/bin/{name}"
+
     with (
-        patch("shutil.which", return_value="/usr/bin/ruff") as mock_which,
+        patch("shutil.which", side_effect=fake_which),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.1.0", stderr="")
 
-        discover_tool("ruff")
-        discover_tool("ruff")
+        first = discover_tool("ruff")
+        second = discover_tool("ruff")
 
-        assert_that(mock_which.call_count).is_equal_to(1)
+    assert_that(lookups).is_equal_to(["ruff"])
+    assert_that(second).is_equal_to(first)
+    assert_that(second.available).is_true()
+    assert_that(second.version).is_equal_to("0.1.0")
 
 
 def test_discover_all_tools() -> None:
@@ -202,20 +219,35 @@ def test_format_tool_status_table() -> None:
 
 
 def test_clear_discovery_cache() -> None:
-    """Clear cache makes next call rediscover tools."""
+    """Clearing the cache makes the next call observe the new environment."""
+    paths = ["/usr/bin/ruff", "/opt/homebrew/bin/ruff"]
+    lookups: list[str] = []
+
+    def fake_which(name: str) -> str:
+        """Record a PATH lookup and answer with the next queued path.
+
+        Args:
+            name: Executable being looked up.
+
+        Returns:
+            The path for this lookup; the second lookup sees a moved binary.
+        """
+        lookups.append(name)
+        return paths[min(len(lookups) - 1, len(paths) - 1)]
+
     with (
-        patch("shutil.which", return_value="/usr/bin/ruff") as mock_which,
+        patch("shutil.which", side_effect=fake_which),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.1.0", stderr="")
 
-        discover_tool("ruff")
-        initial_count = mock_which.call_count
-
+        before = discover_tool("ruff")
         clear_discovery_cache()
-        discover_tool("ruff")
+        after = discover_tool("ruff")
 
-        assert_that(mock_which.call_count).is_equal_to(initial_count + 1)
+    assert_that(lookups).is_equal_to(["ruff", "ruff"])
+    assert_that(before.path).is_equal_to("/usr/bin/ruff")
+    assert_that(after.path).is_equal_to("/opt/homebrew/bin/ruff")
 
 
 def test_discovered_tool_default_values() -> None:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,18 +41,77 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 
 
+@dataclass
+class _ReporterLog:
+    """Plain record of the comments a review posting writes.
+
+    The reporter stays a ``MagicMock`` because of its wide surface, but the
+    assertions read these lists rather than mock call bookkeeping (#2315).
+
+    Attributes:
+        api_calls: ``(method, url, payload)`` of each raw API request.
+        issue_comment_bodies: Body of each sticky comment posted or edited.
+        api_response: Response every raw API request returns; tests set it to
+            a failure status to drive the degraded paths.
+        update_outcomes: Results ``update_issue_comment`` returns, consumed in
+            order; ``default_update_result`` answers once they run out.
+        default_update_result: Result ``update_issue_comment`` falls back to.
+    """
+
+    api_calls: list[tuple[str, str, Any]] = field(default_factory=list)
+    issue_comment_bodies: list[str] = field(default_factory=list)
+    api_response: GitHubApiResponse = field(
+        default_factory=lambda: GitHubApiResponse(status=200),
+    )
+    update_outcomes: list[bool] = field(default_factory=list)
+    default_update_result: bool = True
+
+
 def _fresh_reporter() -> MagicMock:
-    """Build a MagicMock reporter with no existing sticky comment."""
+    """Build a MagicMock reporter with no existing sticky comment.
+
+    Returns:
+        MagicMock: The reporter stub. Its ``log`` attribute is a
+        :class:`_ReporterLog` recording every comment the run writes.
+    """
     reporter = MagicMock()
+    log = _ReporterLog()
+    reporter.log = log
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.post_issue_comment.return_value = True
-    reporter.update_issue_comment.return_value = True
+
+    def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
+        """Record a newly posted sticky body.
+
+        Args:
+            body: Sticky comment body the production code posted.
+            **_kwargs: Ignored posting extras.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        log.issue_comment_bodies.append(str(body))
+        return True
+
+    reporter.post_issue_comment.side_effect = _post_issue_comment
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        log.issue_comment_bodies.append(str(kwargs["body"]))
+        if log.update_outcomes:
+            return log.update_outcomes.pop(0)
+        return log.default_update_result
+
+    reporter.update_issue_comment.side_effect = _update_issue_comment
     reporter.delete_issue_comment.return_value = True
-    reporter.api_response.return_value = GitHubApiResponse(status=200)
+
+    def _api_response(method: str, url: str, payload: Any = None) -> GitHubApiResponse:
+        log.api_calls.append((method, url, payload))
+        return log.api_response
+
+    reporter.api_response.side_effect = _api_response
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -317,7 +377,7 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     """
     reporter = _fresh_reporter()
     # The inline review batch is the only call routed through api_response.
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -379,7 +439,7 @@ def test_failed_inline_post_never_posts_a_second_sticky(
 ) -> None:
     """A sticky that cannot be located is skipped, not duplicated on the PR."""
     reporter = _fresh_reporter()
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -476,7 +536,7 @@ def test_upsert_sticky_patches_when_update_succeeds() -> None:
 def test_upsert_sticky_supersedes_when_patch_fails() -> None:
     """GitHub forbids editing another actor's comment; recreate then delete."""
     reporter = _fresh_reporter()
-    reporter.update_issue_comment.return_value = False
+    reporter.log.default_update_result = False
     reporter.find_issue_comment.return_value = (99, "hello")
 
     posted, live_id = _upsert_sticky(
@@ -553,7 +613,7 @@ def test_upsert_sticky_retries_post_after_recreate_failure() -> None:
 def test_upsert_sticky_keeps_replacement_when_delete_fails() -> None:
     """A failed delete after a successful create still returns the new id."""
     reporter = _fresh_reporter()
-    reporter.update_issue_comment.return_value = False
+    reporter.log.default_update_result = False
     reporter.delete_issue_comment.return_value = False
     reporter.find_issue_comment.return_value = (99, "hello")
 
@@ -615,8 +675,8 @@ def test_refresh_uses_replacement_id_after_cross_actor_recreate(
         (42, prior_body),
         (99, "replacement"),
     ]
-    reporter.update_issue_comment.side_effect = [False, True]
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.update_outcomes = [False, True]
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -721,7 +781,8 @@ def test_post_error_comment_recovers_prior_state(
         reporter=reporter,
     )
 
-    posted_body = reporter.update_issue_comment.call_args.kwargs["body"]
+    assert_that(reporter.log.issue_comment_bodies).is_not_empty()
+    posted_body = reporter.log.issue_comment_bodies[-1]
     assert_that(posted_body).contains("showing round 1 results below")
     assert_that(posted_body).does_not_contain(STATE_MARKER_PREFIX)
 
@@ -904,7 +965,7 @@ def test_post_review_uses_the_rich_review_body(
     )
 
     assert_that(posted).is_true()
-    payload = reporter.api_response.call_args.args[2]
+    payload = reporter.log.api_calls[-1][2]
     assert_that(payload["body"]).contains("🔎 **Lintro review —")
     assert_that(payload["body"]).contains("**📊 Run stats**")
     assert_that(payload["body"]).contains("Config source: `.lintro-config.yaml`")
@@ -922,9 +983,10 @@ def test_post_review_body_carries_the_fix_prompt_inline(
     )
     reporter.fetch_pr_commit_shas.return_value = []
 
-    post_review_to_github(result=sample_review_result, reporter=reporter)
+    posted = post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    payload = reporter.api_response.call_args.args[2]
+    assert_that(posted).is_true()
+    payload = reporter.log.api_calls[-1][2]
     assert_that(payload["body"]).contains("Fix prompt — this round's")
     assert_that(payload["body"]).contains("<details><summary>Show prompt</summary>")
     assert_that(payload["body"]).does_not_contain("identical to the")
@@ -991,7 +1053,7 @@ def test_review_body_and_degraded_sticky_coexist(
     """
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli_utils.commands.check import check, check_command
+from tests.unit.cli.conftest import RecordedLintRun
 
 # =============================================================================
 # Check Command Basic Tests
@@ -31,55 +32,57 @@ def test_check_command_help(cli_runner: CliRunner) -> None:
 
 def test_check_command_default_paths(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify check command uses default paths when none provided.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, [])
+        result = cli_runner.invoke(check_command, [])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["paths"]).is_equal_to(["."])
 
 
 def test_check_command_with_paths(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
     tmp_path: Path,
 ) -> None:
     """Verify check command passes provided paths.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
         tmp_path: Temporary directory path for testing.
     """
     test_file = tmp_path / "test.py"
     test_file.write_text("# test")
 
-    cli_runner.invoke(check_command, [str(test_file)])
+    result = cli_runner.invoke(check_command, [str(test_file)])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["paths"]).contains(str(test_file))
 
 
 def test_check_command_exit_code_zero_on_success(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify check command exits with 0 on success.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
-    mock_run_lint_tools_check.return_value = 0
+    recorded_check_run.exit_code = 0
     with cli_runner.isolated_filesystem():
         result = cli_runner.invoke(check_command, [])
 
@@ -88,15 +91,15 @@ def test_check_command_exit_code_zero_on_success(
 
 def test_check_command_exit_code_nonzero_on_issues(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify check command exits with non-zero when issues found.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
-    mock_run_lint_tools_check.return_value = 1
+    recorded_check_run.exit_code = 1
     with cli_runner.isolated_filesystem():
         result = cli_runner.invoke(check_command, [])
 
@@ -110,73 +113,77 @@ def test_check_command_exit_code_nonzero_on_issues(
 
 def test_check_command_tools_option(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --tools option is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--tools", "ruff,mypy"])
+        result = cli_runner.invoke(check_command, ["--tools", "ruff,mypy"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["tools"]).is_equal_to("ruff,mypy")
 
 
 def test_check_command_exclude_option(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --exclude option is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--exclude", "*.pyc,__pycache__"])
+        result = cli_runner.invoke(check_command, ["--exclude", "*.pyc,__pycache__"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["exclude"]).is_equal_to("*.pyc,__pycache__")
 
 
 def test_check_command_include_venv_flag(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --include-venv flag is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--include-venv"])
+        result = cli_runner.invoke(check_command, ["--include-venv"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["include_venv"]).is_true()
 
 
 def test_check_command_output_format_option(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --output-format option is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--output-format", "json"])
+        result = cli_runner.invoke(check_command, ["--output-format", "json"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["output_format"]).is_equal_to("json")
 
 
@@ -187,14 +194,14 @@ def test_check_command_output_format_option(
 )
 def test_check_command_output_format_valid_choices(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
     format_option: str,
 ) -> None:
     """Verify all valid output format choices are accepted.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
         format_option: The output format option value to test.
     """
     with cli_runner.isolated_filesystem():
@@ -205,38 +212,39 @@ def test_check_command_output_format_valid_choices(
 
 def test_check_command_group_by_option(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --group-by option is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--group-by", "code"])
+        result = cli_runner.invoke(check_command, ["--group-by", "code"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["group_by"]).is_equal_to("code")
 
 
 def test_check_command_group_by_category_is_forwarded(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --group-by category is passed through to the executor.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
         result = cli_runner.invoke(check_command, ["--group-by", "category"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["group_by"]).is_equal_to("category")
 
 
@@ -247,14 +255,14 @@ def test_check_command_group_by_category_is_forwarded(
 )
 def test_check_command_group_by_valid_choices(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
     group_by_option: str,
 ) -> None:
     """Verify all valid group-by choices are accepted.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
         group_by_option: The group-by option value to test.
     """
     with cli_runner.isolated_filesystem():
@@ -265,115 +273,121 @@ def test_check_command_group_by_valid_choices(
 
 def test_check_command_verbose_flag(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --verbose flag is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--verbose"])
+        result = cli_runner.invoke(check_command, ["--verbose"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["verbose"]).is_true()
 
 
 def test_check_command_raw_output_flag(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --raw-output flag is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--raw-output"])
+        result = cli_runner.invoke(check_command, ["--raw-output"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["raw_output"]).is_true()
 
 
 def test_check_command_profile_flag(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --profile flag forwards profile=True.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--profile"])
+        result = cli_runner.invoke(check_command, ["--profile"])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["profile"]).is_true()
 
 
 def test_check_command_profile_defaults_false(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify profile defaults to False when --profile is absent.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, [])
+        result = cli_runner.invoke(check_command, [])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["profile"]).is_false()
 
 
 def test_check_command_tool_options(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
 ) -> None:
     """Verify --tool-options is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
     """
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(
+        result = cli_runner.invoke(
             check_command,
             ["--tool-options", "ruff:line-length=120"],
         )
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["tool_options"]).is_equal_to("ruff:line-length=120")
 
 
 def test_check_command_output_file(
     cli_runner: CliRunner,
-    mock_run_lint_tools_check: MagicMock,
+    recorded_check_run: RecordedLintRun,
     tmp_path: Path,
 ) -> None:
     """Verify --output option is passed correctly.
 
     Args:
         cli_runner: The Click CLI test runner.
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+        recorded_check_run: Recorder standing in for the lint pipeline.
         tmp_path: Temporary directory path for testing.
     """
     output_file = str(tmp_path / "results.json")
     with cli_runner.isolated_filesystem():
-        cli_runner.invoke(check_command, ["--output", output_file])
+        result = cli_runner.invoke(check_command, ["--output", output_file])
 
-    mock_run_lint_tools_check.assert_called_once()
-    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(recorded_check_run.calls).is_length(1)
+    call_kwargs = recorded_check_run.calls[0]
     assert_that(call_kwargs["output_file"]).is_equal_to(output_file)
 
 
@@ -382,27 +396,39 @@ def test_check_command_output_file(
 # =============================================================================
 
 
-def test_check_function_calls_command() -> None:
-    """Verify check() routes through the library API."""
-    with patch(
-        "lintro.api.core.run_lint_with_ai",
-        return_value=0,
-    ) as mock_run:
-        check(
-            paths=("src",),
-            tools="ruff",
-            tool_options=None,
-            exclude=None,
-            include_venv=False,
-            output=None,
-            output_format="grid",
-            group_by="file",
-            ignore_conflicts=False,
-            verbose=False,
-            no_log=False,
-        )
+def test_check_function_reports_a_clean_tree_without_exiting(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """check() runs the real pipeline and returns quietly on a clean tree.
 
-        mock_run.assert_called_once()
+    Args:
+        tmp_path: Pytest temporary directory holding the file to check.
+        capsys: Pytest capture fixture for the pipeline's console output.
+    """
+    (tmp_path / "clean.py").write_text(
+        '"""Module docstring."""\n\nVALUE = 1\n',
+        encoding="utf-8",
+    )
+
+    check(
+        paths=(str(tmp_path),),
+        tools="ruff",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        output=None,
+        output_format="grid",
+        group_by="file",
+        ignore_conflicts=False,
+        verbose=False,
+        no_log=True,
+        yes=True,
+    )
+
+    captured = capsys.readouterr().out
+    assert_that(captured).contains("No issues found")
+    assert_that(captured).contains("Total Issues")
 
 
 def test_check_function_exits_on_failure() -> None:

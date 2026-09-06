@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -75,8 +76,36 @@ def _reporter(*, response: GitHubApiResponse) -> MagicMock:
     reporter.fetch_pr_diff_lines.return_value = diff_lines
     reporter.fetch_compare_lines.return_value = diff_lines
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.post_issue_comment.return_value = True
-    reporter.update_issue_comment.return_value = True
+    sticky_bodies: list[str] = []
+    reporter.sticky_bodies = sticky_bodies
+
+    def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
+        """Record a newly posted sticky body.
+
+        Args:
+            body: Sticky comment body the production code posted.
+            **_kwargs: Ignored posting extras.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        sticky_bodies.append(str(body))
+        return True
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        """Record an edited sticky body.
+
+        Args:
+            **kwargs: Update arguments, of which ``body`` is recorded.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        sticky_bodies.append(str(kwargs["body"]))
+        return True
+
+    reporter.post_issue_comment.side_effect = _post_issue_comment
+    reporter.update_issue_comment.side_effect = _update_issue_comment
     reporter.delete_issue_comment.return_value = True
     reporter.api_response.return_value = response
     reporter.api_base = "https://api.github.com"
@@ -199,8 +228,11 @@ def test_line_mapping_rejection_states_the_cause_once(
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
 
-    post_review_to_github(result=sample_review_result, reporter=reporter)
-    body = str(reporter.update_issue_comment.call_args.kwargs["body"])
+    posted = post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    assert_that(posted).is_false()
+    assert_that(reporter.sticky_bodies).is_not_empty()
+    body = reporter.sticky_bodies[-1]
     row = next(line for line in body.splitlines() if "could not be posted" in line)
 
     assert_that(row.count("map to no line in this PR's diff")).is_equal_to(1)

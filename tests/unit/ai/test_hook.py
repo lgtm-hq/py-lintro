@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
 from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport
 from lintro.ai.hook import AIPostExecutionHook
+from lintro.ai.models import AIResult
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
-from tests.unit.ai.conftest import MockIssue
+from tests.unit.ai.conftest import MockIssue, RecordingConsoleLogger
 
 # ---------------------------------------------------------------------------
 # TestShouldRun
@@ -102,14 +105,18 @@ def test_should_run_false_when_only_review_enabled():
 # ---------------------------------------------------------------------------
 
 
-@patch("lintro.ai.orchestrator.run_ai_enhancement")
-def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
-    """Verify execute delegates to run_ai_enhancement with correct arguments."""
+def test_execute_calls_run_ai_enhancement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute forwards its inputs to run_ai_enhancement and returns its result.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture, used to install a recording
+            stand-in for ``run_ai_enhancement``.
+    """
     config = LintroConfig(
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
     hook = AIPostExecutionHook(config, ai_fix=True)
-    console_logger = MagicMock()
+    console_logger = RecordingConsoleLogger()
     results = [
         ToolResult(
             name="ruff",
@@ -125,22 +132,43 @@ def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
             ],
         ),
     ]
+    forwarded: list[dict[str, Any]] = []
+    expected = AIResult(fixes_applied=3)
 
-    hook.execute(
+    def _record(**kwargs: Any) -> AIResult:
+        """Record the enhancement call and return a recognisable result.
+
+        Args:
+            **kwargs: Keyword arguments the hook forwards.
+
+        Returns:
+            AIResult: The sentinel result the hook must hand back.
+        """
+        forwarded.append(kwargs)
+        return expected
+
+    monkeypatch.setattr("lintro.ai.orchestrator.run_ai_enhancement", _record)
+
+    outcome = hook.execute(
         action=Action.CHECK,
         all_results=results,
         console_logger=console_logger,
         output_format="json",
     )
 
-    mock_run_ai_enhancement.assert_called_once_with(
-        action=Action.CHECK,
-        all_results=results,
-        lintro_config=config,
-        ai_config=resolve_effective_ai_config(config.ai),
-        logger=console_logger,
-        output_format="json",
-        ai_fix=True,
+    assert_that(outcome).is_same_as(expected)
+    assert_that(forwarded).is_length(1)
+    assert_that(forwarded[0]).is_equal_to(
+        {
+            "action": Action.CHECK,
+            "all_results": results,
+            "lintro_config": config,
+            "ai_config": resolve_effective_ai_config(config.ai),
+            "logger": console_logger,
+            "output_format": "json",
+            "ai_fix": True,
+            "transport": None,
+        },
     )
 
 
@@ -152,7 +180,7 @@ def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
     hook = AIPostExecutionHook(config)
-    console_logger = MagicMock()
+    console_logger = RecordingConsoleLogger()
     results = [
         ToolResult(
             name="ruff",
@@ -176,9 +204,8 @@ def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
         output_format="terminal",
     )
 
-    console_logger.warning.assert_called_once()
-    warning_msg = console_logger.warning.call_args[0][0]
-    assert_that(warning_msg).contains("provider exploded")
+    assert_that(console_logger.warnings).is_length(1)
+    assert_that(console_logger.warnings[0]).contains("provider exploded")
 
 
 def test_execute_handles_import_failure():
@@ -187,7 +214,7 @@ def test_execute_handles_import_failure():
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
     hook = AIPostExecutionHook(config)
-    console_logger = MagicMock()
+    console_logger = RecordingConsoleLogger()
     results = [
         ToolResult(
             name="ruff",
@@ -215,6 +242,5 @@ def test_execute_handles_import_failure():
             output_format="terminal",
         )
 
-    console_logger.warning.assert_called_once()
-    warning_msg = console_logger.warning.call_args[0][0]
-    assert_that(warning_msg).contains("AI enhancement unavailable")
+    assert_that(console_logger.warnings).is_length(1)
+    assert_that(console_logger.warnings[0]).contains("AI enhancement unavailable")

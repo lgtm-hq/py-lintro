@@ -6,12 +6,67 @@ import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under
 import sys
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import run_subprocess_streaming
+
+
+class _RecordingProcess:
+    """Stand-in for ``subprocess.Popen`` that records how it was driven.
+
+    Recording ``kill()`` and the wait budgets on the object itself lets a test
+    assert on real process state instead of on mock call bookkeeping (#2315).
+
+    Args:
+        stdout_lines: Lines the streaming reader should see on stdout. Ignored
+            when ``stdout_iter`` is given.
+        stdout_iter: Ready-made stdout iterator, for readers that have to
+            block rather than yield a fixed list.
+        wait_error: Exception ``wait()`` should raise instead of returning.
+        returncode: Exit status ``wait()`` returns when it does not raise.
+    """
+
+    def __init__(
+        self,
+        *,
+        stdout_lines: list[str] | None = None,
+        stdout_iter: Iterator[str] | None = None,
+        wait_error: BaseException | None = None,
+        returncode: int = 0,
+    ) -> None:
+        self.stdout: Iterator[str] = (
+            stdout_iter if stdout_iter is not None else iter(stdout_lines or [])
+        )
+        self.returncode = returncode
+        self.kill_count = 0
+        self.wait_timeouts: list[float | None] = []
+        self._wait_error = wait_error
+
+    def wait(self, timeout: float | None = None) -> int:
+        """Return the exit status, or raise the configured error.
+
+        Args:
+            timeout: Remaining budget the caller allows for the wait.
+
+        Returns:
+            int: The configured return code.
+
+        Raises:
+            self._wait_error: The configured error, when one was given.
+        """
+        self.wait_timeouts.append(timeout)
+        if self._wait_error is not None:
+            raise self._wait_error
+        return self.returncode
+
+    def kill(self) -> None:
+        """Record that the process was killed."""
+        self.kill_count += 1
+
 
 # =============================================================================
 # run_subprocess_streaming - Success Cases
@@ -74,16 +129,17 @@ def test_streaming_with_line_handler() -> None:
 
 
 def test_streaming_timeout_during_read() -> None:
-    """Verify TimeoutExpired is raised when reading times out."""
+    """A reader thread still alive after join raises and kills the process."""
+    process = _RecordingProcess(stdout_lines=[])
+
     with (
-        patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen,
+        patch(
+            "lintro.plugins.subprocess_executor.subprocess.Popen",
+            return_value=process,
+        ),
         patch("lintro.plugins.subprocess_executor.threading.Thread") as mock_thread,
     ):
-        mock_process = MagicMock()
-        mock_process.stdout = iter([])
-        mock_popen.return_value = mock_process
-
-        # Simulate thread still alive after join (timeout occurred)
+        # Simulate the reader thread still running once join() returns.
         mock_thread_instance = MagicMock()
         mock_thread_instance.is_alive.return_value = True
         mock_thread.return_value = mock_thread_instance
@@ -91,7 +147,7 @@ def test_streaming_timeout_during_read() -> None:
         with pytest.raises(subprocess.TimeoutExpired):
             run_subprocess_streaming(["long", "cmd"], timeout=1)
 
-        mock_process.kill.assert_called_once()
+    assert_that(process.kill_count).is_equal_to(1)
 
 
 def test_streaming_wait_receives_remaining_timeout_budget() -> None:
@@ -105,25 +161,31 @@ def test_streaming_wait_receives_remaining_timeout_budget() -> None:
     timeout = 2.0
 
     def slow_stdout() -> Iterator[str]:
-        """Yield no lines but block the reader thread for ``read_delay``."""
+        """Yield no lines but block the reader thread for ``read_delay``.
+
+        Yields:
+            str: Nothing; the generator exists only to consume wall time.
+        """
         time.sleep(read_delay)
         return
         yield  # pragma: no cover - makes this a generator
 
-    with patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.stdout = slow_stdout()
-        mock_process.wait.return_value = 0
-        mock_popen.return_value = mock_process
+    process = _RecordingProcess(stdout_iter=slow_stdout())
 
-        run_subprocess_streaming(["slow", "cmd"], timeout=timeout)
+    with patch(
+        "lintro.plugins.subprocess_executor.subprocess.Popen",
+        return_value=process,
+    ):
+        result = run_subprocess_streaming(["slow", "cmd"], timeout=timeout)
 
-        wait_timeout = mock_process.wait.call_args.kwargs["timeout"]
-        # The wait budget must be strictly less than the full timeout since
-        # the reader already consumed part of it.
-        assert_that(wait_timeout).is_less_than(timeout)
-        assert_that(wait_timeout).is_less_than_or_equal_to(timeout - read_delay + 0.25)
-        assert_that(wait_timeout).is_greater_than_or_equal_to(0.0)
+    assert_that(result.success).is_true()
+    assert_that(process.wait_timeouts).is_length(1)
+    wait_timeout = process.wait_timeouts[0]
+    # The wait budget must be strictly less than the full timeout since
+    # the reader already consumed part of it.
+    assert_that(wait_timeout).is_less_than(timeout)
+    assert_that(wait_timeout).is_less_than_or_equal_to(timeout - read_delay + 0.25)
+    assert_that(wait_timeout).is_greater_than_or_equal_to(0.0)
 
 
 # Drives a real child process past a one-second timeout, so the wall-clock
@@ -148,20 +210,20 @@ def test_streaming_total_walltime_stays_within_budget_on_hang() -> None:
 
 
 def test_streaming_timeout_during_wait() -> None:
-    """Verify TimeoutExpired is raised when process.wait times out."""
-    with patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.stdout = iter(["partial\n"])
-        mock_process.wait.side_effect = subprocess.TimeoutExpired(
-            cmd=["slow"],
-            timeout=1,
-        )
-        mock_popen.return_value = mock_process
+    """A timeout inside ``process.wait`` raises and kills the process."""
+    process = _RecordingProcess(
+        stdout_lines=["partial\n"],
+        wait_error=subprocess.TimeoutExpired(cmd=["slow"], timeout=1),
+    )
 
+    with patch(
+        "lintro.plugins.subprocess_executor.subprocess.Popen",
+        return_value=process,
+    ):
         with pytest.raises(subprocess.TimeoutExpired):
             run_subprocess_streaming(["slow", "cmd"], timeout=1)
 
-        mock_process.kill.assert_called_once()
+    assert_that(process.kill_count).is_equal_to(1)
 
 
 # =============================================================================
@@ -197,25 +259,34 @@ def test_streaming_empty_output() -> None:
         assert_that(result.output).is_equal_to("")
 
 
-def test_streaming_with_cwd_and_env() -> None:
-    """Verify cwd and env are passed to Popen."""
-    with patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen:
-        mock_process = MagicMock()
-        mock_process.stdout = iter([])
-        mock_process.wait.return_value = 0
-        mock_popen.return_value = mock_process
+def test_streaming_with_cwd_and_env(tmp_path: Path) -> None:
+    """A real child process runs in the given cwd with the given env.
 
-        custom_env = {"MY_VAR": "value"}
-        run_subprocess_streaming(
-            ["cmd"],
-            timeout=30,
-            cwd="/custom/path",
-            env=custom_env,
-        )
+    Drives an actual interpreter that reports its own working directory and
+    environment, so the assertion is on where the process really ran rather
+    than on the arguments handed to ``Popen`` (#2315). ``PATH`` must survive
+    because the custom env is merged into the inherited one, not substituted
+    for it.
 
-        mock_popen.assert_called_once()
-        call_kwargs = mock_popen.call_args[1]
-        assert_that(call_kwargs["cwd"]).is_equal_to("/custom/path")
-        # Custom env is merged with os.environ to preserve PATH
-        assert_that(call_kwargs["env"]["MY_VAR"]).is_equal_to("value")
-        assert_that(call_kwargs["env"]).contains_key("PATH")
+    Args:
+        tmp_path: Temporary directory the child process should run in.
+    """
+    report = (
+        "import os;"
+        "print(os.path.realpath(os.getcwd()));"
+        "print(os.environ['MY_VAR']);"
+        "print('PATH' in os.environ)"
+    )
+
+    result = run_subprocess_streaming(
+        [sys.executable, "-c", report],
+        timeout=30,
+        cwd=str(tmp_path),
+        env={"MY_VAR": "value"},
+    )
+
+    assert_that(result.success).is_true()
+    observed_cwd, observed_var, has_path = result.output.strip().splitlines()
+    assert_that(Path(observed_cwd)).is_equal_to(tmp_path.resolve())
+    assert_that(observed_var).is_equal_to("value")
+    assert_that(has_path).is_equal_to("True")

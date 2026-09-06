@@ -13,6 +13,7 @@ from lintro.tools.definitions.markdownlint import (
     MARKDOWNLINT_DEFAULT_TIMEOUT,
     MarkdownlintPlugin,
 )
+from tests.unit.tools.conftest import record_subprocess_argv
 
 
 def _which_only(*available: str) -> Callable[..., str | None]:
@@ -69,19 +70,21 @@ def test_check_uses_path_binary(
     """
     md_file = tmp_path / "README.md"
     md_file.write_text("# Title\n\nBody text.\n")
+    commands: list[list[str]] = []
 
     with (
         patch("shutil.which", _which_only("markdownlint-cli2")),
         patch.object(
             markdownlint_plugin,
             "_run_subprocess",
-            return_value=(True, ""),
-        ) as mock_run,
+            side_effect=record_subprocess_argv(commands),
+        ),
     ):
-        markdownlint_plugin.check([str(md_file)], {})
+        result = markdownlint_plugin.check([str(md_file)], {})
 
-    cmd = mock_run.call_args.kwargs["cmd"]
-    assert_that(cmd[0]).is_equal_to("/usr/local/bin/markdownlint-cli2")
+    assert_that(commands).is_length(1)
+    assert_that(commands[0][0]).is_equal_to("/usr/local/bin/markdownlint-cli2")
+    assert_that(result.success).is_true()
 
 
 def test_check_falls_back_to_pinned_bunx(
@@ -98,19 +101,23 @@ def test_check_falls_back_to_pinned_bunx(
     """
     md_file = tmp_path / "README.md"
     md_file.write_text("# Title\n\nBody text.\n")
+    commands: list[list[str]] = []
 
     with (
         patch("shutil.which", _which_only("bunx")),
         patch.object(
             markdownlint_plugin,
             "_run_subprocess",
-            return_value=(True, ""),
-        ) as mock_run,
+            side_effect=record_subprocess_argv(commands),
+        ),
     ):
-        markdownlint_plugin.check([str(md_file)], {})
+        result = markdownlint_plugin.check([str(md_file)], {})
 
-    cmd = mock_run.call_args.kwargs["cmd"]
-    assert_that(cmd[:2]).is_equal_to(["bunx", pinned_npm_spec("markdownlint-cli2")])
+    assert_that(commands).is_length(1)
+    assert_that(commands[0][:2]).is_equal_to(
+        ["bunx", pinned_npm_spec("markdownlint-cli2")],
+    )
+    assert_that(result.success).is_true()
 
 
 def test_doc_url_lowercases_code(markdownlint_plugin: MarkdownlintPlugin) -> None:

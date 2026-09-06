@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1865,7 +1866,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         pr_metadata=None,
     )
     provider = _mock_provider(content=_sample_response_json())
-    progress = MagicMock(spec=ReviewProgressCallback)
+    progress = _RecordingProgress()
 
     with (
         patch(
@@ -1885,10 +1886,11 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
             progress=progress,
         )
 
-    progress.on_start.assert_called_once()
-    progress.on_error.assert_called_once()
-    progress.on_abort.assert_called_once()
-    progress.on_complete.assert_not_called()
+    # The run starts, reports the failure, aborts, and never completes.
+    assert_that(progress.events.count("on_start")).is_equal_to(1)
+    assert_that(progress.events.count("on_error")).is_equal_to(1)
+    assert_that(progress.events.count("on_abort")).is_equal_to(1)
+    assert_that(progress.events).does_not_contain("on_complete")
 
 
 def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
@@ -2008,15 +2010,29 @@ def test_run_review_uses_git_native_prompt_for_cli_transport() -> None:
     provider = _mock_provider(content=_sample_response_json())
     provider.name = "anthropic"
 
+    built: list[dict[str, Any]] = []
+
+    def _build(**kwargs: Any) -> tuple[str, str]:
+        """Record one git-native prompt build.
+
+        Args:
+            **kwargs: Prompt-builder keyword arguments.
+
+        Returns:
+            tuple[str, str]: A stand-in system and user prompt pair.
+        """
+        built.append(kwargs)
+        return ("system", "user")
+
     with patch(
         "lintro.ai.review.orchestrator.build_git_native_review_prompt",
-    ) as mock_git_native:
-        mock_git_native.return_value = ("system", "user")
+        _build,
+    ):
         with patch(
             "lintro.ai.review.orchestrator.call_ai",
             return_value=provider.complete("prompt"),
         ):
-            run_review(
+            result = run_review(
                 context,
                 provider=provider,
                 ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
@@ -2026,7 +2042,9 @@ def test_run_review_uses_git_native_prompt_for_cli_transport() -> None:
                 classifications=[],
             )
 
-    mock_git_native.assert_called_once()
+    # One chunk, so exactly one git-native prompt, and the review still lands.
+    assert_that(built).is_length(1)
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
 
 
 def test_build_git_native_review_prompt_embeds_diff_when_requested(
@@ -2086,11 +2104,56 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     assert_that(user_prompt).does_not_contain("<pull_request_diff>")
 
 
-def _capability_provider(*, supports_sessions: bool) -> MagicMock:
+class _RecordingProgress:
+    """Progress callback that records the lifecycle events it receives.
+
+    Used instead of a mock so tests assert on the observable event sequence
+    rather than on how the collaborator was called (#2315).
+
+    Attributes:
+        events: Callback names in the order the orchestrator invoked them.
+    """
+
+    events: list[str]
+
+    def __init__(self) -> None:
+        """Start with an empty event log."""
+        self.events = []
+
+    def __getattr__(self, name: str) -> Any:
+        """Record any ``on_*`` callback the orchestrator invokes.
+
+        Args:
+            name: Callback name being looked up.
+
+        Returns:
+            Any: A recorder for ``on_*`` names.
+
+        Raises:
+            AttributeError: For any non-callback attribute.
+        """
+        if not name.startswith("on_"):
+            raise AttributeError(name)
+
+        def _record(*_args: Any, **_kwargs: Any) -> None:
+            self.events.append(name)
+
+        return _record
+
+
+def _capability_provider(
+    *,
+    supports_sessions: bool,
+    session_events: list[str] | None = None,
+) -> MagicMock:
     """Build a mock provider declaring a session capability.
 
     Args:
         supports_sessions: Value of ``capabilities.supports_sessions``.
+        session_events: Optional list that records ``begin``/``end`` in the
+            order the orchestrator drives the durable session, so tests assert
+            on the session lifecycle rather than on mock call bookkeeping
+            (#2315).
 
     Returns:
         A configured provider mock.
@@ -2099,6 +2162,13 @@ def _capability_provider(*, supports_sessions: bool) -> MagicMock:
     provider.capabilities = ProviderCapabilities(
         supports_sessions=supports_sessions,
     )
+    if session_events is not None:
+        provider.begin_durable_session.side_effect = (
+            lambda *_args, **_kwargs: session_events.append("begin")
+        )
+        provider.end_durable_session.side_effect = (
+            lambda *_args, **_kwargs: session_events.append("end")
+        )
     return provider
 
 
@@ -2129,23 +2199,29 @@ def _run_single_chunk_review(provider: MagicMock) -> None:
 
 
 def test_run_review_opens_durable_session_when_capability_declared() -> None:
-    """Open a durable session for any provider declaring session support."""
-    provider = _capability_provider(supports_sessions=True)
+    """A provider declaring session support gets its session opened and closed."""
+    session_events: list[str] = []
+    provider = _capability_provider(
+        supports_sessions=True,
+        session_events=session_events,
+    )
 
     _run_single_chunk_review(provider)
 
-    provider.begin_durable_session.assert_called_once()
-    provider.end_durable_session.assert_called_once()
+    assert_that(session_events).is_equal_to(["begin", "end"])
 
 
 def test_run_review_skips_durable_session_without_capability() -> None:
-    """Leave sessions alone for providers that declare no session support."""
-    provider = _capability_provider(supports_sessions=False)
+    """A provider declaring no session support is never asked to open one."""
+    session_events: list[str] = []
+    provider = _capability_provider(
+        supports_sessions=False,
+        session_events=session_events,
+    )
 
     _run_single_chunk_review(provider)
 
-    provider.begin_durable_session.assert_not_called()
-    provider.end_durable_session.assert_not_called()
+    assert_that(session_events).is_empty()
 
 
 def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:

@@ -75,10 +75,41 @@ async def test_review_file_empty_source_skips_provider() -> None:
 
 
 async def test_review_file_caches_by_content(tmp_path: Path) -> None:
-    """A repeat review of identical source is served from cache."""
+    """A repeat review of identical source is served from cache.
+
+    Args:
+        tmp_path: Temporary directory used as the engine's workspace root.
+    """
+    completions: list[str] = []
+
+    async def fake_complete(*_args: object, **_kwargs: object) -> AIResponse:
+        """Record one provider round trip and answer with a finding.
+
+        Args:
+            *_args: Ignored positional provider arguments.
+            **_kwargs: Ignored keyword provider arguments.
+
+        Returns:
+            A response carrying one idiom finding.
+        """
+        completions.append("complete")
+        return _response(
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "code": "idiom/python/prefer-any",
+                            "line": 1,
+                            "message": "Use any().",
+                            "confidence": "high",
+                        },
+                    ],
+                },
+            ),
+        )
+
     provider = MagicMock()
-    provider.complete = AsyncMock()
-    provider.complete.return_value = _response('{"findings": []}')
+    provider.complete = fake_complete
     engine = IdiomReviewEngine(
         provider=provider,
         ai_config=_config(),
@@ -86,11 +117,14 @@ async def test_review_file_caches_by_content(tmp_path: Path) -> None:
     )
     source = "x = 1\n"
 
-    await engine.review_file(file_path="m.py", source=source)
-    await engine.review_file(file_path="m.py", source=source)
+    first = await engine.review_file(file_path="m.py", source=source)
+    second = await engine.review_file(file_path="m.py", source=source)
 
-    # Second call hit the cache: the provider was only invoked once.
-    assert_that(provider.complete.call_count).is_equal_to(1)
+    assert_that(completions).is_length(1)
+    assert_that(first).is_not_empty()
+    assert_that([issue.code for issue in second]).is_equal_to(
+        [issue.code for issue in first],
+    )
 
 
 async def test_review_duplication_empty_signatures_skips_provider() -> None:

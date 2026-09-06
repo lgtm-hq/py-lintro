@@ -2,15 +2,41 @@
 
 from __future__ import annotations
 
+import io
 from collections.abc import AsyncIterator
-from unittest.mock import MagicMock
 
 from assertpy import assert_that
+from rich.console import Console
 
 from lintro.ai.display.streaming import async_stream_to_console, stream_to_console
 from lintro.ai.providers.async_stream_result import AsyncAIStreamResult
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.providers.stream_result import AIStreamResult
+
+#: ANSI escape Rich emits for the ``cyan`` style, and the reset that closes it.
+CYAN = "\x1b[36m"
+RESET = "\x1b[0m"
+
+
+def _console(buffer: io.StringIO) -> Console:
+    """Build a real Rich console that renders styled text into a buffer.
+
+    Forcing terminal mode keeps Rich's ANSI styling on, so a style really
+    applied to a chunk shows up in the rendered text rather than only in a
+    recorded call.
+
+    Args:
+        buffer: Destination the console writes its rendered output to.
+
+    Returns:
+        A Rich console writing ANSI-styled text to ``buffer``.
+    """
+    return Console(
+        file=buffer,
+        force_terminal=True,
+        color_system="truecolor",
+        width=200,
+    )
 
 
 def _stream(chunks: list[str]) -> AIStreamResult:
@@ -38,61 +64,66 @@ def _stream(chunks: list[str]) -> AIStreamResult:
 
 def test_returns_empty_string_for_empty_stream() -> None:
     """An exhausted-empty stream renders nothing but a trailing newline."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    result = stream_to_console(_stream([]), console)
+    result = stream_to_console(_stream([]), _console(buffer))
 
     assert_that(result).is_equal_to("")
-    # Only the final newline print() call, no chunk prints.
-    assert_that(console.print.call_count).is_equal_to(1)
-    console.print.assert_called_once_with()
+    assert_that(buffer.getvalue()).is_equal_to("\n")
 
 
 def test_renders_single_chunk() -> None:
     """A single chunk is printed and returned verbatim."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    result = stream_to_console(_stream(["hello"]), console)
+    result = stream_to_console(_stream(["hello"]), _console(buffer))
 
     assert_that(result).is_equal_to("hello")
-    first_call = console.print.call_args_list[0]
-    assert_that(first_call.args).is_equal_to(("hello",))
-    assert_that(first_call.kwargs["end"]).is_equal_to("")
-    assert_that(first_call.kwargs["highlight"]).is_false()
-    assert_that(first_call.kwargs["markup"]).is_false()
+    assert_that(buffer.getvalue()).is_equal_to("hello\n")
+
+
+def test_markup_and_highlighting_never_rewrite_a_chunk() -> None:
+    """Rich markup and syntax highlighting stay off for streamed text."""
+    buffer = io.StringIO()
+
+    result = stream_to_console(
+        _stream(["[bold]not markup[/bold] 42"]),
+        _console(buffer),
+    )
+
+    assert_that(result).is_equal_to("[bold]not markup[/bold] 42")
+    assert_that(buffer.getvalue()).is_equal_to("[bold]not markup[/bold] 42\n")
 
 
 def test_concatenates_multiple_chunks() -> None:
     """Multiple chunks are streamed in order and joined into the return value."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    result = stream_to_console(_stream(["a", "b", "c"]), console)
+    result = stream_to_console(_stream(["a", "b", "c"]), _console(buffer))
 
     assert_that(result).is_equal_to("abc")
-    # Three chunk prints plus one trailing newline print.
-    assert_that(console.print.call_count).is_equal_to(4)
-    printed = [call.args[0] for call in console.print.call_args_list[:3]]
-    assert_that(printed).is_equal_to(["a", "b", "c"])
+    # ``end=""`` on every chunk means the three arrive unseparated, followed by
+    # the single trailing newline.
+    assert_that(buffer.getvalue()).is_equal_to("abc\n")
 
 
 def test_passes_style_to_console() -> None:
     """A non-empty style string is forwarded to each chunk print."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    stream_to_console(_stream(["x"]), console, style="cyan")
+    stream_to_console(_stream(["x"]), _console(buffer), style="cyan")
 
-    first_call = console.print.call_args_list[0]
-    assert_that(first_call.kwargs["style"]).is_equal_to("cyan")
+    assert_that(buffer.getvalue()).is_equal_to(f"{CYAN}x{RESET}\n")
 
 
 def test_empty_style_becomes_none() -> None:
     """An empty style string is normalised to None for the console."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    stream_to_console(_stream(["x"]), console)
+    stream_to_console(_stream(["x"]), _console(buffer))
 
-    first_call = console.print.call_args_list[0]
-    assert_that(first_call.kwargs["style"]).is_none()
+    assert_that(buffer.getvalue()).is_equal_to("x\n")
+    assert_that(buffer.getvalue()).does_not_contain(CYAN)
 
 
 def _async_stream(chunks: list[str]) -> AsyncAIStreamResult:
@@ -134,30 +165,35 @@ def _async_stream(chunks: list[str]) -> AsyncAIStreamResult:
 
 async def test_async_returns_empty_string_for_empty_stream() -> None:
     """An empty async stream renders nothing but a trailing newline."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    result = await async_stream_to_console(_async_stream([]), console)
+    result = await async_stream_to_console(_async_stream([]), _console(buffer))
 
     assert_that(result).is_equal_to("")
-    console.print.assert_called_once_with()
+    assert_that(buffer.getvalue()).is_equal_to("\n")
 
 
 async def test_async_streams_chunks_in_order() -> None:
     """Chunks reach the console in arrival order and are concatenated."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    result = await async_stream_to_console(_async_stream(["a", "b", "c"]), console)
+    result = await async_stream_to_console(
+        _async_stream(["a", "b", "c"]),
+        _console(buffer),
+    )
 
     assert_that(result).is_equal_to("abc")
-    printed = [call.args[0] for call in console.print.call_args_list if call.args]
-    assert_that(printed).is_equal_to(["a", "b", "c"])
+    assert_that(buffer.getvalue()).is_equal_to("abc\n")
 
 
 async def test_async_applies_style_to_each_chunk() -> None:
     """The configured Rich style is applied to every streamed chunk."""
-    console = MagicMock()
+    buffer = io.StringIO()
 
-    await async_stream_to_console(_async_stream(["x"]), console, style="cyan")
+    await async_stream_to_console(
+        _async_stream(["a", "b"]),
+        _console(buffer),
+        style="cyan",
+    )
 
-    first_call = console.print.call_args_list[0]
-    assert_that(first_call.kwargs["style"]).is_equal_to("cyan")
+    assert_that(buffer.getvalue()).is_equal_to(f"{CYAN}a{RESET}{CYAN}b{RESET}\n")

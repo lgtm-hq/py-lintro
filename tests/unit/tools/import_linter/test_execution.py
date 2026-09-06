@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -94,27 +95,38 @@ def test_check_runs_once_regardless_of_file_count(
     # would invoke the tool three times here and this assertion would catch it.
     paths = [str(package / name) for name in ("api.py", "services.py", "storage.py")]
 
+    calls: list[dict[str, object]] = []
+
+    def fake_run(**kwargs: object) -> tuple[bool, str]:
+        """Record one lint-imports invocation and report a kept contract.
+
+        Args:
+            **kwargs: Arguments the plugin passed to ``_run_subprocess``.
+
+        Returns:
+            A successful run carrying the kept-contract output.
+        """
+        calls.append(dict(kwargs))
+        return (True, kept_output)
+
     with (
         patch(_VERSION_PATCH, return_value=None),
-        patch.object(
-            import_linter_plugin,
-            "_run_subprocess",
-            return_value=(True, kept_output),
-        ) as run,
+        patch.object(import_linter_plugin, "_run_subprocess", side_effect=fake_run),
     ):
-        import_linter_plugin.check(paths, {})
+        result = import_linter_plugin.check(paths, {})
 
-    assert_that(run.call_count).is_equal_to(1)
-    assert_that(run.call_args.kwargs["cwd"]).is_equal_to(str(project_with_contracts))
+    assert_that(calls).is_length(1)
+    assert_that(calls[0]["cwd"]).is_equal_to(str(project_with_contracts))
     # check() must go through _build_command: the flags are part of the contract
     # (no banner in parsed output, no cache directory written into the project).
-    cmd = run.call_args.kwargs["cmd"]
+    cmd = list(cast("list[str]", calls[0]["cmd"]))
     assert_that(cmd[0]).is_equal_to("lint-imports")
     assert_that(cmd).contains("--no-logo", "--no-cache")
     assert_that(cmd).contains(str(project_with_contracts / "pyproject.toml"))
     # The discovered files are never appended to the command line.
     for path in paths:
         assert_that(cmd).does_not_contain(path)
+    assert_that(result.success).is_true()
 
 
 def test_check_without_configuration_is_clean(

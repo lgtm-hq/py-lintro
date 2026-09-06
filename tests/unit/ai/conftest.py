@@ -21,6 +21,59 @@ from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.console.logger import ThreadSafeConsoleLogger
+
+
+class RecordingConsoleLogger(ThreadSafeConsoleLogger):
+    """Console logger that records its output instead of printing it.
+
+    Subclasses the real :class:`ThreadSafeConsoleLogger` so it satisfies the
+    type production code annotates, then overrides the two sinks that reach a
+    terminal. Every other logger method keeps its real implementation, so text
+    that production routes through ``console_output`` is recorded exactly as a
+    user would have seen it. Tests use this instead of a mock so they assert
+    on visible output rather than on how a collaborator was called (#2315).
+
+    Attributes:
+        lines: Every message passed to :meth:`console_output`, in order.
+        warnings: Every message passed to :meth:`warning`, in order.
+    """
+
+    lines: list[str]
+    warnings: list[str]
+
+    def __init__(self) -> None:
+        """Start with empty console and warning transcripts."""
+        super().__init__()
+        self.lines = []
+        self.warnings = []
+
+    def console_output(self, text: str, color: str | None = None) -> None:
+        """Record one console line instead of printing it.
+
+        Args:
+            text: Text the production code wants on the console.
+            color: Colour the production code asked for, ignored here.
+        """
+        self.lines.append(text)
+
+    def warning(self, message: str, **_kwargs: Any) -> None:
+        """Record one warning instead of printing and logging it.
+
+        Args:
+            message: Warning text the production code emitted.
+            **_kwargs: Ignored loguru formatting extras.
+        """
+        self.warnings.append(message)
+
+    @property
+    def text(self) -> str:
+        """Return every recorded line joined by newlines.
+
+        Returns:
+            str: The console transcript this logger captured.
+        """
+        return "\n".join(self.lines)
 
 
 def completed_process(

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +19,59 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.providers import anthropic as mod
 from lintro.ai.providers.anthropic import AnthropicProvider
+
+
+@dataclass
+class _RecordingMessages:
+    """Records the keyword arguments each ``messages.create`` call receives.
+
+    Used instead of an ``AsyncMock`` so tests assert on a list the fake really
+    appended to rather than on mock call bookkeeping (#2315).
+
+    Attributes:
+        response: Object every call returns.
+        calls: Keyword arguments of each call, in order.
+    """
+
+    response: Any
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def create(self, **kwargs: Any) -> Any:
+        """Record one request and return the canned response.
+
+        Args:
+            **kwargs: Request keyword arguments the provider built.
+
+        Returns:
+            Any: The canned response.
+        """
+        self.calls.append(kwargs)
+        return self.response
+
+
+def _anthropic_response(
+    *,
+    text: str = "ok",
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+) -> SimpleNamespace:
+    """Build a stand-in for an Anthropic messages response.
+
+    Args:
+        text: Text of the single content block.
+        input_tokens: Prompt tokens the response reports.
+        output_tokens: Completion tokens the response reports.
+
+    Returns:
+        SimpleNamespace: The response stand-in.
+    """
+    return SimpleNamespace(
+        content=[SimpleNamespace(text=text)],
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ),
+    )
 
 
 class _FakeAnthropicError(Exception):
@@ -203,25 +258,18 @@ async def test_anthropic_complete_multiple_text_blocks():
         assert_that(result.content).is_equal_to("Hello, world!")
 
 
-async def test_anthropic_complete_respects_max_tokens_cap():
+async def test_anthropic_complete_respects_max_tokens_cap() -> None:
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider(max_tokens=2048)
 
-        mock_usage = MagicMock()
-        mock_usage.input_tokens = 10
-        mock_usage.output_tokens = 5
-
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="ok")]
-        mock_response.usage = mock_usage
-
-        mock_client = MagicMock()
-        mock_client.messages.create = AsyncMock(return_value=mock_response)
-        provider._client = mock_client
+        messages = _RecordingMessages(response=_anthropic_response())
+        provider._client = SimpleNamespace(messages=messages)
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            await provider.complete("prompt", max_tokens=4096)
+            result = await provider.complete("prompt", max_tokens=4096)
 
-        call_kwargs = mock_client.messages.create.call_args[1]
-        assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)
+        assert_that(result.content).is_equal_to("ok")
+        assert_that(messages.calls).is_length(1)
+        # The per-call 4096 is capped by the provider-level 2048.
+        assert_that(messages.calls[0]["max_tokens"]).is_equal_to(2048)

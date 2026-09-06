@@ -49,3 +49,11 @@ def test_no_test_function_bodies_are_duplicated() -> None:
     groups = scanner.find_duplicate_groups()
     rendered = [[f"{f.path}:{f.lineno} {f.name}" for f in group] for group in groups]
     assert_that(rendered).is_empty()
+
+
+def test_no_test_asserts_only_on_mock_bookkeeping() -> None:
+    """Every test asserts on something other than how a mock was called."""
+    scanner = _load("scan_mock_only_tests")
+    offenders = scanner.find_mock_only_tests()
+    rendered = [f"{t.path}:{t.lineno} {t.name}" for t in offenders]
+    assert_that(rendered).is_empty()

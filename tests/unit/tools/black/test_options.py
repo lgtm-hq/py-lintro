@@ -2,13 +2,42 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.tools.definitions.black import BLACK_DEFAULT_TIMEOUT, BlackPlugin
+
+
+def _record_black_argv(
+    commands: list[list[str]],
+) -> Callable[..., tuple[bool, str]]:
+    """Build a plain stand-in for black's subprocess runner.
+
+    Args:
+        commands: List the executed black argv is appended to.
+
+    Returns:
+        A callable recording each invocation and reporting a clean run.
+    """
+
+    def fake_run(**kwargs: object) -> tuple[bool, str]:
+        """Record one black invocation and report success.
+
+        Args:
+            **kwargs: Arguments the plugin passed to the runner.
+
+        Returns:
+            A successful run with empty output.
+        """
+        commands.append(list(cast("list[str]", kwargs["cmd"])))
+        return (True, "")
+
+    return fake_run
 
 
 def test_default_options(black_plugin: BlackPlugin) -> None:
@@ -68,20 +97,23 @@ def test_check_passes_line_length_to_black(
     py_file.write_text('"""Module."""\n')
     black_plugin.set_options(line_length=100)
 
+    commands: list[list[str]] = []
+
     with (
         patch.object(black_plugin, "_build_config_args", return_value=[]),
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
         patch.object(
             black_plugin,
             "_run_subprocess",
-            return_value=(True, ""),
-        ) as mock_run,
+            side_effect=_record_black_argv(commands),
+        ),
     ):
-        black_plugin.check([str(py_file)], {})
+        result = black_plugin.check([str(py_file)], {})
 
-    cmd = mock_run.call_args.kwargs["cmd"]
-    assert_that(cmd).contains("--line-length", "100")
-    assert_that(cmd).contains("--check")
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--line-length", "100")
+    assert_that(commands[0]).contains("--check")
+    assert_that(result.success).is_true()
 
 
 def test_check_passes_fast_to_black(
@@ -98,19 +130,22 @@ def test_check_passes_fast_to_black(
     py_file.write_text('"""Module."""\n')
     black_plugin.set_options(fast=True)
 
+    commands: list[list[str]] = []
+
     with (
         patch.object(black_plugin, "_check_line_length_violations", return_value=[]),
         patch.object(
             black_plugin,
             "_run_subprocess",
-            return_value=(True, ""),
-        ) as mock_run,
+            side_effect=_record_black_argv(commands),
+        ),
     ):
-        black_plugin.check([str(py_file)], {})
+        result = black_plugin.check([str(py_file)], {})
 
-    cmd = mock_run.call_args.kwargs["cmd"]
-    assert_that(cmd).contains("--fast")
-    assert_that(cmd).contains("--check")
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--fast")
+    assert_that(commands[0]).contains("--check")
+    assert_that(result.success).is_true()
 
 
 def test_line_length_check_accepts_float_timeout(black_plugin: BlackPlugin) -> None:

@@ -109,13 +109,14 @@ async def test_claude_cli_complete_cli_schema_flag_when_requested(
             stdout=stdout,
             stderr="",
         )
-        await provider.complete(
+        response = await provider.complete(
             "Review this diff",
             system="Be concise",
             cli_schema=schema,
         )
 
-    cmd = mock_run.call_args.args[0]
+    assert_that(response.content).is_equal_to('{"summary": "ok"}')
+    cmd = mock_run.transport_calls[-1].cmd
     assert_that(cmd).contains("--json-schema")
     schema_arg = cmd[cmd.index("--json-schema") + 1]
     assert_that(schema_arg).contains('"type"')
@@ -154,13 +155,13 @@ async def test_claude_cli_complete_json_schema_name_sent_when_cli_advertises_it(
         )
 
     with patch_cli_exec(side_effect=fake_run) as mock_run:
-        await provider.complete("Review this diff", cli_schema=schema)
+        response = await provider.complete("Review this diff", cli_schema=schema)
 
-    completion_calls = [
-        call for call in mock_run.call_args_list if "--help" not in call.args[0]
+    assert_that(response.content).is_equal_to('{"summary": "ok"}')
+    completion_cmds = [
+        call.cmd for call in mock_run.transport_calls if "--help" not in call.cmd
     ]
-    cmd = completion_calls[-1].args[0]
-    assert_that(cmd).contains("--json-schema-name", "lintro_review")
+    assert_that(completion_cmds[-1]).contains("--json-schema-name", "lintro_review")
 
 
 async def test_claude_cli_complete_json_schema_name_omitted_when_cli_lacks_it(
@@ -200,14 +201,14 @@ async def test_claude_cli_complete_json_schema_name_omitted_when_cli_lacks_it(
         )
 
     with patch_cli_exec(side_effect=fake_run) as mock_run:
-        await provider.complete("Review this diff", cli_schema=schema)
+        response = await provider.complete("Review this diff", cli_schema=schema)
 
-    completion_calls = [
-        call for call in mock_run.call_args_list if "--help" not in call.args[0]
+    assert_that(response.content).is_equal_to('{"summary": "ok"}')
+    completion_cmds = [
+        call.cmd for call in mock_run.transport_calls if "--help" not in call.cmd
     ]
-    cmd = completion_calls[-1].args[0]
-    assert_that(cmd).does_not_contain("--json-schema-name")
-    assert_that(cmd).contains("--json-schema")
+    assert_that(completion_cmds[-1]).does_not_contain("--json-schema-name")
+    assert_that(completion_cmds[-1]).contains("--json-schema")
 
 
 async def test_claude_cli_complete_auth_error(_mock_claude_on_path: None) -> None:

@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.tools.definitions.stylelint import StylelintPlugin
 from tests.test_samples_helpers import copy_sample
+from tests.unit.tools.conftest import record_subprocess_argv
 from tests.unit.tools.stylelint.conftest import make_ctx
 
 INITIAL_JSON = (
@@ -128,13 +129,15 @@ def test_fix_uses_fix_flag(
         (True, CLEAN_JSON),
         (True, CLEAN_JSON),
     ]
+    commands: list[list[str]] = []
+
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
         patch.object(
             stylelint_plugin,
             "_run_subprocess",
-            side_effect=outputs,
-        ) as run,
+            side_effect=record_subprocess_argv(commands, outputs=outputs),
+        ),
         patch.object(
             stylelint_plugin,
             "_get_executable_command",
@@ -142,10 +145,11 @@ def test_fix_uses_fix_flag(
         ),
     ):
         prep.return_value = make_ctx(tmp_path, ["a.css"])
-        stylelint_plugin.fix([str(tmp_path / "a.css")], {})
+        result = stylelint_plugin.fix([str(tmp_path / "a.css")], {})
 
-    fix_cmd = run.call_args_list[1].kwargs["cmd"]
-    assert_that(fix_cmd).contains("--fix")
+    assert_that(commands[1]).contains("--fix")
+    assert_that(commands[0]).does_not_contain("--fix")
+    assert_that(result.success).is_true()
 
 
 def test_fix_skips_when_no_config(

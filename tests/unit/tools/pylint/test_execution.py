@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -99,25 +100,35 @@ def test_check_runs_once_over_every_discovered_file(
     for name in ("a.py", "b.py", "c.py"):
         (package / name).write_text("VALUE = 1\n", encoding="utf-8")
 
+    commands: list[list[str]] = []
+
+    def fake_run(**kwargs: object) -> object:
+        """Record one pylint invocation and report a clean run.
+
+        Args:
+            **kwargs: Arguments the plugin passed to the subprocess helper.
+
+        Returns:
+            A successful pylint result carrying the clean json2 report.
+        """
+        commands.append(list(cast("list[str]", kwargs["cmd"])))
+        return make_result(returncode=0, stdout=clean_report)
+
     with (
         patch(_VERSION_PATCH, return_value=None),
-        patch.object(
-            pylint_plugin,
-            _RUN,
-            return_value=make_result(returncode=0, stdout=clean_report),
-        ) as run,
+        patch.object(pylint_plugin, _RUN, side_effect=fake_run),
     ):
-        pylint_plugin.check([str(configured_project)], {})
+        result = pylint_plugin.check([str(configured_project)], {})
 
-    assert_that(run.call_count).is_equal_to(1)
-    cmd = run.call_args.kwargs["cmd"]
-    assert_that(cmd).contains("--output-format=json2")
-    assert_that(cmd).contains_sequence(
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains("--output-format=json2")
+    assert_that(commands[0]).contains_sequence(
         "--rcfile",
         str(configured_project / "pyproject.toml"),
     )
     for name in ("a.py", "b.py", "c.py", "module.py", "__init__.py"):
-        assert_that(cmd).contains(f"pkg/{name}")
+        assert_that(commands[0]).contains(f"pkg/{name}")
+    assert_that(result.success).is_true()
 
 
 def test_check_without_configuration_still_runs(

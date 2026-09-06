@@ -186,33 +186,45 @@ def test_run_lint_tools_simple_test_action_invalid_tool() -> None:
         assert_that(result).is_equal_to(1)
 
 
+def _fake_pytest_tool(*, applied: list[dict[str, object]]) -> Mock:
+    """Build a fake pytest plugin that records the options applied to it.
+
+    Args:
+        applied: List that accumulates one entry per ``set_options`` call.
+
+    Returns:
+        A mock plugin reporting a clean pytest run.
+    """
+    tool = Mock()
+    tool.name = "pytest"
+    tool.copy_for_execution.return_value = tool
+    tool.set_options.side_effect = lambda **kwargs: applied.append(kwargs)
+    tool.check.return_value = ToolResult(
+        name="pytest",
+        success=True,
+        issues=[],
+        issues_count=0,
+        output="All tests passed",
+    )
+    return tool
+
+
 def test_run_lint_tools_simple_test_action_with_tool_options() -> None:
-    """Test run_lint_tools_simple with pytest tool options."""
+    """Parsed pytest tool options are applied and the run reports success."""
+    applied: list[dict[str, object]] = []
+
     with (
         tempfile.TemporaryDirectory() as tmpdir,
         patch("lintro.utils.tool_executor.tool_manager") as mock_manager,
         patch("lintro.utils.tool_executor.OutputManager") as mock_output,
-        patch("lintro.utils.console.create_logger") as mock_logger,
+        patch("lintro.utils.console.create_logger"),
     ):
-        mock_logger_inst = Mock()
-        mock_logger.return_value = mock_logger_inst
         mock_output_inst = Mock()
         mock_output_inst.run_dir = Path(tmpdir)
         mock_output.return_value = mock_output_inst
+        mock_manager.get_tool.return_value = _fake_pytest_tool(applied=applied)
 
-        mock_pytest_tool = Mock()
-        mock_pytest_tool.name = "pytest"
-        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
-        mock_pytest_tool.check.return_value = ToolResult(
-            name="pytest",
-            success=True,
-            issues=[],
-            issues_count=0,
-            output="All tests passed",
-        )
-        mock_manager.get_tool.return_value = mock_pytest_tool
-
-        run_lint_tools_simple(
+        exit_code = run_lint_tools_simple(
             action="test",
             paths=["."],
             tools="pytest",
@@ -225,37 +237,29 @@ def test_run_lint_tools_simple_test_action_with_tool_options() -> None:
             raw_output=False,
         )
 
-        # Should call set_options on the tool
-        mock_pytest_tool.set_options.assert_called()
+    merged = {key: value for options in applied for key, value in options.items()}
+    assert_that(merged).contains_key("maxfail", "tb")
+    assert_that(str(merged["maxfail"])).is_equal_to("5")
+    assert_that(str(merged["tb"])).is_equal_to("long")
+    assert_that(exit_code).is_equal_to(0)
 
 
 def test_run_lint_tools_simple_test_action_exclude_patterns() -> None:
-    """Test run_lint_tools_simple with exclude patterns."""
+    """The exclude pattern reaches the tool and the run reports success."""
+    applied: list[dict[str, object]] = []
+
     with (
         tempfile.TemporaryDirectory() as tmpdir,
         patch("lintro.utils.tool_executor.tool_manager") as mock_manager,
         patch("lintro.utils.tool_executor.OutputManager") as mock_output,
-        patch("lintro.utils.console.create_logger") as mock_logger,
+        patch("lintro.utils.console.create_logger"),
     ):
-        mock_logger_inst = Mock()
-        mock_logger.return_value = mock_logger_inst
         mock_output_inst = Mock()
         mock_output_inst.run_dir = Path(tmpdir)
         mock_output.return_value = mock_output_inst
+        mock_manager.get_tool.return_value = _fake_pytest_tool(applied=applied)
 
-        mock_pytest_tool = Mock()
-        mock_pytest_tool.name = "pytest"
-        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
-        mock_pytest_tool.check.return_value = ToolResult(
-            name="pytest",
-            success=True,
-            issues=[],
-            issues_count=0,
-            output="All tests passed",
-        )
-        mock_manager.get_tool.return_value = mock_pytest_tool
-
-        run_lint_tools_simple(
+        exit_code = run_lint_tools_simple(
             action="test",
             paths=["."],
             tools="pytest",
@@ -268,37 +272,28 @@ def test_run_lint_tools_simple_test_action_exclude_patterns() -> None:
             raw_output=False,
         )
 
-        # Should set exclude patterns on tool
-        mock_pytest_tool.check.assert_called_once()
+    merged = {key: value for options in applied for key, value in options.items()}
+    assert_that(merged).contains_key("exclude_patterns")
+    assert_that(merged["exclude_patterns"]).contains("*.venv")
+    assert_that(exit_code).is_equal_to(0)
 
 
 def test_run_lint_tools_simple_test_action_verbose() -> None:
-    """Test run_lint_tools_simple with verbose flag."""
+    """A verbose test run still reports the tool's clean result as success."""
+    applied: list[dict[str, object]] = []
+
     with (
         tempfile.TemporaryDirectory() as tmpdir,
         patch("lintro.utils.tool_executor.tool_manager") as mock_manager,
         patch("lintro.utils.tool_executor.OutputManager") as mock_output,
-        patch("lintro.utils.console.create_logger") as mock_logger,
+        patch("lintro.utils.console.create_logger"),
     ):
-        mock_logger_inst = Mock()
-        mock_logger.return_value = mock_logger_inst
         mock_output_inst = Mock()
         mock_output_inst.run_dir = Path(tmpdir)
         mock_output.return_value = mock_output_inst
+        mock_manager.get_tool.return_value = _fake_pytest_tool(applied=applied)
 
-        mock_pytest_tool = Mock()
-        mock_pytest_tool.name = "pytest"
-        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
-        mock_pytest_tool.check.return_value = ToolResult(
-            name="pytest",
-            success=True,
-            issues=[],
-            issues_count=0,
-            output="All tests passed",
-        )
-        mock_manager.get_tool.return_value = mock_pytest_tool
-
-        run_lint_tools_simple(
+        exit_code = run_lint_tools_simple(
             action="test",
             paths=["."],
             tools="pytest",
@@ -311,5 +306,4 @@ def test_run_lint_tools_simple_test_action_verbose() -> None:
             raw_output=False,
         )
 
-        # Logger factory should be called
-        mock_logger.assert_called_once()
+    assert_that(exit_code).is_equal_to(0)

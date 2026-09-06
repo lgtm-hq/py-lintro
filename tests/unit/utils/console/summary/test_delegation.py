@@ -1,21 +1,21 @@
-"""Unit tests for ThreadSafeConsoleLogger summary delegation methods.
+"""Unit tests for the ThreadSafeConsoleLogger summary rendering methods.
 
-This module tests the delegation functionality of ThreadSafeConsoleLogger summary
-methods,
-including summary table, final status, and ASCII art delegation.
+Each test drives the real rendering path and asserts on what a user actually
+sees: the text captured from stdout/stderr, or the tracked buffer that backs
+``console.log`` and ``report.md``. Nothing here asserts that one function
+called another (#2315).
 """
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.utils.console.conftest import patch_tty_streams
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,50 +24,50 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
-# Summary Table Delegation Tests
+# Summary Table Tests
 # =============================================================================
 
 
-def test_print_summary_table_delegates_to_module_function(
+def test_print_summary_table_renders_a_row_per_tool(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_summary_table delegates to print_summary_table function.
-
-    The method should pass through all parameters to the module-level
-    print_summary_table function.
-
+    """The summary table renders the tool name, status and issue count.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory()]
+    results = [fake_tool_result_factory(success=False, issues_count=3)]
 
-    with patch("lintro.utils.summary_tables.print_summary_table") as mock_print:
-        logger._print_summary_table(Action.CHECK, results)
-        mock_print.assert_called_once()
+    logger._print_summary_table(Action.CHECK, results)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("Tool")
+    assert_that(out).contains("test-tool")
+    assert_that(out).contains("3")
 
 
-def test_print_summary_table_converts_string_action(
+def test_print_summary_table_accepts_a_string_action(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_summary_table converts string action to Action enum.
-
-    String action values should be normalized to Action enum instances
-    before being passed to the underlying function.
-
+    """A string action renders the same table as the matching enum value.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory()]
 
-    with patch("lintro.utils.summary_tables.print_summary_table") as mock_print:
-        logger._print_summary_table("check", results)
-        mock_print.assert_called_once()
-        call_kwargs = mock_print.call_args.kwargs
-        assert_that(call_kwargs["action"]).is_equal_to(Action.CHECK)
+    logger._print_summary_table(Action.CHECK, [fake_tool_result_factory()])
+    from_enum = capsys.readouterr().out
+
+    logger._print_summary_table("check", [fake_tool_result_factory()])
+    from_string = capsys.readouterr().out
+
+    assert_that(from_string).is_equal_to(from_enum)
 
 
 @pytest.mark.parametrize(
@@ -83,320 +83,345 @@ def test_print_summary_table_action_normalization(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     action_str: str,
     expected_action: Action,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_summary_table normalizes various action string formats.
-
-    Different string representations of actions should all be correctly
-    converted to their corresponding Action enum values.
-
+    """Every accepted action spelling renders its normalized enum's table.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
         action_str: String representation of the action.
         expected_action: Expected Action enum value.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
-    results = [fake_tool_result_factory()]
 
-    with patch("lintro.utils.summary_tables.print_summary_table") as mock_print:
-        logger._print_summary_table(action_str, results)
-        call_kwargs = mock_print.call_args.kwargs
-        assert_that(call_kwargs["action"]).is_equal_to(expected_action)
+    logger._print_summary_table(expected_action, [fake_tool_result_factory()])
+    from_enum = capsys.readouterr().out
+
+    logger._print_summary_table(action_str, [fake_tool_result_factory()])
+    from_string = capsys.readouterr().out
+
+    assert_that(from_string).is_equal_to(from_enum)
 
 
 # =============================================================================
-# Totals Table Delegation Tests
+# Totals Table Tests
 # =============================================================================
 
 
-def test_print_totals_table_delegates_to_module_function() -> None:
-    """Verify _print_totals_table delegates to print_totals_table function.
+def test_print_totals_table_renders_check_mode_metrics(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CHECK mode renders the issue, severity, fixable and file counts.
 
-    The method should pass through all parameters to the module-level
-    print_totals_table function.
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.summary_tables.print_totals_table") as mock_print:
-        logger._print_totals_table(
-            action=Action.CHECK,
-            total_issues=5,
-            affected_files=2,
-        )
-        mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
-            action=Action.CHECK,
-            total_issues=5,
-            total_fixed=0,
-            total_remaining=0,
-            affected_files=2,
-            severity_errors=0,
-            severity_warnings=0,
-            severity_info=0,
-            total_ai_applied=0,
-            total_ai_verified=0,
-            total_fixable=0,
-        )
+    logger._print_totals_table(
+        action=Action.CHECK,
+        total_issues=5,
+        affected_files=2,
+    )
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("TOTALS")
+    assert_that(out).contains("Total Issues")
+    assert_that(out).contains("Affected Files")
+    assert_that(out).does_not_contain("Remaining Issues")
 
 
-def test_print_totals_table_delegates_fix_mode() -> None:
-    """Verify _print_totals_table delegates FIX mode parameters correctly.
+def test_print_totals_table_renders_fix_mode_metrics(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """FIX mode renders fixed, AI and remaining counts instead of issues.
 
-    FIX mode should pass total_fixed and total_remaining to the
-    underlying function.
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.summary_tables.print_totals_table") as mock_print:
-        logger._print_totals_table(
-            action=Action.FIX,
-            total_fixed=10,
-            total_remaining=3,
-            affected_files=5,
-            total_ai_applied=2,
-            total_ai_verified=1,
-        )
-        mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
-            action=Action.FIX,
-            total_issues=0,
-            total_fixed=10,
-            total_remaining=3,
-            affected_files=5,
-            severity_errors=0,
-            severity_warnings=0,
-            severity_info=0,
-            total_ai_applied=2,
-            total_ai_verified=1,
-            total_fixable=0,
-        )
+    logger._print_totals_table(
+        action=Action.FIX,
+        total_fixed=10,
+        total_remaining=3,
+        affected_files=5,
+        total_ai_applied=2,
+        total_ai_verified=1,
+    )
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("Fixed Issues (Native)")
+    assert_that(out).contains("AI Applied Fixes")
+    assert_that(out).contains("AI Resolved Fixes")
+    assert_that(out).contains("Total Resolved")
+    assert_that(out).contains("Remaining Issues")
 
 
 @pytest.mark.parametrize(
-    ("action", "kwargs"),
+    ("action", "kwargs", "expected_metric"),
     [
-        (Action.CHECK, {"total_issues": 0, "affected_files": 0}),
-        (Action.CHECK, {"total_issues": 10, "affected_files": 5}),
-        (Action.FIX, {"total_fixed": 5, "total_remaining": 2, "affected_files": 3}),
-        (Action.TEST, {"total_issues": 4, "affected_files": 1}),
+        (Action.CHECK, {"total_issues": 0, "affected_files": 0}, "Total Issues"),
+        (Action.CHECK, {"total_issues": 10, "affected_files": 5}, "Total Issues"),
+        (
+            Action.FIX,
+            {"total_fixed": 5, "total_remaining": 2, "affected_files": 3},
+            "Remaining Issues",
+        ),
+        (Action.TEST, {"total_issues": 4, "affected_files": 1}, "Total Issues"),
     ],
 )
 def test_print_totals_table_various_inputs(
     action: Action,
     kwargs: dict[str, int],
+    expected_metric: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_totals_table handles various action and parameter combos.
+    """Every action and count combination renders its own metric rows.
 
     Args:
         action: Action type to test.
         kwargs: Keyword arguments to pass to the method.
+        expected_metric: Metric row the rendered table must carry.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.summary_tables.print_totals_table") as mock_print:
-        logger._print_totals_table(action=action, **kwargs)
-        mock_print.assert_called_once()
+    logger._print_totals_table(action=action, **kwargs)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("TOTALS")
+    assert_that(out).contains(expected_metric)
 
 
 # =============================================================================
-# Final Status Delegation Tests
+# Final Status Tests
 # =============================================================================
 
 
-def test_print_final_status_delegates_to_module_function() -> None:
-    """Verify _print_final_status delegates to print_final_status function.
+def test_print_final_status_reports_the_check_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A CHECK run with issues reports the count as a failure.
 
-    The method should pass the console output function, action, and
-    total issues to the module-level function.
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_final_status") as mock_print:
-        logger._print_final_status(Action.CHECK, 5)
-        mock_print.assert_called_once()
+    logger._print_final_status(Action.CHECK, 5)
+
+    assert_that(capsys.readouterr().out).contains("Found 5 issues.")
 
 
-def test_print_final_status_converts_string_action() -> None:
-    """Verify _print_final_status accepts string action values.
+def test_print_final_status_accepts_a_string_action(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The ``fmt`` alias produces the FIX wording, not the CHECK wording.
 
-    String actions should be passed through and handled by the underlying
-    function's normalization logic.
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_final_status") as mock_print:
-        logger._print_final_status("fmt", 3)
-        mock_print.assert_called_once()
+    logger._print_final_status("fmt", 3)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("Fixed 3 issues.")
+    assert_that(out).does_not_contain("Found")
 
 
 @pytest.mark.parametrize(
-    ("action", "total_issues"),
+    ("action", "total_issues", "expected_text"),
     [
-        (Action.CHECK, 0),
-        (Action.CHECK, 10),
-        (Action.FIX, 0),
-        (Action.FIX, 5),
-        ("check", 3),
-        ("fmt", 7),
+        (Action.CHECK, 0, "No issues found."),
+        (Action.CHECK, 10, "Found 10 issues."),
+        (Action.FIX, 0, "No issues found."),
+        (Action.FIX, 5, "Fixed 5 issues."),
+        ("check", 3, "Found 3 issues."),
+        ("fmt", 7, "Fixed 7 issues."),
     ],
 )
 def test_print_final_status_various_inputs(
     action: Action | str,
     total_issues: int,
+    expected_text: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_final_status handles various action and issue combinations.
-
-    Both enum and string action values with different issue counts should
-    be properly delegated.
-
+    """Each action and issue count combination prints its own wording.
 
     Args:
         action: Action type (enum or string).
         total_issues: Number of total issues.
+        expected_text: Status line the run must print.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_final_status") as mock_print:
-        logger._print_final_status(action, total_issues)
-        mock_print.assert_called_once()
+    logger._print_final_status(action, total_issues)
+
+    assert_that(capsys.readouterr().out).contains(expected_text)
 
 
 # =============================================================================
-# Final Status Format Delegation Tests
+# Final Status Format Tests
 # =============================================================================
 
 
-def test_print_final_status_format_delegates_correctly() -> None:
-    """Verify _print_final_status_format delegates with correct parameters.
+def test_print_final_status_format_reports_fixed_and_remaining(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A format run reports the fixed and remaining counts on separate lines.
 
-    The method should pass the console output function, total fixed,
-    and total remaining to the module-level function.
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_final_status_format") as mock_print:
-        logger._print_final_status_format(10, 2)
-        mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
-            total_fixed=10,
-            total_remaining=2,
-        )
+    logger._print_final_status_format(10, 2)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("10 fixed")
+    assert_that(out).contains("2 remaining")
 
 
 @pytest.mark.parametrize(
-    ("total_fixed", "total_remaining"),
+    ("total_fixed", "total_remaining", "expected_text"),
     [
-        (0, 0),
-        (5, 0),
-        (0, 3),
-        (10, 5),
-        (100, 50),
+        (0, 0, "No issues found."),
+        (5, 0, "5 fixed"),
+        (0, 3, "3 remaining"),
+        (10, 5, "5 remaining"),
+        (100, 50, "100 fixed"),
     ],
 )
 def test_print_final_status_format_various_counts(
     total_fixed: int,
     total_remaining: int,
+    expected_text: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify _print_final_status_format handles various count combinations.
-
-    Different fixed and remaining combinations should be properly passed
-    to the underlying function.
-
+    """Each fixed/remaining combination prints the matching status line.
 
     Args:
         total_fixed: Number of fixed issues.
         total_remaining: Number of remaining issues.
+        expected_text: Status line the run must print.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_final_status_format") as mock_print:
-        logger._print_final_status_format(total_fixed, total_remaining)
-        mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
-            total_fixed=total_fixed,
-            total_remaining=total_remaining,
-        )
+    logger._print_final_status_format(total_fixed, total_remaining)
+
+    assert_that(capsys.readouterr().out).contains(expected_text)
 
 
 # =============================================================================
-# ASCII Art Delegation Tests
+# ASCII Art Tests
 # =============================================================================
 
 
-def test_print_ascii_art_delegates_correctly() -> None:
-    """Verify _print_ascii_art delegates with correct parameters.
+@pytest.mark.usefixtures("labelled_ascii_art")
+def test_print_ascii_art_reaches_the_terminal_untracked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Art reaches an interactive stdout but never the captured buffer.
 
-    The method should pass the untracked console writer, issue count, and
-    the resolved ``enabled`` flag to the module-level print_ascii_art
-    function. Art must use the untracked writer so it never lands in the
-    captured buffer backing report.md/console.log.
+    The buffer backs ``report.md`` and ``console.log``, so the braille blob
+    must stay out of it.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
     """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
-        logger._print_ascii_art(5)
-        mock_print.assert_called_once_with(
-            console_output_func=logger._emit_untracked,
-            issue_count=5,
-            enabled=True,
-            output_stream=sys.stdout,
-        )
+    logger._print_ascii_art(5)
+
+    assert_that(stdout.getvalue()).contains("ART:fail.txt")
+    assert_that(logger.get_buffer()).is_empty()
 
 
-@pytest.mark.parametrize("issue_count", [0, 1, 5, 10, 100])
-def test_print_ascii_art_various_counts(issue_count: int) -> None:
-    """Verify _print_ascii_art handles various issue counts.
-
-    Different issue counts should be properly passed to display
-    either success or failure ASCII art.
-
+@pytest.mark.usefixtures("labelled_ascii_art")
+@pytest.mark.parametrize(
+    ("issue_count", "expected_art"),
+    [
+        (0, "ART:success.txt"),
+        (1, "ART:fail.txt"),
+        (5, "ART:fail.txt"),
+        (100, "ART:fail.txt"),
+    ],
+)
+def test_print_ascii_art_selects_art_by_issue_count(
+    issue_count: int,
+    expected_art: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clean run gets the success art; any issue count gets the failure art.
 
     Args:
         issue_count: Number of issues to display.
+        expected_art: Art asset the count must select.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+    logger = ThreadSafeConsoleLogger()
+
+    logger._print_ascii_art(issue_count)
+
+    assert_that(stdout.getvalue()).contains(expected_art)
+
+
+@pytest.mark.usefixtures("labelled_ascii_art")
+def test_print_ascii_art_emits_nothing_when_art_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``art_enabled=False`` (``output.art: false`` / ``--no-art``) prints no art.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+    logger = ThreadSafeConsoleLogger(art_enabled=False)
+
+    logger._print_ascii_art(0)
+
+    assert_that(stdout.getvalue()).is_empty()
+
+
+@pytest.mark.usefixtures("labelled_ascii_art")
+def test_print_ascii_art_goes_to_stderr_when_output_is_routed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Routed output keeps stdout clean by sending art to stderr instead.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    stdout, stderr = patch_tty_streams(monkeypatch=monkeypatch)
+    logger = ThreadSafeConsoleLogger(route_stderr=True)
+
+    logger._print_ascii_art(0)
+
+    assert_that(stderr.getvalue()).contains("ART:success.txt")
+    assert_that(stdout.getvalue()).is_empty()
+
+
+@pytest.mark.usefixtures("labelled_ascii_art")
+def test_print_ascii_art_is_suppressed_on_a_non_tty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Piped or captured output gets no art, keeping documents parseable.
+
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
-        logger._print_ascii_art(issue_count)
-        mock_print.assert_called_once_with(
-            console_output_func=logger._emit_untracked,
-            issue_count=issue_count,
-            enabled=True,
-            output_stream=sys.stdout,
-        )
+    logger._print_ascii_art(0)
 
-
-def test_print_ascii_art_delegates_disabled_flag() -> None:
-    """Verify _print_ascii_art forwards a disabled art flag.
-
-    When the logger is constructed with ``art_enabled=False`` (config
-    ``output.art: false`` or ``--no-art``), the disabled state must be passed
-    through so no art is emitted.
-    """
-    logger = ThreadSafeConsoleLogger(art_enabled=False)
-
-    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
-        logger._print_ascii_art(0)
-        mock_print.assert_called_once_with(
-            console_output_func=logger._emit_untracked,
-            issue_count=0,
-            enabled=False,
-            output_stream=sys.stdout,
-        )
-
-
-def test_print_ascii_art_uses_stderr_tty_gate_when_routed() -> None:
-    """Verify stderr routing checks stderr for interactive output."""
-    logger = ThreadSafeConsoleLogger(route_stderr=True)
-
-    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
-        logger._print_ascii_art(0)
-        mock_print.assert_called_once_with(
-            console_output_func=logger._emit_untracked,
-            issue_count=0,
-            enabled=True,
-            output_stream=sys.stderr,
-        )
+    assert_that(capsys.readouterr().out).is_empty()
 
 
 # =============================================================================
@@ -406,75 +431,61 @@ def test_print_ascii_art_uses_stderr_tty_gate_when_routed() -> None:
 
 def test_execution_summary_outputs_header_and_border(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary outputs properly styled header.
-
-    The execution summary should begin with a styled header including
-    the section title and border for visual clarity.
-
+    """The execution summary opens with its styled header and border.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with (
-        patch.object(logger, "console_output") as mock_output,
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art"),
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        # Should have multiple output calls including header
-        assert_that(mock_output.call_count).is_greater_than(0)
+    logger.print_execution_summary(Action.CHECK, results)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("EXECUTION SUMMARY")
+    assert_that(out).contains("=" * 50)
 
 
-def test_execution_summary_calls_all_components(
+def test_execution_summary_renders_both_tables(
     fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary invokes all required components.
-
-    The method should call summary table and ASCII art display as part
-    of the complete execution summary output.
-
+    """The summary carries the per-tool table and the totals table together.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=3)]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table") as mock_table,
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, results)
-        mock_table.assert_called_once()
-        mock_art.assert_called_once()
+    logger.print_execution_summary(Action.CHECK, results)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("test-tool")
+    assert_that(out).contains("TOTALS")
+    assert_that(out).contains("Total Issues")
 
 
-def test_execution_summary_empty_results_handled(
-    console_capture: tuple[Callable[[str], None], list[str]],
+def test_execution_summary_empty_results_report_zero_totals(
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary handles empty results list gracefully.
-
-    Even with no tool results, the summary should complete without errors
-    and show appropriate totals (zero).
-
+    """No tool results still renders a complete summary with zero totals.
 
     Args:
-        console_capture: Fixture for capturing console output.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art") as mock_art,
-    ):
-        logger.print_execution_summary(Action.CHECK, [])
-        mock_art.assert_called_once_with(total_issues=0)
+    logger.print_execution_summary(Action.CHECK, [])
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("EXECUTION SUMMARY")
+    assert_that(out).contains("Total Issues")
+    assert_that(out).contains("Affected Files")
 
 
 @pytest.mark.parametrize(
@@ -484,24 +495,20 @@ def test_execution_summary_empty_results_handled(
 def test_execution_summary_all_action_types(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     action: Action,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify print_execution_summary handles all action types.
-
-    CHECK, FIX, and TEST actions should all produce valid summary output
-    without errors.
-
+    """CHECK, FIX and TEST all produce a complete summary without errors.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
         action: Action type to test.
+        capsys: Pytest stdout/stderr capture fixture.
     """
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with (
-        patch.object(logger, "console_output"),
-        patch.object(logger, "_print_summary_table"),
-        patch.object(logger, "_print_ascii_art"),
-    ):
-        # Should not raise for any action type
-        logger.print_execution_summary(action, results)
+    logger.print_execution_summary(action, results)
+
+    out = capsys.readouterr().out
+    assert_that(out).contains("EXECUTION SUMMARY")
+    assert_that(out).contains("TOTALS")
