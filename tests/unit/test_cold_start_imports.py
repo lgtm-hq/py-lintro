@@ -13,6 +13,7 @@ in-process assertion proves nothing.
 from __future__ import annotations
 
 import json
+import re
 import subprocess  # nosec B404 - fixed argv against this interpreter; shell=False
 import sys
 from dataclasses import dataclass
@@ -189,5 +190,10 @@ def test_help_renders_every_lazily_loaded_command() -> None:
     assert_that(report.exit_code).is_equal_to(0)
     for canonical in _COMMAND_MODULES:
         assert_that(report.output).contains(canonical)
+    # Substring matching would pass on aliases that prefix their own canonical
+    # name (`rev`/`review`, `w`/`watch`), so match each alias as a whole token.
+    tokens = set(re.findall(r"[\w.-]+", report.output))
     for alias in _COMMAND_ALIASES:
-        assert_that(report.output).contains(alias)
+        assert_that(tokens).described_as(
+            f"alias {alias!r} missing from the help table",
+        ).contains(alias)

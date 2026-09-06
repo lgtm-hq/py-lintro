@@ -26,7 +26,9 @@ from loguru import logger
 # Entry-point group third-party packages advertise a tool plugin under.
 ENTRY_POINT_GROUP = "lintro.tools"
 
-# Pre-1.0 spelling of the group, still honored with a deprecation warning.
+# Pre-1.0 spelling of the group. Names advertised under it are still read here,
+# silently; `lintro.plugins.discovery` is what warns, and only when it actually
+# loads a plugin from the legacy group.
 LEGACY_ENTRY_POINT_GROUP = "lintro.plugins"
 
 # Sources registered by higher layers, called on every lookup. Populated by
