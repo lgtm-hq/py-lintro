@@ -6,16 +6,18 @@ module that was. The
 repo-wide module-size gate warns at 800 lines, so it cannot hold this line —
 a 600-line review module would pass it and quietly undo the split.
 
-The GitHub-surface modules (``github.py`` and ``github_*.py``) are the one
-exception: they are owned by #1974, which splits them separately, so they are
-listed here by name rather than matched by a prefix. A new module in the
-package is covered by the ratchet from the moment it is added, and shrinking
-#1974's list as those modules land needs no change here.
+The GitHub-surface modules were the one exception, listed by name while epic
+#1974 split them on its own schedule. #2305 was the last of those slices, so
+:data:`GITHUB_SURFACE_MODULES` is now empty and the ratchet covers every
+module in the package without exception. The set stays here, empty, because
+its emptiness is the assertion: a future issue must not be able to re-open the
+exemption by quietly adding a name back.
 
 Scope is the ``lintro/ai/review`` package directory itself, which is what
 #2301's slices enumerated, plus the ``sticky/`` subpackage #2304 split
-``github_sticky.py`` into — a split that moved 2,174 lines out of the glob
-would otherwise have bought the ratchet's silence rather than passing it. Its
+``github_sticky.py`` into and the ``lifecycle/`` subpackage #2305 split
+``github_lifecycle.py`` into — a split that moved lines out of the glob would
+otherwise have bought the ratchet's silence rather than passing it. The
 ``chunker/`` and ``context/`` subpackages are part of the wider >500-line
 burn-down owned by #1995 and are not ratcheted here; extend this to ``rglob``
 when that issue lands.
@@ -23,9 +25,9 @@ when that issue lands.
 The second ratchet is #2301's other structural criterion: no function in the
 package takes more than 8 parameters. Ruff's ``PLR0913`` enforces that repo-wide
 with a per-file baseline, and the closing slice emptied that baseline for this
-package by bundling the last three fat signatures into frozen ``kw_only``
-request dataclasses. Asserting it here as well means a re-grown signature fails
-on its own terms rather than only as a new baseline entry someone might add.
+package by bundling the last fat signatures into frozen ``kw_only`` request
+dataclasses. Asserting it here as well means a re-grown signature fails on its
+own terms rather than only as a new baseline entry someone might add.
 """
 
 from __future__ import annotations
@@ -48,18 +50,15 @@ MAX_REVIEW_FUNCTION_PARAMETERS: int = 8
 REVIEW_PACKAGE = Path(__file__).resolve().parents[4] / "lintro" / "ai" / "review"
 
 #: Subpackages ratcheted alongside the package directory itself. ``sticky/``
-#: is #2304's split of ``github_sticky.py``; entries are added here whenever a
-#: module in scope is split into a package rather than sibling modules.
-RATCHETED_SUBPACKAGES: tuple[str, ...] = ("sticky",)
+#: is #2304's split of ``github_sticky.py`` and ``lifecycle/`` is #2305's split
+#: of ``github_lifecycle.py``; entries are added here whenever a module in
+#: scope is split into a package rather than sibling modules.
+RATCHETED_SUBPACKAGES: tuple[str, ...] = ("lifecycle", "sticky")
 
-#: GitHub-surface modules split by #1974, not by #2301. Entries leave this set
-#: as that issue lands; nothing is ever added to it.
-GITHUB_SURFACE_MODULES: frozenset[str] = frozenset(
-    {
-        "github.py",
-        "github_lifecycle.py",
-    },
-)
+#: GitHub-surface modules #1974 split rather than #2301. Empty since #2305
+#: landed the last slice: every module in the package is now ratcheted.
+#: Entries may only ever leave this set.
+GITHUB_SURFACE_MODULES: frozenset[str] = frozenset()
 
 
 def _ratcheted_modules() -> list[Path]:
@@ -112,15 +111,14 @@ def test_no_review_module_exceeds_the_size_ratchet() -> None:
     assert_that(oversized).is_empty()
 
 
-def test_github_surface_exceptions_all_exist() -> None:
-    """Every named #1974 exception is still a module in the package.
+def test_the_github_surface_exemption_is_closed() -> None:
+    """#1974's exemption is spent, so the ratchet covers the whole package.
 
-    A stale name here would silently widen the exemption to a file that no
-    longer exists while a same-named new module inherited the pass.
+    Held as its own assertion rather than left implicit in an empty set: the
+    two other tests skip whatever this names, so re-adding a name here is the
+    one edit that can widen the ratchet's blind spot without failing anything.
     """
-    present = {path.name for path in REVIEW_PACKAGE.glob("*.py")}
-
-    assert_that(GITHUB_SURFACE_MODULES.issubset(present)).is_true()
+    assert_that(GITHUB_SURFACE_MODULES).is_empty()
 
 
 def _parameter_count(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
@@ -150,8 +148,7 @@ def test_no_review_function_exceeds_the_parameter_ratchet() -> None:
     """No function in the package takes more than 8 parameters.
 
     #2301's acceptance criterion, held as a test rather than as the absence of
-    a ruff baseline entry. The GitHub-surface modules are #1974's, and still
-    carry their ``PLR0913`` entries.
+    a ruff baseline entry.
     """
     offenders: dict[str, int] = {}
     for path in _ratcheted_modules():

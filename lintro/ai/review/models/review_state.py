@@ -1,4 +1,4 @@
-"""Versioned review state for artifacts and legacy sticky blobs (#2154)."""
+"""Versioned review state for workflow artifacts and leftover blobs (#2154)."""
 
 from __future__ import annotations
 
@@ -19,9 +19,10 @@ __all__ = ["ReviewState"]
 class ReviewState:
     """Machine-readable review history for one pull request.
 
-    Authoritative CI state lives in workflow artifacts (schema 3).
-    Schema 2 sticky blobs still decode for one-time migration of
-    findings and runs; coverage is never seeded from a comment.
+    Authoritative CI state lives in workflow artifacts (schema 3). A schema 2
+    blob left behind on an older sticky comment still decodes, so a round can
+    recover runs and findings from it; coverage is never seeded from a
+    comment, and a v1 blob is not read at all (#2305).
 
     Attributes:
         version: Schema version of the decoded payload.
@@ -42,7 +43,6 @@ class ReviewState:
         event: Workflow event (CI only).
         run_id: Actions run id that wrote the state.
         lintro_version: Lintro version that wrote the state.
-        legacy: True when findings/runs were seeded from a sticky blob.
         truncated: True when older runs or resolved findings were pruned.
     """
 
@@ -61,7 +61,6 @@ class ReviewState:
     event: str = ""
     run_id: str = ""
     lintro_version: str = ""
-    legacy: bool = False
     truncated: bool = False
 
     @property
@@ -120,7 +119,6 @@ class ReviewState:
             "event": self.event,
             "run_id": self.run_id,
             "lintro_version": self.lintro_version,
-            "legacy": self.legacy,
             "runs": [run.to_dict() for run in self.runs],
             "findings": [record.to_dict() for record in self.findings],
             "coverage": [record.to_dict() for record in self.coverage],
@@ -192,7 +190,6 @@ class ReviewState:
             event=str(payload.get("event", "")),
             run_id=str(payload.get("run_id", "")),
             lintro_version=str(payload.get("lintro_version", "")),
-            legacy=bool(payload.get("legacy", False)),
             truncated=bool(payload.get("truncated", False)),
         )
 

@@ -24,11 +24,11 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.review_state_codec import decode_state, legacy_state_block
+from lintro.ai.review.review_state_codec import decode_state, leftover_state_block
 from lintro.ai.review.sticky import (
     advance_review_state,
     build_sticky_comment,
-    parse_review_state_v2,
+    parse_sticky_state,
 )
 
 
@@ -163,11 +163,11 @@ def test_second_round_carries_and_resolves_findings(
     assert_that(state.resolved_findings[0].resolved_round).is_equal_to(2)
 
 
-def test_sticky_migrates_a_v1_state_blob(
+def test_sticky_treats_a_v1_state_blob_as_absent(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A v1 blob from an older lintro is migrated instead of discarded."""
-    legacy = json.dumps(
+    """A pre-v2 blob is not migrated: the board starts a fresh history (#2305)."""
+    retired = json.dumps(
         {
             "version": 1,
             "runs": [
@@ -176,8 +176,8 @@ def test_sticky_migrates_a_v1_state_blob(
             ],
         },
     )
-    prior_body = f"## old\n\n{STATE_MARKER_PREFIX} {legacy} {STATE_MARKER_SUFFIX}"
-    prior = parse_review_state_v2(body=prior_body)
+    prior_body = f"## old\n\n{STATE_MARKER_PREFIX} {retired} {STATE_MARKER_SUFFIX}"
+    prior = parse_sticky_state(body=prior_body)
     state = advance_review_state(
         request=StickyRequest(
             result=sample_review_result,
@@ -185,49 +185,9 @@ def test_sticky_migrates_a_v1_state_blob(
         ),
     )
 
-    assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
+    assert_that(prior.runs).is_empty()
+    assert_that([run.round for run in state.runs]).is_equal_to([1])
     assert_that(state.findings).is_not_empty()
-
-
-def test_legacy_prior_runs_argument_still_works(
-    sample_review_result: ReviewResult,
-) -> None:
-    """The ``prior_runs`` compatibility path keeps cumulative telemetry."""
-    first = advance_review_state(request=StickyRequest(result=sample_review_result))
-    body = build_sticky_comment(
-        request=StickyRequest(
-            result=sample_review_result,
-            prior_runs=[run.to_dict() for run in first.runs],
-        ),
-    )
-    state = advance_review_state(
-        request=StickyRequest(
-            result=sample_review_result,
-            prior_runs=[run.to_dict() for run in first.runs],
-        ),
-    )
-
-    assert_that(body).contains("### 🕘 History")
-    assert_that(state.runs).is_length(2)
-    assert_that([run.round for run in state.runs]).is_equal_to([1, 2])
-
-
-def test_legacy_prior_runs_with_multiple_raw_v1_dicts_renumbers_positionally(
-    sample_review_result: ReviewResult,
-) -> None:
-    """Raw v1 dicts (no ``round`` key) trigger the positional-renumber branch."""
-    raw_v1_runs = [
-        {"model": "claude", "total": 100, "cost": 0.01},
-        {"model": "claude", "total": 200, "cost": 0.02},
-    ]
-    state = advance_review_state(
-        request=StickyRequest(
-            result=sample_review_result,
-            prior_runs=raw_v1_runs,
-        ),
-    )
-
-    assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
 
 
 def test_error_comment_preserves_finding_history(
@@ -255,23 +215,6 @@ def test_error_comment_preserves_finding_history(
     assert_that(prior_state.runs).is_length(1)
     assert_that(prior_state.open_findings).is_length(1)
     assert_that(prior_state.open_findings[0].status).is_equal_to(FindingStatus.OPEN)
-
-
-def test_error_comment_legacy_prior_runs_path_preserves_history(
-    sample_review_result: ReviewResult,
-) -> None:
-    """The legacy ``prior_runs`` branch (no ``prior_state``) also survives."""
-    first = advance_review_state(
-        request=StickyRequest(result=sample_review_result, head_sha="sha1"),
-    )
-    body = format_error_comment(
-        error=RuntimeError("boom"),
-        provider="anthropic",
-        prior_runs=[run.to_dict() for run in first.runs],
-    )
-
-    assert_that(body).contains("showing round 1 results below")
-    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
 
 
 def test_sticky_comment_never_exceeds_github_hard_limit(
@@ -440,7 +383,7 @@ def test_leftover_blob_still_decodes_for_migration() -> None:
             ),
         ),
     )
-    body = f"## Review{legacy_state_block(state=state)}"
+    body = f"## Review{leftover_state_block(state=state)}"
     decoded = decode_state(body=body)
 
     assert_that(decoded.runs[0].sha).is_equal_to("realsha")
@@ -455,7 +398,7 @@ def test_floor_overflow_no_longer_appends_a_state_block() -> None:
     state = ReviewState(runs=(monster_run,), findings=(), truncated=False)
     body = fit_body_with_state(
         assemble=lambda *, limits: "visible body",
-        counts=SectionCounts(prior_runs=0, open=0, resolved=0),
+        counts=SectionCounts(history_rows=0, open=0, resolved=0),
         state=state,
     )
 

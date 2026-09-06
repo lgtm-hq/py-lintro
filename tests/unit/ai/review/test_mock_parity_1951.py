@@ -40,7 +40,7 @@ from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.review_state_codec import leftover_state_block
 from lintro.ai.review.sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
@@ -416,7 +416,7 @@ def test_regressed_thread_titles_say_regressed(
 ) -> None:
     """The fresh thread's title carries the suffix, not just a provenance note."""
     finding = _finding()
-    prior_body = STICKY_MARKER + legacy_state_block(
+    prior_body = STICKY_MARKER + leftover_state_block(
         state=_resolved_state(finding=finding),
     )
     reporter = MagicMock()

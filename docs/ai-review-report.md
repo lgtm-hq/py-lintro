@@ -37,3 +37,9 @@ or a positive value.
 
 The primary sticky updates in place. When history would overflow GitHub’s comment cap,
 an archive sticky is created and the primary keeps heading, aggregates, and a link.
+
+A pull request whose sticky comment predates schema v2 (lintro before #1916,
+August 2026) is not migrated. Its comment is still updated in place, but the run history
+behind it starts again from round 1: v1 recorded run totals with no round numbers and no
+per-finding identity, so there was nothing to carry forward that would not have been
+guessed.

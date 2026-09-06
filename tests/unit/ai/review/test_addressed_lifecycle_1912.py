@@ -15,25 +15,25 @@ from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.finding_matcher import fingerprint_for
-from lintro.ai.review.github import post_review_to_github
+from lintro.ai.review.github import ReviewPostOptions, post_review_to_github
 from lintro.ai.review.github_constants import STICKY_MARKER
-from lintro.ai.review.github_lifecycle import (
+from lintro.ai.review.lifecycle.banners import (
     LIFECYCLE_OPEN,
     apply_lifecycle_block,
-    finding_marker,
-    parse_finding_marker,
     regression_provenance,
     render_lifecycle_block,
-    sync_addressed_lifecycle,
 )
+from lintro.ai.review.lifecycle.markers import finding_marker, parse_finding_marker
+from lintro.ai.review.lifecycle.threads import sync_addressed_lifecycle
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.lifecycle_sync_request import LifecycleSyncRequest
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.review_state_codec import leftover_state_block
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 _HEAD_SHA = "abc1234def5678"
@@ -246,10 +246,12 @@ def test_resolved_finding_is_bannered_and_its_thread_resolved_by_default() -> No
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -265,11 +267,13 @@ def test_auto_resolve_false_keeps_the_banner_and_skips_the_mutation() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
-        auto_resolve=False,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+            auto_resolve=False,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -288,10 +292,12 @@ def test_partial_progress_never_resolves_the_thread() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        partial=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            partial=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -311,13 +317,15 @@ def test_regressed_thread_is_bannered_and_stays_resolved() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
-        new_thread_urls={
-            record.key: "https://github.com/owner/name/pull/7#discussion_r9",
-        },
+        request=LifecycleSyncRequest(
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+            new_thread_urls={
+                record.key: "https://github.com/owner/name/pull/7#discussion_r9",
+            },
+        ),
     )
 
     body = reporter.edits[0][1]
@@ -335,10 +343,12 @@ def test_a_regression_without_a_new_thread_does_not_link_one() -> None:
 
     sync_addressed_lifecycle(
         reporter=reporter,
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     body = reporter.edits[0][1]
@@ -366,11 +376,13 @@ def test_one_thread_gets_one_banner_even_when_two_stages_apply() -> None:
 
     sync_addressed_lifecycle(
         reporter=reporter,
-        partial=(record,),
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            partial=(record,),
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     assert_that(reporter.edits).is_length(1)
@@ -397,12 +409,14 @@ def test_a_regression_outranks_an_addressed_stamp_on_the_same_thread() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
-        new_thread_urls={record.key: url},
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+            new_thread_urls={record.key: url},
+        ),
     )
 
     assert_that(reporter.edits).is_length(1)
@@ -426,10 +440,12 @@ def test_a_record_without_a_comment_id_is_never_stamped() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -455,10 +471,12 @@ def test_unchanged_body_is_never_patched() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: stamped},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: stamped},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -472,10 +490,12 @@ def test_a_failed_comment_edit_is_reported_rather_than_raised() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.failed).contains(record.key)
@@ -492,10 +512,12 @@ def test_a_failed_thread_listing_keeps_the_banner() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -510,10 +532,12 @@ def test_a_comment_whose_body_is_unknown_is_left_alone() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -533,7 +557,7 @@ def _sticky_body(*, state: ReviewState) -> str:
     Returns:
         The comment body.
     """
-    return STICKY_MARKER + "\n\nprior round" + legacy_state_block(state=state)
+    return STICKY_MARKER + "\n\nprior round" + leftover_state_block(state=state)
 
 
 def _prior_state(*, findings: tuple[FindingRecord, ...]) -> ReviewState:
@@ -783,7 +807,7 @@ def test_auto_resolve_false_stops_the_mutation_end_to_end(
     post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        auto_resolve=False,
+        options=ReviewPostOptions(auto_resolve=False),
     )
 
     # The comment is still stamped as addressed, but the thread stays open.
@@ -851,7 +875,7 @@ def test_posting_survives_a_refused_comment_edit(
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        auto_resolve=auto_resolve,
+        options=ReviewPostOptions(auto_resolve=auto_resolve),
     )
 
     assert_that(posted).is_true()

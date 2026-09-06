@@ -1,11 +1,19 @@
-"""Encode, decode, migrate, and prune the hidden review-state blob.
+"""Encode, decode, and prune the hidden review-state blob.
 
 The blob lives in the sticky PR comment as an HTML comment so GitHub renders
 nothing while later rounds can recover the full history. Schema v2 adds
 per-round statistics and per-finding identity on top of v1's run aggregates;
 schema v3 adds the per-round convergence score and the per-finding evidence
-style it is derived from (#2099). v1 and v2 blobs are migrated on read and
-unknown versions start fresh rather than crashing a review run.
+style it is derived from (#2099). v2 blobs are read as unscored v3 history;
+every other version — v1 and anything newer than this build knows — decodes as
+no state at all rather than crashing a review run.
+
+v1 is deliberately not migrated (#2305). Its aggregates carried no round
+numbers and no finding identity, so reconstructing them meant guessing from
+list position; sticky state v2 shipped in #1916 and every open pull request
+has been re-reviewed since, which leaves the guess with nothing left to
+recover. A v1 blob is therefore treated as absent and the next round starts a
+fresh history.
 
 Both v2 -> v3 additions are optional keys that the record serializers omit
 when unset, so migrating a v2 blob emits no v3 keys: every run and finding parses
@@ -19,7 +27,6 @@ evidence of a quiet round.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -28,7 +35,6 @@ from lintro.ai.review.github_constants import (
     STATE_MARKER_PREFIX,
     STATE_MARKER_SUFFIX,
     STATE_VERSION,
-    STATE_VERSION_V1,
     STATE_VERSION_V2,
 )
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -38,10 +44,8 @@ from lintro.ai.review.models.run_record import RunRecord
 __all__ = [
     "decode_state",
     "encode_state",
-    "legacy_state_block",
-    "migrate_v1_runs",
+    "leftover_state_block",
     "prune_state_to_fit",
-    "renumber_if_legacy_v1",
     "render_state_block",
 ]
 
@@ -54,7 +58,7 @@ def encode_state(*, state: ReviewState) -> str:
 
     Returns:
         Compact JSON string. The stored version is always the current schema
-        version, so a migrated v1 or v2 blob is written back as v3.
+        version, so a v2 blob is written back as v3.
     """
     payload = state.to_dict()
     payload["version"] = STATE_VERSION
@@ -76,11 +80,13 @@ def render_state_block(*, state: ReviewState) -> str:
     return ""
 
 
-def legacy_state_block(*, state: ReviewState) -> str:
-    """Wrap encoded state in leftover-blob markers for decode/migration tests.
+def leftover_state_block(*, state: ReviewState) -> str:
+    """Wrap encoded state in leftover-blob markers for decode and prune tests.
 
-    New stickies never call this. The decoder still reads v1/v2 blobs so a
-    one-time migration can seed findings and runs.
+    New stickies never call this: #2154 moved authoritative state to workflow
+    artifacts. The decoder still reads a v2 blob left behind on an older
+    comment, and pruning has to measure the block it would produce, so the
+    renderer stays where both can reach it.
 
     Args:
         state: State to encode.
@@ -170,48 +176,6 @@ def _parse_findings(*, payload: dict[str, Any]) -> list[FindingRecord]:
     return [record for record in parsed if record is not None]
 
 
-def migrate_v1_runs(*, runs: list[RunRecord]) -> list[RunRecord]:
-    """Stamp sequential round numbers onto migrated v1 run records.
-
-    v1 stored no round number, so the position in the (chronological) run list
-    is the only available ordering signal. Shared by every entry point that
-    can receive legacy v1 run data (the sticky comment path and the error
-    comment path) so a given set of legacy runs always renumbers the same way
-    regardless of which surface parsed them.
-
-    Args:
-        runs: Runs parsed from a v1 blob, oldest first.
-
-    Returns:
-        The same runs with 1-based round numbers applied.
-    """
-    return [replace(run, round=index) for index, run in enumerate(runs, start=1)]
-
-
-def renumber_if_legacy_v1(*, runs: tuple[RunRecord, ...]) -> tuple[RunRecord, ...]:
-    """Detect and renumber runs that look like an unversioned v1 blob.
-
-    Callers that receive raw ``prior_runs`` mappings (rather than a full,
-    versioned state blob) have no explicit version tag to dispatch on. A v1
-    blob's runs all parse with the round-field default of ``1``, which is the
-    only signal available; a single real round-1 run is indistinguishable
-    from that and is left alone, since renumbering it would be a no-op. This
-    single detection rule is shared by every such entry point (the sticky
-    comment path and the error comment path) so a given set of legacy runs
-    always renumbers the same way regardless of which surface parsed them.
-
-    Args:
-        runs: Runs already parsed via ``RunRecord.from_dict``.
-
-    Returns:
-        The renumbered runs when the v1 heuristic matches, otherwise ``runs``
-        unchanged.
-    """
-    if runs and all(run.round == 1 for run in runs):
-        return tuple(migrate_v1_runs(runs=list(runs)))
-    return runs
-
-
 def decode_state(*, body: str) -> ReviewState:
     """Decode the review state embedded in a sticky comment body.
 
@@ -227,23 +191,20 @@ def decode_state(*, body: str) -> ReviewState:
     if payload is None:
         return ReviewState()
 
-    # Require a genuine int: bool is an int subclass (True/False would
-    # otherwise silently decode as v1/v2), and a float like 2.9 would
-    # truncate to a version that was never actually written.
-    version = payload.get("version", STATE_VERSION_V1)
+    # Require a genuine int. ``bool`` is an int subclass, so ``True`` would
+    # otherwise compare equal to a version number, and a float like 2.9 would
+    # read as a version that was never actually written. A missing key is the
+    # unversioned v1 shape and fails the same check.
+    version = payload.get("version")
     if isinstance(version, bool) or not isinstance(version, int):
         return ReviewState()
 
-    if version == STATE_VERSION_V1:
-        # v1 stored runs only, and no round numbers; findings tracking did not
-        # exist yet, so there is nothing else to carry forward.
-        return ReviewState(
-            version=STATE_VERSION,
-            runs=tuple(migrate_v1_runs(runs=_parse_runs(payload=payload))),
-        )
     if version not in (STATE_VERSION_V2, STATE_VERSION):
-        # Forward-incompatible blob written by a newer lintro: start fresh
-        # instead of guessing at unknown semantics.
+        # Two cases, one answer. A v1 or unversioned blob predates round
+        # numbers and finding identity, and #2305 retired its migration, so it
+        # is read as absent. A blob written by a newer lintro is
+        # forward-incompatible, and starting fresh beats guessing at unknown
+        # semantics.
         return ReviewState()
 
     # v2 -> v3 needs no field rewriting: the record parsers default the two
@@ -258,7 +219,7 @@ def decode_state(*, body: str) -> ReviewState:
 
 def _block_length(*, state: ReviewState) -> int:
     """Return the encoded leftover-blob length used by prune."""
-    return len(legacy_state_block(state=state))
+    return len(leftover_state_block(state=state))
 
 
 def prune_state_to_fit(

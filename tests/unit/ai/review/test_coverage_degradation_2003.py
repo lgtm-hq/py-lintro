@@ -803,7 +803,7 @@ def test_sticky_history_marks_a_prior_capped_round(
         for body in build_sticky_bodies(
             request=StickyRequest(
                 result=sample_review_result,
-                prior_runs=[limited],
+                prior_state=ReviewState(runs=(RunRecord.from_dict(limited),)),
                 transport="cli",
             ),
         )
@@ -813,7 +813,7 @@ def test_sticky_history_marks_a_prior_capped_round(
         for body in build_sticky_bodies(
             request=StickyRequest(
                 result=sample_review_result,
-                prior_runs=[unlimited],
+                prior_state=ReviewState(runs=(RunRecord.from_dict(unlimited),)),
                 transport="cli",
             ),
         )

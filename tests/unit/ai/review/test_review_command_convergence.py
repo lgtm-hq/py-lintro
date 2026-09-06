@@ -163,7 +163,7 @@ def _with_prior_state(
     """
     monkeypatch.setattr(
         review_module,
-        "_load_prior_review_state",
+        "load_prior_review_state",
         lambda **_: state,
     )
 
@@ -352,7 +352,7 @@ def test_post_loads_state_for_the_pr_detected_from_ci(
         seen.update(kwargs)
         return _quiet_state(scores=(1.0, 0.5))
 
-    monkeypatch.setattr(review_module, "_load_prior_review_state", _load)
+    monkeypatch.setattr(review_module, "load_prior_review_state", _load)
     monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
     posted: list[dict[str, object]] = []
 

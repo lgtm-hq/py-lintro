@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -60,14 +59,17 @@ from lintro.ai.review.custom_agents import (
     discover_custom_agents,
     format_custom_agent_listing,
 )
-from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError, ReviewPreparationError
 from lintro.ai.review.finding_matcher import count_blocking_findings
+from lintro.ai.review.lifecycle.state import (
+    departed_paths,
+    load_prior_review_state,
+    persist_review_state,
+)
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import guard_changed_paths
 from lintro.ai.review.output import (
     render_convergence_outcome_json,
@@ -82,15 +84,6 @@ from lintro.ai.review.preparation import (
     prepare_review,
 )
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
-from lintro.ai.review.state_store import (
-    load_ci_state,
-    load_local_state,
-    local_ledger_key,
-    migrate_legacy_sticky,
-    state_dir,
-    write_local_state,
-    write_state_part,
-)
 from lintro.ai.transport import (
     format_resolved_profile_log,
     resolve_max_cost_with_source,
@@ -883,11 +876,10 @@ def _finish_review(
 
         progress_tracker = RichReviewProgress(console=console)
 
-    prior_state = _load_prior_review_state(
+    prior_state = load_prior_review_state(
         pr_number=targets.state_pr,
         head_ref=prepared.context.head_ref,
         repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
-        post=options.post,
     )
     if not options.force_full:
         _check_convergence(
@@ -1025,11 +1017,10 @@ def _run_round(
                 context=prepared.context,
             )
         try:
-            _persist_review_state(
+            persist_review_state(
                 result=result,
                 context=prepared.context,
                 prior=policy.prior_state,
-                force_full=options.force_full,
                 pr_number=targets.state_pr,
                 repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
             )
@@ -1271,35 +1262,37 @@ def _post_review(
         render: Checklist rendering and attribution for this run.
     """
     from lintro.ai.review.github import post_review_to_github
+    from lintro.ai.review.models.review_post_options import ReviewPostOptions
 
     captured_comment_ids: dict[str, int] = {}
     posted = post_review_to_github(
         result=result,
         pr_number=targets.resolved_pr,
         repo=targets.effective_repo,
-        prior_state=prior_state,
-        departed_paths=_departed_paths(context=prepared.context),
-        checklist_display=render.checklist_display,
-        question_map=render.question_map,
-        transport=resolved_profile.transport.value,
-        auth_mode=resolved_profile.auth_mode,
-        # metadata carries the post-run reconciled basis (estimated when the
-        # provider reported no usage), not the pre-run profile value.
-        cost_basis=result.metadata.cost_basis,
-        auto_resolve=lintro_config.review.auto_resolve,
-        config_source=_describe_config_source(
-            config_path=lintro_config.config_path,
-            overrides=_cli_overrides(options=options),
+        options=ReviewPostOptions(
+            prior_state=prior_state,
+            departed_paths=departed_paths(context=prepared.context),
+            checklist_display=render.checklist_display,
+            question_map=render.question_map,
+            transport=resolved_profile.transport.value,
+            auth_mode=resolved_profile.auth_mode,
+            # metadata carries the post-run reconciled basis (estimated when
+            # the provider reported no usage), not the pre-run profile value.
+            cost_basis=result.metadata.cost_basis,
+            auto_resolve=lintro_config.review.auto_resolve,
+            config_source=_describe_config_source(
+                config_path=lintro_config.config_path,
+                overrides=_cli_overrides(options=options),
+            ),
+            captured_comment_ids=captured_comment_ids,
         ),
-        captured_comment_ids=captured_comment_ids,
     )
     if captured_comment_ids:
         try:
-            _persist_review_state(
+            persist_review_state(
                 result=result,
                 context=prepared.context,
                 prior=prior_state,
-                force_full=options.force_full,
                 pr_number=targets.state_pr,
                 repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
                 inline_comment_ids=captured_comment_ids,
@@ -1560,135 +1553,6 @@ def _merge_advisory_into_json(
         return review_output
     document["advisory"] = advisory_results_to_payload(advisory_results)
     return json.dumps(document, indent=2)
-
-
-def _load_prior_review_state(
-    *,
-    pr_number: int | None,
-    head_ref: str,
-    repo: str,
-    post: bool,
-) -> ReviewState:
-    """Load CI artifact, local ledger, or a one-time sticky migration."""
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        return load_ci_state(
-            directory=state_dir(ci=True),
-            repo=repo,
-            pr_number=pr_number or 0,
-        )
-    key = local_ledger_key(pr_number=pr_number, head_ref=head_ref)
-    local = load_local_state(
-        key=key,
-        repo=repo,
-        pr_number=pr_number,
-    )
-    if local.coverage or local.runs or local.findings:
-        return local
-    if post:
-        migrated = _migrate_sticky_state(pr_number=pr_number, repo=repo)
-        if migrated.runs or migrated.findings:
-            return migrated
-    return ReviewState()
-
-
-def _migrate_sticky_state(*, pr_number: int | None, repo: str) -> ReviewState:
-    """Seed findings and runs from a legacy v2 sticky blob, never coverage."""
-    with suppress(Exception):
-        from lintro.ai.integrations.github_pr import GitHubPRReporter
-        from lintro.ai.review.github_constants import STICKY_MARKER
-
-        reporter = GitHubPRReporter(pr_number=pr_number, repo=repo or None)
-        found = reporter.find_issue_comment(marker=STICKY_MARKER)
-        if found is None:
-            return ReviewState()
-        return migrate_legacy_sticky(body=found[1])
-    return ReviewState()
-
-
-def _persist_review_state(
-    *,
-    result: object,
-    context: object,
-    prior: ReviewState | None,
-    force_full: bool,
-    pr_number: int | None,
-    repo: str,
-    inline_comment_ids: dict[str, int] | None = None,
-) -> None:
-    """Write coverage parts for the artifact upload and local ledger."""
-    from importlib.metadata import version as pkg_version
-
-    from lintro.ai.review.models.review_result import ReviewResult
-    from lintro.ai.review.sticky import advance_review_state
-
-    del force_full
-    if not isinstance(result, ReviewResult):
-        return
-    advanced = advance_review_state(
-        request=StickyRequest(
-            result=result,
-            prior_state=prior,
-            head_sha=str(getattr(context, "head_ref", "") or ""),
-            transport=result.metadata.transport,
-            auth_mode=result.metadata.auth_mode,
-            cost_basis=result.metadata.cost_basis,
-            inline_comment_ids=inline_comment_ids,
-            departed_paths=_departed_paths(context=context),
-        ),
-    )
-    state = replace(
-        advanced,
-        repo=repo,
-        pr_number=pr_number,
-        base_sha=str(getattr(context, "base_ref", "") or ""),
-        head_sha=str(getattr(context, "head_ref", "") or ""),
-        workflow="ai-review.yml",
-        event=os.environ.get("GITHUB_EVENT_NAME", ""),
-        run_id=os.environ.get("GITHUB_RUN_ID", ""),
-        lintro_version=_lintro_version(pkg_version),
-    )
-    directory = state_dir(ci=os.environ.get("GITHUB_ACTIONS") == "true")
-    write_state_part(
-        state=state,
-        directory=directory,
-        sequence=1,
-        final=True,
-    )
-    if os.environ.get("GITHUB_ACTIONS") != "true":
-        write_local_state(
-            state=state,
-            key=local_ledger_key(
-                pr_number=pr_number,
-                head_ref=str(getattr(context, "head_ref", "") or ""),
-            ),
-        )
-
-
-def _departed_paths(*, context: object) -> frozenset[str]:
-    """Return paths that left the diff (deletes and rename sources)."""
-    changed = getattr(context, "changed_files", ())
-    departed: set[str] = set()
-    for item in changed:
-        status = item.status
-        if not isinstance(status, ChangedFileStatus):
-            try:
-                status = ChangedFileStatus(str(status))
-            except ValueError:
-                continue
-        if status is ChangedFileStatus.DELETED:
-            departed.add(item.path)
-        previous = getattr(item, "previous_path", None)
-        if previous and status is ChangedFileStatus.RENAMED:
-            departed.add(previous)
-    return frozenset(departed)
-
-
-def _lintro_version(pkg_version: Callable[[str], str]) -> str:
-    """Return the installed lintro version, or empty."""
-    try:
-        return str(pkg_version("lintro"))
-    except Exception:
-        return ""
 
 
 def _detect_pr_number_from_env() -> int | None:

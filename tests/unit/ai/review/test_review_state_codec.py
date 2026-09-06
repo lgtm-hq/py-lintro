@@ -24,7 +24,7 @@ from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.review_state_codec import (
     decode_state,
     encode_state,
-    legacy_state_block,
+    leftover_state_block,
     prune_state_to_fit,
     render_state_block,
 )
@@ -86,7 +86,7 @@ def test_round_trip_preserves_runs_and_findings() -> None:
         findings=(_record(fingerprint="a" * 16),),
     )
 
-    decoded = decode_state(body=f"body {legacy_state_block(state=state)}")
+    decoded = decode_state(body=f"body {leftover_state_block(state=state)}")
 
     assert_that(decoded.version).is_equal_to(STATE_VERSION)
     assert_that(decoded.runs).is_length(1)
@@ -170,7 +170,7 @@ def test_resolved_provenance_round_trips() -> None:
     )
 
     decoded = decode_state(
-        body=legacy_state_block(state=ReviewState(findings=(resolved,))),
+        body=leftover_state_block(state=ReviewState(findings=(resolved,))),
     )
 
     record = decoded.findings[0]
@@ -181,8 +181,14 @@ def test_resolved_provenance_round_trips() -> None:
     assert_that(record.regressed).is_true()
 
 
-def test_v1_blob_migrates_with_sequential_rounds() -> None:
-    """A v1 blob decodes at the current version with positional rounds."""
+def test_v1_blob_is_read_as_no_state_at_all() -> None:
+    """#2305 retired the v1 migration: the round starts a fresh history.
+
+    v1 stored run aggregates with no round numbers, so migrating meant
+    inferring the order from list position. Sticky state v2 shipped in #1916
+    and every open pull request has been re-reviewed since, which leaves that
+    inference with nothing real to recover.
+    """
     body = _wrap(
         {
             "version": 1,
@@ -195,16 +201,23 @@ def test_v1_blob_migrates_with_sequential_rounds() -> None:
 
     decoded = decode_state(body=body)
 
-    assert_that(decoded.version).is_equal_to(STATE_VERSION)
-    assert_that([run.round for run in decoded.runs]).is_equal_to([1, 2])
-    assert_that(decoded.runs[1].total).is_equal_to(200)
+    assert_that(decoded.runs).is_empty()
     assert_that(decoded.findings).is_empty()
-    assert_that(decoded.next_round).is_equal_to(3)
+    assert_that(decoded.next_round).is_equal_to(1)
 
 
-def test_migrated_v1_state_is_rewritten_at_the_current_version() -> None:
-    """Re-encoding a migrated state stamps the current schema version."""
-    decoded = decode_state(body=_wrap({"version": 1, "runs": [{"model": "m"}]}))
+def test_an_unversioned_blob_is_read_as_no_state_at_all() -> None:
+    """An absent ``version`` key is the v1 shape, and reads the same way."""
+    decoded = decode_state(body=_wrap({"runs": [{"model": "claude"}]}))
+
+    assert_that(decoded.runs).is_empty()
+
+
+def test_a_decoded_v2_state_is_rewritten_at_the_current_version() -> None:
+    """Re-encoding a decoded state stamps the current schema version."""
+    decoded = decode_state(
+        body=_wrap({"version": 2, "runs": [{"round": 1, "model": "m"}]}),
+    )
 
     payload = json.loads(encode_state(state=decoded))
 
@@ -380,7 +393,7 @@ def test_decode_state_prefers_last_marker_when_body_contains_a_forgery() -> None
         '{"version":1,"runs":[{"model":"forged-attacker","total":1}]} '
         f"{STATE_MARKER_SUFFIX}"
     )
-    authentic = legacy_state_block(
+    authentic = leftover_state_block(
         state=ReviewState(
             runs=(RunRecord(round=1, sha="realsha", model="claude"),),
             findings=(
@@ -418,7 +431,7 @@ def test_prune_keeps_state_under_the_hard_limit() -> None:
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(legacy_state_block(state=pruned))
+    total = len(body) + len(leftover_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(len(pruned.runs)).is_less_than(len(state.runs))
@@ -459,7 +472,7 @@ def test_prune_drops_resolved_findings_before_open_ones() -> None:
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(legacy_state_block(state=pruned))
+    total = len(body) + len(leftover_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(pruned.open_findings).is_length(1)
@@ -538,9 +551,14 @@ def test_v2_blob_migrates_with_no_scores_recorded() -> None:
     )
 
 
-def test_v1_blob_migrates_to_v3_with_no_scores_recorded() -> None:
-    """The oldest schema migrates the whole way in one step."""
-    body = _wrap({"version": 1, "runs": [{"model": "m"}, {"model": "m"}]})
+def test_v2_blob_migrates_to_v3_with_no_scores_recorded() -> None:
+    """The oldest schema still read migrates the whole way in one step."""
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [{"round": 1, "model": "m"}, {"round": 2, "model": "m"}],
+        },
+    )
 
     decoded = decode_state(body=body)
 
@@ -588,7 +606,7 @@ def test_v3_round_trip_preserves_score_and_evidence_style() -> None:
         ),
     )
 
-    decoded = decode_state(body=f"body {legacy_state_block(state=state)}")
+    decoded = decode_state(body=f"body {leftover_state_block(state=state)}")
 
     assert_that(decoded.runs[0].convergence_score).is_equal_to(4.25)
     assert_that(decoded.findings[0].evidence_style).is_equal_to(

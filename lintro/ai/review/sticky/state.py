@@ -1,15 +1,14 @@
 """State adapters between a review round and the persisted sticky state.
 
-Run-record construction, the per-round narrative, legacy run-mapping upgrades
-and the two public state parsers. Rendering lives elsewhere; this module is
-about what a round *records*.
+Run-record construction, the per-round narrative and the parser that reads a
+blob left behind on an older sticky comment. Rendering lives elsewhere; this
+module is about what a round *records*.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
 
 from loguru import logger
 
@@ -21,7 +20,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.review_state_codec import decode_state, renumber_if_legacy_v1
+from lintro.ai.review.review_state_codec import decode_state
 from lintro.ai.review.severity_gate import count_downgrades
 from lintro.ai.review.sticky.constants import _NARRATIVE_LIMIT, _SENTENCE_BOUNDARY_RE
 from lintro.ai.transport import resolve_cost_basis
@@ -76,20 +75,6 @@ def stamp_comment_ids(
         )
         for record in records
     )
-
-
-def _state_from_runs(prior_runs: list[dict[str, Any]] | None) -> ReviewState:
-    """Build a state object from legacy ``prior_runs`` mappings.
-
-    Args:
-        prior_runs: Run mappings recovered from a previous sticky comment, or
-            ``None``.
-
-    Returns:
-        A state carrying those runs and no finding history.
-    """
-    runs = tuple(RunRecord.from_dict(run) for run in prior_runs or [])
-    return ReviewState(runs=renumber_if_legacy_v1(runs=runs))
 
 
 def _run_record(
@@ -206,26 +191,12 @@ def _round_narrative(*, result: ReviewResult) -> str:
     return sentence[:_NARRATIVE_LIMIT].strip()
 
 
-def parse_review_state(*, body: str) -> list[dict[str, Any]]:
-    """Extract prior run records from a sticky comment's state block.
+def parse_sticky_state(*, body: str) -> ReviewState:
+    """Decode the review state left behind in a sticky comment's state block.
 
-    Compatibility wrapper over :func:`parse_review_state_v2` for callers that
-    only need the run history as plain mappings.
-
-    Args:
-        body: Existing sticky comment body.
-
-    Returns:
-        List of run records, or an empty list when no valid state is present.
-    """
-    return [run.to_dict() for run in parse_review_state_v2(body=body).runs]
-
-
-def parse_review_state_v2(*, body: str) -> ReviewState:
-    """Decode the full v2 review state from a sticky comment's state block.
-
-    v1 blobs are migrated in place; a missing, malformed, or unknown-version
-    blob yields an empty state rather than raising.
+    A missing, malformed, v1, or unknown-version blob yields an empty state
+    rather than raising (#2305): a pre-v2 comment is treated as absent and the
+    round starts a fresh history.
 
     Args:
         body: Existing sticky comment body.
