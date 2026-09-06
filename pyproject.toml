@@ -100,8 +100,10 @@ Source = "https://github.com/lgtm-hq/py-lintro"
 # the same top-level `docstring_parser` module. In a sync that also has `full`
 # the fork arrives via pydoclint, but `uv sync --extra ai` on its own would then
 # install neither and `anthropic.lib.tools` would raise ModuleNotFoundError.
-# This group puts the fork back for exactly those syncs — `ai-review.yml` and
-# `scripts/ci/run-ai-contract-tests.sh` pass `--group ai-runtime`.
+# This group puts the fork back for exactly those syncs, and no call site has to
+# ask for it: `[tool.uv] default-groups` below lists `ai-runtime` alongside
+# `dev`, so a plain `uv sync --extra ai` already carries the fork. `ai-review.yml`
+# and `scripts/ci/run-ai-contract-tests.sh` therefore pass no `--group` flag.
 #
 # It is deliberately NOT on the published `ai` extra: the override is a uv
 # workspace setting that pip never reads, so shipping the fork in wheel metadata
