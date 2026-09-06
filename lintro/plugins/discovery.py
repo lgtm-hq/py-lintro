@@ -27,7 +27,6 @@ import importlib
 import importlib.metadata
 import os
 import pkgutil
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,6 +39,17 @@ from lintro.plugins.protocol import (
     is_compatible_api_version,
 )
 from lintro.plugins.registry import ToolRegistry
+from lintro.utils.plugin_tool_names import (
+    ENTRY_POINT_GROUP as _ENTRY_POINT_GROUP,
+)
+from lintro.utils.plugin_tool_names import (
+    LEGACY_ENTRY_POINT_GROUP as _LEGACY_ENTRY_POINT_GROUP,
+)
+from lintro.utils.plugin_tool_names import (
+    known_plugin_tool_names,
+    register_tool_name_source,
+    reset_plugin_tool_name_cache,
+)
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
@@ -47,12 +57,14 @@ if TYPE_CHECKING:
 # Import path of the package holding the builtin tool definitions.
 BUILTIN_DEFINITIONS_PACKAGE = "lintro.tools.definitions"
 
-# Entry point group third-party packages use to register tool plugins.
-ENTRY_POINT_GROUP = "lintro.tools"
+# Entry-point group names live in `lintro.utils.plugin_tool_names` so that
+# config parsing can read plugin names without importing `lintro.plugins`
+# (#1305, #2290). Re-exported here because this module is their documented home.
+ENTRY_POINT_GROUP = _ENTRY_POINT_GROUP
 
 # Previously documented group name, still honored so plugins packaged against
 # the old docs keep working after an upgrade. Deprecated: emits a warning.
-LEGACY_ENTRY_POINT_GROUP = "lintro.plugins"
+LEGACY_ENTRY_POINT_GROUP = _LEGACY_ENTRY_POINT_GROUP
 
 # Attributes a plugin class must expose to satisfy the LintroPlugin contract.
 _REQUIRED_PLUGIN_ATTRS = ("definition", "check", "fix", "set_options")
@@ -611,38 +623,6 @@ def is_discovered() -> bool:
     return _discovered
 
 
-@lru_cache(maxsize=1)
-def _advertised_plugin_tool_names() -> frozenset[str]:
-    """Read the tool names advertised by installed plugin entry points.
-
-    Only the entry-point *metadata* is read: no plugin module is imported and
-    no plugin class is instantiated, so this stays cheap enough to call from
-    config parsing. The result is cached for the process lifetime because
-    installed distributions cannot change while lintro is running; call
-    :func:`reset_discovery` to drop the cache in tests.
-
-    Returns:
-        frozenset[str]: Lowercased entry-point names from both the current and
-        the legacy plugin entry-point groups.
-    """
-    names: set[str] = set()
-    for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
-        try:
-            entry_points = importlib.metadata.entry_points(group=group)
-        except Exception as e:
-            # This runs inside config loading. A broken metadata backend (an
-            # unreadable dist-info directory, a third-party finder raising)
-            # must degrade to "no plugin names known", never take the whole
-            # configuration down with it.
-            logger.debug(f"Could not read {group!r} entry points: {e}")
-            continue
-        for ep in entry_points:
-            name = str(getattr(ep, "name", "") or "").strip().lower()
-            if name:
-                names.add(name)
-    return frozenset(names)
-
-
 def get_known_plugin_tool_names() -> frozenset[str]:
     """Return the tool names contributed by external plugins.
 
@@ -663,10 +643,24 @@ def get_known_plugin_tool_names() -> frozenset[str]:
     Returns:
         frozenset[str]: Lowercased tool names known to come from plugins.
     """
-    names: set[str] = set(_advertised_plugin_tool_names())
-    if _discovered:
-        names.update(ToolRegistry.get_names())
-    return frozenset(names)
+    return known_plugin_tool_names()
+
+
+def _registered_tool_names() -> frozenset[str]:
+    """Return registry tool names, but only once discovery has run.
+
+    Registered with :func:`~lintro.utils.plugin_tool_names.register_tool_name_source`
+    at import time so configuration parsing sees authoritative plugin
+    spellings whenever the plugin subsystem is loaded, without
+    ``lintro.config`` having to import ``lintro.plugins``.
+
+    Returns:
+        frozenset[str]: Registered tool names, or an empty set before
+        discovery has run.
+    """
+    if not _discovered:
+        return frozenset()
+    return frozenset(ToolRegistry.get_names())
 
 
 def reset_discovery() -> None:
@@ -676,4 +670,9 @@ def reset_discovery() -> None:
     """
     global _discovered
     _discovered = False
-    _advertised_plugin_tool_names.cache_clear()
+    reset_plugin_tool_name_cache()
+
+
+# Contribute registry names to the config-facing lookup. Registration happens
+# at import time so `lintro.config` never has to reach up into `lintro.plugins`.
+register_tool_name_source(_registered_tool_names)

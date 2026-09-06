@@ -24,7 +24,6 @@ from lintro.config.config_loader import (
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.exceptions.errors import ConfigurationError
-from lintro.plugins import discovery
 
 
 def test_empty_data() -> None:
@@ -385,8 +384,7 @@ def _fake_plugin_names(
         *names: Entry-point tool names to advertise.
     """
     monkeypatch.setattr(
-        discovery,
-        "_advertised_plugin_tool_names",
+        "lintro.utils.plugin_tool_names.advertised_plugin_tool_names",
         lambda: frozenset(names),
     )
 
