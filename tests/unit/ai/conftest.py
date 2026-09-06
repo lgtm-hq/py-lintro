@@ -57,6 +57,20 @@ class RecordingConsoleLogger(ThreadSafeConsoleLogger):
         """
         self.lines.append(text)
 
+    def error(self, message: str, *_args: Any, **_kwargs: Any) -> None:
+        """Record one error instead of printing it.
+
+        The real implementation writes to the terminal directly rather than
+        routing through :meth:`console_output`, so it needs its own override
+        or the text would escape the transcript (#2315).
+
+        Args:
+            message: Error text the production code emitted.
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+        """
+        self.lines.append(f"ERROR: {message}")
+
     def warning(self, message: str, **_kwargs: Any) -> None:
         """Record one warning instead of printing and logging it.
 

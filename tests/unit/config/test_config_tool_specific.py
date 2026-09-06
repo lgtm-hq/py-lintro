@@ -233,4 +233,7 @@ def test_load_mypy_config_defaults_to_cwd_when_no_base_dir(
     config, path = load_mypy_config(base_dir=None)
 
     assert_that(config).contains_key("strict")
-    assert_that(path).is_equal_to(mypy_ini)
+    assert_that(path).is_not_none()
+    # ``base_dir=None`` resolves through ``Path.cwd()``, which on macOS reports
+    # ``/private/var/...`` where ``tmp_path`` says ``/var/...``.
+    assert_that(Path(str(path)).resolve()).is_equal_to(mypy_ini.resolve())

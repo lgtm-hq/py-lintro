@@ -83,6 +83,22 @@ def _body_signature(func: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     return "\n".join(parts)
 
 
+def _display_path(*, path: Path) -> str:
+    """Render a path relative to the repository when possible.
+
+    Args:
+        path: File path to render.
+
+    Returns:
+        The repository-relative path, or the absolute path when the file lies
+        outside the repository (``--root`` may point anywhere).
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _module_bindings(tree: ast.Module) -> dict[str, str]:
     """Map every module-level name to a normalised definition.
 
@@ -162,7 +178,7 @@ def _iter_test_functions(path: Path) -> list[TestFunction]:
         }
         found.append(
             TestFunction(
-                path=str(path.relative_to(REPO_ROOT)),
+                path=_display_path(path=path),
                 name=node.name,
                 lineno=node.lineno,
                 body_hash=signature,

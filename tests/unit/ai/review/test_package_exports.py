@@ -39,8 +39,11 @@ def _restore_review_package() -> Iterator[None]:
         importlib.reload(review_pkg)
         vars(review_pkg).clear()
         vars(review_pkg).update(original_namespace)
-        for name, module in original_modules.items():
-            sys.modules[name] = module
+        for name in targets:
+            if name in original_modules:
+                sys.modules[name] = original_modules[name]
+            else:
+                sys.modules.pop(name, None)
 
 
 @pytest.mark.parametrize("export_name", review_pkg.__all__)

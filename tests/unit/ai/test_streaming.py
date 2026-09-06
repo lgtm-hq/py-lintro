@@ -34,6 +34,7 @@ def _console(buffer: io.StringIO) -> Console:
     return Console(
         file=buffer,
         force_terminal=True,
+        no_color=False,
         color_system="truecolor",
         width=200,
     )

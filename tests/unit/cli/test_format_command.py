@@ -390,8 +390,9 @@ def test_format_code_function_raises_on_failure() -> None:
 def test_format_code_function_default_parameters(tmp_path: Path) -> None:
     """format_code() reformats a file with every option left at its default.
 
-    Passing no ``tools`` selects the whole formatter set, so the badly spaced
-    assignment below is rewritten in place. The file content afterwards is the
+    Every option other than ``tools`` is left at its default; the tool is
+    pinned so the run does not depend on which formatters happen to be
+    installed on the host (#2315). The file content afterwards is the
     observable proof that the defaults produce a real run.
 
     Args:
@@ -400,7 +401,7 @@ def test_format_code_function_default_parameters(tmp_path: Path) -> None:
     target = tmp_path / "dirty.py"
     target.write_text('"""Module docstring."""\n\nVALUE   =   1\n', encoding="utf-8")
 
-    format_code(paths=[str(tmp_path)], yes=True)
+    format_code(paths=[str(tmp_path)], tools="ruff", yes=True)
 
     assert_that(target.read_text(encoding="utf-8")).is_equal_to(
         '"""Module docstring."""\n\nVALUE = 1\n',

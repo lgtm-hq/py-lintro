@@ -55,6 +55,22 @@ class MockOnlyTest:
     lineno: int
 
 
+def _display_path(*, path: Path) -> str:
+    """Render a path relative to the repository when possible.
+
+    Args:
+        path: File path to render.
+
+    Returns:
+        The repository-relative path, or the absolute path when the file lies
+        outside the repository (``--root`` may point anywhere).
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _mentions_call_attribute(node: ast.AST) -> bool:
     """Report whether a node reads a mock call-bookkeeping attribute.
 
@@ -275,7 +291,7 @@ def find_mock_only_tests(*, root: Path | None = None) -> list[MockOnlyTest]:
             if _is_mock_only(func=func):
                 found.append(
                     MockOnlyTest(
-                        path=str(path.relative_to(REPO_ROOT)),
+                        path=_display_path(path=path),
                         name=func.name,
                         lineno=func.lineno,
                     ),

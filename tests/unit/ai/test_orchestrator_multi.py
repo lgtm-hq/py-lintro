@@ -128,6 +128,30 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
         _review_interactive,
     )
     monkeypatch.setattr("lintro.ai.pipeline.sys.stdin.isatty", lambda: False)
+    # Stub the post-apply stages too: with a fix reported as applied the
+    # pipeline would otherwise run the real verification stack against the
+    # workspace, which needs the wrapped tools on PATH (#2315).
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.verify_fixes",
+        lambda *_a, **_k: ValidationResult(),
+    )
+
+    async def _no_post_summary(*_args: Any, **_kwargs: Any) -> None:
+        """Skip the post-fix summary, which would call the provider.
+
+        Args:
+            *_args: Ignored positional arguments.
+            **_kwargs: Ignored keyword arguments.
+
+        Returns:
+            None: No summary is generated.
+        """
+        return None
+
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.generate_post_fix_summary",
+        _no_post_summary,
+    )
 
     run_ai_enhancement(
         action=Action.FIX,
