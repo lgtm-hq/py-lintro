@@ -72,12 +72,7 @@ full = [
   "pylint>=4.0.8",
   "yamllint>=1.37.1",
 ]
-# `docstring-parser-fork` is listed explicitly because `[tool.uv]
-# override-dependencies` (see below, #2378) strips anthropic's own
-# `docstring-parser` requirement globally, including when `ai` is synced without
-# `full`. Without this line `anthropic.lib.tools` raises ModuleNotFoundError in an
-# ai-only environment. Add the fork, never upstream `docstring-parser`.
-ai = ["anthropic>=0.39.0", "openai>=1.50.0", "docstring-parser-fork>=0.0.16"]
+ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 # Floor: 2.0 is the first release of the constructor-registered low-level
 # `Server` API (`on_list_tools` / `on_call_tool`), explicit `ListToolsResult`,
 # and snake_case type fields (`input_schema`, `is_error`).
@@ -99,6 +94,21 @@ Source = "https://github.com/lgtm-hq/py-lintro"
 [project.entry-points."lintro.plugins"]
 
 [dependency-groups]
+# Workspace-only compensation for `[tool.uv] override-dependencies` (#2378).
+# The override strips anthropic's `docstring-parser` requirement from every uv
+# resolution so it cannot shadow pydoclint's `docstring-parser-fork`, which owns
+# the same top-level `docstring_parser` module. In a sync that also has `full`
+# the fork arrives via pydoclint, but `uv sync --extra ai` on its own would then
+# install neither and `anthropic.lib.tools` would raise ModuleNotFoundError.
+# This group puts the fork back for exactly those syncs — `ai-review.yml` and
+# `scripts/ci/run-ai-contract-tests.sh` pass `--group ai-runtime`.
+#
+# It is deliberately NOT on the published `ai` extra: the override is a uv
+# workspace setting that pip never reads, so shipping the fork in wheel metadata
+# would make `uv pip install 'lintro[ai]'` (README, docs/configuration.md) pull
+# two distributions that own `docstring_parser`. lintro itself imports neither.
+ai-runtime = ["docstring-parser-fork>=0.0.16"]
+
 dev = [
   "build>=1.4.0",
   "pytest>=9.0.3",
@@ -500,9 +510,11 @@ check_untyped_defs = true
 # with one shadowing the other — pydoclint then dies on import with
 # `cannot import name 'DocstringYields' from 'docstring_parser.common'`, and
 # `lintro chk` reports it as skipped rather than failed, silently dropping the DOC
-# gate. No version pin helps: those symbols exist only in the fork. The `ai`
-# Docker image and the dogfooding environment both need `full` and `ai` together,
-# so drop anthropic's requirement and let the fork own the module (#2378). The
+# gate. No version pin helps: those symbols exist only in the fork. CI's dogfood
+# job installs `full` alone, but the published `ai` Docker image and any local
+# `--extra full --extra ai` sync need both, so drop anthropic's requirement and
+# let the fork own the module (#2378). See the `ai-runtime` dependency-group
+# above for the ai-without-full case. The
 # fork is a superset of upstream, and anthropic touches only
 # `docstring_parser.parse` / `.Docstring` in its optional `@beta_tool` helper,
 # which the fork provides and lintro does not use. `uv.lock` must therefore

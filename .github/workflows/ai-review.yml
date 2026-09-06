@@ -295,7 +295,7 @@ jobs:
           version: 'latest'
 
       - name: Install dependencies
-        run: uv sync --extra ai
+        run: uv sync --extra ai --group ai-runtime
 
       - name: Expose Actions runtime for state upload
         # run: steps do not receive ACTIONS_RUNTIME_TOKEN /

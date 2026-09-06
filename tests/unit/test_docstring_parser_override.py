@@ -77,39 +77,67 @@ def test_pydoclint_depends_on_the_fork_only() -> None:
     assert_that(dependency_names).does_not_contain("docstring-parser")
 
 
-def test_ai_extra_carries_the_fork_directly() -> None:
-    """The ``ai`` extra names the fork, so an ai-only sync still has the module.
+def test_ai_extra_does_not_ship_the_fork_in_wheel_metadata() -> None:
+    """The published ``ai`` extra names neither ``docstring_parser`` distribution.
 
-    The override is global, so anthropic's own `docstring-parser` requirement is
-    stripped even when `full` is not in the extra set. Without a direct
-    dependency, `uv sync --extra ai` alone would leave `anthropic.lib.tools`
-    raising ModuleNotFoundError.
+    The override is a uv workspace setting that pip never reads, so putting the
+    fork on the extra would make ``uv pip install 'lintro[ai]'`` install two
+    distributions that own the same top-level module. lintro imports neither;
+    the fork belongs in the uv-only ``ai-runtime`` group instead.
     """
     data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
     ai_extra = data["project"]["optional-dependencies"]["ai"]
 
     assert_that(
-        any(item.startswith("docstring-parser-fork") for item in ai_extra),
+        any(item.startswith("docstring-parser") for item in ai_extra),
+    ).is_false()
+
+
+def test_ai_runtime_group_carries_the_fork() -> None:
+    """The uv-only ``ai-runtime`` group restores the fork for ai-without-full syncs.
+
+    Without it, ``uv sync --extra ai`` installs neither distribution — the
+    override having stripped anthropic's — and ``anthropic.lib.tools`` raises
+    ModuleNotFoundError.
+    """
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    group = data["dependency-groups"]["ai-runtime"]
+
+    assert_that(
+        any(item.startswith("docstring-parser-fork") for item in group),
     ).is_true()
     assert_that(
         any(
             item.startswith("docstring-parser")
             and not item.startswith("docstring-parser-fork")
-            for item in ai_extra
+            for item in group
         ),
     ).is_false()
 
 
-def test_lock_records_the_fork_on_the_ai_extra() -> None:
-    """The locked ``lintro[ai]`` extra resolves the fork, unconditionally."""
+def test_ai_only_sync_sites_request_the_ai_runtime_group() -> None:
+    """Every uv sync that takes ``ai`` without ``full`` also takes the group.
+
+    These are the two call sites that would otherwise hit the
+    ModuleNotFoundError; a new one must opt in the same way.
+    """
+    for path in (
+        _REPO_ROOT / ".github" / "workflows" / "ai-review.yml",
+        _REPO_ROOT / "scripts" / "ci" / "run-ai-contract-tests.sh",
+    ):
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "uv sync" in line and "--extra ai" in line:
+                assert_that(line).contains("--group ai-runtime")
+
+
+def test_lock_records_the_fork_on_the_ai_runtime_group() -> None:
+    """The locked ``ai-runtime`` group resolves the fork, unconditionally."""
     lintro = next(
         package for package in _lock_packages() if package["name"] == "lintro"
     )
-    ai_dependencies = lintro["optional-dependencies"]["ai"]
-    fork = next(
-        dependency
-        for dependency in ai_dependencies
-        if dependency["name"] == "docstring-parser-fork"
-    )
+    group = lintro["dev-dependencies"]["ai-runtime"]
+    names = [dependency["name"] for dependency in group]
 
-    assert_that(fork.get("marker")).is_none()
+    assert_that(names).contains("docstring-parser-fork")
+    assert_that(names).does_not_contain("docstring-parser")

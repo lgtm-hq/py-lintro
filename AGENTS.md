@@ -69,7 +69,8 @@ required):
   compatibility matrix runs the suite on 3.11, 3.12, 3.13 and 3.14; the coverage job
   runs on 3.14 alone (`.github/workflows/test-ci.yml`).
 - **`[dependency-groups] dev` in `pyproject.toml` is the only dev dependency list**
-  (#2314). There is no `dev` or `test` extra: `uv sync --dev` (uv syncs the `dev` group
+  (#2314; the sibling `ai-runtime` group is a dependency fix-up, not a dev list — see
+  below). There is no `dev` or `test` extra: `uv sync --dev` (uv syncs the `dev` group
   by default) installs the test toolchain — pytest and its plugins, assertpy, ruff,
   black, mypy, bandit, yamllint. Use **`uv sync --dev --extra full`** to match CI, which
   requests `extras: 'full'` in `test-ci.yml`; the `full` extra adds the dogfooding
@@ -87,13 +88,17 @@ required):
   `[tool.uv] override-dependencies` therefore marker-disables anthropic's requirement
   and lets the fork, a superset, own the module — anthropic touches only
   `docstring_parser.parse` / `.Docstring`, in the optional `@beta_tool` helper lintro
-  does not use. Because the override is global, the `ai` extra depends on
-  `docstring-parser-fork` directly — otherwise `uv sync --extra ai` without `full`
-  (`ai-review.yml`, `scripts/ci/run-ai-contract-tests.sh`) would install neither and
-  `anthropic.lib.tools` would raise `ModuleNotFoundError`. Never re-add
-  `docstring-parser` to the resolution: `tests/unit/test_docstring_parser_override.py`
-  fails if it comes back, and the `ai` Docker stage smoke-tests `pydoclint --version`
-  because it is the only build that installs `full` and `ai` together.
+  does not use. Because the override is global, `uv sync --extra ai` without `full`
+  would install neither distribution and `anthropic.lib.tools` would raise
+  `ModuleNotFoundError`, so the uv-only `ai-runtime` dependency-group puts the fork back
+  and the two ai-without-full call sites (`ai-review.yml`,
+  `scripts/ci/run-ai-contract-tests.sh`) pass `--group ai-runtime`. The fork stays off
+  the published `ai` extra on purpose: pip never reads `[tool.uv]`, so shipping it in
+  wheel metadata would make `uv pip install 'lintro[ai]'` install two distributions
+  owning `docstring_parser`. Never re-add `docstring-parser` to the resolution:
+  `tests/unit/test_docstring_parser_override.py` fails if it comes back, and the `ai`
+  Docker stage smoke-tests `pydoclint --version` because it is the only build that
+  installs `full` and `ai` together.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds
