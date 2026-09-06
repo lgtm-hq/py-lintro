@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -108,7 +107,6 @@ def test_execute_ruff_check_subprocess_failure_respected(
 
 def test_execute_ruff_check_version_check_failure(
     mock_ruff_tool: MagicMock,
-    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Return early when the prepared context reports a version failure.
 
@@ -117,7 +115,6 @@ def test_execute_ruff_check_version_check_failure(
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
-        ruff_execution_context: Factory for mock execution contexts.
     """
     version_error_result = ToolResult(
         name="ruff",
@@ -125,9 +122,7 @@ def test_execute_ruff_check_version_check_failure(
         output="Skipping ruff: version too old",
         issues_count=0,
     )
-    mock_ruff_tool.prepare.return_value = ruff_execution_context(
-        early_result=version_error_result,
-    )
+    mock_ruff_tool.prepare.return_value = version_error_result
 
     result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
 

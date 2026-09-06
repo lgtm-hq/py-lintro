@@ -78,7 +78,7 @@ def test_ruff_fix_routes_through_prepare_execution(
     mock_ruff_tool.prepare.assert_called_once()
 
 
-def test_ruff_plugin_check_and_fix_invoke_prepare_execution(
+def test_ruff_plugin_check_and_fix_invoke_prepare(
     ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """The real plugin's ``check``/``fix`` route ruff through ``prepare``.
@@ -96,7 +96,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare_execution(
     with (
         patch.object(
             plugin,
-            "_prepare_execution",
+            "prepare",
             return_value=ruff_execution_context(),
         ) as mock_prepare,
         patch.object(plugin, "_run_subprocess", return_value=(True, "[]")),

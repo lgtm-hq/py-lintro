@@ -446,4 +446,4 @@ def test_check_early_return_when_should_skip(
     with patch.object(plugin, "prepare", return_value=early_result):
         result = plugin.check(["/tmp"], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result).is_same_as(early_result)

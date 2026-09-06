@@ -13,7 +13,6 @@ from lintro.enums.tool_name import ToolName
 from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
-    from lintro.models.core.tool_result import ToolResult
     from lintro.tools.definitions.ruff import RuffPlugin
 
 
@@ -23,9 +22,8 @@ def make_ruff_execution_context(
     rel_files: list[str] | None = None,
     cwd: str | None = "/test/project",
     timeout: int = 30,
-    early_result: ToolResult | None = None,
-) -> MagicMock | ToolResult:
-    """Build a mock preparation outcome for ruff execution tests.
+) -> MagicMock:
+    """Build a mock ``ExecutionContext`` for ruff execution tests.
 
     Mirrors the shape returned by ``BaseToolPlugin.prepare`` so
     ruff's ``execute_ruff_check``/``execute_ruff_fix`` helpers, which now route
@@ -36,33 +34,27 @@ def make_ruff_execution_context(
         rel_files: File paths relative to ``cwd``. Defaults to ``files``.
         cwd: Working directory for command execution.
         timeout: Timeout value in seconds.
-        early_result: Finished result returned instead of a context when
-            preparation short-circuits.
 
     Returns:
-        MagicMock | ToolResult: ``early_result`` itself when preparation should
-        short-circuit — mirroring what ``BaseToolPlugin.prepare`` returns —
-        otherwise an object exposing the ``ExecutionContext`` attributes used
-        by the ruff execution helpers.
+        MagicMock: Object exposing the ``ExecutionContext`` attributes used by
+        the ruff execution helpers. Tests covering the early-exit path assign a
+        ``ToolResult`` to ``prepare`` directly instead of using this factory.
     """
-    if early_result is not None:
-        return early_result
     resolved_files = ["test.py"] if files is None else files
     ctx = MagicMock()
     ctx.files = resolved_files
     ctx.rel_files = resolved_files if rel_files is None else rel_files
     ctx.cwd = cwd
     ctx.timeout = timeout
-    ctx.early_result = None
     return ctx
 
 
 @pytest.fixture
-def ruff_execution_context() -> Callable[..., MagicMock | ToolResult]:
-    """Provide a factory for mock ruff preparation outcomes.
+def ruff_execution_context() -> Callable[..., MagicMock]:
+    """Provide a factory for mock ruff execution contexts.
 
     Returns:
-        Callable[..., MagicMock | ToolResult]: Factory delegating to
+        Callable[..., MagicMock]: Factory delegating to
         :func:`make_ruff_execution_context`.
     """
     return make_ruff_execution_context

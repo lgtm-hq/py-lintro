@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -68,21 +67,17 @@ def test_execute_ruff_check_no_issues_with_format_check(
 
 def test_execute_ruff_check_empty_paths_returns_no_files_message(
     mock_ruff_tool: MagicMock,
-    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Return no files message when the prepared context short-circuits.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
-        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool.prepare.return_value = ruff_execution_context(
-        early_result=ToolResult(
-            name="ruff",
-            success=True,
-            output="No files to check.",
-            issues_count=0,
-        ),
+    mock_ruff_tool.prepare.return_value = ToolResult(
+        name="ruff",
+        success=True,
+        output="No files to check.",
+        issues_count=0,
     )
 
     result = execute_ruff_check(mock_ruff_tool, [])
@@ -94,21 +89,17 @@ def test_execute_ruff_check_empty_paths_returns_no_files_message(
 
 def test_execute_ruff_check_no_python_files_found(
     mock_ruff_tool: MagicMock,
-    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Return no files message when no matching files are discovered.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
-        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool.prepare.return_value = ruff_execution_context(
-        early_result=ToolResult(
-            name="ruff",
-            success=True,
-            output="No py/pyi files found to check.",
-            issues_count=0,
-        ),
+    mock_ruff_tool.prepare.return_value = ToolResult(
+        name="ruff",
+        success=True,
+        output="No py/pyi files found to check.",
+        issues_count=0,
     )
 
     result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
