@@ -69,12 +69,39 @@ required):
   compatibility matrix runs the suite on 3.11, 3.12, 3.13 and 3.14; the coverage job
   runs on 3.14 alone (`.github/workflows/test-ci.yml`).
 - **`[dependency-groups] dev` in `pyproject.toml` is the only dev dependency list**
-  (#2314). There is no `dev` or `test` extra: `uv sync --dev` (uv syncs the `dev` group
-  by default) installs the test toolchain — pytest and its plugins, assertpy, ruff,
-  black, mypy, bandit, yamllint. Use **`uv sync --dev --extra full`** to match CI, which
-  requests `extras: 'full'` in `test-ci.yml`; the `full` extra adds the dogfooding
-  linters the group does not carry (pylint, pydoclint, import-linter). The remaining
-  extras are runtime-facing: `tools`, `ai`, `mcp`, `typing`.
+  (#2314; the sibling `ai-runtime` group is a dependency fix-up, not a dev list, and a
+  default group so it needs no flag — see below). There is no `dev` or `test` extra:
+  `uv sync --dev` (uv syncs the `dev` group by default) installs the test toolchain —
+  pytest and its plugins, assertpy, ruff, black, mypy, bandit, yamllint. Use
+  **`uv sync --dev --extra full`** to match CI, which requests `extras: 'full'` in
+  `test-ci.yml`; the `full` extra adds the dogfooding linters the group does not carry
+  (pylint, pydoclint, import-linter). The remaining extras are runtime-facing: `tools`,
+  `ai`, `mcp`, `typing`.
+- **`pyproject.toml` drops anthropic's `docstring-parser` requirement on purpose**
+  (#2378). pydoclint (the `full` extra) needs `docstring-parser-fork`; anthropic (the
+  `ai` extra) needs `docstring-parser`. Both distributions install the same top-level
+  `docstring_parser` package, so an environment carrying both — the `ai` Docker image
+  and any `--extra full --extra ai` sync — ends up with one shadowing the other, and
+  pydoclint dies on import with
+  `cannot import name 'DocstringYields' from 'docstring_parser.common'`. `lintro chk`
+  then reports pydoclint as **skipped**, exits 0, and silently stops running the DOC
+  gate. No version pin fixes it: those symbols exist only in the fork.
+  `[tool.uv] override-dependencies` therefore marker-disables anthropic's requirement
+  and lets the fork, a superset, own the module — anthropic touches only
+  `docstring_parser.parse` / `.Docstring`, in the optional `@beta_tool` helper lintro
+  does not use. Because the override is global, `uv sync --extra ai` without `full`
+  would install neither distribution and `anthropic.lib.tools` would raise
+  `ModuleNotFoundError`, so the uv-only `ai-runtime` dependency-group puts the fork
+  back. It sits in `[tool.uv] default-groups` next to `dev`, so every sync picks it up
+  and no call site opts in — `ai-review.yml` runs under `pull_request_target`, taking
+  the workflow from the base branch while checking out `base.sha`, so a required flag
+  would skew against an older base. The fork stays off the published `ai` extra on
+  purpose: pip never reads `[tool.uv]`, so shipping it in wheel metadata would make
+  `uv pip install 'lintro[ai]'` install two distributions owning `docstring_parser`.
+  Never re-add `docstring-parser` to the resolution:
+  `tests/unit/test_docstring_parser_override.py` fails if it comes back, and the `ai`
+  Docker stage smoke-tests `pydoclint --version` because it is the only build that
+  installs `full` and `ai` together.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds
