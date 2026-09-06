@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess runs fixed git argv in a temp repo
 from collections.abc import Awaitable, Callable
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -28,6 +29,7 @@ from mcp.types import CallToolResult, Tool
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.toolkits.review import (
     REVIEW_TIMEOUT_SECONDS,
@@ -292,7 +294,8 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
 
     Returns:
         Callable: Installs a stubbed ``run_review`` and returns the list the
-        AI configs it was called with are recorded in.
+        session options it was called with are recorded in, flattened field by
+        field so a caller can assert on one setting at a time.
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
@@ -312,8 +315,20 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
     ) -> list[Any]:
         calls: list[Any] = []
 
-        def _run_review(context: Any, **kwargs: Any) -> ReviewResult:
-            calls.append({"context": context, **kwargs})
+        def _run_review(
+            context: Any,
+            *,
+            options: ReviewSessionOptions,
+        ) -> ReviewResult:
+            calls.append(
+                {
+                    "context": context,
+                    **{
+                        item.name: getattr(options, item.name)
+                        for item in fields(ReviewSessionOptions)
+                    },
+                },
+            )
             if error is not None:
                 raise error
             return result if result is not None else _result()

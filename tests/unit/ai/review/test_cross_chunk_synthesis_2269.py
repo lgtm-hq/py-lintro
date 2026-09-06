@@ -57,6 +57,7 @@ from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.synthesis import run_synthesis_pass
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
@@ -289,13 +290,13 @@ def _run(
     with ExitStack() as stack:
         stack.enter_context(
             patch(
-                "lintro.ai.review.orchestrator.resolve_review_chunks",
+                "lintro.ai.review.run_planning.resolve_review_chunks",
                 return_value=chunks if chunks is not None else _two_chunks(),
             ),
         )
         stack.enter_context(
             patch(
-                "lintro.ai.review.response_pipeline.call_ai",
+                "lintro.ai.review.provider_call.call_ai",
                 side_effect=_chunk_call,
             ),
         )
@@ -311,22 +312,24 @@ def _run(
             )
         return run_review(
             context if context is not None else _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                sensitivity=(
+                    None
+                    if strictness is None
+                    else resolve_sensitivity_policy(strictness=strictness)
+                ),
+                synthesis=synthesis,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            sensitivity=(
-                None
-                if strictness is None
-                else resolve_sensitivity_policy(strictness=strictness)
-            ),
-            synthesis=synthesis,
         )
 
 
@@ -825,25 +828,27 @@ def test_synthesized_duplicate_of_a_chunk_finding_is_dropped() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True),
         )
 
     assert_that(_outcome(result=result).findings_added).is_equal_to(0)
@@ -1581,25 +1586,27 @@ def test_restatements_never_consume_the_cap_window() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True, max_findings=2),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True, max_findings=2),
         )
 
     synthesized_titles = [
@@ -1742,25 +1749,27 @@ def test_a_partial_run_never_spends_the_extra_call() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True),
         )
 
     assert_that(result.metadata.partial).is_true()

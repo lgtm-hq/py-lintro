@@ -1,11 +1,11 @@
 """Characterization tests for the review session options object (#2301).
 
-``run_review`` is the public facade and keeps its keyword signature; the values
-it does not receive come from its own defaults, while every layer below reads
-:class:`ReviewSessionOptions`. Until the final slice of #2301 collapses the two
-onto one surface, the defaults live in two places, so they are pinned against
-each other here: a default that drifts on one side silently changes what a
-caller who omits the keyword gets.
+``run_review`` is the public facade and takes exactly two arguments: the
+context and one :class:`ReviewSessionOptions`. The final slice of #2301
+collapsed the run's settings onto that single surface — the facade no longer
+declares a keyword (or a default) of its own — so what a caller who omits a
+setting gets is decided in exactly one place. These tests pin that: the facade
+forwards the object unchanged, and every setting a run has is a field on it.
 """
 
 from __future__ import annotations
@@ -43,21 +43,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
-def _run_review_keyword_defaults() -> dict[str, object]:
-    """Collect the defaulted keyword parameters of ``run_review``.
-
-    Returns:
-        Mapping of parameter name to default value, for every keyword-only
-        parameter of ``run_review`` that has a default.
-    """
-    return {
-        name: parameter.default
-        for name, parameter in inspect.signature(run_review).parameters.items()
-        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
-        and parameter.default is not inspect.Parameter.empty
-    }
-
-
 def _session_option_defaults() -> dict[str, object]:
     """Collect the defaulted fields of ``ReviewSessionOptions``.
 
@@ -72,25 +57,38 @@ def _session_option_defaults() -> dict[str, object]:
     }
 
 
-def test_every_defaulted_run_review_keyword_is_a_session_option() -> None:
-    """No defaulted facade keyword is missing from the options object."""
-    missing = sorted(
-        set(_run_review_keyword_defaults()) - set(_session_option_defaults()),
+def test_run_review_declares_no_defaults_of_its_own() -> None:
+    """The facade takes the context and the options object, and nothing else.
+
+    A keyword re-declared here would reintroduce the second default surface
+    #2301 removed: a caller omitting it would get the facade's value, not the
+    one :class:`ReviewSessionOptions` documents.
+    """
+    parameters = inspect.signature(run_review).parameters
+
+    assert_that(list(parameters)).is_equal_to(["context", "options"])
+    assert_that(parameters["options"].kind).is_equal_to(
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+    assert_that(parameters["options"].default).is_equal_to(
+        inspect.Parameter.empty,
     )
 
-    assert_that(missing).is_empty()
 
+def test_the_options_object_carries_the_run_defaults() -> None:
+    """Every optional run setting still has its default, on the one surface."""
+    defaults = _session_option_defaults()
 
-def test_run_review_keyword_defaults_equal_session_option_defaults() -> None:
-    """The facade and the options object agree on every shared default."""
-    facade = _run_review_keyword_defaults()
-    options = _session_option_defaults()
-
-    shared = sorted(set(facade) & set(options))
-    mismatched = [name for name in shared if facade[name] != options[name]]
-
-    assert_that(shared).is_not_empty()
-    assert_that(mismatched).is_empty()
+    assert_that(defaults).contains_key(
+        "depth",
+        "force_full",
+        "enforce_cost_cap",
+        "run_builtin_checklist",
+    )
+    assert_that(defaults["depth"]).is_equal_to(1)
+    assert_that(defaults["force_full"]).is_false()
+    assert_that(defaults["enforce_cost_cap"]).is_true()
+    assert_that(defaults["run_builtin_checklist"]).is_true()
 
 
 def _capturing_run_review_async(
@@ -132,15 +130,13 @@ def _capturing_run_review_async(
     return _run
 
 
-def test_run_review_packs_every_facade_keyword_into_the_options(
+def test_run_review_forwards_the_options_object_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each ``run_review`` keyword reaches ``run_review_async`` unchanged.
+    """The options the caller built are the options ``run_review_async`` gets.
 
-    The facade is the only place the keyword wall is packed, so a keyword
-    dropped or wired to the wrong field there would silently ignore a caller's
-    setting. Every keyword is given a value distinct from its default so a
-    mis-wiring cannot pass by coincidence.
+    Every field is given a value distinct from its default so a facade that
+    rebuilt (rather than forwarded) the object could not pass by coincidence.
 
     Args:
         monkeypatch: Pytest fixture used to swap in the capturing stand-in.
@@ -189,13 +185,7 @@ def test_run_review_packs_every_facade_keyword_into_the_options(
     stop = asyncio.Event()
     synthesis = ReviewSynthesisConfig(enabled=True)
 
-    orchestrator.run_review(
-        ReviewContext(
-            base_ref="base",
-            head_ref="head",
-            changed_files=[],
-            unified_diff="",
-        ),
+    options = ReviewSessionOptions(
         provider=provider,
         ai_config=ai_config,
         depth=3,
@@ -217,6 +207,16 @@ def test_run_review_packs_every_facade_keyword_into_the_options(
         enforce_cost_cap=False,
         stop=stop,
         synthesis=synthesis,
+    )
+
+    orchestrator.run_review(
+        ReviewContext(
+            base_ref="base",
+            head_ref="head",
+            changed_files=[],
+            unified_diff="",
+        ),
+        options=options,
     )
 
     expected: dict[str, object] = {
@@ -243,29 +243,23 @@ def test_run_review_packs_every_facade_keyword_into_the_options(
         "synthesis": synthesis,
     }
     assert_that(captured).is_length(1)
-    options = captured[0]
+    received = captured[0]
     mismatched = sorted(
-        name for name, value in expected.items() if getattr(options, name) != value
+        name for name, value in expected.items() if getattr(received, name) != value
     )
 
+    assert_that(received).is_same_as(options)
     assert_that(mismatched).is_empty()
     assert_that(sorted(expected)).is_equal_to(
         sorted(field.name for field in dataclasses.fields(ReviewSessionOptions)),
     )
 
 
-def test_run_review_facade_keywords_cover_every_required_session_option() -> None:
-    """Every option without a default is a keyword the facade accepts."""
-    required = {
-        field.name
-        for field in dataclasses.fields(ReviewSessionOptions)
-        if field.default is dataclasses.MISSING
-        and field.default_factory is dataclasses.MISSING
-    }
-    facade = {
-        name
-        for name, parameter in inspect.signature(run_review).parameters.items()
-        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
-    }
+def test_run_review_async_takes_the_same_single_surface() -> None:
+    """The async entry point reads the options object the facade forwards."""
+    parameters = inspect.signature(orchestrator.run_review_async).parameters
 
-    assert_that(sorted(required - facade)).is_empty()
+    assert_that(list(parameters)).is_equal_to(["context", "options"])
+    assert_that(parameters["options"].annotation).is_equal_to(
+        "ReviewSessionOptions",
+    )

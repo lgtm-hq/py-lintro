@@ -13,7 +13,7 @@ normative decision record is
 | Invocation transport / timeout / cost-cap overrides | `AICliOverrides` on that resolver, for lint and review alike                               | Same resolver pipeline (#1970 / #1923 / #2024) |
 | Monotonic cost-cap clamp                            | MCP adapter (`resolve_budget_policy`)                                                      | Shared domain prep; adapters keep policy       |
 | Diff review preparation                             | `prepare_review` / `execute_review` (#2300)                                                | Done (Phase 3)                                 |
-| Review execution facade                             | `run_review` / `run_review_async`                                                          | Unchanged facade; internals split (Phase 4)    |
+| Review execution facade                             | `run_review` / `run_review_async`                                                          | Done (Phase 4); internals split across modules |
 | Provider client `aclose()` API                      | Not yet (#1885)                                                                            | Provider-side only in #1885                    |
 | Provider close call-site wiring                     | N/A until #1885                                                                            | Phase 5 of #1972                               |
 
@@ -44,9 +44,9 @@ Since #2300 both the CLI (`lintro review`) and MCP (`lintro_review`) run one sha
 
 `ReviewExecutionPolicy` carries what is genuinely adapter-only into `execute_review`:
 terminal progress, `--context-window`, resume state, `--full`, and the CLI's cost-cap
-gate. MCP runs on `DEFAULT_EXECUTION_POLICY`, whose values are `run_review`'s own
-defaults. It is a frozen value object that may carry an optional progress callback — not
-a hook or plugin architecture.
+gate. MCP runs on `DEFAULT_EXECUTION_POLICY`, whose values are the
+`ReviewSessionOptions` defaults. It is a frozen value object that may carry an optional
+progress callback — not a hook or plugin architecture.
 
 Adapter-only policy that must stay out of the shared layer:
 
@@ -57,21 +57,42 @@ Adapter-only policy that must stay out of the shared layer:
 
 ## Orchestrator phase plan
 
-`run_review` remains the stable facade. Phase 4 decomposes internals into
-runner/session, planning/chunks, prompts/passes, response pipeline, merge/filter, and
-metadata modules without changing prompts, findings, severity, or exit semantics. Every
-provider call continues through `call_ai`; prompt redaction remains mandatory.
+`run_review` remains the stable facade. Phase 4 decomposed the internals into session,
+planning, chunk fan-out, per-chunk passes, prompts, merge and result-assembly modules
+without changing prompts, findings, severity, or exit semantics. Every provider call
+continues through `call_ai`; prompt redaction remains mandatory.
+
+`lintro/ai/review/orchestrator.py` is now the sequence and nothing else. It sits well
+below the 800-line `[tool.lintro.module_size]` threshold, so it no longer needs a
+baseline entry, and it carries no `C901` / `PLR0912` / `PLR0913` / `PLR0915`
+suppression. `run_review_async` reads as three steps:
+
+| Step   | Module                                | What it owns                                                                                  |
+| ------ | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Plan   | `lintro/ai/review/run_planning.py`    | Sensitivity policy, diff budget (incl. the CLI ceiling), chunks, resume plan, agent selection |
+| Run    | `lintro/ai/review/chunk_runner.py`    | Bounded-concurrency fan-out, graceful stops, incremental coverage checkpoints                 |
+|        | `lintro/ai/review/chunk_pass.py`      | One chunk's depth-1/2/3 passes                                                                |
+| Report | `lintro/ai/review/result_assembly.py` | Totals, file selection, coverage records, flag reconciliation, `ReviewMetadata`               |
+
+The Run step is a sequence the orchestrator still owns, not a single module: after the
+chunk fan-out it calls the custom-agent passes (`custom_agent_runner.py`), merges and
+filters (`merge.py`), and may run the cross-chunk synthesis pass (`synthesis.py`). The
+two halves of the flow travel as frozen objects: `ReviewRunPlan` (what the run resolved
+to do) and `ReviewRunOutcome` (what it produced, completed or stopped).
 
 ### Session options (`lintro/ai/review/session.py`, #2301)
 
-The first slice of Phase 4 ends the keyword wall. `run_review` still takes the run's
-settings as keywords — that is the public facade every adapter calls — but it now packs
-them into a frozen `ReviewSessionOptions` and hands that single object down;
-`run_review_async` takes `(context, options=...)`. New settings are added as a field on
-the options object rather than as another keyword threaded through each layer. The
+Phase 4 ended the keyword wall. Every setting a review run takes is a field on the
+frozen `ReviewSessionOptions`, and that object is the whole argument surface:
+`run_review(context, *, options)` forwards it to
+`run_review_async(context, *, options)`, which reads it and nothing else. The defaults
+live on the dataclass only — the facade declares none of its own — so what a caller who
+omits a setting gets is decided in exactly one place. New settings are added as a field
+rather than as another keyword threaded through each layer. Two neighbours share the
+module: `ChunkRunPlan`, the run-scope bundle every chunk layer reads, and the
 graceful-stop predicates (`is_cost_cap_stop`, `cost_cap_reason`, `is_timeout_stop`,
-`timeout_reason`) and the `aborted_before_completion` wrapper live in the same module,
-since deciding whether a run stopped gracefully is session-level, not chunk-level.
+`timeout_reason`) with the `aborted_before_completion` wrapper — deciding whether a run
+stopped gracefully is session-level, not chunk-level.
 
 ### Prompt construction (`lintro/ai/review/prompts.py`, #2301)
 
@@ -85,8 +106,7 @@ they are the one thing the two builders do not share. `redact_prompt_text` and
 `make_boundary_marker` now fire inside this module, which makes it the redaction choke
 point for prompt bytes: the git-native builder still embeds the redacted diff unless the
 caller explicitly opts out. The emitted bytes are unchanged and the #2298 prompt goldens
-pass without regeneration; the orchestrator re-exports both builders so the facade is
-untouched.
+pass without regeneration.
 
 ### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
 
@@ -98,8 +118,7 @@ implementation detail, and the #2298 merge goldens pin them: findings deduplicat
 `(file, line, title)` in first-seen order, a `yes` checklist answer from any chunk beats
 a `no` from any other regardless of evidence, chunk summaries join in chunk order,
 walkthrough bullets deduplicate by text and cap at `MAX_WALKTHROUGH_BULLETS`, and the
-first chunk to speak wins verdict prose and per-file assessments. The orchestrator
-re-exports the merge names, so the facade and every external importer are untouched.
+first chunk to speak wins verdict prose and per-file assessments.
 
 ### Per-chunk passes (`response_pipeline.py`, the two pass modules, #2301)
 
@@ -127,11 +146,35 @@ disjoint generated-id ranges so `merge_checklist_answers` cannot collide.
 returns findings and usage only, and degrades to usage alone when the answer is
 malformed.
 
-`call_ai` is now bound in these three modules rather than in the orchestrator, so a test
-that stubs the provider seam for a depth >= 2 run patches all three (the
-`patch_review_call_ai` helper in `tests/unit/ai/review/conftest.py` does exactly that).
-Behaviour is unchanged and the #2298 goldens pass without regeneration; the orchestrator
-re-exports the moved names until the final slice removes the facade shims.
+### The provider-call seam (`lintro/ai/review/provider_call.py`, #2301)
+
+All three built-in passes issue their provider call as `provider_call.call_ai(...)` —
+they import the _module_, never the function, so the name is resolved on
+`lintro.ai.review.provider_call` at call time. That makes it one documented hook:
+patching `lintro.ai.review.provider_call.call_ai` intercepts every call the built-in
+review makes at any depth, and nothing below it reaches a real provider. The
+custom-agent runner and the cross-chunk synthesis pass are separate, independently
+stubbed passes and keep their own seams.
+
+### Chunk fan-out and incremental coverage (#2301)
+
+The final slice moved the chunk scheduler out of the orchestrator.
+`lintro/ai/review/chunk_runner.py` owns the bounded-concurrency fan-out: a semaphore
+capped at `ChunkRunPlan.max_parallel_calls` (forced to `1` under a cost cap so the
+resume queue cannot invert), the sibling harvest that keeps completed chunks when a cost
+cap, timeout or SIGTERM stops the run, and the per-chunk queued/in-flight timing split.
+`lintro/ai/review/chunk_pass.py` owns one chunk's passes end to end.
+`lintro/ai/review/incremental_coverage.py` owns the SIGTERM insurance:
+`checkpoint_writer` returns the callback the fan-out invokes after every completed
+chunk, writing a numbered coverage part when `LINTRO_REVIEW_STATE_DIR` is set and
+logging (never raising) when a part cannot be written.
+
+With every mover landed, the orchestrator's re-exports are gone: external callers import
+`run_review`, `run_review_async` and `guard_changed_paths` from
+`lintro.ai.review.orchestrator`, and everything else from the module that defines it
+(`resolve_review_chunks` from `run_planning`, `parse_review_response` from `merge`, and
+so on). Behaviour is unchanged throughout and the #2298 goldens pass without
+regeneration.
 
 ## Exit and error contracts
 
@@ -147,6 +190,9 @@ CLI JSON failures and MCP review failures both build diagnosis fields through
 Phase 1 locks the gaps listed in ADR-0006:
 
 - `tests/unit/test_core_ai_import_boundary.py` — AC10 / #724 import edge.
+- `tests/unit/ai/review/test_review_session_options.py` — the single options surface:
+  `run_review` declares no keyword (and no default) of its own and forwards the caller's
+  object unchanged.
 - `tests/unit/ai/review/test_architecture_characterization.py` — CLI/MCP preparation,
   effective-config parity, metadata keys, error mapping, exit `0`/`1`/`2`.
 - `tests/unit/ai/review/golden/` — prompt bytes, chunk plan, merge output, merged
@@ -159,8 +205,8 @@ Phase 1 locks the gaps listed in ADR-0006:
   `with_max_cost_usd` clamp is the one thing it applies to the prepared review
   afterwards.
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
-  config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
-  MCP error mapping.
+  config-resolution idempotence, the shared `ReviewSessionOptions` fields both surfaces
+  set, error-contract body parity, MCP error mapping.
 - `tests/unit/ai/test_effective_config_parity.py` — one resolver: for identical resolver
   inputs, check, fix, review CLI, MCP and doctor resolve identical values and sources,
   and the two cap rules stay split (CLI/env may raise or lift; MCP's per-call argument

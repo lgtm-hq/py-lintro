@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
     REVIEW_SYSTEM,
 )
+from lintro.ai.review import provider_call
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.prompt_redaction import redact_prompt_text
@@ -79,7 +79,7 @@ async def run_adversarial_pass(
         diff=redact_prompt_text(text=chunk.diff, source="diff"),
     )
     budget.check()
-    response = await call_ai(
+    response = await provider_call.call_ai(
         provider=provider,
         ai_config=ai_config,
         system_prompt=REVIEW_SYSTEM,

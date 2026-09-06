@@ -25,13 +25,13 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.timings import (
     ReviewPhase,
     ReviewTimingRecorder,
     format_duration,
     format_timing_summary,
 )
-from tests.unit.ai.review.conftest import patch_review_call_ai
 
 _MODEL = "claude-sonnet-4-20250514"
 
@@ -205,21 +205,23 @@ def _run(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_chunks(count=chunk_count),
         ),
-        patch_review_call_ai(side_effect=_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_call),
     ):
         return run_review(
             _context(tmp_path=tmp_path, count=chunk_count),
-            provider=provider,
-            ai_config=ai_config,
-            depth=depth,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            context_collection_seconds=0.5,
-            stop=stop,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                context_collection_seconds=0.5,
+                stop=stop,
+            ),
         )
 
 
@@ -723,13 +725,15 @@ def test_empty_review_still_carries_a_timings_block(tmp_path: Path) -> None:
 
     result = run_review(
         empty,
-        provider=_provider(),
-        ai_config=AIConfig(enabled=True, transport=AITransport.API),
-        depth=1,
-        checklist_items=[],
-        checklist_text="",
-        classifications=[],
-        context_collection_seconds=0.25,
+        options=ReviewSessionOptions(
+            provider=_provider(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            context_collection_seconds=0.25,
+        ),
     )
 
     timings = _timings_of(result=result)

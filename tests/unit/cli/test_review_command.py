@@ -1287,11 +1287,11 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that([agent.name for agent in kwargs["custom_agents"]]).is_equal_to(
+    options = run_review.call_args.kwargs["options"]
+    assert_that([agent.name for agent in options.custom_agents]).is_equal_to(
         ["no-raw-sql"],
     )
-    assert_that(kwargs["run_builtin_checklist"]).is_true()
+    assert_that(options.run_builtin_checklist).is_true()
 
 
 def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
@@ -1322,9 +1322,9 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that(kwargs["custom_agents"]).is_empty()
-    assert_that(kwargs["run_builtin_checklist"]).is_true()
+    options = run_review.call_args.kwargs["options"]
+    assert_that(options.custom_agents).is_empty()
+    assert_that(options.run_builtin_checklist).is_true()
 
 
 def test_review_custom_agents_only_disables_builtin_checklist(
@@ -1357,9 +1357,9 @@ def test_review_custom_agents_only_disables_builtin_checklist(
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that(kwargs["run_builtin_checklist"]).is_false()
-    assert_that(kwargs["custom_agents"]).is_length(1)
+    options = run_review.call_args.kwargs["options"]
+    assert_that(options.run_builtin_checklist).is_false()
+    assert_that(options.custom_agents).is_length(1)
 
 
 def test_review_custom_agents_only_with_no_valid_agents_errors(

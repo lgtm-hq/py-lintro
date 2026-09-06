@@ -36,6 +36,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.orchestrator import run_review
+from lintro.ai.review.session import ReviewSessionOptions
 
 _Patcher = AbstractContextManager[MagicMock]
 
@@ -180,10 +181,10 @@ def _patch_builtin_call(*, content: str) -> _Patcher:
         content: Response content the patched call returns.
 
     Returns:
-        An active ``unittest.mock`` patcher for ``response_pipeline.call_ai``.
+        An active ``unittest.mock`` patcher for ``provider_call.call_ai``.
     """
     return patch(
-        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         return_value=AIResponse(
             content=content,
             model="claude-sonnet-4-20250514",
@@ -425,12 +426,14 @@ def test_run_review_merges_custom_agent_findings(tmp_path: Path) -> None:
     ):
         result = run_review(
             _context(),
-            provider=provider,
-            ai_config=_ai_config(),
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
-            custom_agents=(agent,),
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+            ),
         )
 
     assert_that(result.findings).is_length(1)
@@ -459,12 +462,14 @@ def test_run_review_reports_skipped_custom_agents(tmp_path: Path) -> None:
     ):
         result = run_review(
             _context(),
-            provider=provider,
-            ai_config=_ai_config(),
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
-            custom_agents=(agent,),
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+            ),
         )
 
     assert_that(agent_call.called).is_false()
@@ -485,13 +490,15 @@ def test_run_review_only_mode_skips_builtin_checklist(tmp_path: Path) -> None:
     ):
         result = run_review(
             _context(),
-            provider=provider,
-            ai_config=_ai_config(),
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
-            custom_agents=(agent,),
-            run_builtin_checklist=False,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+                run_builtin_checklist=False,
+            ),
         )
 
     assert_that(builtin_call.called).is_false()
@@ -522,13 +529,15 @@ def test_only_mode_marks_a_failed_agent_scope_as_unreviewed(
     ):
         result = run_review(
             _context(),
-            provider=provider,
-            ai_config=_ai_config(),
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
-            custom_agents=(agent,),
-            run_builtin_checklist=False,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+                run_builtin_checklist=False,
+            ),
         )
 
     assert_that(result.metadata.custom_agents_run).is_equal_to(0)
@@ -551,13 +560,15 @@ def test_only_mode_credits_coverage_to_a_completed_agent(
     ):
         result = run_review(
             _context(),
-            provider=provider,
-            ai_config=_ai_config(),
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
-            custom_agents=(agent,),
-            run_builtin_checklist=False,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=_ai_config(),
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+                custom_agents=(agent,),
+                run_builtin_checklist=False,
+            ),
         )
 
     assert_that(result.metadata.reviewed_paths).contains("src/app.py")
