@@ -81,7 +81,6 @@ def _labels_for(*, path: str) -> set[str]:
     [
         ("tests/unit/test_labeler_rules.py", {"testing"}),
         ("pytest.ini", {"testing"}),
-        ("tox.ini", {"testing"}),
         ("test_samples/README.md", {"testing", "documentation"}),
         ("pyproject.toml", {"dependencies", "release"}),
         ("tools/ascii_resizer/pyproject.toml", {"release"}),

@@ -118,9 +118,9 @@ parity test sets `tool.exclude_patterns = []` before checking a sample file).
 
 ## Coverage expectations
 
-Coverage is measured against the `lintro` package. `tox.ini` configures `--cov=lintro`
-with term-missing, HTML, and XML reports. In CI the coverage job enforces a minimum:
-`coverage-threshold: 80` in
+Coverage is measured against the `lintro` package: `[tool.coverage.run]` in
+`pyproject.toml` sets the source and `[tool.coverage.report]` the local floor. In CI the
+coverage job enforces a minimum of `coverage-threshold: 80` in
 [`.github/workflows/test-ci.yml`](../.github/workflows/test-ci.yml). The architecture
 docs set a higher aspirational target (≥ 70% floor, 90% goal per
 [`architecture/README.md`](architecture/README.md)).

@@ -73,7 +73,6 @@ testing:
       - any-glob-to-any-file:
           - 'tests/**'
           - 'pytest.ini'
-          - 'tox.ini'
           - 'test_samples/**'
           - 'scripts/ci/testing/**'
 

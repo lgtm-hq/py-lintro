@@ -15,12 +15,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${ROOT}"
 
 if command -v uv >/dev/null 2>&1; then
+	# The PEP 735 `dev` group is uv's default group and carries pytest and
+	# assertpy; it is the project's only dev dependency list (#2314).
 	if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
-		uv sync --extra test --frozen
+		uv sync --frozen
 	else
-		uv sync --extra test --frozen 2>/dev/null || uv sync --extra test
+		uv sync --frozen 2>/dev/null || uv sync
 	fi
-	uv run --extra test pytest tests/scripts/ci -q
+	uv run pytest tests/scripts/ci -q
 	exit 0
 fi
 
