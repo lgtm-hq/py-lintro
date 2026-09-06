@@ -256,9 +256,11 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
 ) -> None:
     """Shared preparation fields reach ``run_review`` from both surfaces.
 
-    Adapter-only kwargs are recorded so Phase 3 can extract shared prep without
-    inventing parity that does not exist today (CLI progress/custom agents;
-    MCP budget clamp on ``ai_config.max_cost_usd``).
+    Since #2300 both surfaces reach ``run_review`` through one
+    ``execute_review`` call site, so the kwarg names no longer diverge: the
+    remaining adapter policy (CLI progress and resume state; MCP's budget
+    clamp on ``ai_config.max_cost_usd``) is carried by value, and MCP forwards
+    the orchestrator's own defaults.
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers

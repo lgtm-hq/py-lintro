@@ -119,10 +119,11 @@ values; `tests/unit/ai/review/test_cli_mcp_parity.py` asserts that equality.
 
 `ReviewExecutionPolicy` carries the remaining adapter-only knobs (progress,
 `--context-window`, resume state, `--full`, the CLI cost-cap gate) into `execute_review`
-as a value — not a callback, and not a hook. MCP runs on the default policy, whose
-values are `run_review`'s own defaults. MCP's `max_cost_usd` clamp is applied to the
-prepared review (`PreparedReview.with_max_cost_usd`) after preparation, keeping the
-clamp monotonic and adapter-owned.
+as a frozen value object — it may hold an optional progress callback, but it is not a
+hook or plugin seam. MCP runs on the default policy, whose values are `run_review`'s own
+defaults. MCP's `max_cost_usd` clamp is applied to the prepared review
+(`PreparedReview.with_max_cost_usd`) after preparation, keeping the clamp monotonic and
+adapter-owned.
 
 The shared layer owns deterministic preparation and review execution. Thin adapters
 retain surface policy:
@@ -211,6 +212,9 @@ surfaces call `resolve_effective_ai_config` rather than reaching past it.
   `ai.exclude_paths` now shapes the MCP review's context as well as the CLI's, because
   preparation reads the exclusion from the resolved AI config. That was the single
   context axis the two surfaces disagreed on, and it closed in the CLI's direction.
+  `review.custom_agents` closed the same way: MCP forwards the configured mode instead
+  of hard-coding "built-in checklist only", so a workspace's user-defined agents now run
+  for both surfaces.
 - Phase 4 can split the orchestrator behind `run_review` without changing product
   behavior.
 - Phase 5 can wire `aclose()` at construction sites after #1885 without a competing

@@ -35,7 +35,8 @@ Since #2300 both the CLI (`lintro review`) and MCP (`lintro_review`) run one sha
    run's timeout and the transport profile, collect the review context (honouring
    `ai.exclude_paths` on both surfaces), classify changed files, select and format the
    checklist, optionally build the lint digest, resolve sensitivity, and resolve custom
-   agents from the request's `CustomAgentMode`.
+   agents from the request's `CustomAgentMode` (both adapters forward
+   `review.custom_agents`).
 4. Each adapter constructs its own provider — provider lifetime stays with the
    constructing surface until #1972 Phase 5 — and calls `execute_review`, which is the
    single `run_review` call site.
@@ -44,7 +45,8 @@ Since #2300 both the CLI (`lintro review`) and MCP (`lintro_review`) run one sha
 `ReviewExecutionPolicy` carries what is genuinely adapter-only into `execute_review`:
 terminal progress, `--context-window`, resume state, `--full`, and the CLI's cost-cap
 gate. MCP runs on `DEFAULT_EXECUTION_POLICY`, whose values are `run_review`'s own
-defaults. There are no callbacks and no hooks: the policy is a value.
+defaults. It is a frozen value object that may carry an optional progress callback — not
+a hook or plugin architecture.
 
 Adapter-only policy that must stay out of the shared layer:
 
@@ -79,9 +81,12 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/golden/` — prompt bytes, chunk plan, merge output, merged
   `ReviewResult` and `ReviewMetadata`, as plain-file goldens
   ([ADR-0008](../adr/0008-ai-review-architecture-invariants.md), #2298).
-- `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP parity: the two surfaces
-  produce an **equal** `PreparedReview` for one workspace, and the only divergence left
-  is the named `ReviewExecutionPolicy` allowlist.
+- `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP parity: for equal
+  `ReviewRunRequest` values over one workspace the two surfaces produce an **equal**
+  `PreparedReview` (custom agents included — the fixture ships an agent file), and the
+  only divergence left is the named `ReviewExecutionPolicy` allowlist. MCP's post-prep
+  `with_max_cost_usd` clamp is the one thing it applies to the prepared review
+  afterwards.
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
   config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
   MCP error mapping.

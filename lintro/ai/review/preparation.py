@@ -88,10 +88,12 @@ class ReviewRunRequest:
     """One adapter's request for a review, before anything has been resolved.
 
     Every field is an input an adapter genuinely owns: the diff selection, the
-    review shape, and the workspace the review is anchored to. Values left at
-    their defaults mean "not requested", and :func:`prepare_review` falls back
-    to the project config for those — so a request built from an MCP envelope
-    and one built from Click options resolve identically.
+    review shape, and the workspace the review is anchored to. The ``None``
+    fields mean "not requested", and :func:`prepare_review` falls back to the
+    project config for those — so a request built from an MCP envelope and one
+    built from Click options resolve identically. ``custom_agent_mode`` is the
+    exception: it is a real enum, so an adapter that wants the configured mode
+    passes ``review.custom_agents`` itself (both do).
 
     Attributes:
         workspace_root: Absolute workspace root the review is anchored to.
@@ -112,9 +114,9 @@ class ReviewRunRequest:
         semantic_chunks: Force semantic chunking for this run. Config's
             ``review.force_semantic_chunking`` can enable it independently.
         timeout: Per-run API timeout override in seconds, or None.
-        custom_agent_mode: How user-defined review agents participate. MCP
-            passes :attr:`CustomAgentMode.DISABLED`; the CLI passes
-            ``review.custom_agents``.
+        custom_agent_mode: How user-defined review agents participate. Both
+            adapters pass ``review.custom_agents``; the ``DISABLED`` default
+            is for callers that deliberately want the built-in checklist only.
     """
 
     workspace_root: Path
@@ -273,6 +275,9 @@ def _apply_timeout(config: AIConfig, *, timeout: float | None) -> AIConfig:
 
     An explicit timeout wins over the transport profile for this run, so it is
     written into the active transport's own timeout as well as ``api_timeout``.
+    When no transport is resolved yet, only ``api_timeout`` is written — the
+    behaviour ``review_command`` had before #2300 extracted this, preserved
+    deliberately rather than fixed in a refactor.
 
     Args:
         config: Effective AI configuration before the transport profile is

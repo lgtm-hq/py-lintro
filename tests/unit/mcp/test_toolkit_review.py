@@ -4,11 +4,13 @@ Every call goes through a real :class:`mcp.client.Client` over in-memory
 streams, so the schema validation, the workspace path guard, and the error
 envelope under test are the ones the stdio server actually applies.
 
-The AI provider is always mocked. The orchestrator is stubbed at
-``lintro.ai.review.orchestrator.run_review`` (the toolkit imports it lazily,
-inside the handler, so patching the module attribute is what the handler sees),
-which keeps the tests free of network calls, credentials, and cost while still
-exercising context collection, budget resolution, and payload shaping for real.
+The AI provider is always mocked. Since #2300 the handler reaches the
+orchestrator through ``lintro.ai.review.preparation.execute_review``, so the
+orchestrator is stubbed at ``lintro.ai.review.preparation.run_review`` — that
+module holds the ``from``-import the shared path actually calls, and the lint
+helpers are patched there for the same reason. That keeps the tests free of
+network calls, credentials, and cost while still exercising context
+collection, budget resolution, and payload shaping for real.
 """
 
 from __future__ import annotations

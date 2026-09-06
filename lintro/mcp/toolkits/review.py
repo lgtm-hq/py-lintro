@@ -644,10 +644,11 @@ def _build_request(
 ) -> ReviewRunRequest:
     """Turn the validated tool envelope into a shared review request.
 
-    Everything the tool schema does not expose stays at the request's default,
-    which is what makes the MCP request equal to the CLI's for the same diff:
-    no pull-request mode, no custom agents (``lintro_review`` runs the built-in
-    checklist only), and no per-run timeout.
+    Everything the tool schema does not expose stays at the request's default —
+    no pull-request mode and no per-run timeout — except the workspace's
+    ``review.custom_agents`` mode, which is operator configuration rather than
+    MCP policy and is therefore forwarded exactly as the CLI forwards it. That
+    is what makes the MCP request equal to the CLI's for the same diff.
 
     Args:
         arguments: Validated tool arguments.
@@ -673,6 +674,7 @@ def _build_request(
         depth=int(depth) if depth is not None else None,
         strictness=arguments.get("strictness"),
         with_lint=bool(arguments.get("with_lint", False)),
+        custom_agent_mode=lintro_config.review.custom_agents,
     )
 
 
@@ -697,6 +699,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     """
     from lintro.ai.exceptions import AIError, AIProviderRequiredError
     from lintro.ai.providers import get_provider
+    from lintro.ai.review.exceptions import ReviewPreparationError
     from lintro.ai.review.patch_validation import validate_result_suggested_patches
     from lintro.ai.review.preparation import (
         execute_review,
@@ -721,6 +724,14 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     prepare_started = time.monotonic()
     try:
         prepared = prepare_review(request, resolved=resolved_ai)
+    except ReviewPreparationError as exc:
+        # ``review.custom_agents: only`` with no valid agent file: the
+        # workspace asks for a review that would review nothing.
+        raise McpError(
+            code=McpErrorCode.INVALID_INPUT,
+            message=str(exc),
+            detail={"tool": "lintro_review", "reason": "no_reviewable_work"},
+        ) from exc
     except ReviewContextError as exc:
         # "Nothing changed" is an answer, not a failure; every other context
         # code — including the diff-size ceiling (#1967) — is mapped.

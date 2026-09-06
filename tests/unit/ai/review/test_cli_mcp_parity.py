@@ -43,7 +43,10 @@ from lintro.mcp.toolkits import review as mcp_review
 #:
 #: #2300 removed ``custom_agents`` and ``run_builtin_checklist`` from this set:
 #: both are shared preparation now, resolved from the request's custom-agent
-#: mode. The set is a ratchet — it may only shrink.
+#: mode. This is the complete ``ReviewExecutionPolicy`` field set, asserted as
+#: such below, so it is a ratchet in both directions: it shrinks only when a
+#: policy field stops existing, and a new adapter-only knob fails the test
+#: instead of quietly widening the gap.
 CLI_ONLY_POLICY_FIELDS: frozenset[str] = frozenset(
     {
         "context_window_override",
@@ -153,6 +156,17 @@ def _write_parity_workspace(tmp_path: Path, *, exclude_paths: str = "") -> Path:
         Resolved workspace root on a branch ahead of ``main``.
     """
     workspace = tmp_path.resolve()
+    # A real agent file, so "both surfaces resolve custom agents identically"
+    # is asserted against discovery that finds something. Without it the CLI's
+    # configured mode and a built-in-only surface would look the same.
+    agents_dir = workspace / ".lintro" / "review-agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "parity.md").write_text(
+        "---\nname: parity\ndescription: Parity fixture agent\n"
+        'include: ["*.py"]\n---\n\n'
+        "Report nothing; this agent exists so discovery is non-empty.\n",
+        encoding="utf-8",
+    )
     excludes = f"  exclude_paths:\n    - '{exclude_paths}'\n" if exclude_paths else ""
     (workspace / ".lintro-config.yaml").write_text(
         "ai:\n"
@@ -309,6 +323,9 @@ def test_cli_and_mcp_prepare_equal_reviews(
     )
 
     assert_that(cli_call["prepared"]).is_equal_to(mcp_call["prepared"])
+    # The workspace ships one custom review agent, so this is discovery that
+    # found something on both surfaces rather than two empty tuples matching.
+    assert_that(cli_call["prepared"].custom_agents).is_not_empty()
     # Equality skips the wall-clock field by design; both must still report a
     # real measurement rather than defaulting to nothing.
     for call in (cli_call, mcp_call):
@@ -389,6 +406,10 @@ def test_only_the_allowlisted_policy_fields_differ_between_the_surfaces(
         != getattr(DEFAULT_EXECUTION_POLICY, field.name)
     }
     assert_that(differing).is_subset_of(CLI_ONLY_POLICY_FIELDS)
+    # ...and the CLI really does populate a policy of its own, so a surface
+    # that silently fell back to the defaults cannot pass this test.
+    assert_that(cli_policy).is_not_equal_to(DEFAULT_EXECUTION_POLICY)
+    assert_that(differing).contains("progress", "prior_state")
     assert_that({field.name for field in fields(cli_policy)}).is_equal_to(
         set(CLI_ONLY_POLICY_FIELDS),
     )

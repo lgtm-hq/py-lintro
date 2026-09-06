@@ -1,10 +1,11 @@
 """Characterization locks for #1972 Phase 1 architecture seams.
 
-These tests freeze *current* CLI/MCP review preparation behavior,
-effective-config parity, review metadata shape, error mapping, and exit
-semantics (0/1/2) before later phases extract shared preparation or split the
-orchestrator. Issue #1970 landed ``ResolvedAIConfig``; Phase 3 still owns
-``prepare_review``, orchestrator decomposition, and provider close wiring.
+These tests freeze CLI/MCP review preparation behavior, effective-config
+parity, review metadata shape, error mapping, and exit semantics (0/1/2)
+across the epic's phases. Issue #1970 landed ``ResolvedAIConfig`` and #2300
+landed the shared ``prepare_review`` / ``execute_review`` path, so the
+preparation lock below asserts where those helpers live now; orchestrator
+decomposition (Phase 4) and provider close wiring (Phase 5) are still ahead.
 """
 
 from __future__ import annotations

@@ -623,8 +623,8 @@ def _review(*, options: ReviewCommandOptions) -> None:
 
     Parse → request → prepare → execute → render/post/exit. Preparation and
     execution belong to :mod:`lintro.ai.review.preparation`, which the MCP
-    surface calls with the same request; everything in this module is CLI
-    policy (#2300).
+    surface calls too — from its own envelope, so its request omits the
+    CLI-only fields. Everything in this module is CLI policy (#2300).
 
     Args:
         options: The command's Click-populated options.
