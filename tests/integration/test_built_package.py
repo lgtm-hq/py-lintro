@@ -46,6 +46,7 @@ def test_built_wheel_imports(built_distributions: Path) -> None:
         # Step 2: Create a fresh virtual environment
         venv_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [sys.executable, "-m", "venv", str(venv_path)],
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -63,11 +64,13 @@ def test_built_wheel_imports(built_distributions: Path) -> None:
         # Step 3: Install the wheel in the venv
         install_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "pip", "install", str(wheel_path)],
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=60,
         )
         assert_that(install_result.returncode).is_equal_to(0)
+        _assert_lintro_installed_into(venv_path=venv_path, python_exe=python_exe)
 
         # Step 4: Test importing lintro modules (this is where circular imports fail)
         test_imports = [
@@ -126,6 +129,7 @@ def test_built_wheel_with_full_extra(built_distributions: Path) -> None:
 
         subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [sys.executable, "-m", "venv", str(venv_path)],
+            env=_isolated_env(),
             check=True,
             capture_output=True,
             timeout=30,
@@ -138,6 +142,7 @@ def test_built_wheel_with_full_extra(built_distributions: Path) -> None:
 
         install_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "pip", "install", f"{wheel_path}[full]"],
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=120,
@@ -162,8 +167,18 @@ def _isolated_env() -> dict[str, str]:
     """Build a subprocess environment that cannot reach the source tree.
 
     ``cwd`` alone is not enough: an inherited ``PYTHONPATH`` would put the
-    checkout back on ``sys.path`` and let a module missing from the built
-    distribution satisfy an import. This mirrors ``run_isolated`` in
+    checkout back on ``sys.path``. Two failure modes follow, and the tools
+    image sets ``PYTHONPATH=/app`` with the checkout mounted there, so both
+    were live in CI:
+
+    - an import satisfied by the source tree hides a module missing from the
+      built distribution;
+    - ``pip`` sees the ``lintro.egg-info`` that ``uv build`` leaves in the
+      checkout, treats lintro as already installed, installs only the
+      dependencies and still exits 0 — so nothing is under test.
+
+    Every venv, install and import subprocess therefore runs with this
+    environment, mirroring ``run_isolated`` in
     ``scripts/ci/test-verify-imports.sh``.
 
     Returns:
@@ -172,6 +187,37 @@ def _isolated_env() -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     return env
+
+
+def _assert_lintro_installed_into(venv_path: Path, python_exe: Path) -> None:
+    """Assert the venv's ``lintro`` comes from that venv, not somewhere else.
+
+    A ``pip install`` that quietly resolves lintro as already-satisfied exits
+    0 and installs only dependencies, leaving nothing under test. Resolving
+    ``lintro.__file__`` inside the venv turns that into a failure.
+
+    Args:
+        venv_path: Root of the virtual environment lintro was installed into.
+        python_exe: Interpreter inside that environment.
+    """
+    located = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
+        [
+            str(python_exe),
+            "-c",
+            "import lintro, pathlib; print(pathlib.Path(lintro.__file__).resolve())",
+        ],
+        cwd=str(venv_path.parent),
+        env=_isolated_env(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert_that(located.returncode).described_as(
+        f"lintro is not importable from {venv_path}: {located.stderr}",
+    ).is_equal_to(0)
+    assert_that(located.stdout.strip()).described_as(
+        "lintro was resolved from outside the test environment",
+    ).starts_with(str(venv_path.resolve()))
 
 
 def _build_distributions(dist_dir: Path) -> None:
@@ -360,6 +406,7 @@ def test_built_sdist_installs_and_runs(built_distributions: Path) -> None:
 
         subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [sys.executable, "-m", "venv", str(venv_path)],
+            env=_isolated_env(),
             check=True,
             capture_output=True,
             timeout=60,
@@ -375,6 +422,7 @@ def test_built_sdist_installs_and_runs(built_distributions: Path) -> None:
 
         install_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "pip", "install", str(sdists[0])],
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=300,
@@ -382,6 +430,7 @@ def test_built_sdist_installs_and_runs(built_distributions: Path) -> None:
         assert_that(install_result.returncode).described_as(
             f"sdist install failed:\n{install_result.stdout}\n{install_result.stderr}",
         ).is_equal_to(0)
+        _assert_lintro_installed_into(venv_path=venv_path, python_exe=python_exe)
 
         smoke_checks = [
             "import lintro",
