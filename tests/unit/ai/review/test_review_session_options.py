@@ -43,17 +43,62 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
+#: The value a caller gets for every optional run setting it omits. This is
+#: the whole defaulted surface, not a sample: #2301 collapsed the defaults onto
+#: this object alone, so a changed or newly defaulted field is a change to what
+#: every adapter runs with and must be made here deliberately.
+EXPECTED_SESSION_DEFAULTS: dict[str, object] = {
+    "depth": 1,
+    "context_window_override": None,
+    "lint_results": None,
+    "progress": None,
+    "sensitivity": None,
+    "force_semantic_chunking": False,
+    "timeout": None,
+    "custom_agents": (),
+    "run_builtin_checklist": True,
+    "workspace_root": None,
+    "context_collection_seconds": 0.0,
+    "prior_state": None,
+    "force_full": False,
+    "enforce_cost_cap": True,
+    "stop": None,
+    "synthesis": None,
+}
+
+#: Fields a caller must supply. Every other field is in
+#: :data:`EXPECTED_SESSION_DEFAULTS`, and the two together are the class.
+REQUIRED_SESSION_FIELDS: tuple[str, ...] = (
+    "provider",
+    "ai_config",
+    "checklist_items",
+    "checklist_text",
+    "classifications",
+)
+
+
 def _session_option_defaults() -> dict[str, object]:
-    """Collect the defaulted fields of ``ReviewSessionOptions``.
+    """Read what a caller who supplies only the required fields actually gets.
+
+    Built by constructing the object rather than by reading field metadata, so
+    a ``default_factory`` field or a value normalized in ``__post_init__`` is
+    reported as the caller sees it instead of being skipped.
 
     Returns:
-        Mapping of field name to default value, for every field of
-        ``ReviewSessionOptions`` that has a plain (non-factory) default.
+        Mapping of field name to the value the instance carries, for every
+        field outside :data:`REQUIRED_SESSION_FIELDS`.
     """
+    options = ReviewSessionOptions(
+        provider=MockAIProvider(),
+        ai_config=AIConfig(enabled=True, transport=AITransport.API),
+        checklist_items=[],
+        checklist_text="",
+        classifications=[],
+    )
     return {
-        field.name: field.default
+        field.name: getattr(options, field.name)
         for field in dataclasses.fields(ReviewSessionOptions)
-        if field.default is not dataclasses.MISSING
+        if field.name not in REQUIRED_SESSION_FIELDS
     }
 
 
@@ -76,19 +121,24 @@ def test_run_review_declares_no_defaults_of_its_own() -> None:
 
 
 def test_the_options_object_carries_the_run_defaults() -> None:
-    """Every optional run setting still has its default, on the one surface."""
+    """The defaulted surface is exactly the snapshot, value for value.
+
+    Pinning the whole set rather than four of its members means a default that
+    is silently added, removed, or retuned fails here instead of changing what
+    every review runs with unnoticed.
+    """
     defaults = _session_option_defaults()
 
-    assert_that(defaults).contains_key(
-        "depth",
-        "force_full",
-        "enforce_cost_cap",
-        "run_builtin_checklist",
+    assert_that(defaults).is_equal_to(EXPECTED_SESSION_DEFAULTS)
+
+
+def test_every_option_is_either_required_or_defaulted() -> None:
+    """The required fields and the defaulted snapshot together are the class."""
+    names = tuple(field.name for field in dataclasses.fields(ReviewSessionOptions))
+
+    assert_that(sorted(names)).is_equal_to(
+        sorted([*REQUIRED_SESSION_FIELDS, *EXPECTED_SESSION_DEFAULTS]),
     )
-    assert_that(defaults["depth"]).is_equal_to(1)
-    assert_that(defaults["force_full"]).is_false()
-    assert_that(defaults["enforce_cost_cap"]).is_true()
-    assert_that(defaults["run_builtin_checklist"]).is_true()
 
 
 def _capturing_run_review_async(

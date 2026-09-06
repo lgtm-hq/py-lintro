@@ -5,8 +5,8 @@ The orchestrator decides *what* to review; this module runs it:
 * :func:`review_all_chunks` — bounded-concurrency fan-out over the planned
   chunks, with graceful cost-cap / timeout / SIGTERM stops and an incremental
   sink so completed work survives an aborted run.
-* :func:`chunk_pass.review_chunk` — the depth-controlled pass over one chunk,
-  invoked once per chunk from here.
+* :func:`~lintro.ai.review.chunk_pass.review_chunk_with_progress` — the
+  depth-controlled pass over one chunk, invoked once per chunk from here.
 
 The run-scope inputs travel as one frozen
 :class:`~lintro.ai.review.session.ChunkRunPlan` rather than the ~18 keywords

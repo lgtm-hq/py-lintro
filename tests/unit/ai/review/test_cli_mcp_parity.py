@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - fixed git argv against a temp repo
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -29,12 +29,17 @@ from click.testing import CliRunner
 
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.preparation import (
     DEFAULT_EXECUTION_POLICY,
     PreparedReview,
     ReviewExecutionPolicy,
+    execute_review,
 )
+from lintro.ai.review.progress import NullReviewProgress
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.cli import cli
+from lintro.config.review_config import ReviewSynthesisConfig
 from lintro.mcp.toolkits import review as mcp_review
 
 #: Execution-policy fields only the CLI populates. Each is adapter policy the
@@ -478,3 +483,130 @@ def test_exclude_paths_now_shapes_the_context_on_both_surfaces(
         assert_that({skipped.path for skipped in context.skipped_files}).contains(
             "tokens.py",
         )
+
+
+#: Where every :class:`ReviewSessionOptions` field the adapter path fills comes
+#: from: ``"prepared"`` for shared preparation, ``"policy"`` for adapter-owned
+#: execution policy. ``timeout`` and ``stop`` are deliberately absent — neither
+#: adapter sets them through ``execute_review`` (an explicit ``--timeout`` is
+#: applied to the AI config during preparation instead), so they are asserted
+#: to arrive at the object's own defaults.
+SESSION_OPTION_SOURCES: dict[str, tuple[str, str]] = {
+    "ai_config": ("prepared", "ai_config"),
+    "depth": ("prepared", "depth"),
+    "checklist_items": ("prepared", "checklist_items"),
+    "checklist_text": ("prepared", "checklist_text"),
+    "classifications": ("prepared", "classifications"),
+    "lint_results": ("prepared", "lint_digest"),
+    "sensitivity": ("prepared", "sensitivity"),
+    "force_semantic_chunking": ("prepared", "force_semantic_chunking"),
+    "custom_agents": ("prepared", "custom_agents"),
+    "run_builtin_checklist": ("prepared", "run_builtin_checklist"),
+    "workspace_root": ("prepared", "workspace_root"),
+    "context_collection_seconds": ("prepared", "context_collection_seconds"),
+    "synthesis": ("prepared", "synthesis"),
+    "context_window_override": ("policy", "context_window_override"),
+    "progress": ("policy", "progress"),
+    "prior_state": ("policy", "prior_state"),
+    "force_full": ("policy", "force_full"),
+    "enforce_cost_cap": ("policy", "enforce_cost_cap"),
+}
+
+#: Session fields no adapter sets on this path. They must still arrive at the
+#: default :class:`ReviewSessionOptions` documents.
+UNSET_SESSION_OPTION_FIELDS: frozenset[str] = frozenset({"timeout", "stop"})
+
+
+def test_execute_review_forwards_every_prepared_and_policy_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every session option the adapter path fills reaches ``run_review``.
+
+    ``execute_review`` is the one place a prepared review and an execution
+    policy become a :class:`ReviewSessionOptions`, and it packs the object
+    field by field. A field dropped there would strand a resolved setting at
+    its default with no surface reporting the difference, so this asserts the
+    full mapping — every field, from its named source — and that the only
+    fields left at a default are the two no adapter sets.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.ai.review.preparation as preparation
+
+    cli_call, _, _ = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
+    # Every value is moved off its default so a dropped field cannot match by
+    # coincidence with the default it would fall back to.
+    prepared = replace(
+        cli_call["prepared"],
+        depth=3,
+        checklist_text="1. [security] Packed?",
+        force_semantic_chunking=True,
+        run_builtin_checklist=False,
+        lint_digest="lint digest",
+        workspace_root=tmp_path / "elsewhere",
+        context_collection_seconds=1.5,
+        synthesis=ReviewSynthesisConfig(enabled=True),
+    )
+    policy = ReviewExecutionPolicy(
+        progress=NullReviewProgress(),
+        context_window_override=4242,
+        prior_state=ReviewState(),
+        force_full=True,
+        enforce_cost_cap=False,
+    )
+    sources = {"prepared": prepared, "policy": policy}
+    captured: list[ReviewSessionOptions] = []
+
+    def _record_run_review(
+        context: Any,
+        *,
+        options: ReviewSessionOptions,
+    ) -> ReviewResult:
+        """Record the options ``execute_review`` packed.
+
+        Args:
+            context: Review context the orchestrator would run over.
+            options: The packed session options.
+
+        Returns:
+            A stub review result.
+        """
+        del context
+        captured.append(options)
+        return _stub_result()
+
+    monkeypatch.setattr(preparation, "run_review", _record_run_review)
+    # The stand-in stands in for a provider the orchestrator never calls here.
+    provider: Any = _FakeProvider()
+
+    execute_review(prepared, provider=provider, policy=policy)
+
+    assert_that(captured).is_length(1)
+    options = captured[0]
+    mismatched = sorted(
+        name
+        for name, (source, attribute) in SESSION_OPTION_SOURCES.items()
+        if getattr(options, name) != getattr(sources[source], attribute)
+    )
+    defaults = {field.name: field.default for field in fields(ReviewSessionOptions)}
+    left_at_default = sorted(
+        name
+        for name in UNSET_SESSION_OPTION_FIELDS
+        if getattr(options, name) != defaults[name]
+    )
+
+    assert_that(options.provider).is_same_as(provider)
+    assert_that(mismatched).is_empty()
+    assert_that(left_at_default).is_empty()
+    assert_that(
+        sorted([*SESSION_OPTION_SOURCES, *UNSET_SESSION_OPTION_FIELDS]),
+    ).is_equal_to(
+        sorted(
+            field.name
+            for field in fields(ReviewSessionOptions)
+            if field.name != "provider"
+        ),
+    )

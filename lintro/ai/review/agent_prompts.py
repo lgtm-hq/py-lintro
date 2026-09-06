@@ -18,9 +18,14 @@ copied prompt is never ambiguous about which findings it covers.
 
 from __future__ import annotations
 
-import re
-import textwrap
-
+from lintro.ai.review.agent_prompt_text import (
+    CONTINUATION_INDENT,
+    FOOTERS,
+    fence_for,
+    panel_title,
+    scope_sentence,
+    wrap,
+)
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -54,170 +59,9 @@ SPECULATIVE_NOTICE = (
     "This finding is inferred, not verified — confirm it reproduces before fixing."
 )
 
-#: Column at which prompt prose is soft-wrapped inside the fenced code block.
-_WRAP_WIDTH = 80
-
-#: Indent applied to continuation lines under a finding bullet.
-_CONTINUATION_INDENT = "  "
-
-_BACKTICK_RUN_RE = re.compile(r"`+")
-
 _TITLE_LIMIT = 200
 _TEXT_LIMIT = 2000
 _PATH_LIMIT = 300
-
-_FOOTERS: dict[AgentPromptScopeKind, str] = {
-    AgentPromptScopeKind.ALL_OPEN: (
-        "Regenerated every run · covers exactly the open table above"
-    ),
-    AgentPromptScopeKind.THIS_REVIEW: (
-        "For everything still open across all rounds, use the sticky comment's "
-        "fix-all prompt"
-    ),
-    AgentPromptScopeKind.SINGLE_FINDING: (
-        "Paste into Claude Code, Cursor, or any coding agent"
-    ),
-}
-
-_MISSING_FOOTERS = set(AgentPromptScopeKind) - set(_FOOTERS)
-if _MISSING_FOOTERS:  # pragma: no cover - guards a future scope kind
-    raise RuntimeError(
-        f"AgentPromptScopeKind members without a default footer: {_MISSING_FOOTERS}",
-    )
-
-
-def _plural(*, count: int, noun: str) -> str:
-    """Format a count with a naively pluralized noun.
-
-    Args:
-        count: Number of items.
-        noun: Singular noun to pluralize with a trailing ``s``.
-
-    Returns:
-        The count and noun, e.g. ``"1 finding"`` or ``"3 findings"``.
-    """
-    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
-
-
-def _wrap(*, text: str, initial_indent: str = "", subsequent_indent: str = "") -> str:
-    """Soft-wrap prose to the prompt width without breaking words.
-
-    Args:
-        text: Prose to wrap. Internal whitespace is collapsed.
-        initial_indent: Indent for the first output line.
-        subsequent_indent: Indent for every following line.
-
-    Returns:
-        The wrapped text, or an empty string when ``text`` has no content.
-    """
-    collapsed = " ".join(text.split())
-    if not collapsed:
-        return ""
-    return textwrap.fill(
-        collapsed,
-        width=_WRAP_WIDTH,
-        initial_indent=initial_indent,
-        subsequent_indent=subsequent_indent,
-        break_long_words=False,
-        break_on_hyphens=False,
-    )
-
-
-def _fence_for(*, text: str) -> str:
-    """Build a code fence longer than any backtick run inside ``text``.
-
-    A finding's reasoning can legitimately contain triple backticks; a fixed
-    ```` ``` ```` fence would then be closed early and the rest of the prompt
-    would escape the code block.
-
-    Args:
-        text: Prompt body that will be placed inside the fence.
-
-    Returns:
-        A run of at least three backticks, always longer than the longest run
-        found in ``text``.
-    """
-    longest = max((len(run) for run in _BACKTICK_RUN_RE.findall(text)), default=0)
-    return "`" * max(3, longest + 1)
-
-
-def _scope_sentence(*, scope: AgentPromptScope, count: int) -> str:
-    """Build the scope sentence restated on the prompt's first line.
-
-    Args:
-        scope: Scope descriptor for the prompt.
-        count: Number of findings the prompt covers.
-
-    Returns:
-        A single sentence naming exactly which findings are in scope.
-
-    Raises:
-        ValueError: When ``scope.kind`` is not a handled member of
-            :class:`AgentPromptScopeKind`.
-    """
-    if scope.kind is AgentPromptScopeKind.SINGLE_FINDING:
-        return "Scope: this single finding from a lintro AI code review."
-    if scope.kind is AgentPromptScopeKind.ALL_OPEN:
-        quantifier = "the 1 finding" if count == 1 else f"ALL {count} findings"
-        after = (
-            f" after round {scope.round_number}"
-            if scope.round_number is not None and scope.round_number > 1
-            else ""
-        )
-        return (
-            f"Scope: {quantifier} still open on this PR{after} "
-            "(not just the latest review)."
-        )
-    if scope.kind is AgentPromptScopeKind.THIS_REVIEW:
-        where = (
-            f"round {scope.round_number}"
-            if scope.round_number is not None
-            else "the latest round"
-        )
-        return (
-            f"Scope: the {_plural(count=count, noun='finding')} posted in {where} of "
-            "this PR's lintro review ONLY (older open findings are covered by the "
-            "fix-all prompt on the sticky status comment)."
-        )
-    # Exhaustiveness guard twin to _FOOTERS' _MISSING_FOOTERS check: a new
-    # AgentPromptScopeKind added without a branch here must fail loudly
-    # instead of silently falling through to THIS_REVIEW-flavored text.
-    raise ValueError(f"Unhandled AgentPromptScopeKind: {scope.kind!r}")
-
-
-def _panel_title(*, scope: AgentPromptScope, count: int) -> str:
-    """Build the visible panel header title for a prompt.
-
-    Args:
-        scope: Scope descriptor for the prompt.
-        count: Number of findings the prompt covers.
-
-    Returns:
-        Panel title text, without the leading ``⚡``.
-
-    Raises:
-        ValueError: When ``scope.kind`` is not a handled member of
-            :class:`AgentPromptScopeKind`.
-    """
-    if scope.kind is AgentPromptScopeKind.SINGLE_FINDING:
-        return "Prompt for AI agents"
-    if scope.kind is AgentPromptScopeKind.ALL_OPEN:
-        rounds = ""
-        if scope.round_number is not None:
-            rounds = (
-                " (round 1)"
-                if scope.round_number <= 1
-                else f" (rounds 1–{scope.round_number})"
-            )
-        noun = _plural(count=count, noun="still-open finding")
-        quantifier = noun if count == 1 else f"all {noun}"
-        return f"Fix-all prompt — {quantifier}{rounds}"
-    if scope.kind is AgentPromptScopeKind.THIS_REVIEW:
-        return f"Fix prompt — this round's {_plural(count=count, noun='finding')} only"
-    # Exhaustiveness guard twin to _FOOTERS' _MISSING_FOOTERS check: a new
-    # AgentPromptScopeKind added without a branch here must fail loudly
-    # instead of silently falling through to THIS_REVIEW-flavored text.
-    raise ValueError(f"Unhandled AgentPromptScopeKind: {scope.kind!r}")
 
 
 def _group_by_file(
@@ -259,24 +103,24 @@ def _occurrence_lines(*, finding: ReviewFinding) -> list[str]:
     if len(occurrences) < 2:
         return []
     lines = [
-        _wrap(
+        wrap(
             text=(
                 f"Occurs at {len(occurrences)} locations — apply the "
                 "equivalent fix at each and verify each one still reproduces "
                 "before changing it:"
             ),
-            initial_indent=_CONTINUATION_INDENT,
-            subsequent_indent=_CONTINUATION_INDENT,
+            initial_indent=CONTINUATION_INDENT,
+            subsequent_indent=CONTINUATION_INDENT,
         ),
     ]
     lines.extend(
-        _wrap(
+        wrap(
             text=(
                 f"- {sanitize_comment_text(occurrence.file, limit=_PATH_LIMIT)}"
                 f":{occurrence.line}"
             ),
-            initial_indent=_CONTINUATION_INDENT * 2,
-            subsequent_indent=_CONTINUATION_INDENT * 3,
+            initial_indent=CONTINUATION_INDENT * 2,
+            subsequent_indent=CONTINUATION_INDENT * 3,
         )
         for occurrence in occurrences
     )
@@ -318,7 +162,7 @@ def _finding_block(*, finding: ReviewFinding) -> list[str]:
         f"({finding.severity.value} · {category}):"
     )
     lines = [
-        _wrap(text=bullet, subsequent_indent=_CONTINUATION_INDENT),
+        wrap(text=bullet, subsequent_indent=CONTINUATION_INDENT),
     ]
 
     reasoning = " ".join(
@@ -331,27 +175,27 @@ def _finding_block(*, finding: ReviewFinding) -> list[str]:
     )
     if reasoning:
         lines.append(
-            _wrap(
+            wrap(
                 text=reasoning,
-                initial_indent=_CONTINUATION_INDENT,
-                subsequent_indent=_CONTINUATION_INDENT,
+                initial_indent=CONTINUATION_INDENT,
+                subsequent_indent=CONTINUATION_INDENT,
             ),
         )
     fix = sanitize_comment_text(finding.fix, limit=_TEXT_LIMIT).strip()
     if fix:
         lines.append(
-            _wrap(
+            wrap(
                 text=f"Fix: {fix}",
-                initial_indent=_CONTINUATION_INDENT,
-                subsequent_indent=_CONTINUATION_INDENT,
+                initial_indent=CONTINUATION_INDENT,
+                subsequent_indent=CONTINUATION_INDENT,
             ),
         )
     if finding.evidence_style is EvidenceStyle.SPECULATIVE:
         lines.append(
-            _wrap(
+            wrap(
                 text=SPECULATIVE_NOTICE,
-                initial_indent=_CONTINUATION_INDENT,
-                subsequent_indent=_CONTINUATION_INDENT,
+                initial_indent=CONTINUATION_INDENT,
+                subsequent_indent=CONTINUATION_INDENT,
             ),
         )
     lines.extend(_occurrence_lines(finding=finding))
@@ -384,8 +228,8 @@ def render_agent_prompt(
         return ""
 
     sections: list[str] = [
-        _wrap(text=_scope_sentence(scope=scope, count=len(actionable))),
-        _wrap(text=VERIFICATION_PREAMBLE),
+        wrap(text=scope_sentence(scope=scope, count=len(actionable))),
+        wrap(text=VERIFICATION_PREAMBLE),
     ]
     for path, file_findings in _group_by_file(findings=actionable):
         safe_path = sanitize_comment_text(path, limit=_PATH_LIMIT)
@@ -417,7 +261,7 @@ def _suggested_change_section(*, change: SuggestedChange) -> str:
         if not change.is_multiline
         else f"lines {change.start_line}-{change.end_line}"
     )
-    header = _wrap(
+    header = wrap(
         text=(
             "Apply exactly the change already proposed in this comment's "
             f"suggestion block — replace {span} with the following, verbatim:"
@@ -433,7 +277,7 @@ def _suggested_change_section(*, change: SuggestedChange) -> str:
     body = "\n".join(
         sanitize_comment_text(line) for line in change.replacement.splitlines() or [""]
     )
-    fence = _fence_for(text=body)
+    fence = fence_for(text=body)
     return f"{header}\n{fence}\n{body}\n{fence}"
 
 
@@ -480,7 +324,7 @@ def render_prompt_panel(*, prompt: str, title: str, footer: str = "") -> str:
     """
     if not prompt.strip():
         return ""
-    fence = _fence_for(text=prompt)
+    fence = fence_for(text=prompt)
     lines = [
         "> [!IMPORTANT]",
         f"> ⚡ **{title}**",
@@ -520,8 +364,8 @@ def render_agent_prompt_panel(
         return ""
     return render_prompt_panel(
         prompt=prompt,
-        title=_panel_title(scope=scope, count=len(prompt_findings(findings=findings))),
-        footer=_FOOTERS[scope.kind] if footer is None else footer,
+        title=panel_title(scope=scope, count=len(prompt_findings(findings=findings))),
+        footer=FOOTERS[scope.kind] if footer is None else footer,
     )
 
 
@@ -554,6 +398,6 @@ def render_finding_prompt_panel(
         return ""
     return render_prompt_panel(
         prompt=prompt,
-        title=_panel_title(scope=scope, count=1),
-        footer=_FOOTERS[scope.kind] if footer is None else footer,
+        title=panel_title(scope=scope, count=1),
+        footer=FOOTERS[scope.kind] if footer is None else footer,
     )

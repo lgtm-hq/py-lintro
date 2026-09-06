@@ -7,8 +7,10 @@ envelope under test are the ones the stdio server actually applies.
 The AI provider is always mocked. Since #2300 the handler reaches the
 orchestrator through ``lintro.ai.review.preparation.execute_review``, so the
 orchestrator is stubbed at ``lintro.ai.review.preparation.run_review`` — that
-module holds the ``from``-import the shared path actually calls, and the lint
-helpers are patched there for the same reason. That keeps the tests free of
+module holds the ``from``-import the shared path actually calls. The lint
+helpers are stubbed on ``lintro.ai.review.preparation_resolvers`` for the same
+reason: since #2301 that is the module whose globals the digest builder reads.
+That keeps the tests free of
 network calls, credentials, and cost while still exercising context
 collection, budget resolution, and payload shaping for real.
 """
@@ -845,15 +847,15 @@ def test_review_includes_a_lint_digest_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``with_lint`` feeds the deterministic linters' digest into the prompt."""
-    import lintro.ai.review.preparation as preparation
+    import lintro.ai.review.preparation_resolvers as resolvers
 
     monkeypatch.setattr(
-        preparation,
+        resolvers,
         "run_lint_on_changed_files",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        preparation,
+        resolvers,
         "format_lint_results_for_prompt",
         lambda **_kwargs: "ruff: 1 issue",
     )
