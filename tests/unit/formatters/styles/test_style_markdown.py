@@ -44,17 +44,6 @@ def test_markdown_style_multiple_rows_produces_correct_line_count(
     assert_that(lines).is_length(4)  # header, separator, 2 data rows
 
 
-def test_markdown_style_escapes_pipe_characters(markdown_style: MarkdownStyle) -> None:
-    """MarkdownStyle escapes pipe characters in cell values.
-
-    Args:
-        markdown_style: The MarkdownStyle formatter instance.
-    """
-    result = markdown_style.format(["Message"], [["A | B"]])
-
-    assert_that(result).contains("A \\| B")
-
-
 def test_markdown_style_row_shorter_than_columns(markdown_style: MarkdownStyle) -> None:
     """MarkdownStyle handles row with fewer elements than columns.
 

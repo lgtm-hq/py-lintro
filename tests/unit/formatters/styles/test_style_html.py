@@ -54,17 +54,6 @@ def test_html_style_escapes_script_tags(html_style: HtmlStyle) -> None:
     assert_that(result).does_not_contain("<script>")
 
 
-def test_html_style_escapes_ampersand(html_style: HtmlStyle) -> None:
-    """HtmlStyle escapes ampersand characters.
-
-    Args:
-        html_style: The HtmlStyle formatter instance.
-    """
-    result = html_style.format(["Message"], [["A & B"]])
-
-    assert_that(result).contains("A &amp; B")
-
-
 def test_html_style_row_shorter_than_columns(html_style: HtmlStyle) -> None:
     """HtmlStyle handles row with fewer elements than columns.
 

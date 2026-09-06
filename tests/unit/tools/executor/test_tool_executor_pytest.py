@@ -19,13 +19,6 @@ def test_get_tools_to_run_test_action_with_pytest() -> None:
     assert_that(result.to_run[0]).is_equal_to("pytest")
 
 
-def test_get_tools_to_run_test_action_with_pytest_full_name() -> None:
-    """Test get_tools_to_run with test action using full pytest name."""
-    result = get_tools_to_run(tools="pytest", action="test")
-    assert_that(result.to_run).is_length(1)
-    assert_that(result.to_run[0]).is_equal_to("pytest")
-
-
 def test_get_tools_to_run_test_action_with_none_tools() -> None:
     """Test get_tools_to_run with test action and None tools."""
     result = get_tools_to_run(tools=None, action="test")

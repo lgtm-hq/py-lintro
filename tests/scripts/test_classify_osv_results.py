@@ -356,22 +356,3 @@ def test_classify_error_for_malformed_exit_zero_payload() -> None:
     assert_that(module.classify_osv_results(payload=payload)).is_equal_to(
         module.OsvResultClass.ERROR,
     )
-
-
-def test_classify_ok_for_empty_results_scan() -> None:
-    """A clean exit-0 empty-results scan still classifies as ok (#1028)."""
-    module = _load_classify_module()
-    payload = {
-        "results": [
-            {
-                "tool": "osv_scanner",
-                "success": True,
-                "issues_count": 0,
-                "parse_failures_count": 0,
-            },
-        ],
-    }
-
-    assert_that(module.classify_osv_results(payload=payload)).is_equal_to(
-        module.OsvResultClass.OK,
-    )

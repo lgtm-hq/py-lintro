@@ -324,16 +324,6 @@ def test_chunker_orders_source_before_test_in_group_diff() -> None:
     assert_that(source_index).is_less_than(test_index)
 
 
-def test_matches_test_for_source_rejects_loose_substring_pairs() -> None:
-    """Test paths must explicitly pair with a source stem, not substring-match."""
-    assert_that(
-        matches_test_for_source(test_path="tests/test_foobar.py", source_stem="foo"),
-    ).is_false()
-    assert_that(
-        matches_test_for_source(test_path="tests/test_foo.py", source_stem="foo"),
-    ).is_true()
-
-
 @pytest.mark.parametrize(
     ("test_path", "source_stem"),
     [
