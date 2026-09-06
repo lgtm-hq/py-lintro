@@ -560,12 +560,20 @@ class _ReporterLog:
         issue_comment_bodies: Body of each sticky comment posted or edited.
         review_comment_edits: Keyword arguments of each inline-comment edit.
         resolved_threads: Thread ids the run resolved.
+        update_outcomes: Results ``update_review_comment`` returns, consumed in
+            order; ``default_update_result`` answers once they run out. A
+            ``side_effect`` wins over ``return_value``, so a test that needs a
+            refused edit must queue it here rather than setting the mock's
+            ``return_value``.
+        default_update_result: Result ``update_review_comment`` falls back to.
     """
 
     api_calls: list[tuple[str, str, Any]] = field(default_factory=list)
     issue_comment_bodies: list[str] = field(default_factory=list)
     review_comment_edits: list[dict[str, Any]] = field(default_factory=list)
     resolved_threads: list[str] = field(default_factory=list)
+    update_outcomes: list[bool] = field(default_factory=list)
+    default_update_result: bool = True
 
 
 def _posting_reporter(
@@ -624,10 +632,12 @@ def _posting_reporter(
             **kwargs: Every argument of the edit, recorded as a dict.
 
         Returns:
-            bool: Always ``True``, the success result GitHub would return.
+            bool: The next queued outcome, else ``default_update_result``.
         """
         log.review_comment_edits.append(dict(kwargs))
-        return True
+        if log.update_outcomes:
+            return log.update_outcomes.pop(0)
+        return log.default_update_result
 
     def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
         """Record a newly posted sticky body.
@@ -833,7 +843,9 @@ def test_posting_survives_a_refused_comment_edit(
         prior=_prior_state(findings=(record,)),
         review_comments=[{"id": _COMMENT_ID, "body": _INLINE_BODY}],
     )
-    reporter.update_review_comment.return_value = False
+    # Queue the refusal on the log, not the mock: the recorder is installed as
+    # a side_effect, which unittest.mock runs ahead of return_value (#2315).
+    reporter.log.update_outcomes = [False]
 
     posted = post_review_to_github(
         result=sample_review_result,
@@ -842,6 +854,12 @@ def test_posting_survives_a_refused_comment_edit(
     )
 
     assert_that(posted).is_true()
+    # The edit really was attempted and really was refused, so the production
+    # failed-edit branch ran: it `continue`s before queueing the thread for
+    # resolution, leaving nothing resolved even when auto_resolve is on.
+    assert_that(reporter.log.review_comment_edits).is_length(1)
+    assert_that(reporter.log.update_outcomes).is_empty()
+    assert_that(reporter.log.resolved_threads).is_empty()
     # The refused edit is not a crash; the prior comment id remains available
     # on the artifact state the next round will load.
     from lintro.ai.review.github_sticky import advance_review_state

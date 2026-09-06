@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -173,8 +173,14 @@ def test_execute_calls_run_ai_enhancement(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @patch("lintro.ai.orchestrator.run_ai_enhancement")
-def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
-    """Exceptions don't propagate; warning is logged."""
+def test_execute_catches_exceptions_and_logs_warning(
+    mock_run_ai_enhancement: MagicMock,
+) -> None:
+    """A provider failure warns and returns an errored result, never raises.
+
+    Args:
+        mock_run_ai_enhancement: Patched orchestrator entry point.
+    """
     mock_run_ai_enhancement.side_effect = RuntimeError("provider exploded")
     config = LintroConfig(
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
@@ -197,19 +203,22 @@ def test_execute_catches_exceptions_and_logs_warning(mock_run_ai_enhancement):
         ),
     ]
 
-    hook.execute(
+    result = hook.execute(
         action=Action.CHECK,
         all_results=results,
         console_logger=console_logger,
         output_format="terminal",
     )
 
+    # The warning alone does not prove the failure was reported: a regression
+    # that logged and then returned a plain AIResult() would look identical.
+    assert_that(result.error).is_true()
     assert_that(console_logger.warnings).is_length(1)
     assert_that(console_logger.warnings[0]).contains("provider exploded")
 
 
-def test_execute_handles_import_failure():
-    """Verify graceful handling when the lazy import of run_ai_enhancement fails."""
+def test_execute_handles_import_failure() -> None:
+    """A failed lazy import warns and returns an errored result."""
     config = LintroConfig(
         ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
@@ -235,6 +244,54 @@ def test_execute_handles_import_failure():
         "sys.modules",
         {"lintro.ai.orchestrator": None},
     ):
+        result = hook.execute(
+            action=Action.CHECK,
+            all_results=results,
+            console_logger=console_logger,
+            output_format="terminal",
+        )
+
+    assert_that(result.error).is_true()
+    assert_that(console_logger.warnings).is_length(1)
+    assert_that(console_logger.warnings[0]).contains("AI enhancement unavailable")
+
+
+@patch("lintro.ai.orchestrator.run_ai_enhancement")
+def test_execute_reraises_when_fail_on_ai_error_is_set(
+    mock_run_ai_enhancement: MagicMock,
+) -> None:
+    """``fail_on_ai_error`` propagates the original exception instead of warning.
+
+    Args:
+        mock_run_ai_enhancement: Patched orchestrator entry point.
+    """
+    mock_run_ai_enhancement.side_effect = RuntimeError("provider exploded")
+    config = LintroConfig(
+        ai=AIConfig(
+            enabled=True,
+            transport=AITransport.API,
+            fail_on_ai_error=True,
+        ).model_dump(),
+    )
+    hook = AIPostExecutionHook(config)
+    console_logger = RecordingConsoleLogger()
+    results = [
+        ToolResult(
+            name="ruff",
+            success=False,
+            issues_count=1,
+            issues=[
+                MockIssue(
+                    file="src/main.py",
+                    line=1,
+                    message="err",
+                    code="E501",
+                ),
+            ],
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match="provider exploded"):
         hook.execute(
             action=Action.CHECK,
             all_results=results,
@@ -242,5 +299,5 @@ def test_execute_handles_import_failure():
             output_format="terminal",
         )
 
-    assert_that(console_logger.warnings).is_length(1)
-    assert_that(console_logger.warnings[0]).contains("AI enhancement unavailable")
+    # The raising path returns before the warning, so nothing was printed.
+    assert_that(console_logger.warnings).is_empty()

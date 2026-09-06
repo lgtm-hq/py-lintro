@@ -28,14 +28,20 @@ class RecordingConsoleLogger(ThreadSafeConsoleLogger):
     """Console logger that records its output instead of printing it.
 
     Subclasses the real :class:`ThreadSafeConsoleLogger` so it satisfies the
-    type production code annotates, then overrides the two sinks that reach a
-    terminal. Every other logger method keeps its real implementation, so text
-    that production routes through ``console_output`` is recorded exactly as a
-    user would have seen it. Tests use this instead of a mock so they assert
-    on visible output rather than on how a collaborator was called (#2315).
+    type production code annotates, then overrides the sinks that reach a
+    terminal. Every other logger method keeps its real implementation. Tests
+    use this instead of a mock so they assert on visible output rather than on
+    how a collaborator was called (#2315).
+
+    The transcripts are split, so ``lines`` is **not** everything a user would
+    have seen: :meth:`warning` records to ``warnings`` only and never routes
+    through ``console_output``, unlike production, which formats a
+    ``WARNING:`` line and prints it. Assert on ``warnings`` for warning text
+    and on ``lines``/``text`` for the rest.
 
     Attributes:
-        lines: Every message passed to :meth:`console_output`, in order.
+        lines: Every message passed to :meth:`console_output` or :meth:`error`,
+            in order. Excludes warnings.
         warnings: Every message passed to :meth:`warning`, in order.
     """
 
@@ -82,10 +88,11 @@ class RecordingConsoleLogger(ThreadSafeConsoleLogger):
 
     @property
     def text(self) -> str:
-        """Return every recorded line joined by newlines.
+        """Return every recorded console line joined by newlines.
 
         Returns:
-            str: The console transcript this logger captured.
+            str: The console transcript this logger captured, excluding
+            warnings (those live in ``warnings``).
         """
         return "\n".join(self.lines)
 

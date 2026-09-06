@@ -40,9 +40,17 @@ def test_ruff_check_routes_through_prepare_execution(
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
+
+    Raises:
+        TypeError: If a recorded ``cmd`` is not a list, which would otherwise
+            be coerced silently into a list of characters.
     """
     from lintro.tools.implementations.ruff.check import execute_ruff_check
 
+    # The shared fixture leaves format_check False, but RuffPlugin's defaults
+    # set it True, so production runs both `ruff check` and `ruff format
+    # --check`. Opt in here or the second subprocess is never covered (#2315).
+    mock_ruff_tool.options["format_check"] = True
     mock_ruff_tool.prepare.return_value = ruff_execution_context(
         timeout=77,
         cwd="/prepared/cwd",
@@ -70,12 +78,28 @@ def test_ruff_check_routes_through_prepare_execution(
             "lintro.tools.implementations.ruff.check.parse_ruff_output",
             return_value=[],
         ),
+        patch(
+            "lintro.tools.implementations.ruff.check.parse_ruff_format_check_output",
+            return_value=[],
+        ),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-    assert_that(observed).is_length(1)
-    assert_that(observed[0]["timeout"]).is_equal_to(77)
-    assert_that(observed[0]["cwd"]).is_equal_to("/prepared/cwd")
+    # Both the lint and the format --check subprocess must honour the context.
+    assert_that(observed).is_length(2)
+    argvs: list[str] = []
+    for call in observed:
+        cmd = call["cmd"]
+        if not isinstance(cmd, list):
+            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
+        argvs.append(" ".join(str(part) for part in cmd))
+    assert_that(argvs[0]).contains("check")
+    assert_that(argvs[1]).contains("format")
+    assert_that(argvs[1]).contains("--check")
+    assert_that([call["timeout"] for call in observed]).is_equal_to([77, 77])
+    assert_that([call["cwd"] for call in observed]).is_equal_to(
+        ["/prepared/cwd", "/prepared/cwd"],
+    )
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
 
@@ -123,7 +147,10 @@ def test_ruff_fix_routes_through_prepare_execution(
 def test_ruff_plugin_check_and_fix_invoke_prepare(
     ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """Both plugin entry points carry the prepared timeout into ruff's argv.
+    """Both plugin entry points carry the prepared timeout into the runner.
+
+    The timeout is a subprocess-runner keyword argument, not a ruff CLI flag,
+    so this asserts on the call kwargs rather than on argv (#2315).
 
     Args:
         ruff_execution_context: Factory for mock execution contexts.
@@ -135,12 +162,15 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
 
         plugin = RuffPlugin()
 
-    prepared: list[str] = []
+    prepared: list[dict[str, object]] = []
     check_timeouts: list[object] = []
     fix_timeouts: list[object] = []
 
     def fake_prepare(**kwargs: object) -> MagicMock:
-        """Record the action being prepared and hand back a fixed context.
+        """Record one preparation and hand back a fixed context.
+
+        ``_prepare_execution`` takes no ``action`` parameter, so the whole
+        kwargs mapping is recorded rather than a field that never exists.
 
         Args:
             **kwargs: Arguments the plugin passed to ``prepare``.
@@ -148,7 +178,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
         Returns:
             A context pinning the timeout the subprocess calls must honour.
         """
-        prepared.append(str(kwargs.get("action", "")))
+        prepared.append(dict(kwargs))
         return ruff_execution_context(timeout=64)
 
     def fake_check_run(**kwargs: object) -> tuple[bool, str]:

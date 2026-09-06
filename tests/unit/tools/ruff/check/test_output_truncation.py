@@ -54,8 +54,12 @@ def test_check_failure_logs_output_to_debug_only(
         [message for message in debug_messages if "check full output" in message],
     ).is_not_empty()
     assert_that("\n".join(debug_messages)).contains(long_output)
+    # Assert on the payload itself: no phrase like "check failed with output"
+    # is logged anywhere in lintro, so forbidding that string proved nothing.
+    # A real diagnostic WARNING does fire here (parse_ruff_output returned no
+    # issues), so "zero warnings" would be the wrong assertion (#2315).
     assert_that("\n".join(_messages_at(loguru_records, "WARNING"))).does_not_contain(
-        "check failed with output",
+        long_output,
     )
 
 
@@ -98,7 +102,7 @@ def test_format_check_failure_logs_output_to_debug_only(
     ).is_not_empty()
     assert_that("\n".join(debug_messages)).contains(long_format_output)
     assert_that("\n".join(_messages_at(loguru_records, "WARNING"))).does_not_contain(
-        "format check failed with output",
+        long_format_output,
     )
 
 

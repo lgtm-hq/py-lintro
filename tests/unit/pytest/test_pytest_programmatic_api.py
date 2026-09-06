@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -176,20 +175,3 @@ def test_test_function_exits_with_the_failing_suite_exit_code(
     written = report.read_text(encoding="utf-8")
     assert_that(written).contains('"failed": 1')
     assert_that(written).contains("test_generated_fails")
-
-
-def test_test_function_exit_code_failure() -> None:
-    """The wrapper turns a non-zero pipeline exit code into ``SystemExit``."""
-    with patch("lintro.api.core.run_lint_with_ai", return_value=1):
-        with pytest.raises(SystemExit) as exc_info:
-            test(
-                paths=(),
-                exclude=None,
-                include_venv=False,
-                output=None,
-                output_format="grid",
-                group_by="file",
-                verbose=False,
-                tool_options=None,
-            )
-        assert_that(exc_info.value.code).is_equal_to(1)

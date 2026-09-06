@@ -199,6 +199,10 @@ def test_test_command_propagates_the_pipeline_exit_code(
 ) -> None:
     """The command exits with whatever code the pipeline returned.
 
+    Reading ``only_run`` first makes a no-op command fail: without it a command
+    that exited 0 *without* invoking the pipeline would satisfy the success
+    case (#2315).
+
     Args:
         recorded_pipeline: Recorder for the pipeline the command drives.
         pipeline_exit_code: Exit code the stand-in pipeline returns.
@@ -208,4 +212,5 @@ def test_test_command_propagates_the_pipeline_exit_code(
 
     result = CliRunner().invoke(pytest_cli_command, [])
 
+    assert_that(recorded_pipeline.only_run).contains_key("tools")
     assert_that(result.exit_code).is_equal_to(expected_exit_code)

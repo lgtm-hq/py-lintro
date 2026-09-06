@@ -322,8 +322,12 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
         output_format="json",
     )
 
-    # The verification pass is what turns the applied suggestion into the
-    # fixed/remaining counts stamped on the result and the AI outcome.
+    # `fixed_count` is stamped from the applied suggestions, not from the
+    # verification pass: pipeline.py builds `applied_by_tool` off
+    # `applied_suggestions` and hands that to `attach_fixed_count_metadata`,
+    # while the ValidationResult only feeds the separate verified/unverified
+    # counts. The stubbed verification above is what keeps this rerun path
+    # deterministic, not what produces the number asserted below.
     assert_that(ai_result.fixes_applied).is_equal_to(1)
     assert_that(result.metadata).is_not_none()
     assert_that(result.metadata).contains_key("fixed_count")

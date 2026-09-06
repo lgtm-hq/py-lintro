@@ -3,9 +3,10 @@
 
 Earlier file splits copied test functions into their new home without deleting
 the monolith copy, leaving groups of byte-identical tests that cost runtime and
-drift apart silently. This scanner hashes every test function body with names,
-docstrings and constants preserved but position information stripped, then
-reports every group of two or more functions whose bodies hash the same.
+drift apart silently. This scanner hashes every test function body with names
+and constants preserved but leading docstrings and position information
+stripped, so a copy that was only re-worded still matches, then reports every
+group of two or more functions whose bodies hash the same.
 
 Run as a script for a human-readable report, or import :func:`find_duplicate_groups`
 from a test to assert the count stays at zero.
@@ -200,8 +201,15 @@ def find_duplicate_groups(
     Returns:
         One list per duplicate group, each holding two or more functions,
         sorted by path and line number.
+
+    Raises:
+        NotADirectoryError: If ``root`` is not an existing directory. Left to
+            ``rglob`` this would yield nothing and report a clean gate, so a
+            typo in CI would silently pass (#2375).
     """
     scan_root = root if root is not None else REPO_ROOT / "tests"
+    if not scan_root.is_dir():
+        raise NotADirectoryError(f"not a directory: {scan_root}")
     buckets: dict[tuple[str, tuple[tuple[str, str], ...]], list[TestFunction]] = (
         defaultdict(list)
     )
@@ -223,7 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments, defaulting to ``sys.argv[1:]``.
 
     Returns:
-        ``0`` when no duplicate group was found, ``1`` otherwise.
+        ``0`` when no duplicate group was found, ``1`` when at least one
+        exists, and ``2`` when ``--root`` does not name a directory.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -233,7 +242,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory to scan (default: the repository tests/ tree).",
     )
     args = parser.parse_args(argv)
-    groups = find_duplicate_groups(root=args.root)
+    try:
+        groups = find_duplicate_groups(root=args.root)
+    except NotADirectoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for group in groups:
         print("duplicate group:")
         for function in group:

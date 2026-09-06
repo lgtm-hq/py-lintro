@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -18,6 +19,10 @@ from lintro.cli import (
     ensure_utf8_stdio,
     main,
 )
+
+if TYPE_CHECKING:
+    from tests.unit.cli.conftest import RecordedLintRun
+
 
 # =============================================================================
 # CLI Entry Point Tests
@@ -373,13 +378,24 @@ def test_cli_alias_resolves_to_command(
 # =============================================================================
 
 
-def test_lintro_group_invoke_single_command() -> None:
-    """A single command's pipeline exit code reaches the process exit code."""
-    runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock:
-        mock.return_value = 2
-        result = runner.invoke(cli, ["check", "."])
+def test_lintro_group_invoke_single_command(
+    recorded_check_run: RecordedLintRun,
+) -> None:
+    """A single command's pipeline exit code reaches the process exit code.
 
+    Click reports its own usage errors as exit code 2, so asserting the code
+    alone cannot tell a forwarded pipeline result from a mis-parsed command
+    line. Asserting the recorder ran exactly once pins that the pipeline is
+    what produced the 2 (#2315).
+
+    Args:
+        recorded_check_run: Recorder standing in for the check pipeline.
+    """
+    recorded_check_run.exit_code = 2
+
+    result = CliRunner().invoke(cli, ["check", "."])
+
+    assert_that(recorded_check_run.calls).is_length(1)
     assert_that(result.exit_code).is_equal_to(2)
 
 

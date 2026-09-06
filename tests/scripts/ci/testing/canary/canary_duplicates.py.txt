@@ -1,0 +1,28 @@
+"""Canary module for the duplicate-body scanner (#2375).
+
+Stored with a ``.py.txt`` suffix so pytest does not collect it and the
+scanners' live ``rglob("*.py")`` sweep of ``tests/`` never sees it. The
+positive-control test copies it into ``tmp_path`` as a real module.
+"""
+
+from assertpy import assert_that
+
+STEP = 3
+
+
+def test_canary_original() -> None:
+    """First copy of a body that a later file split duplicated."""
+    result = STEP + 1
+    assert_that(result).is_equal_to(4)
+
+
+def test_canary_copy() -> None:
+    """Second copy of the same body, left behind by the split."""
+    result = STEP + 1
+    assert_that(result).is_equal_to(4)
+
+
+def test_canary_unique_body() -> None:
+    """A distinct body, which the scanner must not group with the pair."""
+    result = STEP * 2
+    assert_that(result).is_equal_to(6)

@@ -47,7 +47,12 @@ class _RecordingProcess:
         self._wait_error = wait_error
 
     def wait(self, timeout: float | None = None) -> int:
-        """Return the exit status, or raise the configured error.
+        """Return the exit status, or raise the configured error once.
+
+        The error fires on the first call only. Production's wait-timeout
+        handler kills the process and then waits again *without* suppressing,
+        so a stand-in that raised every time would surface its own error and
+        hide the wrapped re-raise that attaches the partial output (#2315).
 
         Args:
             timeout: Remaining budget the caller allows for the wait.
@@ -56,11 +61,13 @@ class _RecordingProcess:
             int: The configured return code.
 
         Raises:
-            self._wait_error: The configured error, when one was given.
+            error: The configured error, on the first call only.
         """
         self.wait_timeouts.append(timeout)
         if self._wait_error is not None:
-            raise self._wait_error
+            error = self._wait_error
+            self._wait_error = None
+            raise error
         return self.returncode
 
     def kill(self) -> None:
@@ -210,20 +217,36 @@ def test_streaming_total_walltime_stays_within_budget_on_hang() -> None:
 
 
 def test_streaming_timeout_during_wait() -> None:
-    """A timeout inside ``process.wait`` raises and kills the process."""
+    """A wait timeout kills the process and re-raises with the partial output.
+
+    The handler must kill, wait once more for the corpse, then raise a *new*
+    ``TimeoutExpired`` carrying the caller's command, the configured timeout
+    and whatever the reader managed to collect. Asserting on those fields is
+    what distinguishes the wrapped error from the one the process itself
+    raised (#2315).
+    """
+    original = subprocess.TimeoutExpired(cmd=["slow"], timeout=1)
     process = _RecordingProcess(
         stdout_lines=["partial\n"],
-        wait_error=subprocess.TimeoutExpired(cmd=["slow"], timeout=1),
+        wait_error=original,
     )
 
     with patch(
         "lintro.plugins.subprocess_executor.subprocess.Popen",
         return_value=process,
     ):
-        with pytest.raises(subprocess.TimeoutExpired):
+        with pytest.raises(subprocess.TimeoutExpired) as caught:
             run_subprocess_streaming(["slow", "cmd"], timeout=1)
 
+    # The raised error is the wrapper, not the one process.wait() raised.
+    assert_that(caught.value).is_not_same_as(original)
+    assert_that(caught.value.__cause__).is_same_as(original)
+    assert_that(caught.value.cmd).is_equal_to(["slow", "cmd"])
+    assert_that(caught.value.output).is_equal_to("partial")
     assert_that(process.kill_count).is_equal_to(1)
+    # Killed, then waited again for the corpse with the fixed cleanup budget.
+    assert_that(process.wait_timeouts).is_length(2)
+    assert_that(process.wait_timeouts[1]).is_equal_to(1.0)
 
 
 # =============================================================================

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -25,16 +24,21 @@ def _record_black_argv(
         A callable recording each invocation and reporting a clean run.
     """
 
-    def fake_run(**kwargs: object) -> tuple[bool, str]:
+    def fake_run(*, cmd: list[str], **kwargs: object) -> tuple[bool, str]:
         """Record one black invocation and report success.
 
+        Taking ``cmd`` as a typed keyword parameter narrows it for real, where
+        ``typing.cast`` was a no-op that would have silently split a stray
+        string into characters (#2315).
+
         Args:
-            **kwargs: Arguments the plugin passed to the runner.
+            cmd: Command the plugin passed to the runner.
+            **kwargs: Remaining runner arguments (timeout, cwd).
 
         Returns:
             A successful run with empty output.
         """
-        commands.append(list(cast("list[str]", kwargs["cmd"])))
+        commands.append(list(cmd))
         return (True, "")
 
     return fake_run

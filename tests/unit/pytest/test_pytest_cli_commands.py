@@ -147,32 +147,6 @@ def test_test_command_tool_options_mixed(
     assert_that(tool_options).does_not_contain("pytest:pytest:")
 
 
-def test_test_command_exit_code_success(recorded_pipeline: PipelineRecorder) -> None:
-    """Test test command propagates success exit code.
-
-    Args:
-        recorded_pipeline: Recorder for the pipeline the command drives.
-    """
-    recorded_pipeline.exit_code = 0
-
-    result = CliRunner().invoke(pytest_cli_command, [])
-
-    assert_that(result.exit_code).is_equal_to(0)
-
-
-def test_test_command_exit_code_failure(recorded_pipeline: PipelineRecorder) -> None:
-    """Test test command propagates failure exit code.
-
-    Args:
-        recorded_pipeline: Recorder for the pipeline the command drives.
-    """
-    recorded_pipeline.exit_code = 1
-
-    result = CliRunner().invoke(pytest_cli_command, [])
-
-    assert_that(result.exit_code).is_equal_to(1)
-
-
 def test_test_command_combined_options(recorded_pipeline: PipelineRecorder) -> None:
     """Every option on one command line reaches the pipeline together.
 

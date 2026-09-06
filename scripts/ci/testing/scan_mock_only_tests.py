@@ -279,8 +279,15 @@ def find_mock_only_tests(*, root: Path | None = None) -> list[MockOnlyTest]:
 
     Returns:
         The offending test functions, sorted by path and line number.
+
+    Raises:
+        NotADirectoryError: If ``root`` is not an existing directory. Left to
+            ``rglob`` this would yield nothing and report a clean gate, so a
+            typo in CI would silently pass (#2375).
     """
     scan_root = root if root is not None else REPO_ROOT / "tests"
+    if not scan_root.is_dir():
+        raise NotADirectoryError(f"not a directory: {scan_root}")
     found: list[MockOnlyTest] = []
     for path in sorted(scan_root.rglob("*.py")):
         try:
@@ -306,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments, defaulting to ``sys.argv[1:]``.
 
     Returns:
-        ``0`` when no mock-only test was found, ``1`` otherwise.
+        ``0`` when no mock-only test was found, ``1`` when at least one
+        exists, and ``2`` when ``--root`` does not name a directory.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -316,7 +324,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Directory to scan (default: the repository tests/ tree).",
     )
     args = parser.parse_args(argv)
-    offenders = find_mock_only_tests(root=args.root)
+    try:
+        offenders = find_mock_only_tests(root=args.root)
+    except NotADirectoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for offender in offenders:
         print(f"{offender.path}:{offender.lineno} {offender.name}")
     print(f"{len(offenders)} mock-only test(s)")

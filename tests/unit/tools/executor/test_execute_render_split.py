@@ -1037,8 +1037,15 @@ def test_simple_runner_finalizes_output_after_execution_error(
         )
 
     assert_that(finalization).is_equal_to(["mark_run_complete", "cleanup_old_runs"])
-    warnings = [name for name, _args, _kwargs in fake_logger.calls if name == "warning"]
-    assert_that(warnings).is_length(1)
+    # Assert the message, not just that some warning happened: the point is
+    # that the cleanup failure is reported to the user (#2315).
+    warning_messages = [
+        str(args[0])
+        for name, args, _kwargs in fake_logger.calls
+        if name == "warning" and args
+    ]
+    assert_that(warning_messages).is_length(1)
+    assert_that(warning_messages[0]).contains("Failed to clean up old runs")
 
 
 def _profiled_artifact() -> RunArtifact:

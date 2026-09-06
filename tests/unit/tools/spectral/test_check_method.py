@@ -99,8 +99,15 @@ def _recording_run(
 
         Returns:
             A successful Spectral result carrying ``stdout``.
+
+        Raises:
+            TypeError: If the recorded ``cmd`` is not a list, which would
+                otherwise be coerced silently into a list of characters.
         """
-        commands.append(list(cast("list[str]", kwargs["cmd"])))
+        cmd = kwargs["cmd"]
+        if not isinstance(cmd, list):
+            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
+        commands.append([str(part) for part in cmd])
         if calls is not None:
             calls.append(dict(kwargs))
         return _process(stdout=stdout)
@@ -497,6 +504,10 @@ def test_check_searches_all_input_paths_for_ruleset(
         spectral_plugin: The SpectralPlugin instance under test.
         tmp_path: Temporary directory path for test files.
     """
+    # Bound the upward ruleset walk at tmp_path, the way the sibling
+    # parent-ruleset test does, so discovery cannot reach the repo's own
+    # .spectral.yaml when tmp_path happens to sit inside a checkout (#2315).
+    (tmp_path / ".git").mkdir()
     first_dir = tmp_path / "first"
     second_dir = tmp_path / "second"
     first_dir.mkdir()
@@ -529,13 +540,15 @@ def test_check_searches_all_input_paths_for_ruleset(
         )
         result = spectral_plugin.check([str(first_spec), str(second_spec)], {})
 
-    assert_that(commands).is_not_empty()
-    assert_that(commands[-1]).contains(
+    # Exactly one invocation: only second_dir carries a ruleset, so a second
+    # command would mean discovery found one somewhere it should not have.
+    assert_that(commands).is_length(1)
+    assert_that(commands[0]).contains(
         "--ruleset",
         str(ruleset.absolute()),
         "second/second.yaml",
     )
-    assert_that(commands[-1]).does_not_contain("first/first.yaml")
+    assert_that(commands[0]).does_not_contain("first/first.yaml")
     assert_that(result.success).is_true()
 
 

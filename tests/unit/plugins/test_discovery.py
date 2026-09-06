@@ -86,19 +86,27 @@ class _FakeEntryPoint:
             registers itself under.
         value: The ``module:attr`` target string discovery reports on failure.
         dist: Distribution object exposing ``.name``, or ``None``.
+        load_count: How many times :meth:`load` has been invoked, so a test
+            can assert the trust gate refused *before* importing the plugin.
     """
 
     name: str
     value: str = "fake_pkg.plugin:Plugin"
     dist: object | None = None
+    load_count: int = 0
 
     def load(self) -> type[BaseToolPlugin]:
         """Return a well-formed plugin class registering ``self.name``.
+
+        Counts its own invocations: the trust gate has to fail closed *before*
+        importing third-party code, so "was never registered" is a weaker
+        property than "was never loaded" (#2315).
 
         Returns:
             A ``BaseToolPlugin`` subclass whose tool is named after this entry
             point.
         """
+        self.load_count += 1
         return _make_external_plugin(tool_name=self.name)
 
 
@@ -357,6 +365,10 @@ def test_allowlist_filters_untrusted(
     assert_that(registered).is_equal_to(1)
     assert_that(ToolRegistry.is_registered("allowed-plugin")).is_true()
     assert_that(ToolRegistry.is_registered("untrusted-plugin")).is_false()
+    # The untrusted entry point must never be imported at all: refusing to
+    # register it after loading would already have run its module-level code.
+    assert_that(allowed.load_count).is_equal_to(1)
+    assert_that(untrusted.load_count).is_equal_to(0)
 
 
 def test_malformed_yaml_config_fails_closed(

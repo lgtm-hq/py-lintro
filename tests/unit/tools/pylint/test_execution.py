@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - only TimeoutExpired is used, no process is spawned
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -102,16 +101,21 @@ def test_check_runs_once_over_every_discovered_file(
 
     commands: list[list[str]] = []
 
-    def fake_run(**kwargs: object) -> object:
+    def fake_run(*, cmd: list[str], **kwargs: object) -> object:
         """Record one pylint invocation and report a clean run.
 
+        Taking ``cmd`` as a typed keyword parameter narrows it for real, where
+        ``typing.cast`` was a no-op that would have silently split a stray
+        string into characters (#2315).
+
         Args:
-            **kwargs: Arguments the plugin passed to the subprocess helper.
+            cmd: Command the plugin passed to the subprocess helper.
+            **kwargs: Remaining subprocess helper arguments (timeout, cwd).
 
         Returns:
             A successful pylint result carrying the clean json2 report.
         """
-        commands.append(list(cast("list[str]", kwargs["cmd"])))
+        commands.append(list(cmd))
         return make_result(returncode=0, stdout=clean_report)
 
     with (

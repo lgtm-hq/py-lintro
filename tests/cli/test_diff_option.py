@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import os
-import subprocess  # nosec B404 - subprocess drives git in controlled test fixtures
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from lintro.cli import cli
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
+from tests.unit.conftest import run_git
 
 
 @pytest.mark.parametrize("command", ["chk", "fmt"])
@@ -32,24 +31,35 @@ def test_diff_option_in_help(command: str) -> None:
 def _git(*args: str, cwd: Path) -> None:
     """Run one git command in a throwaway repository.
 
+    Delegates to :func:`tests.unit.conftest.run_git`, which blanks
+    ``GIT_CONFIG_GLOBAL``/``GIT_CONFIG_SYSTEM`` and drops a leaked
+    ``GIT_DIR``/``GIT_INDEX_FILE``/``GIT_WORK_TREE``. Without that, a
+    developer's global ``commit.gpgsign``, ``core.hooksPath`` or
+    ``init.templateDir`` changes how these fixtures behave from machine to
+    machine (#2315).
+
     Args:
         *args: Arguments after the ``git`` executable.
         cwd: Repository directory to run in.
     """
-    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.com",
-        },
-    )
+    run_git(["git", *args], cwd=cwd)
+
+
+def _assert_no_crash(*, result: Result) -> None:
+    """Assert a CLI invocation ended by exiting, not by raising.
+
+    ``CliRunner`` swallows exceptions into ``result.exception``, so string
+    assertions on ``result.output`` still pass when the command crashed after
+    printing. A normal non-zero exit surfaces here as ``SystemExit``, which is
+    a ``BaseException`` rather than an ``Exception``; anything that is an
+    ``Exception`` is a real crash.
+
+    Args:
+        result: Result returned by ``CliRunner.invoke``.
+    """
+    assert_that(isinstance(result.exception, Exception)).described_as(
+        f"command crashed: {result.exception!r}",
+    ).is_false()
 
 
 def _repo_with_one_changed_file(*, tmp_path: Path) -> Path:
@@ -81,6 +91,8 @@ def test_diff_flag_without_value_scans_only_changes_vs_the_default_base(
 ) -> None:
     """``chk --diff`` resolves a default base and reports only the change.
 
+    The unused import in ``changed.py`` makes the run exit 1.
+
     Args:
         tmp_path: Pytest temporary directory for the throwaway repository.
         monkeypatch: Pytest monkeypatch fixture, used to enter the repository.
@@ -90,6 +102,8 @@ def test_diff_flag_without_value_scans_only_changes_vs_the_default_base(
 
     result = CliRunner().invoke(cli, ["chk", "--diff", "--tools", "ruff"])
 
+    _assert_no_crash(result=result)
+    assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("Diff mode")
     assert_that(result.output).contains("default base")
     assert_that(result.output).contains("changed.py")
@@ -102,6 +116,8 @@ def test_diff_flag_with_explicit_base_scans_only_changes_vs_that_ref(
 ) -> None:
     """``chk --diff main`` reports the change and skips the committed file.
 
+    The unused import in ``changed.py`` makes the run exit 1.
+
     Args:
         tmp_path: Pytest temporary directory for the throwaway repository.
         monkeypatch: Pytest monkeypatch fixture, used to enter the repository.
@@ -111,6 +127,8 @@ def test_diff_flag_with_explicit_base_scans_only_changes_vs_that_ref(
 
     result = CliRunner().invoke(cli, ["chk", "--diff", "main", "--tools", "ruff"])
 
+    _assert_no_crash(result=result)
+    assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("Diff mode")
     assert_that(result.output).contains("vs main")
     assert_that(result.output).contains("changed.py")
@@ -123,6 +141,8 @@ def test_no_diff_flag_scans_every_file(
 ) -> None:
     """Omitting ``--diff`` scans the whole tree, committed files included.
 
+    Both files carry an unused import, so the run exits 1.
+
     Args:
         tmp_path: Pytest temporary directory for the throwaway repository.
         monkeypatch: Pytest monkeypatch fixture, used to enter the repository.
@@ -132,6 +152,8 @@ def test_no_diff_flag_scans_every_file(
 
     result = CliRunner().invoke(cli, ["chk", "--tools", "ruff"])
 
+    _assert_no_crash(result=result)
+    assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).does_not_contain("Diff mode")
     assert_that(result.output).contains("changed.py")
     assert_that(result.output).contains("baseline.py")
@@ -152,6 +174,7 @@ def test_format_diff_flag_fixes_only_the_changed_file(
 
     result = CliRunner().invoke(cli, ["fmt", "--diff", "--tools", "ruff"])
 
+    _assert_no_crash(result=result)
     assert_that(result.exit_code).is_equal_to(0)
     assert_that((repo / "changed.py").read_text(encoding="utf-8")).does_not_contain(
         "import sys",
@@ -220,34 +243,9 @@ def test_diff_equals_syntax_allows_ref_when_path_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``--diff=main`` works when a ``main/`` directory also exists."""
-    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
-        ["git", "init", "-q"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
-        ["git", "commit", "--allow-empty", "-qm", "init"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.com",
-        },
-    )
-    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
-        ["git", "branch", "-M", "main"],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _git("init", "-q", cwd=tmp_path)
+    _git("commit", "--allow-empty", "-qm", "init", cwd=tmp_path)
+    _git("branch", "-M", "main", cwd=tmp_path)
     (tmp_path / "main").mkdir()
     monkeypatch.chdir(tmp_path)
 

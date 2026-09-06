@@ -500,8 +500,12 @@ def test_apply_fixes_forwards_search_radius(tmp_path):
     assert_that(f.read_text()).contains("target")
 
 
-def test_apply_fixes_forwards_auto_apply(tmp_path: Path) -> None:
-    """auto_apply reaches the file, rewriting it without an interactive prompt.
+def test_apply_fixes_rewrites_the_target_file(tmp_path: Path) -> None:
+    """apply_fixes rewrites the target file with the suggested code.
+
+    ``auto_apply`` is passed through but is reserved for API compatibility and
+    gates nothing today: the write happens whenever the line match succeeds.
+    The assertion is on the file, not on the flag.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
