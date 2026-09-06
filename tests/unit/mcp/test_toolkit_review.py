@@ -681,6 +681,36 @@ def test_review_maps_a_too_large_diff_to_invalid_input(
     )
 
 
+def test_review_only_mode_without_agents_is_invalid_input(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """``review.custom_agents: only`` with no agent file reviews nothing.
+
+    In ``only`` mode the built-in checklist is skipped, so an empty agents
+    directory would otherwise report a clean review with nothing checked. The
+    MCP surface answers with ``INVALID_INPUT`` and a ``no_reviewable_work``
+    reason instead, and never calls the provider.
+    """
+    calls = stub_ai()
+    (repo / ".lintro-config.yaml").write_text(
+        _CONFIG + "review:\n  custom_agents: only\n",
+        encoding="utf-8",
+    )
+    (repo / ".lintro" / "review-agents").mkdir(parents=True)
+
+    result, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_true()
+    assert_that(payload["error"]["code"]).is_equal_to(
+        McpErrorCode.INVALID_INPUT.value,
+    )
+    assert_that(payload["error"]["detail"]["reason"]).is_equal_to(
+        "no_reviewable_work",
+    )
+    assert_that(calls).is_empty()
+
+
 def test_review_is_unavailable_without_the_ai_extra(
     repo: Path,
     monkeypatch: pytest.MonkeyPatch,

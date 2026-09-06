@@ -96,6 +96,23 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--max-cost-usd")
 
 
+def test_click_dests_match_review_command_options_fields() -> None:
+    """Every Click dest has a matching ``ReviewCommandOptions`` field.
+
+    ``review_command`` splats ``ctx.params`` into the frozen dataclass, so the
+    decorators and the dataclass are two sources of one truth: an added or
+    renamed option that never reaches the dataclass raises ``TypeError`` on
+    every ``lintro review`` invocation, and a stale field is dead weight the
+    Click surface can no longer populate.
+    """
+    from lintro.cli_utils.commands.review import review_command
+
+    click_dests = frozenset(param.name for param in review_command.params)
+    option_fields = frozenset(ReviewCommandOptions.__dataclass_fields__)
+
+    assert_that(click_dests).is_equal_to(option_fields)
+
+
 def test_review_invalid_provider_env_exits_two(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

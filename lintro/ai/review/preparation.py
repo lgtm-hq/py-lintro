@@ -78,6 +78,7 @@ __all__ = [
     "ReviewRunRequest",
     "execute_review",
     "prepare_review",
+    "resolve_custom_agent_mode",
     "resolve_review_depth",
     "resolve_review_strictness",
 ]
@@ -91,9 +92,7 @@ class ReviewRunRequest:
     review shape, and the workspace the review is anchored to. The ``None``
     fields mean "not requested", and :func:`prepare_review` falls back to the
     project config for those — so a request built from an MCP envelope and one
-    built from Click options resolve identically. ``custom_agent_mode`` is the
-    exception: it is a real enum, so an adapter that wants the configured mode
-    passes ``review.custom_agents`` itself (both do).
+    built from Click options resolve identically.
 
     Attributes:
         workspace_root: Absolute workspace root the review is anchored to.
@@ -114,9 +113,10 @@ class ReviewRunRequest:
         semantic_chunks: Force semantic chunking for this run. Config's
             ``review.force_semantic_chunking`` can enable it independently.
         timeout: Per-run API timeout override in seconds, or None.
-        custom_agent_mode: How user-defined review agents participate. Both
-            adapters pass ``review.custom_agents``; the ``DISABLED`` default
-            is for callers that deliberately want the built-in checklist only.
+        custom_agent_mode: How user-defined review agents participate, or
+            None for ``review.custom_agents``. A caller that deliberately
+            wants the built-in checklist only passes
+            :attr:`CustomAgentMode.DISABLED` explicitly.
     """
 
     workspace_root: Path
@@ -131,7 +131,7 @@ class ReviewRunRequest:
     with_lint: bool = False
     semantic_chunks: bool = False
     timeout: float | None = None
-    custom_agent_mode: CustomAgentMode = CustomAgentMode.DISABLED
+    custom_agent_mode: CustomAgentMode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +268,26 @@ def resolve_review_strictness(request: ReviewRunRequest) -> ReviewStrictness:
     """
     configured = request.lintro_config.review.strictness.value
     return ReviewStrictness((request.strictness or configured).lower())
+
+
+def resolve_custom_agent_mode(request: ReviewRunRequest) -> CustomAgentMode:
+    """Resolve how user-defined review agents participate in a request.
+
+    Follows the same None-means-config rule as :func:`resolve_review_depth`
+    and :func:`resolve_review_strictness`, so a caller that omits the field
+    gets the workspace's configured mode rather than silently running the
+    built-in checklist only.
+
+    Args:
+        request: The adapter's typed request.
+
+    Returns:
+        CustomAgentMode: The requested mode, or ``review.custom_agents`` when
+        unset.
+    """
+    if request.custom_agent_mode is not None:
+        return request.custom_agent_mode
+    return request.lintro_config.review.custom_agents
 
 
 def _apply_timeout(config: AIConfig, *, timeout: float | None) -> AIConfig:
@@ -420,6 +440,7 @@ def prepare_review(
     )
 
     strictness = resolve_review_strictness(request)
+    custom_agent_mode = resolve_custom_agent_mode(request)
     return PreparedReview(
         ai_config=ai_config,
         context=context,
@@ -436,10 +457,10 @@ def prepare_review(
             request.semantic_chunks or review_config.force_semantic_chunking
         ),
         custom_agents=_resolve_custom_agents(
-            mode=request.custom_agent_mode,
+            mode=custom_agent_mode,
             workspace_root=request.workspace_root,
         ),
-        run_builtin_checklist=request.custom_agent_mode != CustomAgentMode.ONLY,
+        run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
         synthesis=review_config.synthesis,
         workspace_root=request.workspace_root,
         lint_digest=lint_digest,

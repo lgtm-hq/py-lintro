@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
     from lintro.ai.review.models.review_result import ReviewResult
     from lintro.ai.review.preparation import ReviewRunRequest
+    from lintro.config.lintro_config import LintroConfig
 
 __all__ = ["REVIEW_TIMEOUT_SECONDS", "STRICTNESS_VALUES", "build_review_toolkit"]
 
@@ -644,7 +645,7 @@ def _build_request(
     *,
     arguments: dict[str, Any],
     workspace: Path,
-    lintro_config: Any,
+    lintro_config: LintroConfig,
 ) -> ReviewRunRequest:
     """Turn the validated tool envelope into a shared review request.
 
