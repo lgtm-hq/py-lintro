@@ -8,7 +8,6 @@ other common mistakes, and can automatically fix most of them.
 from __future__ import annotations
 
 import re
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -22,9 +21,9 @@ from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
     parse_dotenv_linter_output,
 )
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
 from lintro.tools.core.fix_runner import (
     PerFileFixPolicy,
     VerifyMode,
@@ -211,57 +210,6 @@ class DotenvLinterPlugin(BaseToolPlugin):
             file_path,
         ]
 
-    def _process_single_file(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileProcessingResult:
-        """Check a single ``.env`` file with dotenv-linter.
-
-        Args:
-            file_path: Path to the ``.env`` file to check.
-            timeout: Timeout in seconds for the dotenv-linter command.
-
-        Returns:
-            FileProcessingResult with processing outcome.
-        """
-        try:
-            success, output = self._run_subprocess(
-                cmd=self._check_command(file_path),
-                timeout=timeout,
-            )
-            issues = parse_dotenv_linter_output(output=output)
-            # dotenv-linter exits non-zero when it reports problems. Treat a
-            # non-zero exit with no parsed issues as a genuine failure so real
-            # invocation errors are not silently reported as clean.
-            if not success and not issues:
-                return FileProcessingResult(
-                    success=False,
-                    output=output,
-                    issues=[],
-                    error="dotenv-linter check failed",
-                )
-            return FileProcessingResult(
-                success=success,
-                output=output,
-                issues=issues,
-            )
-        except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
-                timed_out=True,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
-            )
-
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check ``.env`` files with dotenv-linter.
 
@@ -276,19 +224,17 @@ class DotenvLinterPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=lambda f: self._process_single_file(f, ctx.timeout),
-            timeout=ctx.timeout,
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success and result.total_issues == 0,
-            output=result.build_output(timeout=ctx.timeout),
-            issues_count=result.total_issues,
-            timed_out=result.timed_out,
-            issues=result.all_issues,
+        return run_per_file_check(
+            ctx,
+            plugin=self,
+            command=self._check_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            policy=PerFileCheckPolicy(
+                # dotenv-linter exits non-zero when it reports problems. Treat
+                # a non-zero exit with no parsed issues as a genuine failure so
+                # real invocation errors are not silently reported as clean.
+                failure_message="dotenv-linter check failed",
+            ),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

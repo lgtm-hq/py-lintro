@@ -6,7 +6,6 @@ It parses SQL into an AST and performs linting rules on top of it.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,9 +16,9 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
 from lintro.tools.core.fix_runner import (
     PerFileFixPolicy,
     VerifyMode,
@@ -184,47 +183,6 @@ class SqlfluffPlugin(BaseToolPlugin):
 
         return cmd
 
-    def _process_single_file_check(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileProcessingResult:
-        """Process a single SQL file with sqlfluff lint.
-
-        Args:
-            file_path: Path to the SQL file to process.
-            timeout: Timeout in seconds for the sqlfluff command.
-
-        Returns:
-            FileProcessingResult with check results for this file.
-        """
-        cmd = self._build_lint_command(files=[str(file_path)])
-        try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
-            issues = parse_sqlfluff_output(output=output)
-            # success is False if issues exist or tool failed
-            final_success = success and len(issues) == 0
-            return FileProcessingResult(
-                success=final_success,
-                output=output,
-                issues=issues,
-            )
-        except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
-                timed_out=True,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
-            )
-
     def doc_url(self, code: str) -> str | None:
         """Return SQLFluff documentation URL for the given rule code.
 
@@ -253,24 +211,12 @@ class SqlfluffPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        # Process files with progress bar support
-        def processor(file_path: str) -> FileProcessingResult:
-            return self._process_single_file_check(file_path, ctx.timeout)
-
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=processor,
-            timeout=ctx.timeout,
-            label="Processing files",
-        )
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success,
-            output=result.build_output(timeout=ctx.timeout),
-            issues_count=result.total_issues,
-            timed_out=result.timed_out,
-            issues=result.all_issues,
+        return run_per_file_check(
+            ctx,
+            plugin=self,
+            command=lambda f: self._build_lint_command(files=[str(f)]),
+            parse=lambda output: parse_sqlfluff_output(output=output),
+            policy=PerFileCheckPolicy(issues_imply_failure=True),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
