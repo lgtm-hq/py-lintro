@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
@@ -23,9 +22,8 @@ class StickyRequest:
 
     Attributes:
         result: Current review result.
-        prior_runs: Legacy run mappings recovered from an old sticky comment.
-            Ignored when ``prior_state`` is given.
-        prior_state: Artifact or migrated sticky state.
+        prior_state: Artifact or ledger state carried into this round.
+            ``None`` is a first round.
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text. ``None`` is an empty map.
         diff_lines: Unused by the renderer; retained because the inline
@@ -42,7 +40,6 @@ class StickyRequest:
     """
 
     result: ReviewResult
-    prior_runs: list[dict[str, Any]] | None = None
     prior_state: ReviewState | None = None
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF
     question_map: dict[int, str] | None = None

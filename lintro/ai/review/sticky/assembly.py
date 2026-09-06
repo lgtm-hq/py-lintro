@@ -42,7 +42,6 @@ from lintro.ai.review.sticky.body import round_sections, state_sections
 from lintro.ai.review.sticky.history import _archive_body
 from lintro.ai.review.sticky.state import (
     _run_record,
-    _state_from_runs,
     matcher_reviewed_paths,
     stamp_comment_ids,
 )
@@ -79,11 +78,7 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         RoundOutcome: The matching outcome, verdict and run record every
         consumer of this round reads from.
     """
-    state = (
-        request.prior_state
-        if request.prior_state is not None
-        else _state_from_runs(request.prior_runs)
-    )
+    state = request.prior_state or ReviewState()
     round_number = state.next_round
     match = match_findings(
         previous=state,
@@ -165,7 +160,6 @@ def advance_review_state(*, request: StickyRequest) -> ReviewState:
         event=state.event,
         run_id=state.run_id,
         lintro_version=state.lintro_version,
-        legacy=state.legacy,
         truncated=outcome.truncated,
     )
 
@@ -232,7 +226,7 @@ def build_sticky_bodies(*, request: StickyRequest) -> tuple[str, str | None]:
     primary = fit_body(
         assemble=render,
         counts=SectionCounts(
-            prior_runs=max(len(outcome.runs) - 1, 0),
+            history_rows=max(len(outcome.runs) - 1, 0),
             open=outcome.open_count,
             resolved=len(outcome.match.resolved),
         ),
@@ -320,7 +314,7 @@ def render_state_sticky(
     return fit_body(
         assemble=render,
         counts=SectionCounts(
-            prior_runs=max(len(runs) - 1, 0),
+            history_rows=max(len(runs) - 1, 0),
             open=open_count,
             resolved=len(records) - open_count,
         ),

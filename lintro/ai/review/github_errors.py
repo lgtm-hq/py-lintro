@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
@@ -17,8 +16,6 @@ from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import renumber_if_legacy_v1
 from lintro.ai.review.sticky import render_state_sticky
 
 #: Cap on the provider error text rendered on the error-only sticky. Provider
@@ -47,7 +44,6 @@ def format_error_comment(
     error: Exception,
     provider: str | None = None,
     metadata: ReviewMetadata | None = None,
-    prior_runs: list[dict[str, Any]] | None = None,
     prior_state: ReviewState | None = None,
     repo: str = "",
     pr_number: int | None = None,
@@ -73,9 +69,7 @@ def format_error_comment(
         provider: Provider identifier used for provider-aware classification.
             Falls back to ``metadata.provider`` when omitted.
         metadata: Optional review metadata for a mechanics footer.
-        prior_runs: Legacy run mappings recovered from the previous sticky
-            comment. Ignored when ``prior_state`` is given.
-        prior_state: Full state decoded from the previous sticky comment.
+        prior_state: Full state carried into this round.
             Re-emitted verbatim so a transient error does not reset cumulative
             telemetry, advance the round counter, or touch the tracked
             finding history.
@@ -89,7 +83,7 @@ def format_error_comment(
     """
     resolved_provider = provider or (metadata.provider if metadata else "") or ""
     kind = classify_provider_error(provider=resolved_provider, error=error)
-    state = _resolve_prior_state(prior_runs=prior_runs, prior_state=prior_state)
+    state = prior_state
 
     if state is not None and state.runs:
         return render_state_sticky(
@@ -128,29 +122,6 @@ def format_error_comment(
             Section(name="footer", text=_FOOTER),
         ],
     )
-
-
-def _resolve_prior_state(
-    *,
-    prior_runs: list[dict[str, Any]] | None,
-    prior_state: ReviewState | None,
-) -> ReviewState | None:
-    """Return the state to re-emit, upgrading legacy run mappings when needed.
-
-    Args:
-        prior_runs: Legacy run mappings recovered from the previous sticky
-            comment. Ignored when ``prior_state`` is given.
-        prior_state: Full state decoded from the previous sticky comment.
-
-    Returns:
-        The resolved state, or ``None`` when nothing was carried over.
-    """
-    if prior_state is not None:
-        return prior_state
-    if not prior_runs:
-        return None
-    runs = tuple(RunRecord.from_dict(run) for run in prior_runs)
-    return ReviewState(runs=renumber_if_legacy_v1(runs=runs))
 
 
 def _failure_banner(

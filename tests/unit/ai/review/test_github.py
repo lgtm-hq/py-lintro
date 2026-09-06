@@ -21,14 +21,13 @@ from lintro.ai.review.github import (
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
+    ReviewPostOptions,
     _count_new_commits,
-    _sticky_comment_id,
-    _upsert_sticky,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
     format_run_mechanics,
-    parse_review_state,
+    parse_sticky_state,
     post_review_error_to_github,
     post_review_to_github,
     sanitize_comment_text,
@@ -306,22 +305,26 @@ def test_build_sticky_comment_aggregates_prior_runs(
     sample_review_result: ReviewResult,
 ) -> None:
     """Cumulative header sums prior runs and flags mixed estimates."""
-    prior = [
-        {
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "model": "cursor:auto",
-            "provider": "cursor",
-            "total": 5000,
-            "cost": 0.02,
-            "estimated": True,
-            "depth": 1,
-            "p1": 0,
-            "p2": 1,
-            "p3": 0,
-        },
-    ]
+    prior = ReviewState(
+        runs=(
+            RunRecord.from_dict(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "model": "cursor:auto",
+                    "provider": "cursor",
+                    "total": 5000,
+                    "cost": 0.02,
+                    "estimated": True,
+                    "depth": 1,
+                    "p1": 0,
+                    "p2": 1,
+                    "p3": 0,
+                },
+            ),
+        ),
+    )
     body = build_sticky_comment(
-        request=StickyRequest(result=sample_review_result, prior_runs=prior),
+        request=StickyRequest(result=sample_review_result, prior_state=prior),
     )
 
     assert_that(body).contains("### 🕘 History · 1 previous run")
@@ -331,20 +334,20 @@ def test_build_sticky_comment_aggregates_prior_runs(
 
 
 def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
-    """New stickies carry no leftover blob; parse yields empty runs."""
+    """New stickies carry no leftover blob; parse yields empty state."""
     from lintro.ai.review.sticky import advance_review_state
 
     body = build_sticky_comment(request=StickyRequest(result=sample_review_result))
-    runs = parse_review_state(body=body)
+    parsed = parse_sticky_state(body=body)
     state = advance_review_state(request=StickyRequest(result=sample_review_result))
 
-    assert_that(runs).is_empty()
+    assert_that(parsed.runs).is_empty()
     assert_that(state.runs[0].model).is_equal_to("claude-sonnet-4-20250514")
 
 
-def test_parse_review_state_handles_missing_block() -> None:
-    """A body with no state block yields an empty run list."""
-    assert_that(parse_review_state(body="no state here")).is_empty()
+def test_parse_sticky_state_handles_missing_block() -> None:
+    """A body with no state block yields an empty state."""
+    assert_that(parse_sticky_state(body="no state here").runs).is_empty()
 
 
 # --- posting: create, update, inline ----------------------------------------
@@ -360,7 +363,7 @@ def test_post_review_creates_sticky_when_absent(
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        captured_comment_ids=captured,
+        options=ReviewPostOptions(captured_comment_ids=captured),
     )
 
     assert_that(posted).is_true()
@@ -460,22 +463,6 @@ def test_failed_inline_post_never_posts_a_second_sticky(
     reporter.update_issue_comment.assert_not_called()
 
 
-def test_sticky_comment_id_short_circuits_on_a_known_id() -> None:
-    """A known id is reused without a second lookup against the API."""
-    reporter = _fresh_reporter()
-
-    assert_that(_sticky_comment_id(reporter=reporter, known=42)).is_equal_to(42)
-    reporter.find_issue_comment.assert_not_called()
-
-
-def test_sticky_comment_id_relocates_a_just_created_comment() -> None:
-    """With no prior id the sticky is re-located by its marker."""
-    reporter = _fresh_reporter()
-    reporter.find_issue_comment.return_value = (99, "body")
-
-    assert_that(_sticky_comment_id(reporter=reporter, known=None)).is_equal_to(99)
-
-
 def test_post_review_updates_existing_sticky(
     sample_review_result: ReviewResult,
 ) -> None:
@@ -498,171 +485,6 @@ def test_post_review_updates_existing_sticky(
     kwargs = reporter.update_issue_comment.call_args.kwargs
     assert_that(kwargs["comment_id"]).is_equal_to(42)
     assert_that(kwargs["body"]).contains("## 🔎 Lintro Review —")
-
-
-def test_upsert_sticky_creates_when_missing() -> None:
-    """A first review posts a new sticky comment."""
-    reporter = _fresh_reporter()
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=None,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_none()
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.update_issue_comment.assert_not_called()
-    reporter.delete_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_patches_when_update_succeeds() -> None:
-    """Same-actor updates edit the sticky in place."""
-    reporter = _fresh_reporter()
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(42)
-    reporter.update_issue_comment.assert_called_once_with(
-        comment_id=42,
-        body="hello",
-    )
-    reporter.delete_issue_comment.assert_not_called()
-    reporter.post_issue_comment.assert_not_called()
-    reporter.find_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_supersedes_when_patch_fails() -> None:
-    """GitHub forbids editing another actor's comment; recreate then delete."""
-    reporter = _fresh_reporter()
-    reporter.log.default_update_result = False
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    reporter.update_issue_comment.assert_called_once_with(
-        comment_id=42,
-        body="hello",
-    )
-    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.find_issue_comment.assert_called_once_with(marker=STICKY_MARKER)
-
-
-@pytest.mark.parametrize(
-    ("status", "should_recreate"),
-    [
-        (403, True),
-        (500, False),
-        (429, False),
-    ],
-    ids=["attr=actor_mismatch", "attr=server_error", "attr=rate_limit"],
-)
-def test_upsert_sticky_supersedes_only_on_actor_mismatch(
-    status: int,
-    should_recreate: bool,
-) -> None:
-    """Only a 403 PATCH (wrong actor) replaces the leftover sticky."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = status
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    if should_recreate:
-        assert_that(posted).is_true()
-        assert_that(live_id).is_equal_to(99)
-        reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-        reporter.post_issue_comment.assert_called_once_with("hello")
-    else:
-        assert_that(posted).is_false()
-        assert_that(live_id).is_none()
-        reporter.delete_issue_comment.assert_not_called()
-        reporter.post_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_retries_post_after_recreate_failure() -> None:
-    """A failed create is retried once before the leftover sticky is deleted."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = 403
-    reporter.post_issue_comment.side_effect = [False, True]
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    assert_that(reporter.post_issue_comment.call_count).is_equal_to(2)
-
-
-def test_upsert_sticky_keeps_replacement_when_delete_fails() -> None:
-    """A failed delete after a successful create still returns the new id."""
-    reporter = _fresh_reporter()
-    reporter.log.default_update_result = False
-    reporter.delete_issue_comment.return_value = False
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-
-
-def test_upsert_sticky_does_not_delete_when_patch_status_unknown() -> None:
-    """A transport failure must not be treated as actor-mismatch."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = None
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_false()
-    assert_that(live_id).is_none()
-    reporter.delete_issue_comment.assert_not_called()
-    reporter.post_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_posts_replacement_before_deleting() -> None:
-    """Create the new sticky first so a failed POST leaves the old one."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = 403
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    _upsert_sticky(reporter=reporter, body="hello", comment_id=42)
-
-    names = [call[0] for call in reporter.method_calls]
-    assert_that(names.index("post_issue_comment")).is_less_than(
-        names.index("delete_issue_comment"),
-    )
 
 
 def test_refresh_uses_replacement_id_after_cross_actor_recreate(
@@ -747,23 +569,27 @@ def test_post_error_comment_updates_sticky(
 
 def test_error_comment_preserves_prior_run_state() -> None:
     """A transient error re-emits prior run state so telemetry survives."""
-    prior = [
-        {
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "model": "claude-sonnet-4-20250514",
-            "provider": "anthropic",
-            "total": 5000,
-            "cost": 0.02,
-            "estimated": False,
-            "depth": 1,
-            "p1": 0,
-            "p2": 1,
-            "p3": 0,
-        },
-    ]
+    prior = ReviewState(
+        runs=(
+            RunRecord.from_dict(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "model": "claude-sonnet-4-20250514",
+                    "provider": "anthropic",
+                    "total": 5000,
+                    "cost": 0.02,
+                    "estimated": False,
+                    "depth": 1,
+                    "p1": 0,
+                    "p2": 1,
+                    "p3": 0,
+                },
+            ),
+        ),
+    )
     body = format_error_comment(
         error=AIAuthenticationError("bad key"),
-        prior_runs=prior,
+        prior_state=prior,
     )
 
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -775,12 +601,12 @@ def test_post_error_comment_recovers_prior_state(
     sample_review_result: ReviewResult,
 ) -> None:
     """post_review_error_to_github reloads prior runs and keeps their state."""
-    from lintro.ai.review.review_state_codec import legacy_state_block
+    from lintro.ai.review.review_state_codec import leftover_state_block
     from lintro.ai.review.sticky import advance_review_state
 
     reporter = _fresh_reporter()
     prior = advance_review_state(request=StickyRequest(result=sample_review_result))
-    prior_body = f"{STICKY_MARKER}\n\nprior round{legacy_state_block(state=prior)}"
+    prior_body = f"{STICKY_MARKER}\n\nprior round{leftover_state_block(state=prior)}"
     reporter.find_issue_comment.return_value = (9, prior_body)
 
     post_review_error_to_github(
@@ -971,8 +797,10 @@ def test_post_review_uses_the_rich_review_body(
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        transport="cli",
-        config_source="`.lintro-config.yaml`",
+        options=ReviewPostOptions(
+            transport="cli",
+            config_source="`.lintro-config.yaml`",
+        ),
     )
 
     assert_that(posted).is_true()

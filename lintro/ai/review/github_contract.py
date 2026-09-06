@@ -151,12 +151,12 @@ class SectionCounts:
     dozen.
 
     Attributes:
-        prior_runs: Prior runs available to the history table.
+        history_rows: Prior runs available to the history table.
         open: Open findings available to the open-findings section.
         resolved: Resolved findings available to the resolved section.
     """
 
-    prior_runs: int
+    history_rows: int
     open: int
     resolved: int
 
@@ -275,7 +275,7 @@ def fit_body(
         return body
 
     # 1. Drop the oldest run history first, one round at a time.
-    for history in range(counts.prior_runs - 1, -1, -1):
+    for history in range(counts.history_rows - 1, -1, -1):
         limits = replace(limits, history=history)
         body = assemble(limits=limits)
         if len(body) <= limit:

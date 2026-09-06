@@ -13,7 +13,7 @@ from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.review_state_codec import leftover_state_block
 from lintro.ai.review.sticky import (
     advance_review_state,
     build_sticky_comment,
@@ -138,7 +138,9 @@ def test_converged_stamp_falls_back_to_the_stickys_own_state_blob(
     a local ``--post`` — but the sticky carries its own state. The stamp must
     recover the board from there rather than refusing (#2099 review).
     """
-    reporter = _reporter(prior_body=prior_body + legacy_state_block(state=prior_state))
+    reporter = _reporter(
+        prior_body=prior_body + leftover_state_block(state=prior_state),
+    )
 
     posted = post_review_converged_to_github(
         decision=_DECISION,

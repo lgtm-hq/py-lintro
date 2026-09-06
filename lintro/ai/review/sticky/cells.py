@@ -11,8 +11,8 @@ from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.finding_matcher import normalize_file_path
 from lintro.ai.review.github_constants import _SEVERITY_EMOJI, SHORT_SHA_LENGTH
-from lintro.ai.review.github_lifecycle import inline_comment_url
 from lintro.ai.review.github_render import sanitize_comment_text
+from lintro.ai.review.lifecycle.markers import inline_comment_url
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding

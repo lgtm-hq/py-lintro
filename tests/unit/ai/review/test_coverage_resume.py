@@ -45,7 +45,6 @@ from lintro.ai.review.state_store import (
     load_ci_state,
     load_local_state,
     local_ledger_key,
-    migrate_legacy_sticky,
     union_states,
     write_local_state,
     write_state_part,
@@ -297,18 +296,6 @@ def test_wrong_repo_state_is_ignored(tmp_path: Path) -> None:
         pr_number=1,
     )
     assert_that(loaded.coverage).is_empty()
-
-
-def test_legacy_sticky_never_seeds_coverage() -> None:
-    """Migration copies findings/runs only."""
-    from lintro.ai.review.review_state_codec import legacy_state_block
-
-    blob = legacy_state_block(
-        state=ReviewState(version=2, runs=(), findings=()),
-    )
-    migrated = migrate_legacy_sticky(body=f"hello{blob}")
-    assert_that(migrated.legacy).is_true()
-    assert_that(migrated.coverage).is_empty()
 
 
 def test_local_ledger_keys_pr_not_branch() -> None:
@@ -639,8 +626,8 @@ def test_persist_keeps_pending_and_consumed_flags(
     """CLI persist must not drop resume fields when stamping identity."""
     from dataclasses import replace
 
+    from lintro.ai.review.lifecycle.state import persist_review_state
     from lintro.ai.review.state_store import load_ci_state
-    from lintro.cli_utils.commands.review import _persist_review_state
 
     monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
@@ -651,7 +638,7 @@ def test_persist_keeps_pending_and_consumed_flags(
         consumed_flags=(("done.py", "H0"),),
         coverage_records=(CoverageRecord("a.py", "H1"),),
     )
-    _persist_review_state(
+    persist_review_state(
         result=result,
         context=ReviewContext(
             base_ref="main",
@@ -661,7 +648,6 @@ def test_persist_keeps_pending_and_consumed_flags(
             pr_metadata=None,
         ),
         prior=None,
-        force_full=False,
         pr_number=9,
         repo="lgtm-hq/py-lintro",
     )
@@ -672,15 +658,3 @@ def test_persist_keeps_pending_and_consumed_flags(
     )
     assert_that(loaded.pending_invalidations).is_equal_to(pending)
     assert_that(loaded.consumed_flags).is_equal_to((("done.py", "H0"),))
-
-
-def test_union_states_keeps_legacy_from_any_part() -> None:
-    """A later non-legacy part cannot drop migrated-history marking."""
-    merged = union_states(
-        (
-            ReviewState(legacy=True, findings=()),
-            ReviewState(coverage=(CoverageRecord("a.py", "1"),)),
-        ),
-    )
-    assert_that(merged.legacy).is_true()
-    assert_that(merged.coverage).is_length(1)

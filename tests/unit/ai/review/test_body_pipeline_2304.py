@@ -20,7 +20,12 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.review import github, github_errors, github_render, github_review_body
+from lintro.ai.review import (
+    github_errors,
+    github_inline,
+    github_render,
+    github_review_body,
+)
 from lintro.ai.review.github_contract import (
     DEFAULT_BUDGET,
     TRUNCATION_NOTICE,
@@ -41,7 +46,7 @@ from tests.unit.ai.review.golden.github_comment_fixtures import (
 #: Modules that render a comment a reviewer reads. Every one of them must
 #: reach the shared pipeline rather than re-deriving it.
 _SURFACE_MODULES: tuple[str, ...] = (
-    "github.py",
+    "github_inline.py",
     "github_errors.py",
     "github_review_body.py",
     "sticky/assembly.py",
@@ -99,7 +104,7 @@ def test_every_comment_surface_binds_the_one_assemble() -> None:
     bound = {
         name: getattr(module, "assemble")  # noqa: B009 - the point is the binding
         for name, module in (
-            ("github", github),
+            ("github_inline", github_inline),
             ("github_errors", github_errors),
             ("github_review_body", github_review_body),
             ("sticky.assembly", assembly),
