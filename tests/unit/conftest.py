@@ -1,11 +1,11 @@
 """Shared fixtures for unit tests."""
 
-import os
-import subprocess  # nosec B404 - drives git in temp test repos; shell=False
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests.conftest import run_git
 
 
 class FakeLogger:
@@ -145,37 +145,6 @@ def fake_logger() -> FakeLogger:
         FakeLogger: Configured FakeLogger instance for unit testing.
     """
     return FakeLogger()
-
-
-def run_git(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Run a git command in a temp repo, isolated from developer git config.
-
-    A global ``commit.gpgsign``, ``core.hooksPath`` or ``init.templateDir``
-    would otherwise change how these fixtures behave from machine to machine,
-    and an exported ``GIT_INDEX_FILE`` would point git at the wrong index.
-
-    Args:
-        cmd: Full argv, starting with ``git``.
-        cwd: Working directory.
-
-    Returns:
-        The completed process.
-    """
-    env = os.environ.copy()
-    env["GIT_CONFIG_GLOBAL"] = os.devnull
-    env["GIT_CONFIG_SYSTEM"] = os.devnull
-    for leaked in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
-        env.pop(leaked, None)
-    return (
-        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
-            cmd,
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-        )
-    )
 
 
 def init_git_repo(tmp_path: Path, *, files: dict[str, str]) -> Path:

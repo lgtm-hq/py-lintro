@@ -11,7 +11,7 @@ from click.testing import CliRunner, Result
 
 from lintro.cli import cli
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from tests.unit.conftest import run_git
+from tests.conftest import run_git
 
 
 @pytest.mark.parametrize("command", ["chk", "fmt"])

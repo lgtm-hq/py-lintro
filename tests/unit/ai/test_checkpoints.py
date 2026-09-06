@@ -25,7 +25,8 @@ from lintro.ai.config import AIConfig
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import _apply_or_review, _report_checkpoints
 from lintro.ai.undo import prepare_fix_batch, restore_undo
-from tests.unit.conftest import init_git_repo, run_git
+from tests.conftest import run_git
+from tests.unit.conftest import init_git_repo
 
 
 def _init_git_repo(tmp_path: Path) -> Path:

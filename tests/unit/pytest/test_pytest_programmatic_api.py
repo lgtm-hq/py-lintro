@@ -54,15 +54,13 @@ def _pytest_summary(*, report_text: str) -> dict[str, int]:
     counts = {
         name: int(value)
         for name, value in re.findall(
-            r'"(passed|failed|skipped|errors)":\s*(\d+)',
+            r'"(passed|failed|skipped|error)":\s*(\d+)',
             report_text,
         )
     }
     if not counts:
         raise AssertionError(f"no pytest counts in report: {report_text[:400]}")
-    return {
-        key: counts.get(key, 0) for key in ("passed", "failed", "skipped", "errors")
-    }
+    return {key: counts.get(key, 0) for key in ("passed", "failed", "skipped", "error")}
 
 
 @pytest.mark.slow
@@ -157,17 +155,23 @@ def test_test_function_normalizes_bare_tool_options_to_the_pytest_prefix(
 
 def test_test_function_writes_json_when_asked_for_json_output(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``output_format="json"`` produces a parseable JSON report.
 
     Args:
         tmp_path: Pytest temporary directory for the generated project.
+        monkeypatch: Pytest monkeypatch fixture, used to run from the project.
     """
     project = _write_project(
         tmp_path=tmp_path,
         body="def test_generated_passes() -> None:\n    assert True\n",
     )
     report = tmp_path / "report.json"
+    # The plugin auto-enables --junitxml at a path relative to the cwd, so two
+    # nested runs would race on one report.xml in the repository root under
+    # ``-n auto``. Run from the throwaway project instead (#2375).
+    monkeypatch.chdir(project)
 
     test(
         paths=(str(project),),

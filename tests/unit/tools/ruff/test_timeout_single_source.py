@@ -115,16 +115,25 @@ def test_ruff_fix_routes_through_prepare_execution(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
         sample_ruff_json_empty_output: Sample empty JSON output from ruff.
+
+    Raises:
+        TypeError: If a recorded ``cmd`` is not a list, which would otherwise
+            be coerced silently into a list of characters.
     """
     from lintro.tools.implementations.ruff.fix import execute_ruff_fix
 
+    # The shared fixture carries no ``format`` key, but RuffPlugin's defaults
+    # set it True, so production also runs `ruff format --check` and `ruff
+    # format`. Opt in here or two of the four subprocesses are never covered
+    # (#2315).
+    mock_ruff_tool.options["format"] = True
     mock_ruff_tool.prepare.return_value = ruff_execution_context(
         timeout=91,
     )
-    timeouts: list[object] = []
+    observed: list[dict[str, object]] = []
 
     def fake_run(**kwargs: object) -> tuple[bool, str]:
-        """Record the timeout and report a clean ruff run.
+        """Record the subprocess arguments and report a clean ruff run.
 
         Args:
             **kwargs: Arguments ruff passed to ``_run_subprocess``.
@@ -132,15 +141,29 @@ def test_ruff_fix_routes_through_prepare_execution(
         Returns:
             A successful run with empty JSON findings.
         """
-        timeouts.append(kwargs["timeout"])
+        observed.append(kwargs)
         return (True, sample_ruff_json_empty_output)
 
     mock_ruff_tool._run_subprocess.side_effect = fake_run
 
     result = execute_ruff_fix(mock_ruff_tool, ["/test/project"])
 
-    assert_that(timeouts).is_not_empty()
-    assert_that(set(timeouts)).is_equal_to({91})
+    # Lint check, format --check, lint --fix, format apply: all four honour
+    # the one prepared timeout.
+    assert_that([call["timeout"] for call in observed]).is_equal_to(
+        [91, 91, 91, 91],
+    )
+    argvs: list[str] = []
+    for call in observed:
+        cmd = call["cmd"]
+        if not isinstance(cmd, list):
+            raise TypeError(f"expected a cmd list, got {type(cmd).__name__}")
+        argvs.append(" ".join(str(part) for part in cmd))
+    assert_that(argvs[1]).contains("format")
+    assert_that(argvs[1]).contains("--check")
+    assert_that(argvs[2]).contains("--fix")
+    assert_that(argvs[3]).contains("format")
+    assert_that(argvs[3]).does_not_contain("--check")
     assert_that(result.success).is_true()
 
 

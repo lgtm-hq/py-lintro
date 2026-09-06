@@ -7,6 +7,7 @@ import shutil
 import subprocess  # nosec B404 - drives `uv build` for the shared distribution fixture; shell=False
 import tempfile
 import time
+import uuid
 from collections.abc import Generator, Iterator
 from pathlib import Path
 
@@ -26,6 +27,37 @@ os.environ.setdefault("DOCKER_BUILDKIT", "0")
 # Session-scoped tool discovery runs before function-scoped fixtures, so the
 # developer's real user-level global config must be excluded at import time.
 os.environ.setdefault("LINTRO_GLOBAL_CONFIG", "off")
+
+
+def run_git(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run a git command in a temp repo, isolated from developer git config.
+
+    A global ``commit.gpgsign``, ``core.hooksPath`` or ``init.templateDir``
+    would otherwise change how these fixtures behave from machine to machine,
+    and an exported ``GIT_INDEX_FILE`` would point git at the wrong index.
+
+    Args:
+        cmd: Full argv, starting with ``git``.
+        cwd: Working directory.
+
+    Returns:
+        The completed process.
+    """
+    env = os.environ.copy()
+    env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_SYSTEM"] = os.devnull
+    for leaked in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
+        env.pop(leaked, None)
+    return (
+        subprocess.run(  # nosec B603 B607 - fixed git argv in a temp repo; shell=False
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+        )
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -146,6 +178,51 @@ _BUILD_LOCK_TIMEOUT_SECONDS = 300.0
 _BUILD_POLL_SECONDS = 0.5
 
 
+def _lock_owner_pid(*, lock: Path) -> int | None:
+    """Read the pid recorded in a build lock file.
+
+    Args:
+        lock: Path to the lock file.
+
+    Returns:
+        The recorded pid, or ``None`` when the file is gone or its contents
+        are not a token this code wrote.
+    """
+    try:
+        token = lock.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    pid, _, _uuid = token.partition(":")
+    return int(pid) if pid.isdigit() else None
+
+
+def _owner_is_gone(*, lock: Path) -> bool:
+    """Report whether the process that wrote a lock has died.
+
+    Age is not evidence: a slow but live build can hold the lock past any
+    threshold, and unlinking it there would let two ``uv build`` runs share the
+    project scratch directories. Only a pid that no longer exists proves the
+    owner cannot come back and finish.
+
+    Args:
+        lock: Path to the lock file.
+
+    Returns:
+        True when the recorded owner is provably dead.
+    """
+    pid = _lock_owner_pid(lock=lock)
+    if pid is None or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        # A pid we may not signal is still a running process.
+        return False
+    return False
+
+
 @pytest.fixture(scope="session")
 def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build the wheel and the sdist once for the whole session.
@@ -182,11 +259,22 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
     marker = shared_root / "lintro-dist.complete"
     lock = shared_root / "lintro-dist.lock"
 
+    # Ownership token: the pid proves whether the holder is still alive, and
+    # the uuid makes the token unique to this acquisition, so a worker never
+    # unlinks a replacement lock that somebody else acquired after its own was
+    # reclaimed.
+    token = f"{os.getpid()}:{uuid.uuid4().hex}"
+
     deadline = time.monotonic() + _BUILD_LOCK_TIMEOUT_SECONDS
     while not marker.exists():
         try:
             handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError as exc:
+            # A worker that died before its ``finally`` leaves the lock behind
+            # forever. Reclaim it only when its recorded owner is gone.
+            if _owner_is_gone(lock=lock):
+                lock.unlink(missing_ok=True)
+                continue
             if time.monotonic() > deadline:
                 raise TimeoutError(
                     f"Timed out waiting for the shared build lock at {lock}",
@@ -194,6 +282,7 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
             time.sleep(_BUILD_POLL_SECONDS)
             continue
         try:
+            os.write(handle, token.encode("utf-8"))
             # Another worker may have finished between the marker check and
             # the lock acquisition.
             if marker.exists():
@@ -206,7 +295,13 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
             marker.touch()
         finally:
             os.close(handle)
-            lock.unlink(missing_ok=True)
+            # Release only the lock this worker still owns: if it was reclaimed
+            # as stale, the file now belongs to whoever took over.
+            try:
+                if lock.read_text(encoding="utf-8") == token:
+                    lock.unlink(missing_ok=True)
+            except (FileNotFoundError, OSError):
+                pass
 
     # Every caller takes the first match, so more than one artifact of a kind
     # would make which distribution is under test a coin toss.
@@ -312,6 +407,42 @@ def skip_config_injection(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     monkeypatch.setenv("LINTRO_SKIP_CONFIG_INJECTION", "1")
     yield
+
+
+#: The checkout's own project config: the only config the singleton may keep
+#: between tests. Anything else was resolved from a temporary directory.
+_REPO_CONFIG_PATH = str(
+    (Path(__file__).parent.parent / ".lintro-config.yaml").resolve(),
+)
+
+
+@pytest.fixture(autouse=True)
+def evict_foreign_config_singleton() -> Iterator[None]:
+    """Keep a temp directory's config out of every later test (#2375).
+
+    ``config_loader.get_config`` memoises whatever config it resolved from the
+    process working directory in a module-level singleton, and modules that
+    bind ``get_config`` at import time reach it directly, past any
+    monkeypatch. Any test that runs real code from a temporary directory
+    therefore leaves the whole worker holding that directory's config: a
+    throwaway project has no ``.lintro-config.yaml``, so ``ai.provider``
+    disappears and later ``lintro review`` tests fail with "provider unset"
+    depending on the shuffle order.
+
+    Only a foreign config is evicted. Keeping the checkout's own config cached
+    is what every test already expects, and reloading it after each test cost
+    the unit suite well over ten percent.
+
+    Yields:
+        None: The check runs after the test body.
+    """
+    yield
+
+    from lintro.config import config_loader
+
+    loaded = config_loader._loaded_config
+    if loaded is not None and loaded.config_path != _REPO_CONFIG_PATH:
+        config_loader.clear_config_cache()
 
 
 @pytest.fixture(autouse=True)

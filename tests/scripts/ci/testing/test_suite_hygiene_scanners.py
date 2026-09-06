@@ -148,7 +148,7 @@ def test_scanner_rejects_a_root_that_is_not_a_directory(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A missing ``--root`` exits 2 and says so, instead of reporting zero.
+    """A ``--root`` that is not a directory exits 2 instead of reporting zero.
 
     Args:
         module_name: Scanner module stem under ``scripts/ci/testing``.
@@ -188,3 +188,68 @@ def test_scanner_library_call_raises_on_a_missing_root(
 
     with pytest.raises(NotADirectoryError):
         getattr(scanner, finder)(root=tmp_path / "does-not-exist")
+
+
+# =============================================================================
+# The CLI entry point must report what the library call found
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("module_name", "canary_stem"),
+    [
+        ("scan_duplicate_test_bodies", "canary_duplicates"),
+        ("scan_mock_only_tests", "canary_mock_only"),
+    ],
+    ids=["duplicates", "mock-only"],
+)
+def test_scanner_main_exits_one_on_a_planted_canary(
+    module_name: str,
+    canary_stem: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main`` prints the offenders it found and exits ``1``.
+
+    A ``main`` that dropped the findings on the floor and always returned
+    ``0`` would still satisfy the ``--root`` validation tests, so the
+    print-and-fail branch needs a canary of its own.
+
+    Args:
+        module_name: Scanner module stem under ``scripts/ci/testing``.
+        canary_stem: Canary file stem under ``canary/``, without any suffix.
+        tmp_path: Pytest temporary directory holding the planted canary.
+        capsys: Pytest capture fixture for the printed report.
+    """
+    scanner = _load(module_name)
+    planted = _plant_canary(stem=canary_stem, tmp_path=tmp_path)
+
+    exit_code = scanner.main(["--root", str(planted)])
+
+    assert_that(exit_code).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains("test_canary")
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["scan_duplicate_test_bodies", "scan_mock_only_tests"],
+    ids=["duplicates", "mock-only"],
+)
+def test_scanner_main_exits_zero_on_a_clean_tree(
+    module_name: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main`` exits ``0`` and reports a zero count on an empty tree.
+
+    Args:
+        module_name: Scanner module stem under ``scripts/ci/testing``.
+        tmp_path: Pytest temporary directory standing in for a clean tree.
+        capsys: Pytest capture fixture for the printed report.
+    """
+    scanner = _load(module_name)
+
+    exit_code = scanner.main(["--root", str(tmp_path)])
+
+    assert_that(exit_code).is_equal_to(0)
+    assert_that(capsys.readouterr().out).contains("0 ")
