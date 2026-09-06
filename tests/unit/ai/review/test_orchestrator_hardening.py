@@ -17,7 +17,8 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.review.orchestrator import (
+from lintro.ai.review.prompts import (
+    PromptInputs,
     build_git_native_review_prompt,
     build_review_prompt,
 )
@@ -98,11 +99,13 @@ def test_build_review_prompt_redacts_secrets_in_diff() -> None:
     context = _make_context(body="Routine change.")
 
     _system, user_prompt = build_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
     )
 
     assert_that(user_prompt).does_not_contain(_LEAKED_KEY)
@@ -115,11 +118,13 @@ def test_build_review_prompt_redacts_secrets_in_pr_body() -> None:
     context = _make_context(body=f"Deploy token: {_LEAKED_KEY}")
 
     _system, user_prompt = build_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
     )
 
     assert_that(user_prompt).does_not_contain(_LEAKED_KEY)
@@ -132,11 +137,13 @@ def test_build_review_prompt_redacts_secrets_in_pr_title() -> None:
     context = _make_context(body="Routine change.", title=f"Add {_LEAKED_KEY}")
 
     _system, user_prompt = build_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
     )
 
     assert_that(user_prompt).does_not_contain(_LEAKED_KEY)
@@ -149,11 +156,13 @@ def test_build_git_native_review_prompt_redacts_secrets_in_pr_title() -> None:
     context = _make_context(body="Routine change.", title=f"Add {_LEAKED_KEY}")
 
     _system, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=True,
     )
 
@@ -172,11 +181,13 @@ def test_git_native_default_embeds_redacted_diff_not_git_command() -> None:
     context = _make_context(body="Routine change.")
 
     _system, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=False,
     )
 
@@ -197,11 +208,13 @@ def test_git_native_opt_out_uses_delegated_git_command() -> None:
     context = _make_context(body="Routine change.")
 
     _system, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=False,
         allow_unredacted_git_native=True,
     )
@@ -223,11 +236,13 @@ def test_build_review_prompt_logs_secret_warning() -> None:
     )
     try:
         build_review_prompt(
-            chunk=chunk,
-            context=context,
-            checklist_text="1. [logic-bug] Example?",
-            checklist_count=1,
-            interaction_paths="(none)",
+            inputs=PromptInputs(
+                chunk=chunk,
+                context=context,
+                checklist_text="1. [logic-bug] Example?",
+                checklist_count=1,
+                interaction_paths="(none)",
+            ),
         )
     finally:
         logger.remove(handler_id)

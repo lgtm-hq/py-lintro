@@ -116,8 +116,9 @@ owner approval before merge (roadmap #2288, execution protocol item 5).
 
 ## References
 
-- `lintro/ai/review/orchestrator.py` — `run_review`, `build_review_prompt`,
-  `build_git_native_review_prompt`, `merge_review_results`.
+- `lintro/ai/review/orchestrator.py` — `run_review`, `merge_review_results`.
+- `lintro/ai/review/prompts.py` — `build_review_prompt`,
+  `build_git_native_review_prompt` (both re-exported from the orchestrator).
 - `lintro/ai/invoke.py` — `call_ai`.
 - `lintro/ai/review/prompt_redaction.py` — the redaction choke point.
 - `tests/unit/ai/review/golden/` — the golden suite and its fixture.

@@ -34,7 +34,6 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.orchestrator import (
     _review_chunk,
-    build_git_native_review_prompt,
     parse_review_response,
     resolve_review_chunks,
     run_review,
@@ -42,6 +41,10 @@ from lintro.ai.review.orchestrator import (
     strip_json_fences,
 )
 from lintro.ai.review.progress import ReviewProgressCallback
+from lintro.ai.review.prompts import (
+    PromptInputs,
+    build_git_native_review_prompt,
+)
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.state_store import load_ci_state, write_state_part
@@ -2047,11 +2050,13 @@ def test_build_git_native_review_prompt_embeds_diff_when_requested(
     )
 
     _, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=sample_review_context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=sample_review_context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=True,
     )
 
@@ -2078,11 +2083,13 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     )
 
     _, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=sample_review_context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=sample_review_context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=False,
         allow_unredacted_git_native=True,
     )

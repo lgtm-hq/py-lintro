@@ -16,11 +16,12 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.review.cli_limits import resolve_cli_findings_cap
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
-from lintro.ai.review.orchestrator import (
+from lintro.ai.review.paths_registry import generate_interaction_paths
+from lintro.ai.review.prompts import (
+    PromptInputs,
     build_git_native_review_prompt,
     build_review_prompt,
 )
-from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.sensitivity import (
     format_strictness_prompt_section,
     resolve_sensitivity_policy,
@@ -80,7 +81,7 @@ def _pin_boundary_marker() -> Iterator[None]:
         None: The patch is active for the test body.
     """
     with patch(
-        "lintro.ai.review.orchestrator.make_boundary_marker",
+        "lintro.ai.review.prompts.make_boundary_marker",
         return_value=GOLDEN_BOUNDARY,
     ):
         yield
@@ -95,14 +96,16 @@ def test_build_review_prompt_matches_golden(chunk_index: int) -> None:
     """
     chunk = golden_chunks()[chunk_index]
     system_prompt, user_prompt = build_review_prompt(
-        chunk=chunk,
-        context=golden_review_context(),
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_INTERACTION_PATHS,
-        lint_results=_LINT_DIGEST,
-        strictness_section=_STRICTNESS,
-        max_findings=10,
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=golden_review_context(),
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+            lint_results=_LINT_DIGEST,
+            strictness_section=_STRICTNESS,
+            max_findings=10,
+        ),
     )
 
     assert_golden(name="prompt_system.golden", actual=system_prompt)
@@ -121,14 +124,16 @@ def test_build_git_native_review_prompt_matches_golden(chunk_index: int) -> None
     """
     chunk = golden_chunks()[chunk_index]
     system_prompt, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=golden_review_context(),
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_INTERACTION_PATHS,
-        lint_results=_LINT_DIGEST,
-        strictness_section=_STRICTNESS,
-        max_findings=10,
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=golden_review_context(),
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+            lint_results=_LINT_DIGEST,
+            strictness_section=_STRICTNESS,
+            max_findings=10,
+        ),
     )
 
     assert_golden(name="prompt_system.golden", actual=system_prompt)
@@ -145,13 +150,15 @@ def test_git_native_delegated_diff_command_matches_golden() -> None:
     pinned separately from the default embedded path.
     """
     _, user_prompt = build_git_native_review_prompt(
-        chunk=golden_chunks()[1],
-        context=golden_review_context(),
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_INTERACTION_PATHS,
-        lint_results=_LINT_DIGEST,
-        strictness_section=_STRICTNESS,
+        inputs=PromptInputs(
+            chunk=golden_chunks()[1],
+            context=golden_review_context(),
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+            lint_results=_LINT_DIGEST,
+            strictness_section=_STRICTNESS,
+        ),
         embed_diff=False,
         allow_unredacted_git_native=True,
     )
@@ -169,18 +176,22 @@ def test_prompt_goldens_prove_the_redaction_choke_point_fired() -> None:
     chunk = golden_chunks()[0]
     context = golden_review_context()
     _, api_prompt = build_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_INTERACTION_PATHS,
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+        ),
     )
     _, cli_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=context,
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_INTERACTION_PATHS,
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=context,
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+        ),
     )
 
     for prompt in (api_prompt, cli_prompt):
@@ -198,16 +209,18 @@ def test_api_prompt_with_production_defaults_matches_golden() -> None:
     digest — so a change to any of those defaults reddens a golden.
     """
     _, user_prompt = build_review_prompt(
-        chunk=golden_chunks()[0],
-        context=golden_review_context(),
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_production_interaction_paths(),
-        lint_results=None,
-        strictness_section=_production_strictness_section(),
-        max_findings=resolve_cli_findings_cap(
-            transport_is_cli=False,
-            cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
+        inputs=PromptInputs(
+            chunk=golden_chunks()[0],
+            context=golden_review_context(),
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_production_interaction_paths(),
+            lint_results=None,
+            strictness_section=_production_strictness_section(),
+            max_findings=resolve_cli_findings_cap(
+                transport_is_cli=False,
+                cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
+            ),
         ),
     )
 
@@ -222,16 +235,18 @@ def test_cli_prompt_with_production_defaults_matches_golden() -> None:
     reddens this golden instead of passing silently.
     """
     _, user_prompt = build_git_native_review_prompt(
-        chunk=golden_chunks()[0],
-        context=golden_review_context(),
-        checklist_text=golden_checklist_text(),
-        checklist_count=_CHECKLIST_COUNT,
-        interaction_paths=_production_interaction_paths(),
-        lint_results=None,
-        strictness_section=_production_strictness_section(),
-        max_findings=resolve_cli_findings_cap(
-            transport_is_cli=True,
-            cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
+        inputs=PromptInputs(
+            chunk=golden_chunks()[0],
+            context=golden_review_context(),
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_production_interaction_paths(),
+            lint_results=None,
+            strictness_section=_production_strictness_section(),
+            max_findings=resolve_cli_findings_cap(
+                transport_is_cli=True,
+                cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
+            ),
         ),
     )
 
