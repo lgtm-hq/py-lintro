@@ -72,7 +72,12 @@ full = [
   "pylint>=4.0.8",
   "yamllint>=1.37.1",
 ]
-ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
+# `docstring-parser-fork` is listed explicitly because `[tool.uv]
+# override-dependencies` (see below, #2378) strips anthropic's own
+# `docstring-parser` requirement globally, including when `ai` is synced without
+# `full`. Without this line `anthropic.lib.tools` raises ModuleNotFoundError in an
+# ai-only environment. Add the fork, never upstream `docstring-parser`.
+ai = ["anthropic>=0.39.0", "openai>=1.50.0", "docstring-parser-fork>=0.0.16"]
 # Floor: 2.0 is the first release of the constructor-registered low-level
 # `Server` API (`on_list_tools` / `on_call_tool`), explicit `ListToolsResult`,
 # and snake_case type fields (`input_schema`, `is_error`).

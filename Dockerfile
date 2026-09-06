@@ -222,4 +222,14 @@ RUN echo "Smoke-testing AI agent CLIs..." && \
     gosu lintro agent --version && \
     echo "AI CLI smoke check passed."
 
+# This stage is the only place `full` and `ai` are installed together, so it is
+# the only place the `docstring_parser` module collision can reappear (#2378).
+# pydoclint fails to import when upstream `docstring-parser` shadows
+# `docstring-parser-fork`, and `lintro chk` would report that as a skip rather
+# than an error - so assert the import here, where it fails the build loudly.
+RUN echo "Smoke-testing the combined full+ai Python environment..." && \
+    /app/.venv/bin/pydoclint --version && \
+    /app/.venv/bin/python -c "import anthropic.lib.tools, docstring_parser" && \
+    echo "Combined full+ai smoke check passed."
+
 # ENTRYPOINT, CMD and HEALTHCHECK are inherited from `full`.

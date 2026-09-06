@@ -93,7 +93,16 @@ commits before merge.
    `pyproject.toml` marker-disables anthropic's `docstring-parser` dependency via
    `[tool.uv] override-dependencies` so it cannot collide with pydoclint's
    `docstring-parser-fork` — both install the same `docstring_parser` module, and
-   installing both silently breaks pydoclint. See issue #2378 before touching it.
+   installing both silently breaks pydoclint. The `ai` extra therefore depends on the
+   fork directly, so it works with or without `full`. See issue #2378 before touching
+   either declaration.
+
+   `uv sync --dev --extra full --extra ai` gives you the linters and the AI providers in
+   one environment, which is what `lintro review` work wants. A bare
+   `uv sync --extra ai` is not additive — it rebuilds `.venv` without `full`, dropping
+   pylint, pydoclint and import-linter. If you want the AI extra on its own, put it in a
+   separate environment with `UV_PROJECT_ENVIRONMENT=.venv-ai uv sync --extra ai`, and
+   keep that variable set for the follow-up `uv run` commands.
 
 3. Run tests:
 

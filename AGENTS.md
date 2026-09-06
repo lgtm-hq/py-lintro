@@ -87,8 +87,13 @@ required):
   `[tool.uv] override-dependencies` therefore marker-disables anthropic's requirement
   and lets the fork, a superset, own the module — anthropic touches only
   `docstring_parser.parse` / `.Docstring`, in the optional `@beta_tool` helper lintro
-  does not use. Never re-add `docstring-parser` to the resolution;
-  `tests/unit/test_docstring_parser_override.py` fails if it comes back.
+  does not use. Because the override is global, the `ai` extra depends on
+  `docstring-parser-fork` directly — otherwise `uv sync --extra ai` without `full`
+  (`ai-review.yml`, `scripts/ci/run-ai-contract-tests.sh`) would install neither and
+  `anthropic.lib.tools` would raise `ModuleNotFoundError`. Never re-add
+  `docstring-parser` to the resolution: `tests/unit/test_docstring_parser_override.py`
+  fails if it comes back, and the `ai` Docker stage smoke-tests `pydoclint --version`
+  because it is the only build that installs `full` and `ai` together.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds

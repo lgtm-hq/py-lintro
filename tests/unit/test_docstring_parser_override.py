@@ -48,6 +48,11 @@ def test_lock_pins_the_fork_and_never_installs_upstream() -> None:
 
     assert_that(names).contains("docstring-parser-fork")
 
+    # `docstring-parser` keeps a `[[package]]` metadata entry in the lock even
+    # though nothing can install it: uv records the version it *would* have
+    # resolved for a marker-disabled requirement. The enforceable invariant is
+    # therefore about edges, not names — every requirement pointing at it must
+    # carry the never marker, so no sync of any extra can pull it in.
     requirements = [
         dependency
         for package in packages
@@ -70,3 +75,41 @@ def test_pydoclint_depends_on_the_fork_only() -> None:
 
     assert_that(dependency_names).contains("docstring-parser-fork")
     assert_that(dependency_names).does_not_contain("docstring-parser")
+
+
+def test_ai_extra_carries_the_fork_directly() -> None:
+    """The ``ai`` extra names the fork, so an ai-only sync still has the module.
+
+    The override is global, so anthropic's own `docstring-parser` requirement is
+    stripped even when `full` is not in the extra set. Without a direct
+    dependency, `uv sync --extra ai` alone would leave `anthropic.lib.tools`
+    raising ModuleNotFoundError.
+    """
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    ai_extra = data["project"]["optional-dependencies"]["ai"]
+
+    assert_that(
+        any(item.startswith("docstring-parser-fork") for item in ai_extra),
+    ).is_true()
+    assert_that(
+        any(
+            item.startswith("docstring-parser")
+            and not item.startswith("docstring-parser-fork")
+            for item in ai_extra
+        ),
+    ).is_false()
+
+
+def test_lock_records_the_fork_on_the_ai_extra() -> None:
+    """The locked ``lintro[ai]`` extra resolves the fork, unconditionally."""
+    lintro = next(
+        package for package in _lock_packages() if package["name"] == "lintro"
+    )
+    ai_dependencies = lintro["optional-dependencies"]["ai"]
+    fork = next(
+        dependency
+        for dependency in ai_dependencies
+        if dependency["name"] == "docstring-parser-fork"
+    )
+
+    assert_that(fork.get("marker")).is_none()

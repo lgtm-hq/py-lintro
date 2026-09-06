@@ -1488,6 +1488,7 @@ dependencies = [
 [package.optional-dependencies]
 ai = [
     { name = "anthropic" },
+    { name = "docstring-parser-fork" },
     { name = "openai" },
 ]
 full = [
@@ -1549,6 +1550,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'full'", specifier = ">=26.3.1" },
     { name = "click", specifier = ">=8.3.3" },
     { name = "defusedxml", specifier = ">=0.7.1" },
+    { name = "docstring-parser-fork", marker = "extra == 'ai'", specifier = ">=0.0.16" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "identify", specifier = ">=2.6.19" },
     { name = "import-linter", marker = "extra == 'full'", specifier = ">=2.15" },
