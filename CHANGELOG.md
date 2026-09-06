@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.4] - 2026-09-06
+
+### Fixed
+
+- **ci**: let the duplicate-code guard tolerate environment-dependent pylint counts
+  (#2366) (c38e3f6)
+
 ## [0.147.3] - 2026-09-05
 
 ### Changed
