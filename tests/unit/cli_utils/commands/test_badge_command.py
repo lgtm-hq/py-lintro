@@ -403,3 +403,66 @@ def test_badge_color_follows_the_worst_severity(
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains(color_fragment)
+
+
+def test_resolve_severity_counts_rejects_a_partial_timeout_run() -> None:
+    """One timed-out tool disqualifies the whole badge, not just its counts.
+
+    A completed clean tool alongside a timed-out security scanner would
+    otherwise publish "0 issues" for findings that were never collected.
+    """
+    artifact = _counted_artifact()
+    artifact.tool_results = [
+        ToolResult(
+            name="ruff",
+            success=True,
+            skipped=False,
+            output="All checks passed",
+        ),
+        ToolResult(
+            name="bandit",
+            success=False,
+            skipped=False,
+            timed_out=True,
+            output="timed out after 30s",
+        ),
+    ]
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        with pytest.raises(click.ClickException) as excinfo:
+            resolve_severity_counts(override=None, paths=())
+
+    assert_that(str(excinfo.value)).contains("timed out")
+
+
+def test_badge_live_partial_timeout_prints_no_badge() -> None:
+    """A partially timed-out live check exits non-zero and prints no badge."""
+    runner = CliRunner()
+    artifact = _counted_artifact()
+    artifact.tool_results = [
+        ToolResult(
+            name="ruff",
+            success=True,
+            skipped=False,
+            output="All checks passed",
+        ),
+        ToolResult(
+            name="bandit",
+            success=False,
+            skipped=False,
+            timed_out=True,
+            output="timed out after 30s",
+        ),
+    ]
+
+    with patch(
+        "lintro.cli_utils.commands.badge.api.check_run",
+        return_value=artifact,
+    ):
+        result = runner.invoke(badge_command, [])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).does_not_contain("img.shields.io")

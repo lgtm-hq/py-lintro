@@ -79,11 +79,14 @@ class _FakeOutputManager:
         """Record the run directory this double reports.
 
         Args:
-            run_dir: Directory the render phase would write into. It doubles
-                as the ``.lintro`` log root for baseline writes.
+            run_dir: Temporary directory to build under. A ``logs`` log root
+                and a pruneable ``logs/run-test`` child are created inside it,
+                mirroring production, so a baseline written into the run
+                directory instead of the log root fails the placement test.
         """
-        self.run_dir = run_dir
-        self.base_dir = run_dir
+        self.base_dir = run_dir / "logs"
+        self.run_dir = self.base_dir / "run-test"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
         self.reports_written = 0
         self.console_logs: list[str] = []
         self.cleanups = 0
@@ -686,24 +689,79 @@ def test_render_run_records_the_baseline_for_the_next_run(
     )
 
 
-def test_render_run_does_not_record_a_baseline_for_an_empty_run(
+def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
+    """Build the run shapes that must never overwrite a real baseline.
+
+    Each one reports zero issues for a reason other than "the project is
+    clean", so recording it would make the next real check report every
+    existing issue as newly introduced.
+
+    Returns:
+        list[tuple[str, RunArtifact]]: ``(id, artifact)`` pairs.
+    """
+    skipped_only = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="hadolint",
+                success=True,
+                skipped=True,
+                skip_reason="hadolint not found",
+            ),
+        ],
+    )
+    no_files = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="ruff",
+                success=True,
+                skipped=False,
+                output="No .py/.pyi files found to check.",
+            ),
+        ],
+    )
+    dry_run = RunArtifact(
+        action=Action.CHECK,
+        dry_run_preview=True,
+        tool_results=[ToolResult(name="ruff", success=True, issues_count=0)],
+    )
+    early = RunArtifact(action=Action.CHECK, early_exit=True)
+    return [
+        ("empty", RunArtifact(action=Action.CHECK)),
+        ("all-skipped", skipped_only),
+        ("no-files-matched", no_files),
+        ("dry-run-preview", dry_run),
+        ("early-exit", early),
+    ]
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [pair[1] for pair in _unmeasured_artifacts()],
+    ids=[pair[0] for pair in _unmeasured_artifacts()],
+)
+def test_render_run_does_not_record_a_baseline_for_an_unmeasured_run(
     tmp_path: Path,
     fake_logger: Any,
+    artifact: RunArtifact,
 ) -> None:
-    """A run where nothing executed must not overwrite a real baseline.
+    """Only a run that actually measured the project may replace the baseline.
 
-    Its zero counts mean "nothing ran", not "nothing found"; recording them
-    would make the next real check report every existing issue as newly
-    introduced.
+    An all-skipped run still carries ``skipped=True`` placeholder results, so
+    a non-empty result list is not evidence that anything was measured; the
+    same holds for a toolset that matched no files and for a ``fmt --dry-run``
+    preview, whose counts are the auto-fixable subset only.
 
     Args:
         tmp_path: Temporary directory standing in for the run directory.
         fake_logger: Console logger double.
+        artifact: A run shape that measured nothing comparable.
     """
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger)
     write_severity_baseline(ctx.output_manager.base_dir, SeverityCounts(errors=9))
 
-    render_run(RunArtifact(action=Action.CHECK), ctx=ctx, output_format="grid")
+    render_run(artifact, ctx=ctx, output_format="grid")
 
     assert_that(read_severity_baseline(ctx.output_manager.base_dir)).is_equal_to(
         SeverityCounts(errors=9),
@@ -756,6 +814,78 @@ def test_render_run_json_carries_the_counts_and_delta(
         {"error": -12, "warning": 0, "info": 0, "total": -12},
     )
     assert_that(summary["total_issues"]).is_equal_to(2)
+
+
+def test_render_run_output_file_json_carries_the_counts_and_delta(
+    tmp_path: Path,
+    fake_logger: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An ``--output`` JSON file carries the same tallies as stdout.
+
+    A consumer reading the file must not have to fall back to parsing the
+    console to learn what the run found.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        capsys: Pytest stdout capture fixture.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = SeverityCounts(errors=14)
+    output_file = tmp_path / "report.json"
+
+    render_run(
+        artifact,
+        ctx=ctx,
+        output_format="json",
+        output_file=str(output_file),
+    )
+    capsys.readouterr()
+
+    summary = json.loads(output_file.read_text(encoding="utf-8"))["summary"]
+    assert_that(summary["severity_counts"]).is_equal_to(
+        {"error": 2, "warning": 0, "info": 0, "total": 2},
+    )
+    assert_that(summary["severity_delta"]).is_equal_to(
+        {"error": -12, "warning": 0, "info": 0, "total": -12},
+    )
+
+
+def test_render_run_json_artifact_carries_the_counts_and_delta(
+    tmp_path: Path,
+    fake_logger: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A configured JSON artifact carries the tallies too.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest stdout capture fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    ctx.lintro_config.execution.artifacts = ["json"]
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(warnings=5)
+    artifact.previous_severity_counts = SeverityCounts(warnings=1)
+
+    render_run(artifact, ctx=ctx, output_format="json")
+    capsys.readouterr()
+
+    written = Path(".lintro") / "artifacts" / "json" / "results.json"
+    summary = json.loads(written.read_text(encoding="utf-8"))["summary"]
+    assert_that(summary["severity_counts"]).is_equal_to(
+        {"error": 0, "warning": 5, "info": 0, "total": 5},
+    )
+    assert_that(summary["severity_delta"]).is_equal_to(
+        {"error": 0, "warning": 4, "info": 0, "total": 4},
+    )
 
 
 def test_render_run_writes_the_run_reports(

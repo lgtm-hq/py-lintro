@@ -153,9 +153,11 @@ BASELINE: dict[str, tuple[str, ...]] = {
 #: Ceilings on ``BASELINE`` itself, recorded when the families were switched on
 #: and deliberately *not* derived from ``BASELINE``. Without them a pull request
 #: could edit the mapping and ``pyproject.toml`` together and reintroduce a
-#: suppression that a previous ratchet step removed. Both may only go *down*.
-BASELINE_MAX_FILES: int = 99
-BASELINE_MAX_SUPPRESSIONS: int = 198
+#: suppression that a previous ratchet step removed. Both may only go *down*,
+#: and both are pinned to the exact live counts (issue #1739): any slack here
+#: is room for exactly that reintroduction.
+BASELINE_MAX_FILES: int = 98
+BASELINE_MAX_SUPPRESSIONS: int = 197
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->

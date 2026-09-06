@@ -55,6 +55,7 @@ def finalize_artifact(
     """
     from pathlib import Path
 
+    from lintro.utils.meaningful_run import baseline_is_eligible
     from lintro.utils.severity_baseline import (
         read_severity_baseline,
         resolve_log_root,
@@ -72,13 +73,18 @@ def finalize_artifact(
     )
 
     # Tally what the run actually found, and read the previous run's tally so
-    # the renderer can report an exact count delta (issue #1739). Only a check
-    # run has a comparable baseline: ``fmt`` and ``test`` measure something
-    # else, so comparing them against the last check would be meaningless.
+    # the renderer can report an exact count delta (issue #1739). The read side
+    # uses the same eligibility rule as the write side in
+    # ``run_renderer._record_severity_baseline``: a run that must not record a
+    # baseline must not compare against one either, or the delta spans two
+    # different populations.
     severity_counts = count_severities(all_results)
-    log_root = (
-        resolve_log_root(ctx.output_manager) if ctx.action == Action.CHECK else None
+    eligible = baseline_is_eligible(
+        action=ctx.action,
+        dry_run_preview=ctx.dry_run_preview,
+        tool_results=all_results,
     )
+    log_root = resolve_log_root(ctx.output_manager) if eligible else None
     previous_counts = read_severity_baseline(log_root) if log_root else None
 
     return RunArtifact(

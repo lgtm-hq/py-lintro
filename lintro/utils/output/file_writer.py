@@ -16,6 +16,7 @@ import html
 import io
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,7 @@ from lintro.formatters.formatter import (
     merge_detected_and_remaining,
 )
 from lintro.models.core.sarif_enrichment import AISarifEnrichment
+from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import sanitize_csv_value
@@ -295,6 +297,28 @@ def render_markdown_report(
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class JsonReportExtras:
+    """Optional payloads that only the JSON report carries.
+
+    Bundled rather than passed as separate keyword arguments so
+    :func:`write_output_file` stays within the structural argument budget
+    (``PLR0913``) as the JSON summary grows.
+
+    Attributes:
+        profile_data: ``--profile`` payload, attached under ``profile`` so the
+            file matches the stdout document.
+        severity_counts: Issue tallies by normalized severity, added under
+            ``summary.severity_counts``.
+        severity_delta: Change in those tallies since the previous comparable
+            run, added under ``summary.severity_delta``.
+    """
+
+    profile_data: ProfileData | None = None
+    severity_counts: SeverityCounts | None = None
+    severity_delta: SeverityDelta | None = None
+
+
 def write_output_file(
     *,
     output_path: str,
@@ -304,7 +328,7 @@ def write_output_file(
     total_issues: int,
     total_fixed: int,
     ai_enrichment: AISarifEnrichment | None = None,
-    profile_data: ProfileData | None = None,
+    json_extras: JsonReportExtras | None = None,
 ) -> None:
     """Write results to user-specified output file.
 
@@ -318,9 +342,9 @@ def write_output_file(
         ai_enrichment: Optional AI objects for SARIF output, supplied by the
             caller via the AI seam. Ignored for non-SARIF formats. When None,
             SARIF is rendered without AI enrichment.
-        profile_data: Optional performance profile payload; attached to the
-            JSON artifact under ``profile`` so the file output matches the
-            stdout payload when ``--profile`` is on.
+        json_extras: Optional JSON-only additions (performance profile and
+            severity tallies). Ignored for every other format; see
+            :class:`JsonReportExtras`.
     """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -340,14 +364,21 @@ def write_output_file(
             },
             "results": [],
         }
+        # Additive, and mirrors the stdout JSON document so a consumer reading
+        # the file sees the same severity evidence (issue #1739).
+        extras = json_extras or JsonReportExtras()
+        if extras.severity_counts is not None:
+            json_data["summary"]["severity_counts"] = extras.severity_counts.to_dict()
+        if extras.severity_delta is not None:
+            json_data["summary"]["severity_delta"] = extras.severity_delta.to_dict()
         for result in all_results:
             # Build each per-tool object via the shared serializer so the
             # file artifact and the stdout payload cannot drift.
             json_data["results"].append(
                 serialize_tool_result(result, action=action),
             )
-        if profile_data is not None:
-            json_data["profile"] = profile_data
+        if extras.profile_data is not None:
+            json_data["profile"] = extras.profile_data
         output_file.write_text(
             json.dumps(json_data, indent=2, ensure_ascii=False),
             encoding="utf-8",

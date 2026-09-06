@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 from contextlib import redirect_stdout
 from urllib.parse import quote
 
@@ -19,7 +18,7 @@ import click
 from lintro.api import core as api
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.severity_counts import SeverityCounts
-from lintro.models.core.tool_result import ToolResult
+from lintro.utils.meaningful_run import run_inspected_files
 
 _SHIELDS_STYLES: tuple[str, ...] = (
     "flat",
@@ -36,46 +35,30 @@ COLOR_CLEAN: str = "brightgreen"
 COLOR_WARNINGS: str = "yellow"
 COLOR_ERRORS: str = "red"
 
-# Real wrapper messages vary: "No files found to check.", "No Astro files to
-# check.", "No .py/.pyi files found to check.".
-_NO_FILES_CHECKED_RE = re.compile(r"(?i)\bno\b.*\bfiles?\b.*\bto check\b")
-
-
-def _result_checked_any_files(result: ToolResult) -> bool:
-    """Return whether a tool result looks like it actually inspected files.
-
-    Tools that run over an empty path still return ``skipped=False`` and
-    ``success=True`` with a ``"No … files found to check"`` message. That is
-    not a public quality signal — it is the same as never running.
-
-    Args:
-        result: One tool's completed result.
-
-    Returns:
-        bool: ``True`` when the tool was not skipped and did not report an
-        empty file set.
-    """
-    if result.skipped or result.timed_out:
-        return False
-    text = f"{result.output or ''}\n{result.formatted_output or ''}"
-    return _NO_FILES_CHECKED_RE.search(text) is None
-
 
 def _live_counts_are_usable(artifact: RunArtifact) -> bool:
     """Return whether a live check produced badge-worthy counts.
+
+    A badge is a public quality claim, so it is refused whenever the run did
+    not actually measure the project: an early exit, an empty or all-skipped
+    run, or a run where nothing inspected any files. **Any** timed-out tool
+    also disqualifies the run — a completed clean tool alongside a timed-out
+    security scanner would otherwise publish "0 issues" for findings that were
+    never collected.
 
     Args:
         artifact: Completed check run.
 
     Returns:
-        bool: ``True`` when at least one tool inspected files. Empty,
-        all-skipped, timed-out, and early-exit runs are not usable public
-        quality signals. A filter-empty main phase is still usable when
-        post-checks produced a real result.
+        bool: ``True`` when the counts are a publishable quality signal. A
+        filter-empty main phase is still usable when post-checks produced a
+        real result.
     """
     if artifact.early_exit:
         return False
-    return any(_result_checked_any_files(result) for result in artifact.tool_results)
+    if any(result.timed_out for result in artifact.tool_results):
+        return False
+    return run_inspected_files(artifact.tool_results)
 
 
 def badge_color(counts: SeverityCounts) -> str:
@@ -184,8 +167,9 @@ def resolve_severity_counts(
         SeverityCounts: Counts for the badge.
 
     Raises:
-        click.ClickException: If the live check exits before producing
-            counts, or no tool actually executed (empty / all-skipped).
+        click.ClickException: If the live check exits before producing counts,
+            no tool actually executed (empty / all-skipped), or any tool timed
+            out.
     """
     if override is not None:
         return override
@@ -200,7 +184,7 @@ def resolve_severity_counts(
     if not _live_counts_are_usable(artifact):
         raise click.ClickException(
             "Could not determine usable issue counts because the check "
-            "exited early, was empty, or all tools were skipped.",
+            "exited early, was empty, timed out, or all tools were skipped.",
         )
     return artifact.severity_counts
 

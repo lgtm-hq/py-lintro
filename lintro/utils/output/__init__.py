@@ -13,7 +13,11 @@ from lintro.utils.output.constants import (
     DEFAULT_TEMP_PREFIX,
     DEFAULT_TIMESTAMP_FORMAT,
 )
-from lintro.utils.output.file_writer import format_tool_output, write_output_file
+from lintro.utils.output.file_writer import (
+    JsonReportExtras,
+    format_tool_output,
+    write_output_file,
+)
 from lintro.utils.output.helpers import html_escape, markdown_escape, sanitize_csv_value
 from lintro.utils.output.manager import OutputManager
 
@@ -27,6 +31,7 @@ __all__ = [
     # Classes
     "OutputManager",
     # Functions
+    "JsonReportExtras",
     "write_output_file",
     "format_tool_output",
     # Helpers

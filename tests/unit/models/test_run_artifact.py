@@ -87,3 +87,18 @@ def test_early_exit_artifact_reports_its_failure() -> None:
     assert_that(artifact.success).is_false()
     # A run that never executed must not report findings it did not make.
     assert_that(artifact.severity_counts.total).is_equal_to(0)
+
+
+def test_severity_delta_distinguishes_an_empty_baseline_from_no_baseline() -> None:
+    """A recorded all-zero baseline is a comparison, not a missing one.
+
+    The property tests ``previous_severity_counts is None``, so a first check
+    that genuinely found nothing still yields a delta rather than suppressing
+    the line.
+    """
+    artifact = RunArtifact(
+        severity_counts=SeverityCounts(errors=3),
+        previous_severity_counts=SeverityCounts(),
+    )
+
+    assert_that(artifact.severity_delta).is_equal_to(SeverityDelta(errors=3))

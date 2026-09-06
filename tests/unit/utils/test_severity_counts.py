@@ -140,11 +140,32 @@ def test_counts_round_trip_through_a_dict() -> None:
     assert_that(SeverityCounts.from_dict(counts.to_dict())).is_equal_to(counts)
 
 
-def test_format_counts_line_pluralizes_each_severity() -> None:
-    """One issue reads singular; anything else reads plural."""
-    line = format_counts_line(SeverityCounts(errors=1, warnings=2, info=0))
+@pytest.mark.parametrize(
+    ("counts", "expected"),
+    [
+        (
+            SeverityCounts(errors=1, warnings=2, info=0),
+            "Issues: 1 error, 2 warnings, 0 info",
+        ),
+        (
+            SeverityCounts(errors=2, warnings=1, info=1),
+            "Issues: 2 errors, 1 warning, 1 info",
+        ),
+        (SeverityCounts(), "Issues: 0 errors, 0 warnings, 0 info"),
+    ],
+    ids=["singular-error", "singular-warning", "all-zero"],
+)
+def test_format_counts_line_pluralizes_each_severity(
+    counts: SeverityCounts,
+    expected: str,
+) -> None:
+    """One issue reads singular; anything else plural; ``info`` never changes.
 
-    assert_that(line).is_equal_to("Issues: 1 error, 2 warnings, 0 info")
+    Args:
+        counts: Tallies to render.
+        expected: The line the renderer must produce.
+    """
+    assert_that(format_counts_line(counts)).is_equal_to(expected)
 
 
 @pytest.mark.parametrize(
@@ -205,6 +226,10 @@ def test_format_delta_line_pluralizes_a_single_issue() -> None:
         (SeverityDelta(errors=-1, warnings=1), "green"),
         (SeverityDelta(errors=1, warnings=-1), "red"),
         (SeverityDelta(warnings=-2, info=2), "green"),
+        (SeverityDelta(warnings=2), "red"),
+        (SeverityDelta(warnings=-2), "green"),
+        (SeverityDelta(info=1), "red"),
+        (SeverityDelta(info=-1), "green"),
     ],
     ids=[
         "fewer-errors",
@@ -213,6 +238,10 @@ def test_format_delta_line_pluralizes_a_single_issue() -> None:
         "error-traded-for-warning",
         "warning-traded-for-error",
         "warning-traded-for-info",
+        "more-warnings-only",
+        "fewer-warnings-only",
+        "more-info-only",
+        "fewer-info-only",
     ],
 )
 def test_delta_color_tracks_the_direction_of_improvement(
@@ -240,3 +269,35 @@ def test_delta_between_subtracts_the_previous_run() -> None:
     assert_that(delta.to_dict()).is_equal_to(
         {"error": -12, "warning": 3, "info": -3, "total": -12},
     )
+
+
+def test_counts_from_dict_keeps_valid_keys_beside_invalid_ones() -> None:
+    """A partly-corrupt payload keeps the fields that are still readable."""
+    parsed = SeverityCounts.from_dict({"error": 4, "warning": "many", "info": -2})
+
+    assert_that(parsed).is_equal_to(SeverityCounts(errors=4))
+
+
+def test_count_severities_tallies_issues_on_a_successful_result() -> None:
+    """A tool that reports success can still carry advisory findings."""
+    issues: list[Any] = [_Issue(SeverityLevel.WARNING), _Issue(SeverityLevel.INFO)]
+    result = ToolResult(name="ruff", success=True, issues_count=2, issues=issues)
+
+    assert_that(count_severities([result])).is_equal_to(
+        SeverityCounts(warnings=1, info=1),
+    )
+
+
+def test_count_severities_ignores_a_count_only_result() -> None:
+    """A result carrying only ``issues_count`` contributes nothing.
+
+    Some synthetic results (the duplicate-code ratchet, certain post-check
+    failures) set ``issues_count`` without a parsed ``issues`` list. The
+    severity tally is built from real ``BaseIssue`` severities, so it reads
+    zero for that shape while ``total_issues`` and the exit code still reflect
+    the failure. Pinned here so the contract is explicit rather than
+    accidental.
+    """
+    result = ToolResult(name="pylint", success=False, issues_count=7, issues=None)
+
+    assert_that(count_severities([result])).is_equal_to(SeverityCounts())

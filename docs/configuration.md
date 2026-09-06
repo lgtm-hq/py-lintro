@@ -279,11 +279,18 @@ severities that actually moved are listed; a run with no movement reads `no chan
 Severities are compared most-severe first, so trading an error for a warning still reads
 as an improvement.
 
-The comparison baseline is the previous check's counts, stored at
-`.lintro/severity-baseline.json` — at the root of the log directory rather than inside a
-`run-*` directory, so run pruning never removes it. Only `check` writes it; `format` and
-`test` measure something else. A missing or unreadable baseline simply omits the change
-line, and never fails a run.
+The comparison baseline is stored at `.lintro/severity-baseline.json` — at the root of
+the log directory rather than inside a `run-*` directory, so run pruning never removes
+it.
+
+Only a run that actually measured the project reads or writes it, and the same rule
+governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
+measure something else), is not a `fmt --dry-run` preview (those report as checks but
+count only the auto-fixable subset), and had at least one tool actually inspect files.
+Runs that do not qualify — an empty directory, an all-skipped toolset, an early exit —
+leave the previous baseline in place rather than overwriting it with zeroes, so the next
+comparison may be against an older run rather than the immediately preceding one. A
+missing or unreadable baseline simply omits the change line, and never fails a run.
 
 > **Removed in favour of this (issue #1739).** `lintro` used to compute a 0-100 "health
 > score" along with `check --score` and `check --fail-under N`. The score had no size
@@ -310,8 +317,11 @@ only warnings or info issues remain.
 
 #### JSON output
 
-In `--output-format json` the tallies are added **additively** under `summary`, leaving
-all existing keys untouched. `severity_delta` appears only when a baseline exists:
+In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
+`total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
+object is **gone** — this is a breaking change for anything that read it.
+`severity_delta` appears only when a comparable baseline exists. `--output` files and
+configured JSON artifacts carry the same keys as the stdout document:
 
 ```json
 {
