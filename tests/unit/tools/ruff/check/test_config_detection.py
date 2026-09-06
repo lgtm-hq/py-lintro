@@ -30,7 +30,7 @@ def test_execute_ruff_check_uses_cwd_for_config_discovery(
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
         # Verify the shared preparation pipeline resolved the working directory
-        mock_ruff_tool._prepare_execution.assert_called()
+        mock_ruff_tool.prepare.assert_called()
 
         # Verify subprocess was called with cwd from the execution context
         mock_subprocess.assert_called()

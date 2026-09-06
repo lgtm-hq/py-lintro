@@ -404,7 +404,7 @@ class MypyPlugin(BaseToolPlugin):
         self.exclude_patterns = effective_excludes
 
         # Use shared preparation with custom excludes
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             target_paths,
             merged_options,
             no_files_message="No files to check.",
@@ -413,17 +413,8 @@ class MypyPlugin(BaseToolPlugin):
         # Restore original exclude patterns
         self.exclude_patterns = original_excludes
 
-        if ctx.should_skip and ctx.early_result is not None:
-            return ctx.early_result
-
-        # Safety check: if should_skip but no early_result, create one
-        if ctx.should_skip:
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output="No files to check.",
-                issues_count=0,
-            )
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         logger.debug("[mypy] Discovered {} python file(s)", len(ctx.files))
 

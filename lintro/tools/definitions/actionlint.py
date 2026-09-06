@@ -147,9 +147,9 @@ class ActionlintPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Restrict to GitHub Actions workflow location
         workflow_files: list[str] = [

@@ -48,23 +48,14 @@ def check(
     merged_options.update(options)
 
     # Use shared preparation for version check, path validation, discovery
-    ctx = plugin._prepare_execution(
+    ctx = plugin.prepare(
         paths,
         merged_options,
         no_files_message=plugin._no_files_message,
     )
 
-    if ctx.should_skip and ctx.early_result is not None:
-        return ctx.early_result
-
-    # Safety check: if should_skip but no early_result, create one
-    if ctx.should_skip:
-        return ToolResult(
-            name=plugin.definition.name,
-            success=True,
-            output=plugin._no_files_message,
-            issues_count=0,
-        )
+    if isinstance(ctx, ToolResult):
+        return ctx
 
     logger.debug(
         "[{}] Discovered {} {} file(s)",

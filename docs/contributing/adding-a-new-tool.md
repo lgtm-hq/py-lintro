@@ -65,6 +65,7 @@ from dataclasses import dataclass
 from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -104,12 +105,13 @@ class <Tool>Plugin(BaseToolPlugin):
 
 **Key implementation notes:**
 
-- `check()` must return a `ToolResult`; call `self._prepare_execution(paths, options)`
-  and check `ctx.should_skip` first.
+- `check()` must return a `ToolResult`; call `self.prepare(paths, options)` first and
+  return its result unchanged when it hands back a `ToolResult`
+  (`if isinstance(ctx, ToolResult): return ctx`).
 - `fix()` raises `NotImplementedError` when `can_fix=False`.
 - Always use list args in subprocess calls, never `shell=True`; add `# nosec B404` on
   the `import subprocess` line.
-- `_prepare_execution()` handles file discovery and filtering by `file_patterns`. Use
+- `prepare()` handles file discovery and filtering by `file_patterns`. Use
   `ctx.rel_files` for the filtered list.
 - If the tool has per-rule documentation URLs, implement `doc_url(self, code)` and add a
   `DocUrlTemplate` entry (see Step 3).

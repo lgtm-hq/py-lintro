@@ -34,7 +34,7 @@ def test_ruff_timeout_single_source_fix() -> None:
 def test_ruff_check_routes_through_prepare_execution(
     mock_ruff_tool: MagicMock,
 ) -> None:
-    """``execute_ruff_check`` delegates preparation to ``_prepare_execution``.
+    """``execute_ruff_check`` delegates preparation to ``prepare``.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
@@ -53,14 +53,14 @@ def test_ruff_check_routes_through_prepare_execution(
     ):
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-    mock_ruff_tool._prepare_execution.assert_called_once()
+    mock_ruff_tool.prepare.assert_called_once()
 
 
 def test_ruff_fix_routes_through_prepare_execution(
     mock_ruff_tool: MagicMock,
     sample_ruff_json_empty_output: str,
 ) -> None:
-    """``execute_ruff_fix`` delegates preparation to ``_prepare_execution``.
+    """``execute_ruff_fix`` delegates preparation to ``prepare``.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
@@ -75,13 +75,13 @@ def test_ruff_fix_routes_through_prepare_execution(
 
     execute_ruff_fix(mock_ruff_tool, ["/test/project"])
 
-    mock_ruff_tool._prepare_execution.assert_called_once()
+    mock_ruff_tool.prepare.assert_called_once()
 
 
-def test_ruff_plugin_check_and_fix_invoke_prepare_execution(
+def test_ruff_plugin_check_and_fix_invoke_prepare(
     ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """The real plugin's ``check``/``fix`` route ruff through ``_prepare_execution``.
+    """The real plugin's ``check``/``fix`` route ruff through ``prepare``.
 
     Args:
         ruff_execution_context: Factory for mock execution contexts.
@@ -96,7 +96,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare_execution(
     with (
         patch.object(
             plugin,
-            "_prepare_execution",
+            "prepare",
             return_value=ruff_execution_context(),
         ) as mock_prepare,
         patch.object(plugin, "_run_subprocess", return_value=(True, "[]")),

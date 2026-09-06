@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.command_builders import pinned_npm_spec
@@ -141,15 +142,17 @@ def test_check_returns_early_when_skipped(
     Args:
         html_validate_plugin: The plugin under test.
     """
-    early = MagicMock()
-    ctx = MagicMock()
-    ctx.should_skip = True
-    ctx.early_result = early
+    early = ToolResult(
+        name="html-validate",
+        success=True,
+        output="",
+        issues_count=0,
+    )
 
     with patch.object(
         html_validate_plugin,
-        "_prepare_execution",
-        return_value=ctx,
+        "prepare",
+        return_value=early,
     ):
         result = html_validate_plugin.check(["x.html"], {})
 

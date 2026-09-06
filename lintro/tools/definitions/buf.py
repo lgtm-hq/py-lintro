@@ -246,9 +246,9 @@ class BufPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         all_issues: list[BufIssue] = []
         all_outputs: list[str] = []
@@ -353,13 +353,13 @@ class BufPlugin(BaseToolPlugin):
         Returns:
             ToolResult with fix results.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No .proto files to format.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         buf_cmd = self._get_executable_command(tool_name="buf")
         common_args = self._build_common_args(ctx.rel_files)

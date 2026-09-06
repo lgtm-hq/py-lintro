@@ -138,10 +138,9 @@ class PydoclintPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            # early_result is guaranteed to be ToolResult when should_skip=True
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         result = self._process_files_with_progress(
             files=ctx.files,

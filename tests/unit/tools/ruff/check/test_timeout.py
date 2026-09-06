@@ -28,7 +28,7 @@ def test_execute_ruff_check_uses_context_timeout(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+    mock_ruff_tool.prepare.return_value = ruff_execution_context(
         timeout=60,
     )
 

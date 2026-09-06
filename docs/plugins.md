@@ -130,10 +130,11 @@ class MyToolPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        # Use _prepare_execution for common setup (version check, file discovery)
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result
+        # Use prepare() for common setup (version check, file discovery). It
+        # returns the finished ToolResult when execution must stop early.
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Build and run the tool command
         cmd = ["my-tool", "check"] + ctx.rel_files
@@ -203,7 +204,8 @@ The `ToolResult` dataclass represents execution results:
 
 The `BaseToolPlugin` base class provides useful methods:
 
-- `_prepare_execution(paths, options)` - Common setup (version check, file discovery)
+- `prepare(paths, options)` - Common setup (version check, file discovery); returns an
+  `ExecutionContext`, or a `ToolResult` to return as-is when execution stops early
 - `_run_subprocess(cmd, timeout, cwd)` - Run tool command safely
 - `_get_executable_command(tool_name)` - Get command with proper path
 - `_discover_files(paths, patterns)` - Find files matching patterns

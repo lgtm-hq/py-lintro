@@ -279,9 +279,9 @@ class SemgrepPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cmd: list[str] = self._build_check_command(files=ctx.rel_files)
         logger.debug(f"[semgrep] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})")

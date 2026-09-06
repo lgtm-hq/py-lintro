@@ -159,12 +159,7 @@ def test_check_early_skip(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:
         issues=[],
     )
 
-    with patch.object(oxlint_plugin, "_prepare_execution") as mock_prepare:
-        mock_ctx = MagicMock()
-        mock_ctx.should_skip = True
-        mock_ctx.early_result = early_result
-        mock_prepare.return_value = mock_ctx
-
+    with patch.object(oxlint_plugin, "prepare", return_value=early_result):
         result = oxlint_plugin.check([str(tmp_path)], {})
 
         assert_that(result).is_same_as(early_result)

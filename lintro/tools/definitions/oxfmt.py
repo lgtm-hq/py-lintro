@@ -208,14 +208,13 @@ class OxfmtPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to check.",
         )
-        if ctx.should_skip:
-            assert ctx.early_result is not None
-            return ctx.early_result
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         logger.debug(
             f"[OxfmtPlugin] Discovered {len(ctx.files)} files matching patterns: "
@@ -297,14 +296,13 @@ class OxfmtPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No files to format.",
         )
-        if ctx.should_skip:
-            assert ctx.early_result is not None
-            return ctx.early_result
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Get Lintro config injection args
         config_args = self._build_config_args()

@@ -267,9 +267,9 @@ class HadolintPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Process files using the shared file processor
         result = self._process_files_with_progress(

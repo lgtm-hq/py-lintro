@@ -233,14 +233,14 @@ class TrufflehogPlugin(BaseToolPlugin):
             ToolResult with check results.
         """
         # Use shared preparation for version check and path validation.
-        ctx = self._prepare_execution(paths=paths, options=options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths=paths, options=options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Scan the discovered, filtered file set — never the raw CLI paths — so
         # that .lintro-ignore exclusions (test_samples/, .venv, build dirs, …)
         # and the venv filter are honored exactly like every other tool. When
-        # filtering removes every file, ``_prepare_execution`` already returned
+        # filtering removes every file, ``prepare`` already returned
         # a no-files result above, so ``ctx.files`` is guaranteed non-empty here
         # and there is no unfiltered fallback that could reintroduce excluded
         # targets.

@@ -253,9 +253,9 @@ class BlackPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         cmd: list[str] = self._get_executable_command(tool_name="black") + ["--check"]
         cmd.extend(self._build_common_args())
@@ -306,13 +306,13 @@ class BlackPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No files to format.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Build reusable check command
         check_cmd: list[str] = self._get_executable_command(tool_name="black") + [

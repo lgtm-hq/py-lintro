@@ -136,10 +136,9 @@ class CargoAuditPlugin(BaseToolPlugin):
         Returns:
             ToolResult with security scan results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            # early_result is guaranteed non-None when should_skip is True
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Find Cargo.lock root from filtered file list
         cargo_root = _find_cargo_root(ctx.files)

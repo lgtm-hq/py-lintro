@@ -92,13 +92,13 @@ def execute_ruff_fix(
     # Delegate file discovery, version checking, and timeout resolution to the
     # shared preparation pipeline so ruff behaves consistently with every other
     # tool plugin.
-    ctx = tool._prepare_execution(
+    ctx = tool.prepare(
         paths=paths,
         options={},
         no_files_message="No files to fix.",
     )
-    if ctx.should_skip:
-        return ctx.early_result  # type: ignore[return-value]
+    if isinstance(ctx, ToolResult):
+        return ctx
 
     python_files: list[str] = ctx.files
     timeout: int = int(ctx.timeout)

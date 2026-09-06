@@ -195,23 +195,14 @@ class SvelteCheckPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message="No Svelte files to check.",
         )
 
-        if ctx.should_skip and ctx.early_result is not None:
-            return ctx.early_result
-
-        # Safety check: if should_skip but no early_result, create one
-        if ctx.should_skip:
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output="No Svelte files to check.",
-                issues_count=0,
-            )
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         logger.debug("[svelte-check] Discovered {} Svelte file(s)", len(ctx.files))
 

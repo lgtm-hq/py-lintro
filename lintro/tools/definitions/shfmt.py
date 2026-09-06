@@ -370,9 +370,9 @@ class ShfmtPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         result = self._process_files_with_progress(
             files=ctx.files,
@@ -399,13 +399,13 @@ class ShfmtPlugin(BaseToolPlugin):
         Returns:
             ToolResult with fix results.
         """
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             options,
             no_files_message="No files to format.",
         )
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Track fix-specific metrics. We collect remaining issues per-file
         # because AggregatedResult drops issues from skipped/errored files,

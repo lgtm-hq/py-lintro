@@ -218,29 +218,20 @@ class AstroCheckPlugin(BaseToolPlugin):
         merged_options.update(options)
 
         # Use shared preparation for version check, path validation, file discovery
-        ctx = self._prepare_execution(
+        ctx = self.prepare(
             paths,
             merged_options,
             no_files_message=self._NO_FILES_MESSAGE,
         )
 
-        if ctx.should_skip and ctx.early_result is not None:
-            # Normalize "no files" messages to the canonical form.
-            # _prepare_execution may generate "No .astro files found to check."
-            # from file patterns; detect and normalize robustly.
-            output_lower = (ctx.early_result.output or "").lower()
+        if isinstance(ctx, ToolResult):
+            # Normalize "no files" messages to the canonical form. Preparation
+            # may generate "No .astro files found to check." from file
+            # patterns; detect and normalize robustly.
+            output_lower = (ctx.output or "").lower()
             if "no" in output_lower and "astro" in output_lower:
-                ctx.early_result.output = self._NO_FILES_MESSAGE
-            return ctx.early_result
-
-        # Safety check: if should_skip but no early_result, create one
-        if ctx.should_skip:
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output=self._NO_FILES_MESSAGE,
-                issues_count=0,
-            )
+                ctx.output = self._NO_FILES_MESSAGE
+            return ctx
 
         logger.debug("[astro-check] Discovered {} Astro file(s)", len(ctx.files))
 
