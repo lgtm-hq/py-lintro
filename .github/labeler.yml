@@ -64,8 +64,8 @@ security:
       - any-glob-to-any-file:
           - '.github/workflows/*security*.yml'
           - '.github/workflows/*codeql*.yml'
-          - 'lintro/tools/bandit/definition.py'
-          - 'lintro/tools/gitleaks/definition.py'
+          - 'lintro/tools/bandit/**'
+          - 'lintro/tools/gitleaks/**'
           - 'lintro/tools/definitions/semgrep.py'
 
 testing:
