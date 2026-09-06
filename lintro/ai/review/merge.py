@@ -53,7 +53,25 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ChunkReviewPartial:
-    """Intermediate review result for one chunk."""
+    """Intermediate review result for one chunk.
+
+    Attributes:
+        summary: Flat summary text the chunk returned.
+        checklist: Checklist answers for the chunk's slice of the diff.
+        findings: Findings the chunk reported, in reported order.
+        input_tokens: Prompt tokens the chunk's provider calls consumed.
+        output_tokens: Completion tokens the chunk's provider calls produced.
+        cost_estimate: Estimated USD cost of the chunk's provider calls.
+        pr_summary: Structured summary, or ``None`` when the model returned
+            only plain summary text.
+        verdict_reasoning: Model-written verdict explanation, or ``None``.
+        file_assessments: One-sentence overview per file the chunk assessed.
+        files: Repository-relative paths the chunk reviewed. Coverage
+            crediting and the synthesis digest key off this set.
+        flagged_files: Reviewer re-read requests the chunk reported.
+        coverage_degradations: Chunk-level limits that may have suppressed
+            findings, such as a findings cap or an output-exhaustion retry.
+    """
 
     summary: str
     checklist: tuple[ChecklistAnswer, ...]
@@ -83,10 +101,7 @@ def parse_review_response(*, content: str) -> dict[str, Any]:
     Raises:
         ValueError: When JSON is invalid or missing required keys.
     """
-    try:
-        return parse_review_response_payload(content=content)
-    except ValueError:
-        raise
+    return parse_review_response_payload(content=content)
 
 
 def merge_findings(
