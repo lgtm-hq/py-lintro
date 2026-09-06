@@ -27,6 +27,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.state_store import write_local_state
 from lintro.cli import cli
 from lintro.cli_utils.commands.review import (
+    ReviewCommandOptions,
     _cli_overrides,
     _describe_config_source,
     _load_prior_review_state,
@@ -375,23 +376,23 @@ def test_review_json_output_echoes_payload() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -402,7 +403,7 @@ def test_review_json_output_echoes_payload() -> None:
             ),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -448,30 +449,30 @@ def test_review_passes_transport_override_to_provider() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
             "lintro.cli_utils.commands.review.get_provider",
         ) as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -515,30 +516,30 @@ def test_review_passes_provider_and_model_overrides_to_provider() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
             "lintro.cli_utils.commands.review.get_provider",
         ) as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -599,28 +600,28 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -684,28 +685,28 @@ def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=estimated_result,
         ),
         patch(
@@ -743,23 +744,23 @@ def test_review_exits_zero_without_p1_findings() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -770,7 +771,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
             ),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -839,12 +840,12 @@ def _mock_review_pipeline(
 
     collect_patch = (
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             mock_collect,
         )
         if mock_collect is not None
         else patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         )
     )
@@ -857,19 +858,19 @@ def _mock_review_pipeline(
         ),
         "collect_review_context": collect_patch,
         "classify_changed_files": patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         "get_all_checklist_items": patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         "select_checklist_items": patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         "format_checklist_for_prompt": patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         "get_provider": patch(
@@ -880,7 +881,7 @@ def _mock_review_pipeline(
             ),
         ),
         "run_review": patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         "render_review_output": patch(
@@ -1121,23 +1122,23 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
             return_value=mock_config,
         ):
             with patch(
-                "lintro.cli_utils.commands.review.collect_review_context",
+                "lintro.ai.review.preparation.collect_review_context",
                 return_value=mock_context,
             ):
                 with patch(
-                    "lintro.cli_utils.commands.review.classify_changed_files",
+                    "lintro.ai.review.preparation.classify_changed_files",
                     return_value=[],
                 ):
                     with patch(
-                        "lintro.cli_utils.commands.review.get_all_checklist_items",
+                        "lintro.ai.review.preparation.get_all_checklist_items",
                         return_value=[],
                     ):
                         with patch(
-                            "lintro.cli_utils.commands.review.select_checklist_items",
+                            "lintro.ai.review.preparation.select_checklist_items",
                             return_value=[],
                         ):
                             with patch(
-                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+                                "lintro.ai.review.preparation.format_checklist_for_prompt",
                                 return_value=("", {}),
                             ):
                                 with patch(
@@ -1148,7 +1149,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
                                     ),
                                 ):
                                     with patch(
-                                        "lintro.cli_utils.commands.review.run_review",
+                                        "lintro.ai.review.preparation.run_review",
                                         side_effect=execution_error,
                                     ):
                                         result = runner.invoke(cli, ["review"])
@@ -1261,7 +1262,7 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1296,7 +1297,7 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1331,7 +1332,7 @@ def test_review_custom_agents_only_disables_builtin_checklist(
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1369,7 +1370,7 @@ def test_review_custom_agents_only_with_no_valid_agents_errors(
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1787,7 +1788,7 @@ def test_sigterm_partial_skips_advisory_and_post() -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_partial_result(stopped_reason="timeout (SIGTERM)"),
         ),
         patch(
@@ -1842,7 +1843,7 @@ def test_cost_cap_partial_still_runs_advisory_and_post() -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_partial_result(stopped_reason="cost cap ($1.00) reached"),
         ),
         patch(
@@ -1950,17 +1951,11 @@ def test_full_review_forwards_effective_ai_config_to_advisory() -> None:
 def test_cli_overrides_lists_only_explicit_flags() -> None:
     """Only options the caller actually passed appear as overrides."""
     overrides = _cli_overrides(
-        depth=None,
-        strictness=None,
-        transport="cli",
-        provider=None,
-        model=None,
-        review=True,
-        max_cost_usd=None,
-        timeout=600.0,
-        context_window=None,
-        semantic_chunks=False,
-        paths=None,
+        options=ReviewCommandOptions(
+            transport="cli",
+            review_override=True,
+            timeout=600.0,
+        ),
     )
 
     assert_that(overrides).is_equal_to(

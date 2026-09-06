@@ -75,3 +75,15 @@ class ReviewExecutionError(AIError):
     def __str__(self) -> str:
         """Return the human-readable failure message."""
         return self.message
+
+
+class ReviewPreparationError(AIError):
+    """Deterministic review preparation could not produce a runnable review.
+
+    Raised by :func:`lintro.ai.review.preparation.prepare_review` when the
+    request and the resolved configuration together describe a review that
+    would review nothing — today, ``review.custom_agents: only`` with no valid
+    agent files. Adapters translate it into their own surface error (a Click
+    usage error for the CLI, a structured envelope for MCP) rather than the
+    shared layer owning either policy.
+    """

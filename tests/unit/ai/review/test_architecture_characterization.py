@@ -42,20 +42,31 @@ from lintro.mcp.toolkits.review import resolve_budget_policy
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 CLI_REVIEW_PATH = PROJECT_ROOT / "lintro/cli_utils/commands/review.py"
 MCP_REVIEW_PATH = PROJECT_ROOT / "lintro/mcp/toolkits/review.py"
+PREPARATION_PATH = PROJECT_ROOT / "lintro/ai/review/preparation.py"
 
-# Domain helpers both adapters must keep calling until Phase 3 extracts them.
+# Domain helpers Phase 3 (#2300) extracted into one shared module. They are
+# called there, once, and by neither adapter.
 _SHARED_PREPARATION_CALLS: frozenset[str] = frozenset(
     {
-        # #2299 folded both adapters' private resolution onto one resolver.
-        "resolve_effective_ai_config",
         "collect_review_context",
         "classify_changed_files",
         "get_all_checklist_items",
         "select_checklist_items",
         "format_checklist_for_prompt",
-        "get_provider",
         "run_review",
         "resolve_sensitivity_policy",
+    },
+)
+
+# The shared path each adapter reaches the domain through, plus the two things
+# that stay adapter-owned: the one config resolver (#2299) and constructing
+# the provider whose lifetime the adapter owns (ADR-0006 section D).
+_ADAPTER_ENTRY_CALLS: frozenset[str] = frozenset(
+    {
+        "resolve_effective_ai_config",
+        "prepare_review",
+        "execute_review",
+        "get_provider",
     },
 )
 
@@ -214,23 +225,23 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -238,7 +249,7 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
             return_value=MagicMock(model_name="gpt-4o", name="openai"),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=run_review_return,
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -256,12 +267,22 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
 
 
 def test_cli_and_mcp_review_adapters_call_shared_preparation_helpers() -> None:
-    """CLI and MCP both invoke the domain helpers Phase 3 will extract."""
+    """CLI and MCP reach the domain helpers through one shared module.
+
+    Phase 3 (#2300) extracted the duplicated preparation: the helpers are
+    called in ``lintro/ai/review/preparation.py`` alone, and each adapter now
+    calls ``prepare_review`` / ``execute_review`` instead. A surface that
+    re-grew its own copy of a helper call fails here.
+    """
     cli_calls = _called_names(CLI_REVIEW_PATH)
     mcp_calls = _called_names(MCP_REVIEW_PATH)
+    preparation_calls = _called_names(PREPARATION_PATH)
 
-    assert_that(_SHARED_PREPARATION_CALLS.issubset(cli_calls)).is_true()
-    assert_that(_SHARED_PREPARATION_CALLS.issubset(mcp_calls)).is_true()
+    assert_that(_SHARED_PREPARATION_CALLS.issubset(preparation_calls)).is_true()
+    assert_that(_ADAPTER_ENTRY_CALLS.issubset(cli_calls)).is_true()
+    assert_that(_ADAPTER_ENTRY_CALLS.issubset(mcp_calls)).is_true()
+    assert_that(_SHARED_PREPARATION_CALLS & cli_calls).is_empty()
+    assert_that(_SHARED_PREPARATION_CALLS & mcp_calls).is_empty()
     # Both adapters resolve through the one resolver (#2299). The CLI is the
     # only one with flags, so it is also the only one building an overrides
     # value; MCP's single per-call knob stays a downstream budget clamp.
@@ -466,23 +487,23 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -490,7 +511,7 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
             return_value=MagicMock(model_name="gpt-4o", name="openai"),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             side_effect=AIAuthenticationError("401 authentication_error"),
         ),
         patch("lintro.cli_utils.commands.review.render_review_error"),

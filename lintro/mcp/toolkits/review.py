@@ -53,10 +53,10 @@ from lintro.mcp.toolkits.runner import workspace_session
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.resolved_ai_config import ResolvedAIConfig
-    from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
     from lintro.ai.review.models.review_metadata import ReviewMetadata
     from lintro.ai.review.models.review_result import ReviewResult
+    from lintro.ai.review.preparation import ReviewRunRequest
 
 __all__ = ["REVIEW_TIMEOUT_SECONDS", "STRICTNESS_VALUES", "build_review_toolkit"]
 
@@ -354,77 +354,31 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
     return lintro_config, resolved
 
 
-def _collect_context(
-    *,
-    arguments: dict[str, Any],
-    workspace: Path,
-) -> ReviewContext | None:
-    """Collect the git diff context for this call.
+def _context_error(*, exc: ReviewContextError) -> McpError:
+    """Translate a review-context failure into the tool's error taxonomy.
 
     Args:
-        arguments: Validated tool arguments.
-        workspace: Workspace root.
+        exc: The context failure raised during preparation or, for the
+            diff-size ceiling (#1967), inside the review run itself.
 
     Returns:
-        ReviewContext | None: The collected context, or ``None`` when the diff
-        is empty — "nothing changed" is an answer, not a failure.
-
-    Raises:
-        McpError: With :attr:`McpErrorCode.INVALID_INPUT` for a bad ``base`` or
-            an unusable diff request, :attr:`McpErrorCode.TOOL_UNAVAILABLE` when
-            git itself is missing, and :attr:`McpErrorCode.EXECUTION_ERROR`
-            otherwise.
+        McpError: :attr:`McpErrorCode.INVALID_INPUT` when the failure describes
+        the caller's request, :attr:`McpErrorCode.TOOL_UNAVAILABLE` when this
+        workspace cannot serve reviews at all, and
+        :attr:`McpErrorCode.EXECUTION_ERROR` otherwise.
     """
-    from lintro.ai.review import collect_review_context
-
-    try:
-        return collect_review_context(
-            base=arguments.get("base"),
-            uncommitted=bool(arguments.get("uncommitted", False)),
-            paths=_relative_paths(arguments=arguments, workspace=workspace),
-        )
-    except ReviewContextError as exc:
-        code = str(exc.code.value)
-        if code == _NO_CHANGES_CODE:
-            return None
-        if code in _UNAVAILABLE_CONTEXT_CODES:
-            mcp_code = McpErrorCode.TOOL_UNAVAILABLE
-        elif code in _INVALID_INPUT_CONTEXT_CODES:
-            mcp_code = McpErrorCode.INVALID_INPUT
-        else:
-            mcp_code = McpErrorCode.EXECUTION_ERROR
-        raise McpError(
-            code=mcp_code,
-            message=str(exc),
-            detail={"tool": "lintro_review", "context_error": code},
-        ) from exc
-
-
-def _lint_digest(
-    *,
-    context: ReviewContext,
-    lintro_config: Any,
-) -> str | None:
-    """Build the ``with_lint`` digest for the review prompt.
-
-    Args:
-        context: Collected review context.
-        lintro_config: Loaded Lintro configuration.
-
-    Returns:
-        str | None: A compact lint digest, or ``None`` when there is nothing
-        to report.
-    """
-    from lintro.ai.review.lint_bridge import (
-        format_lint_results_for_prompt,
-        run_lint_on_changed_files,
+    code = str(exc.code.value)
+    if code in _UNAVAILABLE_CONTEXT_CODES:
+        mcp_code = McpErrorCode.TOOL_UNAVAILABLE
+    elif code in _INVALID_INPUT_CONTEXT_CODES:
+        mcp_code = McpErrorCode.INVALID_INPUT
+    else:
+        mcp_code = McpErrorCode.EXECUTION_ERROR
+    return McpError(
+        code=mcp_code,
+        message=str(exc),
+        detail={"tool": "lintro_review", "context_error": code},
     )
-
-    results = run_lint_on_changed_files(
-        changed_files=[file.path for file in context.changed_files],
-        lintro_config=lintro_config,
-    )
-    return format_lint_results_for_prompt(results=results) or None
 
 
 def _finding_body(*, finding: ReviewFinding) -> str:
@@ -682,8 +636,54 @@ def _review_failure(*, provider_name: str, error: Exception) -> McpErrorEnvelope
     )
 
 
+def _build_request(
+    *,
+    arguments: dict[str, Any],
+    workspace: Path,
+    lintro_config: Any,
+) -> ReviewRunRequest:
+    """Turn the validated tool envelope into a shared review request.
+
+    Everything the tool schema does not expose stays at the request's default,
+    which is what makes the MCP request equal to the CLI's for the same diff:
+    no pull-request mode, no custom agents (``lintro_review`` runs the built-in
+    checklist only), and no per-run timeout.
+
+    Args:
+        arguments: Validated tool arguments.
+        workspace: Workspace root the review is anchored to.
+        lintro_config: Loaded Lintro configuration.
+
+    Returns:
+        ReviewRunRequest: The request the shared preparation consumes.
+
+    Raises:
+        McpError: :attr:`McpErrorCode.INVALID_INPUT` when a ``paths`` entry
+            lies outside the workspace.
+    """
+    from lintro.ai.review.preparation import ReviewRunRequest
+
+    depth = arguments.get("depth")
+    return ReviewRunRequest(
+        workspace_root=workspace,
+        lintro_config=lintro_config,
+        base=arguments.get("base"),
+        uncommitted=bool(arguments.get("uncommitted", False)),
+        paths=tuple(_relative_paths(arguments=arguments, workspace=workspace) or ()),
+        depth=int(depth) if depth is not None else None,
+        strictness=arguments.get("strictness"),
+        with_lint=bool(arguments.get("with_lint", False)),
+    )
+
+
 def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, Any]:
     """Run one review end to end inside an open workspace session.
+
+    The sequence is envelope → request → prepare → clamp budget → execute →
+    payload (#2300). Preparation and the orchestrator call are the shared
+    domain path :mod:`lintro.ai.review.preparation` owns; what is left here is
+    MCP policy — the argument envelope, the monotonic budget clamp, the error
+    taxonomy, and the result payload.
 
     Args:
         arguments: Validated tool arguments.
@@ -697,15 +697,13 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     """
     from lintro.ai.exceptions import AIError, AIProviderRequiredError
     from lintro.ai.providers import get_provider
-    from lintro.ai.review import (
-        classify_changed_files,
-        format_checklist_for_prompt,
-        get_all_checklist_items,
-        select_checklist_items,
+    from lintro.ai.review.patch_validation import validate_result_suggested_patches
+    from lintro.ai.review.preparation import (
+        execute_review,
+        prepare_review,
+        resolve_review_depth,
+        resolve_review_strictness,
     )
-    from lintro.ai.review.enums.review_strictness import ReviewStrictness
-    from lintro.ai.review.orchestrator import run_review
-    from lintro.ai.review.sensitivity import resolve_sensitivity_policy
     from lintro.ai.transport import apply_resolved_transport
 
     lintro_config, resolved_ai = _resolve_ai_config(workspace=workspace)
@@ -714,42 +712,34 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         requested=arguments.get("max_cost_usd"),
         configured=ai_config.max_cost_usd,
     )
-    effective_ai_config = ai_config.model_copy(
-        update={"max_cost_usd": budget.effective_usd},
-    )
-    depth = int(arguments.get("depth") or lintro_config.review.depth)
-    strictness = ReviewStrictness(
-        str(
-            arguments.get("strictness") or lintro_config.review.strictness.value,
-        ).lower(),
+    request = _build_request(
+        arguments=arguments,
+        workspace=workspace,
+        lintro_config=lintro_config,
     )
 
-    context_started = time.monotonic()
-    context = _collect_context(arguments=arguments, workspace=workspace)
-    context_collection_seconds = time.monotonic() - context_started
-    if context is None:
+    prepare_started = time.monotonic()
+    try:
+        prepared = prepare_review(request, resolved=resolved_ai)
+    except ReviewContextError as exc:
+        # "Nothing changed" is an answer, not a failure; every other context
+        # code — including the diff-size ceiling (#1967) — is mapped.
+        if str(exc.code.value) != _NO_CHANGES_CODE:
+            raise _context_error(exc=exc) from exc
         return _no_changes_payload(
             ai_config=ai_config,
-            depth=depth,
-            strictness=strictness.value,
+            depth=resolve_review_depth(request),
+            strictness=resolve_review_strictness(request).value,
             budget=budget,
-            context_collection_seconds=context_collection_seconds,
+            context_collection_seconds=time.monotonic() - prepare_started,
         )
-
-    classifications = classify_changed_files(context.changed_files)
-    selected_items = select_checklist_items(
-        classifications=classifications,
-        items=get_all_checklist_items(config=lintro_config),
-    )
-    checklist_text, _prompt_mapping = format_checklist_for_prompt(items=selected_items)
-    lint_results = (
-        _lint_digest(context=context, lintro_config=lintro_config)
-        if arguments.get("with_lint", False)
-        else None
-    )
+    # The clamp is MCP's alone (ADR-0008 invariant 6): the per-call argument may
+    # only lower the operator's ceiling, so it is applied to the prepared review
+    # rather than folded into the shared resolution.
+    prepared = prepared.with_max_cost_usd(max_cost_usd=budget.effective_usd)
 
     try:
-        provider = get_provider(effective_ai_config, workspace_root=workspace)
+        provider = get_provider(prepared.ai_config, workspace_root=workspace)
     except (AIProviderRequiredError, ValueError) as exc:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
@@ -758,40 +748,9 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         ) from exc
 
     try:
-        result = run_review(
-            context,
-            provider=provider,
-            ai_config=effective_ai_config,
-            depth=depth,
-            checklist_items=selected_items,
-            checklist_text=checklist_text,
-            classifications=classifications,
-            lint_results=lint_results,
-            sensitivity=resolve_sensitivity_policy(
-                strictness=strictness,
-                overrides=lintro_config.review.sensitivity,
-            ),
-            force_semantic_chunking=lintro_config.review.force_semantic_chunking,
-            workspace_root=workspace,
-            context_collection_seconds=context_collection_seconds,
-            synthesis=lintro_config.review.synthesis,
-        )
+        result = execute_review(prepared, provider=provider)
     except ReviewContextError as exc:
-        # Context errors raised inside run_review (e.g. the CLI diff-size
-        # ceiling, #1967) get the same taxonomy mapping as _collect_context,
-        # so a too-large diff reports as invalid input, not a provider crash.
-        code = str(exc.code.value)
-        if code in _UNAVAILABLE_CONTEXT_CODES:
-            mcp_code = McpErrorCode.TOOL_UNAVAILABLE
-        elif code in _INVALID_INPUT_CONTEXT_CODES:
-            mcp_code = McpErrorCode.INVALID_INPUT
-        else:
-            mcp_code = McpErrorCode.EXECUTION_ERROR
-        raise McpError(
-            code=mcp_code,
-            message=str(exc),
-            detail={"tool": "lintro_review", "context_error": code},
-        ) from exc
+        raise _context_error(exc=exc) from exc
     except (AIError, ValueError) as exc:
         failure = _review_failure(provider_name=str(provider.name), error=exc)
         raise McpError(
@@ -802,9 +761,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     # #2101: the MCP payload carries suggested_code, so it goes through the
     # same head-content validation as the CLI's terminal, JSON, and --post
     # surfaces rather than handing an agent a patch that no longer applies.
-    from lintro.ai.review.patch_validation import validate_result_suggested_patches
-
-    result = validate_result_suggested_patches(result=result, context=context)
+    result = validate_result_suggested_patches(result=result, context=prepared.context)
     return _review_payload(result=result, budget=budget)
 
 

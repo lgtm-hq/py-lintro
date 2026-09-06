@@ -294,7 +294,7 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
-    import lintro.ai.review.orchestrator as orchestrator
+    import lintro.ai.review.preparation as preparation
 
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
     monkeypatch.setattr(
@@ -316,7 +316,7 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
                 raise error
             return result if result is not None else _result()
 
-        monkeypatch.setattr(orchestrator, "run_review", _run_review)
+        monkeypatch.setattr(preparation, "run_review", _run_review)
         return calls
 
     return install
@@ -798,15 +798,15 @@ def test_review_includes_a_lint_digest_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``with_lint`` feeds the deterministic linters' digest into the prompt."""
-    import lintro.ai.review.lint_bridge as lint_bridge
+    import lintro.ai.review.preparation as preparation
 
     monkeypatch.setattr(
-        lint_bridge,
+        preparation,
         "run_lint_on_changed_files",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        lint_bridge,
+        preparation,
         "format_lint_results_for_prompt",
         lambda **_kwargs: "ruff: 1 issue",
     )

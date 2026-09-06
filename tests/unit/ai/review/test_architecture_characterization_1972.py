@@ -38,11 +38,12 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError
 from lintro.mcp.toolkits import review as mcp_review
-from tests.unit.ai.review.test_cli_mcp_parity import CLI_ONLY_KWARGS
+from tests.unit.ai.review.test_cli_mcp_parity import CLI_ONLY_POLICY_FIELDS
 
-# Keys both CLI and MCP currently forward into ``run_review``. Adapter-only
-# kwargs (CLI progress / custom agents; MCP has neither) are listed separately
-# so Phase 3 can shrink the divergent set without rewriting this golden.
+# Keys both CLI and MCP forward into ``run_review``. #2300 added
+# ``custom_agents`` and ``run_builtin_checklist``: both surfaces now reach the
+# orchestrator through one ``execute_review`` call site, so the shared set grew
+# by exactly what left the CLI-only allowlist.
 _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
     {
         "provider",
@@ -54,6 +55,8 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
         "lint_results",
         "sensitivity",
         "force_semantic_chunking",
+        "custom_agents",
+        "run_builtin_checklist",
         "workspace_root",
         # #2269: the cross-chunk synthesis config is shared preparation —
         # both adapters read it from the same project config section.
@@ -61,11 +64,21 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
     },
 )
 
-# One CLI-only allowlist for the whole suite (#2298): the exact set-difference
-# ratchet lives in ``test_cli_mcp_parity``, and this module asserts the weaker
-# "these are present on the CLI and absent on MCP" property against the same
-# list, so Phase 3 cannot shrink one story and leave the other behind.
-_CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = CLI_ONLY_KWARGS
+# One adapter-policy allowlist for the whole suite (#2298, shrunk by #2300):
+# the exact ratchet lives in ``test_cli_mcp_parity``, and this module asserts
+# the weaker "MCP passes the orchestrator's own defaults for these" property
+# against the same list, so neither story can shrink without the other.
+_CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = CLI_ONLY_POLICY_FIELDS
+
+# What ``run_review`` itself defaults each policy kwarg to. MCP runs on the
+# default policy, so these are the values it must forward.
+_DEFAULT_POLICY_KWARGS: dict[str, Any] = {
+    "context_window_override": None,
+    "progress": None,
+    "prior_state": None,
+    "force_full": False,
+    "enforce_cost_cap": True,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -249,7 +262,7 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
-    import lintro.ai.review.orchestrator as orchestrator
+    import lintro.ai.review.preparation as preparation
     from lintro.config import config_loader
 
     workspace = _write_review_workspace(tmp_path)
@@ -276,7 +289,7 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
         mcp_calls.append({"context": context, **kwargs})
         return _result_with(findings=())
 
-    monkeypatch.setattr(orchestrator, "run_review", _mcp_run_review)
+    monkeypatch.setattr(preparation, "run_review", _mcp_run_review)
 
     mcp_review._execute_review(
         arguments={"base": "main"},
@@ -299,7 +312,7 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
             return_value=loaded,
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             side_effect=_cli_run_review,
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -327,7 +340,12 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
     assert_that(set(cli_kwargs) & _CLI_ONLY_RUN_REVIEW_KWARGS).is_equal_to(
         _CLI_ONLY_RUN_REVIEW_KWARGS,
     )
-    assert_that(set(mcp_kwargs) & _CLI_ONLY_RUN_REVIEW_KWARGS).is_empty()
+    # #2300: one call site, so the kwarg *names* no longer diverge — the
+    # adapter policy is carried by value, and MCP carries the defaults.
+    assert_that(set(cli_kwargs)).is_equal_to(set(mcp_kwargs))
+    assert_that(
+        {key: mcp_kwargs[key] for key in _DEFAULT_POLICY_KWARGS},
+    ).is_equal_to(_DEFAULT_POLICY_KWARGS)
 
     # Shared deterministic prep must agree on depth/checklist text shape and
     # force_semantic_chunking from the same project config.
