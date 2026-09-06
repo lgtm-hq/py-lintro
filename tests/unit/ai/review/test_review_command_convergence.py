@@ -10,6 +10,7 @@ import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai.review import preparation as preparation_module
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -91,15 +92,15 @@ def patched_review(
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
     monkeypatch.setattr(review_module, "get_config", lambda: config)
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "collect_review_context",
         lambda **_: MagicMock(changed_files=[], head_ref="sha9"),
     )
-    monkeypatch.setattr(review_module, "classify_changed_files", lambda _: [])
-    monkeypatch.setattr(review_module, "get_all_checklist_items", lambda **_: [])
-    monkeypatch.setattr(review_module, "select_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "classify_changed_files", lambda _: [])
+    monkeypatch.setattr(preparation_module, "get_all_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "select_checklist_items", lambda **_: [])
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "format_checklist_for_prompt",
         lambda **_: ("", {}),
     )
@@ -117,12 +118,12 @@ def patched_review(
         ),
     )
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "resolve_sensitivity_policy",
         lambda **_: MagicMock(),
     )
     monkeypatch.setattr(review_module, "get_provider", _count_provider)
-    monkeypatch.setattr(review_module, "run_review", _count_run_review)
+    monkeypatch.setattr(preparation_module, "run_review", _count_run_review)
     return convergence
 
 

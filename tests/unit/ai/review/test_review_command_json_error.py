@@ -10,6 +10,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.ai.exceptions import AIAuthenticationError
+from lintro.ai.review import preparation as preparation_module
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -41,15 +42,15 @@ def patched_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
     monkeypatch.setattr(review_module, "get_config", lambda: config)
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "collect_review_context",
         lambda **_: MagicMock(changed_files=[]),
     )
-    monkeypatch.setattr(review_module, "classify_changed_files", lambda _: [])
-    monkeypatch.setattr(review_module, "get_all_checklist_items", lambda **_: [])
-    monkeypatch.setattr(review_module, "select_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "classify_changed_files", lambda _: [])
+    monkeypatch.setattr(preparation_module, "get_all_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "select_checklist_items", lambda **_: [])
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "format_checklist_for_prompt",
         lambda **_: ("", {}),
     )
@@ -68,7 +69,7 @@ def patched_review(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(review_module, "get_provider", lambda _, **_kwargs: provider)
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "resolve_sensitivity_policy",
         lambda **_: MagicMock(),
     )
@@ -78,7 +79,7 @@ def patched_review(monkeypatch: pytest.MonkeyPatch) -> None:
             "Anthropic authentication failed: Error code: 401 - authentication_error",
         )
 
-    monkeypatch.setattr(review_module, "run_review", _raise)
+    monkeypatch.setattr(preparation_module, "run_review", _raise)
 
 
 def test_json_error_emits_envelope_and_exits_two(
@@ -115,15 +116,15 @@ def test_json_unset_provider_exits_two(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
     monkeypatch.setattr(review_module, "get_config", lambda: config)
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "collect_review_context",
         lambda **_: MagicMock(changed_files=[]),
     )
-    monkeypatch.setattr(review_module, "classify_changed_files", lambda _: [])
-    monkeypatch.setattr(review_module, "get_all_checklist_items", lambda **_: [])
-    monkeypatch.setattr(review_module, "select_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "classify_changed_files", lambda _: [])
+    monkeypatch.setattr(preparation_module, "get_all_checklist_items", lambda **_: [])
+    monkeypatch.setattr(preparation_module, "select_checklist_items", lambda **_: [])
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "format_checklist_for_prompt",
         lambda **_: ("", {}),
     )
@@ -141,7 +142,7 @@ def test_json_unset_provider_exits_two(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "resolve_sensitivity_policy",
         lambda **_: MagicMock(),
     )
@@ -192,7 +193,7 @@ def test_json_unset_provider_beats_context_failure(
     monkeypatch.setattr(review_module, "require_ai", lambda: None)
     monkeypatch.setattr(review_module, "get_config", lambda: config)
     monkeypatch.setattr(
-        review_module,
+        preparation_module,
         "collect_review_context",
         _raise_context,
     )

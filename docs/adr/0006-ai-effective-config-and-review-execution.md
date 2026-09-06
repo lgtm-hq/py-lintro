@@ -94,20 +94,36 @@ Issue #1970 implemented the initial parse (`AIConfig.resolve_from_mapping` retur
 `ResolvedAIConfig`); #2299 put one function in front of it,
 `lintro.ai.effective_config.resolve_effective_ai_config(mapping, *, cli_overrides, diagnostics)`.
 This epic must not introduce a second resolver. CLI review passes
-`--provider`/`--model`/`--transport`/`--max-cost-usd` as `AICliOverrides`; `check`/`fmt`
-pass `--transport` the same way; other surfaces pass none and consume the same value,
-with `resolve_ai_config()` as the values-only unwrap.
+`--provider`/`--model`/`--transport`/`--max-cost-usd` as `AICliOverrides`; the `check`
+CLI and the lint API pass `--transport` the same way, and `fmt` uses the same resolver
+with no flag of its own; other surfaces pass none and consume the same value, with
+`resolve_ai_config()` as the values-only unwrap.
 
 ### B. Shared review domain request and preparation
 
-Introduce domain-level inputs/outputs (names illustrative) in a later phase:
+Domain-level inputs/outputs, landed by
+[#2300](https://github.com/lgtm-hq/py-lintro/issues/2300) in
+`lintro/ai/review/preparation.py`:
 
 ```python
-ReviewRunRequest
-PreparedReview
-prepare_review(...)
-execute_review(...)
+ReviewRunRequest              # typed inputs, built by each adapter
+prepare_review(request, *, resolved) -> PreparedReview   # deterministic, no provider
+execute_review(prepared, *, provider, policy) -> ReviewResult
 ```
+
+`prepare_review` is provider-free: it applies the run's timeout and transport profile,
+collects the diff context, classifies files, selects and formats the checklist, builds
+the optional lint digest, resolves sensitivity, and resolves custom agents. Two adapters
+that build equal requests over one workspace must produce **equal** `PreparedReview`
+values; `tests/unit/ai/review/test_cli_mcp_parity.py` asserts that equality.
+
+`ReviewExecutionPolicy` carries the remaining adapter-only knobs (progress,
+`--context-window`, resume state, `--full`, the CLI cost-cap gate) into `execute_review`
+as a frozen value object — it may hold an optional progress callback, but it is not a
+hook or plugin seam. MCP runs on the default policy, whose values are `run_review`'s own
+defaults. MCP's `max_cost_usd` clamp is applied to the prepared review
+(`PreparedReview.with_max_cost_usd`) after preparation, keeping the clamp monotonic and
+adapter-owned.
 
 The shared layer owns deterministic preparation and review execution. Thin adapters
 retain surface policy:
@@ -191,8 +207,14 @@ surfaces call `resolve_effective_ai_config` rather than reaching past it.
 
 - #1970 / #1923 / #1235 extend one resolver contract instead of inventing parallel
   override layers.
-- Phase 3 can extract shared preparation behind characterization locks without changing
-  adapter policy.
+- Phase 3 extracted shared preparation behind the characterization locks without
+  changing adapter policy (#2300). One deliberate behaviour change came with it:
+  `ai.exclude_paths` now shapes the MCP review's context as well as the CLI's, because
+  preparation reads the exclusion from the resolved AI config. That was the single
+  context axis the two surfaces disagreed on, and it closed in the CLI's direction.
+  `review.custom_agents` closed the same way: MCP forwards the configured mode instead
+  of hard-coding "built-in checklist only", so a workspace's user-defined agents now run
+  for both surfaces.
 - Phase 4 can split the orchestrator behind `run_review` without changing product
   behavior.
 - Phase 5 can wire `aclose()` at construction sites after #1885 without a competing
@@ -217,6 +239,8 @@ surfaces call `resolve_effective_ai_config` rather than reaching past it.
   API only.
 - [#724](https://github.com/lgtm-hq/py-lintro/issues/724) — core/AI import separation.
 - `lintro/ai/interface.py` — `resolve_ai_config` seam.
+- `lintro/ai/review/preparation.py` — shared review request, preparation, and execution
+  (#2300).
 - `lintro/cli_utils/commands/review.py` — CLI review adapter.
 - `lintro/mcp/toolkits/review.py` — MCP review adapter.
 - `lintro/ai/review/orchestrator.py` — stable `run_review` facade.

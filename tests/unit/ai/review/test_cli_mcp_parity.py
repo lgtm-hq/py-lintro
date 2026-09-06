@@ -1,21 +1,24 @@
-"""CLI-versus-MCP parity for review preparation (issue #2298).
+"""CLI-versus-MCP parity for review preparation (issues #2298, #2300).
 
-Both surfaces prepare a review independently today (epic #1972, problem 2).
-This module drives ``lintro review`` through the Click runner and the MCP
-``_execute_review`` entry point over the *same* workspace, captures the
-``run_review`` call each one makes, and asserts the shared inputs are equal
-field for field — with the divergences named in an explicit allowlist rather
-than tolerated implicitly.
+Both surfaces used to prepare a review independently (epic #1972, problem 2).
+#2300 replaced that with one shared path — ``ReviewRunRequest`` →
+:func:`~lintro.ai.review.preparation.prepare_review` → ``PreparedReview`` →
+:func:`~lintro.ai.review.preparation.execute_review` — so this module drives
+``lintro review`` through the Click runner and the MCP ``_execute_review``
+entry point over the *same* workspace, captures what each one hands to
+``execute_review``, and asserts the two prepared reviews are **equal**.
 
-Phase 3 (#2300) replaces the duplicated preparation with one shared path. When
-it does, this test must keep passing and the allowlist may only shrink.
+What may still differ is execution policy, not preparation: the fields of
+:class:`~lintro.ai.review.preparation.ReviewExecutionPolicy` the CLI sets and
+MCP leaves at its defaults. That set is named explicitly below and may only
+shrink.
 """
 
 from __future__ import annotations
 
 import subprocess  # nosec B404 - fixed git argv against a temp repo
 from collections.abc import Callable, Iterator
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -26,35 +29,41 @@ from click.testing import CliRunner
 
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.preparation import (
+    DEFAULT_EXECUTION_POLICY,
+    PreparedReview,
+    ReviewExecutionPolicy,
+)
 from lintro.cli import cli
 from lintro.mcp.toolkits import review as mcp_review
 
-#: ``run_review`` keyword arguments only the CLI passes. Each entry is
-#: adapter policy the MCP surface deliberately does not have: terminal
-#: progress, user-defined agents, resume state, and the CLI's own cost-cap
-#: and context-window flags.
-CLI_ONLY_KWARGS: frozenset[str] = frozenset(
+#: Execution-policy fields only the CLI populates. Each is adapter policy the
+#: MCP surface deliberately does not have: terminal progress, the CLI's
+#: ``--context-window`` flag, resume state, and the CLI's cost-cap gate.
+#:
+#: #2300 removed ``custom_agents`` and ``run_builtin_checklist`` from this set:
+#: both are shared preparation now, resolved from the request's custom-agent
+#: mode. This is the complete ``ReviewExecutionPolicy`` field set, asserted as
+#: such below, so it is a ratchet in both directions: it shrinks only when a
+#: policy field stops existing, and a new adapter-only knob fails the test
+#: instead of quietly widening the gap.
+CLI_ONLY_POLICY_FIELDS: frozenset[str] = frozenset(
     {
         "context_window_override",
         "progress",
-        "custom_agents",
-        "run_builtin_checklist",
         "prior_state",
         "force_full",
         "enforce_cost_cap",
     },
 )
 
-#: Shared keyword arguments whose *values* cannot be compared directly:
-#: ``provider`` is a per-surface provider instance (asserted by identity and
-#: construction below) and ``context_collection_seconds`` is wall-clock
-#: (asserted as a non-negative float on each surface, never compared across
-#: them). Neither is silently skipped.
-UNCOMPARABLE_SHARED_KWARGS: frozenset[str] = frozenset(
-    {
-        "provider",
-        "context_collection_seconds",
-    },
+#: ``PreparedReview`` fields whose values cannot be compared across surfaces:
+#: ``context_collection_seconds`` is wall-clock (asserted as a non-negative
+#: float on each surface, never compared between them). It is excluded from
+#: ``PreparedReview`` equality for the same reason, and asserted explicitly
+#: rather than silently skipped.
+UNCOMPARABLE_PREPARED_FIELDS: frozenset[str] = frozenset(
+    {"context_collection_seconds"},
 )
 
 
@@ -147,6 +156,17 @@ def _write_parity_workspace(tmp_path: Path, *, exclude_paths: str = "") -> Path:
         Resolved workspace root on a branch ahead of ``main``.
     """
     workspace = tmp_path.resolve()
+    # A real agent file, so "both surfaces resolve custom agents identically"
+    # is asserted against discovery that finds something. Without it the CLI's
+    # configured mode and a built-in-only surface would look the same.
+    agents_dir = workspace / ".lintro" / "review-agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "parity.md").write_text(
+        "---\nname: parity\ndescription: Parity fixture agent\n"
+        'include: ["*.py"]\n---\n\n'
+        "Report nothing; this agent exists so discovery is non-empty.\n",
+        encoding="utf-8",
+    )
     excludes = f"  exclude_paths:\n    - '{exclude_paths}'\n" if exclude_paths else ""
     (workspace / ".lintro-config.yaml").write_text(
         "ai:\n"
@@ -193,13 +213,13 @@ def _capture_calls(
         exclude_paths: Optional ``ai.exclude_paths`` glob for the workspace.
 
     Returns:
-        Tuple of the CLI and MCP ``run_review`` call mappings — each with the
-        positional review context under the ``context`` key — and the configs
-        every ``get_provider`` call was made with, in call order.
+        Tuple of the CLI and MCP ``execute_review`` call mappings — each with
+        the ``prepared`` review, the ``policy`` and the ``provider`` — and the
+        configs every ``get_provider`` call was made with, in call order.
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
-    import lintro.ai.review.orchestrator as orchestrator
+    import lintro.ai.review.preparation as preparation
     from lintro.config import config_loader
 
     workspace = _write_parity_workspace(tmp_path, exclude_paths=exclude_paths)
@@ -231,22 +251,32 @@ def _capture_calls(
     cli_calls: list[dict[str, Any]] = []
 
     def _record(sink: list[dict[str, Any]]) -> Callable[..., ReviewResult]:
-        """Build a ``run_review`` stand-in recording into ``sink``.
+        """Build an ``execute_review`` stand-in recording into ``sink``.
 
         Args:
             sink: List the captured call mapping is appended to.
 
         Returns:
-            A callable with the ``run_review`` signature shape.
+            A callable with the ``execute_review`` signature shape.
         """
 
-        def _run_review(context: Any, **kwargs: Any) -> ReviewResult:
-            sink.append({"context": context, **kwargs})
+        def _execute_review(
+            prepared: PreparedReview,
+            *,
+            provider: Any,
+            policy: ReviewExecutionPolicy = DEFAULT_EXECUTION_POLICY,
+        ) -> ReviewResult:
+            sink.append(
+                {"prepared": prepared, "provider": provider, "policy": policy},
+            )
             return _stub_result()
 
-        return _run_review
+        return _execute_review
 
-    monkeypatch.setattr(orchestrator, "run_review", _record(mcp_calls))
+    # MCP resolves ``execute_review`` from the shared module at call time; the
+    # CLI binds it at import. Each surface is therefore patched where it looks,
+    # so neither borrows the other's stub.
+    monkeypatch.setattr(preparation, "execute_review", _record(mcp_calls))
     mcp_review._execute_review(arguments={"base": "main"}, workspace=workspace)
 
     runner = CliRunner()
@@ -254,7 +284,7 @@ def _capture_calls(
         patch("lintro.cli_utils.commands.review.require_ai"),
         patch("lintro.cli_utils.commands.review.get_config", return_value=loaded),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.cli_utils.commands.review.execute_review",
             side_effect=_record(cli_calls),
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -272,6 +302,60 @@ def _capture_calls(
     return cli_calls[0], mcp_calls[0], provider_configs
 
 
+def test_cli_and_mcp_prepare_equal_reviews(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both surfaces produce an equal ``PreparedReview`` for one workspace.
+
+    This is the Phase 3 (#2300) contract in one assertion: preparation is a
+    single shared path, so a change that made one adapter resolve depth,
+    checklist, sensitivity, custom agents, the lint digest, or the effective
+    AI config differently reddens here.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    cli_call, mcp_call, _ = _capture_calls(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert_that(cli_call["prepared"]).is_equal_to(mcp_call["prepared"])
+    # The workspace ships one custom review agent, so this is discovery that
+    # found something on both surfaces rather than two empty tuples matching.
+    assert_that(cli_call["prepared"].custom_agents).is_not_empty()
+    # Equality skips the wall-clock field by design; both must still report a
+    # real measurement rather than defaulting to nothing.
+    for call in (cli_call, mcp_call):
+        seconds = call["prepared"].context_collection_seconds
+        assert_that(seconds).is_instance_of(float)
+        assert_that(seconds).is_greater_than_or_equal_to(0.0)
+
+
+def test_every_prepared_field_is_compared_or_named_uncomparable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No ``PreparedReview`` field escapes the parity assertion unnoticed.
+
+    A field added with ``compare=False`` would silently leave the equality
+    above, so the excluded set is pinned to the documented allowlist.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    cli_call, _, _ = _capture_calls(tmp_path=tmp_path, monkeypatch=monkeypatch)
+
+    excluded = {
+        field.name for field in fields(cli_call["prepared"]) if not field.compare
+    }
+
+    assert_that(excluded).is_equal_to(set(UNCOMPARABLE_PREPARED_FIELDS))
+
+
 def test_cli_and_mcp_build_the_same_review_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -287,16 +371,22 @@ def test_cli_and_mcp_build_the_same_review_context(
         monkeypatch=monkeypatch,
     )
 
-    assert_that(asdict(cli_call["context"])).is_equal_to(asdict(mcp_call["context"]))
-    paths = {file.path for file in cli_call["context"].changed_files}
+    cli_context = cli_call["prepared"].context
+    mcp_context = mcp_call["prepared"].context
+    assert_that(asdict(cli_context)).is_equal_to(asdict(mcp_context))
+    paths = {file.path for file in cli_context.changed_files}
     assert_that(paths).contains("session.py", "tokens.py", "logo.png")
 
 
-def test_cli_and_mcp_pass_equal_shared_run_review_kwargs(
+def test_only_the_allowlisted_policy_fields_differ_between_the_surfaces(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every shared ``run_review`` kwarg carries the same value on both surfaces.
+    """The CLI/MCP divergence is exactly the documented execution policy.
+
+    MCP runs on the default policy, and every field the CLI sets differently
+    is on the allowlist. A new adapter-only knob on either surface fails here
+    rather than silently widening the gap Phase 3 closed.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -306,44 +396,23 @@ def test_cli_and_mcp_pass_equal_shared_run_review_kwargs(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
     )
-    cli_kwargs = {key: value for key, value in cli_call.items() if key != "context"}
-    mcp_kwargs = {key: value for key, value in mcp_call.items() if key != "context"}
 
-    shared = (set(cli_kwargs) & set(mcp_kwargs)) - UNCOMPARABLE_SHARED_KWARGS
-    assert_that(shared).is_not_empty()
-    for key in sorted(shared):
-        assert_that(cli_kwargs[key]).described_as(key).is_equal_to(mcp_kwargs[key])
-
-    # The wall-clock kwarg cannot be compared across surfaces, but both must
-    # still report a real measurement rather than defaulting to nothing.
-    for kwargs in (cli_kwargs, mcp_kwargs):
-        seconds = kwargs["context_collection_seconds"]
-        assert_that(seconds).is_instance_of(float)
-        assert_that(seconds).is_greater_than_or_equal_to(0.0)
-
-
-def test_only_the_allowlisted_kwargs_differ_between_the_surfaces(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The CLI/MCP kwarg divergence is exactly the documented allowlist.
-
-    A new adapter-only kwarg on either surface fails here rather than silently
-    widening the gap Phase 3 has to close.
-
-    Args:
-        tmp_path: Pytest temporary directory.
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    cli_call, mcp_call, _ = _capture_calls(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
+    assert_that(mcp_call["policy"]).is_equal_to(DEFAULT_EXECUTION_POLICY)
+    cli_policy = cli_call["policy"]
+    differing = {
+        field.name
+        for field in fields(cli_policy)
+        if getattr(cli_policy, field.name)
+        != getattr(DEFAULT_EXECUTION_POLICY, field.name)
+    }
+    assert_that(differing).is_subset_of(CLI_ONLY_POLICY_FIELDS)
+    # ...and the CLI really does populate a policy of its own, so a surface
+    # that silently fell back to the defaults cannot pass this test.
+    assert_that(cli_policy).is_not_equal_to(DEFAULT_EXECUTION_POLICY)
+    assert_that(differing).contains("progress", "prior_state")
+    assert_that({field.name for field in fields(cli_policy)}).is_equal_to(
+        set(CLI_ONLY_POLICY_FIELDS),
     )
-    cli_kwargs = set(cli_call) - {"context"}
-    mcp_kwargs = set(mcp_call) - {"context"}
-
-    assert_that(cli_kwargs - mcp_kwargs).is_equal_to(set(CLI_ONLY_KWARGS))
-    assert_that(mcp_kwargs - cli_kwargs).is_empty()
 
 
 def test_each_surface_builds_its_own_provider_from_an_equivalent_config(
@@ -353,10 +422,10 @@ def test_each_surface_builds_its_own_provider_from_an_equivalent_config(
     """Each adapter constructs a provider of its own from the same effective config.
 
     What this pins: both adapters ask for a provider (twice in total, from
-    equivalent effective config) and each ``run_review`` call receives its own
-    instance, so a Phase 3 change that stopped one surface constructing a
-    provider reddens here. What it cannot see: ``get_provider`` is replaced on
-    both adapter bindings, so a singleton or session cache *inside* the real
+    equivalent effective config) and each ``execute_review`` call receives its
+    own instance, so a change that stopped one surface constructing a provider
+    reddens here. What it cannot see: ``get_provider`` is replaced on both
+    adapter bindings, so a singleton or session cache *inside* the real
     ``lintro.ai.providers.get_provider`` would not surface — Phase 5 (#2302)
     needs its own pin for the shared-lifetime end state.
 
@@ -376,19 +445,19 @@ def test_each_surface_builds_its_own_provider_from_an_equivalent_config(
     assert_that(cli_call["provider"]).is_not_same_as(mcp_call["provider"])
 
 
-def test_exclude_paths_is_the_one_context_axis_the_surfaces_disagree_on(
+def test_exclude_paths_now_shapes_the_context_on_both_surfaces(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``ai.exclude_paths`` shapes the CLI's context and is ignored by MCP.
+    """``ai.exclude_paths`` is honoured by MCP as well as the CLI.
 
-    The equal-context test above runs with the production default (no globs),
-    where the divergence is invisible. This pins it: the CLI forwards
-    ``exclude_globs=list(ai_config.exclude_paths)`` into
-    ``collect_review_context`` and MCP's ``_collect_context`` passes nothing, so
-    an excluded file is dropped and recorded as skipped on one surface and
-    reviewed on the other. Phase 3 (#2300) must close this deliberately, not by
-    accident — and this test says which direction it moved.
+    Before #2300 this was the one context axis the surfaces disagreed on: the
+    CLI forwarded ``exclude_globs=list(ai_config.exclude_paths)`` into
+    ``collect_review_context`` and MCP's own collection passed nothing, so an
+    excluded file was dropped and recorded as skipped on one surface and
+    reviewed on the other. Shared preparation reads the exclusion from the
+    resolved AI config, so the operator's setting now applies to both — closed
+    in the CLI's direction, deliberately.
 
     Args:
         tmp_path: Pytest temporary directory.
@@ -399,12 +468,13 @@ def test_exclude_paths_is_the_one_context_axis_the_surfaces_disagree_on(
         monkeypatch=monkeypatch,
         exclude_paths="tokens.py",
     )
-    cli_paths = {file.path for file in cli_call["context"].changed_files}
-    mcp_paths = {file.path for file in mcp_call["context"].changed_files}
+    cli_context = cli_call["prepared"].context
+    mcp_context = mcp_call["prepared"].context
 
-    assert_that(cli_paths).does_not_contain("tokens.py")
-    assert_that(mcp_paths).contains("tokens.py")
-    assert_that(
-        {skipped.path for skipped in cli_call["context"].skipped_files},
-    ).contains("tokens.py")
-    assert_that(mcp_call["context"].skipped_files).is_empty()
+    for context in (cli_context, mcp_context):
+        assert_that({file.path for file in context.changed_files}).does_not_contain(
+            "tokens.py",
+        )
+        assert_that({skipped.path for skipped in context.skipped_files}).contains(
+            "tokens.py",
+        )

@@ -4,11 +4,13 @@ Every call goes through a real :class:`mcp.client.Client` over in-memory
 streams, so the schema validation, the workspace path guard, and the error
 envelope under test are the ones the stdio server actually applies.
 
-The AI provider is always mocked. The orchestrator is stubbed at
-``lintro.ai.review.orchestrator.run_review`` (the toolkit imports it lazily,
-inside the handler, so patching the module attribute is what the handler sees),
-which keeps the tests free of network calls, credentials, and cost while still
-exercising context collection, budget resolution, and payload shaping for real.
+The AI provider is always mocked. Since #2300 the handler reaches the
+orchestrator through ``lintro.ai.review.preparation.execute_review``, so the
+orchestrator is stubbed at ``lintro.ai.review.preparation.run_review`` — that
+module holds the ``from``-import the shared path actually calls, and the lint
+helpers are patched there for the same reason. That keeps the tests free of
+network calls, credentials, and cost while still exercising context
+collection, budget resolution, and payload shaping for real.
 """
 
 from __future__ import annotations
@@ -294,7 +296,7 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
-    import lintro.ai.review.orchestrator as orchestrator
+    import lintro.ai.review.preparation as preparation
 
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
     monkeypatch.setattr(
@@ -316,7 +318,7 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
                 raise error
             return result if result is not None else _result()
 
-        monkeypatch.setattr(orchestrator, "run_review", _run_review)
+        monkeypatch.setattr(preparation, "run_review", _run_review)
         return calls
 
     return install
@@ -679,6 +681,36 @@ def test_review_maps_a_too_large_diff_to_invalid_input(
     )
 
 
+def test_review_only_mode_without_agents_is_invalid_input(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """``review.custom_agents: only`` with no agent file reviews nothing.
+
+    In ``only`` mode the built-in checklist is skipped, so an empty agents
+    directory would otherwise report a clean review with nothing checked. The
+    MCP surface answers with ``INVALID_INPUT`` and a ``no_reviewable_work``
+    reason instead, and never calls the provider.
+    """
+    calls = stub_ai()
+    (repo / ".lintro-config.yaml").write_text(
+        _CONFIG + "review:\n  custom_agents: only\n",
+        encoding="utf-8",
+    )
+    (repo / ".lintro" / "review-agents").mkdir(parents=True)
+
+    result, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_true()
+    assert_that(payload["error"]["code"]).is_equal_to(
+        McpErrorCode.INVALID_INPUT.value,
+    )
+    assert_that(payload["error"]["detail"]["reason"]).is_equal_to(
+        "no_reviewable_work",
+    )
+    assert_that(calls).is_empty()
+
+
 def test_review_is_unavailable_without_the_ai_extra(
     repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -798,15 +830,15 @@ def test_review_includes_a_lint_digest_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``with_lint`` feeds the deterministic linters' digest into the prompt."""
-    import lintro.ai.review.lint_bridge as lint_bridge
+    import lintro.ai.review.preparation as preparation
 
     monkeypatch.setattr(
-        lint_bridge,
+        preparation,
         "run_lint_on_changed_files",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        lint_bridge,
+        preparation,
         "format_lint_results_for_prompt",
         lambda **_kwargs: "ruff: 1 issue",
     )

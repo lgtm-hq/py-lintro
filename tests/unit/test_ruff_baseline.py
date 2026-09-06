@@ -71,7 +71,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/cli_utils/commands/format.py": ("PLR0913",),
     "lintro/cli_utils/commands/install.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/cli_utils/commands/list_tools.py": ("PLR0915",),
-    "lintro/cli_utils/commands/review.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/cli_utils/commands/test.py": ("PLR0913",),
     "lintro/cli_utils/commands/versions.py": ("PLR0912", "PLR0915"),
     "lintro/config/config_loader.py": ("C901", "PLR0912", "PLR0915"),
@@ -156,8 +155,8 @@ BASELINE: dict[str, tuple[str, ...]] = {
 #: suppression that a previous ratchet step removed. Both may only go *down*,
 #: and both are pinned to the exact live counts (issue #1739): any slack here
 #: is room for exactly that reintroduction.
-BASELINE_MAX_FILES: int = 98
-BASELINE_MAX_SUPPRESSIONS: int = 197
+BASELINE_MAX_FILES: int = 97
+BASELINE_MAX_SUPPRESSIONS: int = 193
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->

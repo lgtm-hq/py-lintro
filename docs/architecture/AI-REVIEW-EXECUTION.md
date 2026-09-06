@@ -12,27 +12,41 @@ normative decision record is
 | Effective `ResolvedAIConfig` for one invocation     | `resolve_effective_ai_config()` (#2299), the one caller of `AIConfig.resolve_from_mapping` | Same resolver; #1923 extends it                |
 | Invocation transport / timeout / cost-cap overrides | `AICliOverrides` on that resolver, for lint and review alike                               | Same resolver pipeline (#1970 / #1923 / #2024) |
 | Monotonic cost-cap clamp                            | MCP adapter (`resolve_budget_policy`)                                                      | Shared domain prep; adapters keep policy       |
-| Diff review preparation                             | Duplicated in CLI + MCP                                                                    | `prepare_review` / `execute_review` (Phase 3)  |
+| Diff review preparation                             | `prepare_review` / `execute_review` (#2300)                                                | Done (Phase 3)                                 |
 | Review execution facade                             | `run_review` / `run_review_async`                                                          | Unchanged facade; internals split (Phase 4)    |
 | Provider client `aclose()` API                      | Not yet (#1885)                                                                            | Provider-side only in #1885                    |
 | Provider close call-site wiring                     | N/A until #1885                                                                            | Phase 5 of #1972                               |
 
-## Shared preparation (current duplicated steps)
+## Shared preparation (`lintro/ai/review/preparation.py`)
 
-Both the CLI (`lintro review`) and MCP (`lintro_review`) currently:
+Since #2300 both the CLI (`lintro review`) and MCP (`lintro_review`) run one shared path
+— `ReviewRunRequest` → `prepare_review` → `PreparedReview` → `execute_review`:
 
-1. Resolve AI config through `resolve_effective_ai_config` — one resolver pipeline for
-   both adapters (#2299). What each passes into it differs by design: CLI review passes
-   its flags as `AICliOverrides`, which may change values and stamp `flag` provenance,
-   while MCP passes none because its one per-call knob (`max_cost_usd`) is a downstream
-   monotonic clamp (`resolve_budget_policy`) rather than an overlay. Given identical
-   resolver inputs the two produce identical values _and_ provenance; the parity suite
-   asserts exactly that.
-2. Gate on `ai.review` being enabled (adapter-specific error shape).
-3. Collect review context, classify changed files, select/format checklist items.
-4. Optionally build a lint digest.
-5. Resolve sensitivity policy and construct a provider.
-6. Invoke `run_review` and translate failures.
+1. Each adapter resolves AI config through `resolve_effective_ai_config` — one resolver
+   pipeline for both (#2299). What each passes into it differs by design: CLI review
+   passes its flags as `AICliOverrides`, which may change values and stamp `flag`
+   provenance, while MCP passes none because its one per-call knob (`max_cost_usd`) is a
+   downstream monotonic clamp (`resolve_budget_policy`) rather than an overlay. Given
+   identical resolver inputs the two produce identical values _and_ provenance; the
+   parity suite asserts exactly that.
+2. Each adapter gates on `ai.review` being enabled (adapter-specific error shape) and
+   builds a `ReviewRunRequest` from its own argument surface.
+3. `prepare_review` then does the deterministic, provider-free work once: apply the
+   run's timeout and the transport profile, collect the review context (honouring
+   `ai.exclude_paths` on both surfaces), classify changed files, select and format the
+   checklist, optionally build the lint digest, resolve sensitivity, and resolve custom
+   agents from the request's `CustomAgentMode` (both adapters forward
+   `review.custom_agents`).
+4. Each adapter constructs its own provider — provider lifetime stays with the
+   constructing surface until #1972 Phase 5 — and calls `execute_review`, which is the
+   single `run_review` call site.
+5. Each adapter translates failures into its own contract.
+
+`ReviewExecutionPolicy` carries what is genuinely adapter-only into `execute_review`:
+terminal progress, `--context-window`, resume state, `--full`, and the CLI's cost-cap
+gate. MCP runs on `DEFAULT_EXECUTION_POLICY`, whose values are `run_review`'s own
+defaults. It is a frozen value object that may carry an optional progress callback — not
+a hook or plugin architecture.
 
 Adapter-only policy that must stay out of the shared layer:
 
@@ -67,8 +81,12 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/golden/` — prompt bytes, chunk plan, merge output, merged
   `ReviewResult` and `ReviewMetadata`, as plain-file goldens
   ([ADR-0008](../adr/0008-ai-review-architecture-invariants.md), #2298).
-- `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP `run_review` input parity and
-  the `ai.exclude_paths` divergence.
+- `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP parity: for equal
+  `ReviewRunRequest` values over one workspace the two surfaces produce an **equal**
+  `PreparedReview` (custom agents included — the fixture ships an agent file), and the
+  only divergence left is the named `ReviewExecutionPolicy` allowlist. MCP's post-prep
+  `with_max_cost_usd` clamp is the one thing it applies to the prepared review
+  afterwards.
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:
   config-resolution idempotence, shared `run_review` kwargs, error-contract body parity,
   MCP error mapping.
