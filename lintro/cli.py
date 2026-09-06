@@ -103,6 +103,13 @@ _COMMAND_MODULES: dict[str, tuple[str, str]] = {
     "watch": ("lintro.cli_utils.commands.watch", "watch_command"),
 }
 
+# Attribute name this module used to export -> canonical command name. Kept so
+# `from lintro.cli import check_command` keeps working for out-of-tree callers;
+# see the module-level `__getattr__` below.
+_COMMAND_ATTRIBUTES: dict[str, str] = {
+    attribute: canonical for canonical, (_, attribute) in _COMMAND_MODULES.items()
+}
+
 # Alias name -> canonical command name.
 _COMMAND_ALIASES: dict[str, str] = {
     "chk": "check",
@@ -121,6 +128,36 @@ _COMMAND_ALIASES: dict[str, str] = {
     "version": "versions",
     "w": "watch",
 }
+
+
+def _load_command(canonical: str) -> click.Command:
+    """Import a canonical command's module and return its Click command.
+
+    Args:
+        canonical: Canonical command name present in ``_COMMAND_MODULES``.
+
+    Returns:
+        click.Command: The command object, tagged with its canonical name so
+        help rendering can group aliases under it.
+
+    Raises:
+        TypeError: If the table entry does not name a :class:`click.Command`.
+            The static tables are covered per entry by
+            ``tests/unit/cli/test_lazy_subcommands.py``, so this can only fire
+            on a hand-edited table.
+    """
+    module_path, attribute = _COMMAND_MODULES[canonical]
+    # Module paths come from the static table above, never from user input.
+    module = importlib.import_module(module_path)  # nosemgrep: non-literal-import
+    command = getattr(module, attribute)
+    if not isinstance(command, click.Command):
+        raise TypeError(
+            f"{module_path}.{attribute} is {type(command).__name__}, "
+            f"not a click.Command",
+        )
+    cast(Any, command)._canonical_name = canonical
+    return command
+
 
 # Ignore-file name used by upward lookup. Kept next to the shared YAML
 # filenames so fingerprinting and ``find_lintro_ignore`` cannot drift.
@@ -254,21 +291,10 @@ class LintroGroup(click.Group):
             return existing
 
         canonical = _COMMAND_ALIASES.get(cmd_name, cmd_name)
-        target = _COMMAND_MODULES.get(canonical)
-        if target is None:
+        if canonical not in _COMMAND_MODULES:
             return None
 
-        module_path, attribute = target
-        command = cast(
-            click.Command,
-            # Module paths come from the static table above, never from
-            # user input.
-            getattr(
-                importlib.import_module(module_path),  # nosemgrep: non-literal-import
-                attribute,
-            ),
-        )
-        cast(Any, command)._canonical_name = canonical
+        command = _load_command(canonical)
         # Cache under the canonical name and the requested alias so the next
         # lookup (and ``self.commands``) skips the import entirely.
         self.add_command(command, name=canonical)
@@ -484,3 +510,28 @@ def main() -> None:
     """Entry point for the CLI."""
     ensure_utf8_stdio()
     cli()
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve a command object that this module used to export eagerly.
+
+    Subcommands load on demand (#1305), so ``badge_command`` and friends are no
+    longer module attributes. Out-of-tree callers that imported them keep
+    working: the first access imports the owning module and caches the result
+    in this module's namespace.
+
+    Args:
+        name: Attribute being looked up.
+
+    Returns:
+        Any: The resolved :class:`click.Command`.
+
+    Raises:
+        AttributeError: If *name* is not one of the historical command exports.
+    """
+    canonical = _COMMAND_ATTRIBUTES.get(name)
+    if canonical is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    command = _load_command(canonical)
+    globals()[name] = command
+    return command

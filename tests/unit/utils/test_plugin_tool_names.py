@@ -26,6 +26,7 @@ def clean_sources() -> Iterator[None]:
         None: Control returns to the test with a pristine source list.
     """
     saved = list(plugin_tool_names._EXTRA_NAME_SOURCES)
+    plugin_tool_names._EXTRA_NAME_SOURCES.clear()
     plugin_tool_names.reset_plugin_tool_name_cache()
     try:
         yield
@@ -102,10 +103,19 @@ def test_broken_entry_point_metadata_degrades_to_empty(
     assert_that(plugin_tool_names.advertised_plugin_tool_names()).is_empty()
 
 
-def test_discovery_registers_a_registry_backed_source() -> None:
-    """Importing the plugin subsystem wires registry names into the lookup."""
+def test_discovery_contributes_registry_names_after_discovery() -> None:
+    """Registry tool names reach the config-facing lookup once discovery runs.
+
+    Asserts the behaviour rather than the identity of the registered callable:
+    a source that always returned an empty set would pass an identity check.
+    """
     from lintro.plugins import discovery
 
-    assert_that(plugin_tool_names._EXTRA_NAME_SOURCES).contains(
-        discovery._registered_tool_names,
-    )
+    plugin_tool_names._EXTRA_NAME_SOURCES[:] = [discovery._registered_tool_names]
+    discovery.discover_all_tools(force=True)
+
+    names = plugin_tool_names.known_plugin_tool_names()
+
+    # `ruff` is a builtin, so it can only reach the config-facing lookup
+    # through the source `lintro.plugins.discovery` registers at import time.
+    assert_that(names).contains("ruff")

@@ -9,7 +9,13 @@ import click
 import pytest
 from assertpy import assert_that
 
-from lintro.cli import _COMMAND_ALIASES, _COMMAND_MODULES, cli
+import lintro.cli as cli_module
+from lintro.cli import (
+    _COMMAND_ALIASES,
+    _COMMAND_ATTRIBUTES,
+    _COMMAND_MODULES,
+    cli,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -151,3 +157,49 @@ def test_a_broken_table_entry_surfaces_as_an_import_error(
 
     with pytest.raises(ModuleNotFoundError):
         cli.get_command(context, "check")
+
+
+@pytest.mark.parametrize("attribute", sorted(_COMMAND_ATTRIBUTES))
+def test_command_objects_stay_importable_from_the_cli_module(
+    attribute: str,
+    context: click.Context,
+) -> None:
+    """The names this module used to export eagerly still resolve.
+
+    Lazy loading must not silently break
+    ``from lintro.cli import check_command`` for out-of-tree callers.
+
+    Args:
+        attribute: Historical module attribute under test.
+        context: Click context fixture.
+    """
+    resolved = getattr(cli_module, attribute)
+
+    assert_that(resolved).is_instance_of(click.Command)
+    assert_that(resolved).is_same_as(
+        cli.get_command(context, _COMMAND_ATTRIBUTES[attribute]),
+    )
+
+
+def test_unknown_module_attribute_still_raises() -> None:
+    """The module ``__getattr__`` does not swallow genuine typos."""
+    with pytest.raises(AttributeError):
+        getattr(cli_module, "definitely_not_an_attribute")  # noqa: B009
+
+
+def test_a_table_entry_that_is_not_a_command_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A table entry pointing at a non-command fails with a clear error.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setitem(
+        _COMMAND_MODULES,
+        "check",
+        ("lintro.cli_utils.commands.check", "__doc__"),
+    )
+
+    with pytest.raises(TypeError, match="not a click.Command"):
+        cli_module._load_command("check")
