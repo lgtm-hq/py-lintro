@@ -10,8 +10,10 @@ hand-maintained list. That directive is what prevents a repeat of the 0.43.0
 packaging bug, where ``lintro.utils.environment`` was missing from the wheel.
 """
 
+import fnmatch
 import importlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -38,7 +40,7 @@ def _discover_packages_from_source() -> set[str]:
     return packages
 
 
-def _get_find_directive() -> dict[str, object]:
+def _get_find_directive() -> dict[str, Any]:
     """Read the setuptools package-discovery directive from pyproject.toml.
 
     Returns:
@@ -50,7 +52,7 @@ def _get_find_directive() -> dict[str, object]:
     with pyproject_path.open("rb") as f:
         data = tomllib.load(f)
 
-    find: dict[str, object] = data["tool"]["setuptools"]["packages"]["find"]
+    find: dict[str, Any] = data["tool"]["setuptools"]["packages"]["find"]
     return find
 
 
@@ -107,10 +109,22 @@ def test_package_discovery_covers_every_source_package() -> None:
         "docs*",
         "evals*",
     )
-    assert_that(sorted(_discover_packages_from_source())).contains(
-        "lintro",
-        "lintro.utils.environment",
+
+    # An exclude that reaches into the package would drop a subpackage from the
+    # wheel, which is the failure mode the explicit list used to have. Applying
+    # the patterns to the discovered names catches that here rather than in the
+    # slow build test, and without pinning the list's contents or order.
+    source_packages = _discover_packages_from_source()
+    assert_that(source_packages).contains("lintro", "lintro.utils.environment")
+    over_excluded = sorted(
+        package
+        for package in source_packages
+        for pattern in find["exclude"]
+        if fnmatch.fnmatchcase(package, pattern)
     )
+    assert_that(over_excluded).described_as(
+        "find excludes match packages that must ship",
+    ).is_empty()
 
 
 def test_doctor_command_imports() -> None:

@@ -8,6 +8,7 @@ when the package is installed (not in editable mode).
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 import tarfile
@@ -21,6 +22,7 @@ from assertpy import assert_that
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_built_wheel_imports(built_distributions: Path) -> None:
     """Test that lintro can be installed and imported as a wheel.
 
@@ -113,6 +115,7 @@ def test_built_wheel_imports(built_distributions: Path) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_built_wheel_with_full_extra(built_distributions: Path) -> None:
     """Test that lintro[full] extra installs bundled Python tools.
 
@@ -240,7 +243,11 @@ def _build_distributions(dist_dir: Path) -> None:
     ).is_equal_to(0)
 
 
-_BUILD_LOCK_TIMEOUT_SECONDS = 900.0
+# Kept below the 600s per-test budget the tests using this fixture declare:
+# fixture setup counts toward pytest-timeout, so a lock wait longer than the
+# test's own allowance would be killed by the timeout plugin instead of raising
+# the diagnosable error below.
+_BUILD_LOCK_TIMEOUT_SECONDS = 300.0
 _BUILD_POLL_SECONDS = 0.5
 
 
@@ -287,12 +294,28 @@ def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> Path:
             time.sleep(_BUILD_POLL_SECONDS)
             continue
         try:
-            dist_dir.mkdir(exist_ok=True)
+            # Another worker may have finished between the marker check and
+            # the lock acquisition.
+            if marker.exists():
+                break
+            # A previous attempt can have died mid-build and left a partial
+            # artifact behind; the glob below would happily install it.
+            shutil.rmtree(dist_dir, ignore_errors=True)
+            dist_dir.mkdir(parents=True)
             _build_distributions(dist_dir=dist_dir)
             marker.touch()
         finally:
             os.close(handle)
             lock.unlink(missing_ok=True)
+
+    # Every caller takes the first match, so more than one artifact of a kind
+    # would make which distribution is under test a coin toss.
+    assert_that(sorted(dist_dir.glob("*.whl"))).described_as(
+        "expected exactly one built wheel",
+    ).is_length(1)
+    assert_that(sorted(dist_dir.glob("*.tar.gz"))).described_as(
+        "expected exactly one built sdist",
+    ).is_length(1)
 
     return dist_dir
 
@@ -312,6 +335,7 @@ def _source_packages() -> set[str]:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_built_distributions_ship_the_whole_package_and_no_tests(
     built_distributions: Path,
 ) -> None:

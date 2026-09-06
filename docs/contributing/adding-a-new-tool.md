@@ -312,14 +312,22 @@ automatically, so `lintro.parsers.<tool>` ships as soon as it has an `__init__.p
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lintro*"]
+exclude = ["lintro_build*", "tests*", "..."]  # keep repo-only trees out
+namespaces = false                            # setuptools defaults to true
 ```
+
+Both keys under `include` are load-bearing, so copy the real table from `pyproject.toml`
+rather than this excerpt if you ever edit it: `namespaces = false` is what keeps
+`lintro/ascii-art` and the prompt-template data directories out of the package list, and
+`exclude` is what keeps the in-tree build backend out of the wheel —
+`include = ["lintro*"]` matches `lintro_build` too.
 
 Only two cases need an edit:
 
 - **Non-Python files** the tool ships (templates, schemas, corpora) must be declared in
   `[tool.setuptools.package-data]`; discovery covers modules, not data.
-- **A new top-level directory** whose name starts with `lintro` (like the in-tree build
-  backend `lintro_build`) must be added to the `exclude` list, or it lands in the wheel.
+- **A new top-level directory** whose name starts with `lintro` (like `lintro_build`)
+  must be added to the `exclude` list, or it lands in the wheel.
 
 Verify with `uv build` and `unzip -l dist/*.whl` when in doubt.
 
