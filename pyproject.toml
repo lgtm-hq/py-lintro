@@ -489,6 +489,19 @@ disallow_untyped_defs = false
 check_untyped_defs = true
 
 [tool.uv]
+# The `full` and `ai` extras cannot share an environment (#2378). `full` pulls
+# pydoclint -> docstring-parser-fork; `ai` pulls anthropic -> docstring-parser.
+# Both distributions own the top-level `docstring_parser` module, so whichever
+# installs second shadows the other and pydoclint dies on import
+# (`cannot import name 'DocstringYields' from 'docstring_parser.common'`).
+# `lintro chk` then classifies pydoclint as skipped and the DOC gate silently
+# stops running locally. No version pin fixes this — no upstream
+# docstring-parser release exports the fork-only symbols pydoclint needs — so
+# the conflict is declared instead and uv refuses the broken sync outright.
+# Contributors who need `lintro review` sync `--extra ai` into its own
+# environment; see AGENTS.md.
+conflicts = [[{ extra = "full" }, { extra = "ai" }]]
+
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",

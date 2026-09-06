@@ -75,6 +75,19 @@ required):
   requests `extras: 'full'` in `test-ci.yml`; the `full` extra adds the dogfooding
   linters the group does not carry (pylint, pydoclint, import-linter). The remaining
   extras are runtime-facing: `tools`, `ai`, `mcp`, `typing`.
+- **The `full` and `ai` extras are mutually exclusive and uv now refuses to install
+  both** (#2378). `full` pulls pydoclint, which needs `docstring-parser-fork`; `ai`
+  pulls anthropic, which needs `docstring-parser`. Both distributions own the top-level
+  `docstring_parser` module, so an environment carrying both has a pydoclint that dies
+  on import — and `lintro chk` reports it as **skipped**, exits 0, and quietly stops
+  running the DOC gate. No version pin can fix that (no upstream `docstring-parser`
+  release exports the fork-only symbols pydoclint imports), so `[tool.uv] conflicts` in
+  `pyproject.toml` declares the conflict and `uv sync --dev --extra full --extra ai`
+  fails loudly instead. Contributors working on `lintro review` sync `--extra ai` into a
+  separate environment. If you already had both installed, dropping `ai` is not enough
+  to recover: uv's uninstall guts the shared `docstring_parser/` directory, so run
+  `uv sync --dev --extra full --reinstall-package docstring-parser-fork` (or delete
+  `.venv`).
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
 ## Structural lint thresholds
