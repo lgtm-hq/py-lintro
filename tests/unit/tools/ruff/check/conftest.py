@@ -14,7 +14,7 @@ from loguru import logger
 
 
 @pytest.fixture
-def loguru_records() -> Generator[list[tuple[str, str]]]:
+def loguru_records() -> Generator[list[tuple[str, str]], None, None]:
     """Capture every loguru record emitted during the test.
 
     Yields:

@@ -78,7 +78,7 @@ def mock_subprocess() -> Generator[MagicMock, None, None]:
 
 
 @pytest.fixture
-def recorded_ruff_argv() -> Generator[list[list[str]]]:
+def recorded_ruff_argv() -> Generator[list[list[str]], None, None]:
     """Record the argv of every ``subprocess.run`` call made by the checker.
 
     Reading the argv back off a mock only asserts how the mock was called;

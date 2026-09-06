@@ -77,7 +77,7 @@ def labelled_ascii_art(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def loguru_messages() -> Generator[list[str]]:
+def loguru_messages() -> Generator[list[str], None, None]:
     """Capture every message loguru emits during the test.
 
     Some logger methods deliberately write to loguru instead of the console;
