@@ -14,6 +14,7 @@ Every golden in ``snapshots/`` was produced that way against the code on
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 from dataclasses import fields, is_dataclass
@@ -34,8 +35,13 @@ PAYLOAD_DIR: Path = Path(__file__).resolve().parent / "payloads"
 def goldens_are_being_updated() -> bool:
     """Return whether the run should rewrite goldens instead of asserting.
 
+    The switch is an allowlist rather than a truthiness test, so an unexpected
+    value (``2``, ``maybe``) compares instead of rewriting. Rewriting goldens
+    is destructive, so it fails closed.
+
     Returns:
-        True when ``LINTRO_UPDATE_GOLDENS`` is set to a truthy value.
+        True when ``LINTRO_UPDATE_GOLDENS`` is one of ``1``, ``true``, ``yes``
+        or ``on``, case-insensitively.
     """
     return os.environ.get(UPDATE_GOLDENS_ENV, "").strip().lower() in {
         "1",
@@ -133,10 +139,21 @@ def assert_golden(*, name: str, actual: str) -> None:
         raise AssertionError(msg)
     expected = path.read_text(encoding="utf-8")
     if actual != expected:
+        # pytest does not rewrite asserts in a helper module, so the diff has
+        # to be built here or a failure says only "the bytes moved".
+        diff = "".join(
+            difflib.unified_diff(
+                expected.splitlines(keepends=True),
+                actual.splitlines(keepends=True),
+                fromfile=f"{name} (golden)",
+                tofile=f"{name} (actual)",
+                n=3,
+            ),
+        )
         msg = (
             f"golden mismatch for {name}: review behaviour changed. "
             f"If the change is intended, say so in the PR body and rerun with "
-            f"{UPDATE_GOLDENS_ENV}=1."
+            f"{UPDATE_GOLDENS_ENV}=1.\n\n{diff}"
         )
         raise AssertionError(msg)
 

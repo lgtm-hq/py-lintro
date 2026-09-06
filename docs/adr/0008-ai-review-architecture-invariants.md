@@ -61,6 +61,11 @@ that bypasses this function.
 `lintro.ai`, `lintro.mcp`, `lintro.cli_utils` and `lintro.api` may import `lintro.ai`.
 That guard is owned by [#2290](https://github.com/lgtm-hq/py-lintro/issues/2290), not by
 the review suite, and is named here so the review decomposition does not reinvent it.
+The boundary is a ratchet, not an empty set: the contract still carries 15
+`ignore_imports` edges (4 from `lintro.utils` owned by
+[#2312](https://github.com/lgtm-hq/py-lintro/issues/2312), 11 from `lintro.tools` owned
+by [#2331](https://github.com/lgtm-hq/py-lintro/issues/2331)). Entries may be deleted,
+never added, so the review decomposition may not treat the direction as already clean.
 
 **5. Provider lifetime belongs to the run, not the adapter (target).** Today CLI and MCP
 each build their own provider and neither calls `aclose()`; Phase 5
