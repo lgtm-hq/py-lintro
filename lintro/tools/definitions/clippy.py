@@ -241,9 +241,9 @@ class ClippyPlugin(BaseToolPlugin):
             policy=BatchCheckPolicy(
                 success=BatchSuccess.EXIT_STATUS,
                 output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+                tool_name="clippy",
             ),
             cwd=str(cargo_root),
-            tool_name="clippy",
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

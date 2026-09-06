@@ -296,6 +296,7 @@ and scores the difference.
 ```python
 from lintro.tools.core.batch_runner import (
     BatchCheckPolicy,
+    BatchCommands,
     BatchFixPolicy,
     BatchSuccess,
     run_batch_check,
@@ -312,9 +313,11 @@ def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         plugin=self,
         cmd=[*self._build_command(), *ctx.rel_files],
         parse=lambda output: parse_mytool_output(output=output),
-        policy=BatchCheckPolicy(success=BatchSuccess.ISSUES_ONLY),
+        policy=BatchCheckPolicy(
+            success=BatchSuccess.ISSUES_ONLY,
+            report_cwd=True,
+        ),
         cwd=ctx.cwd,
-        result_cwd=ctx.cwd,
     )
 ```
 
@@ -324,14 +327,18 @@ findings, `EXIT_STATUS` for one whose exit code is the whole verdict, and
 `EXIT_AND_ISSUES` (the default) when both must be clean. `BatchOutput` says when the raw
 output is surfaced — `NEVER`, `ON_FAILURE` (the default),
 `ON_EXIT_FAILURE_WITHOUT_ISSUES` for tools where unparseable output is the only sign of
-a compilation or config error, and `ON_ISSUES_OR_EXIT_FAILURE`.
+a compilation or config error, and `ON_ISSUES_OR_EXIT_FAILURE`. Both policies also carry
+`tool_name` (the name timeout messages use when it differs from the registered one) and
+`report_cwd` (whether the working directory is recorded on the `ToolResult`, which tools
+emitting issue paths relative to it need).
 
-`run_batch_fix()` takes both fully built command lines and a `BatchFixPolicy` holding
-the wording of the summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`)
-plus two reporting switches: `report_initial_issues` prefixes `ToolResult.issues` with
-the pre-fix set for tools that render a two-table view, and
-`always_report_initial_issues` passes an empty list rather than `None` when nothing was
-detected.
+`run_batch_fix()` takes both fully built command lines as a
+`BatchCommands(check=..., fix=...)` bundle — the check command runs twice, once before
+the fix and once to score it — plus a `BatchFixPolicy` holding the wording of the
+summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`) and two reporting
+switches: `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
+tools that render a two-table view, and `always_report_initial_issues` passes an empty
+list rather than `None` when nothing was detected.
 
 Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
 the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it

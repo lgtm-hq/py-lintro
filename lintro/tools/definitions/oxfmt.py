@@ -22,6 +22,7 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import (
     BatchCheckPolicy,
+    BatchCommands,
     BatchFixPolicy,
     BatchSuccess,
     run_batch_check,
@@ -267,9 +268,11 @@ class OxfmtPlugin(BaseToolPlugin):
             plugin=self,
             cmd=cmd,
             parse=lambda output: parse_oxfmt_output(output=output),
-            policy=BatchCheckPolicy(success=BatchSuccess.ISSUES_ONLY),
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.ISSUES_ONLY,
+                report_cwd=True,
+            ),
             cwd=ctx.cwd,
-            result_cwd=ctx.cwd,
             on_timeout=lambda: self._create_timeout_result(
                 timeout_val=ctx.timeout,
                 cwd=ctx.cwd,
@@ -338,8 +341,7 @@ class OxfmtPlugin(BaseToolPlugin):
         return run_batch_fix(
             ctx,
             plugin=self,
-            check_cmd=check_cmd,
-            fix_cmd=fix_cmd,
+            commands=BatchCommands(check=check_cmd, fix=fix_cmd),
             parse=lambda output: parse_oxfmt_output(output=output),
             policy=BatchFixPolicy(
                 fixed_label="formatting issue",
@@ -348,9 +350,9 @@ class OxfmtPlugin(BaseToolPlugin):
                 ),
                 verbose_output_label="Formatting output",
                 verbose=bool(merged_options.get("verbose_fix_output", False)),
+                report_cwd=True,
             ),
             cwd=ctx.cwd,
-            result_cwd=ctx.cwd,
             on_timeout=lambda detected: self._create_timeout_result(
                 timeout_val=ctx.timeout,
                 initial_issues=list(detected) or None,

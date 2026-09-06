@@ -51,6 +51,7 @@ IssueT = TypeVar("IssueT", bound="BaseIssue")
 __all__ = [
     "DEFAULT_BATCH_CHECK_POLICY",
     "BatchCheckPolicy",
+    "BatchCommands",
     "BatchFixPolicy",
     "BatchOutput",
     "BatchSuccess",
@@ -105,10 +106,17 @@ class BatchCheckPolicy:
     Attributes:
         success: How the pass/fail verdict is derived.
         output: When the command's raw output is surfaced.
+        tool_name: Name used in timeout messages when it differs from the
+            registered tool name.
+        report_cwd: Record the working directory on the ``ToolResult``. Tools
+            that emit issue paths relative to it need this so the AI layer can
+            resolve them; tools that emit absolute paths do not.
     """
 
     success: BatchSuccess = BatchSuccess.EXIT_AND_ISSUES
     output: BatchOutput = BatchOutput.ON_FAILURE
+    tool_name: str | None = None
+    report_cwd: bool = False
 
 
 #: Policy for a tool whose exit status and findings must both be clean.
@@ -130,6 +138,9 @@ class BatchFixPolicy:
             two-table fix view need this; the rest report only what remains.
         always_report_initial_issues: Pass an empty list rather than ``None``
             to ``ToolResult.initial_issues`` when nothing was detected.
+        tool_name: Name used in timeout messages when it differs from the
+            registered tool name.
+        report_cwd: Record the working directory on the ``ToolResult``.
     """
 
     fixed_label: str = "issue"
@@ -138,6 +149,22 @@ class BatchFixPolicy:
     verbose: bool = False
     report_initial_issues: bool = False
     always_report_initial_issues: bool = False
+    tool_name: str | None = None
+    report_cwd: bool = False
+
+
+@dataclass(frozen=True)
+class BatchCommands:
+    """The two fully built command lines a batch fix run alternates between.
+
+    Attributes:
+        check: Command that reports what is wrong without changing anything.
+            It runs twice: once before the fix and once to score it.
+        fix: Command that rewrites the files.
+    """
+
+    check: list[str]
+    fix: list[str]
 
 
 def batch_timeout_result(
@@ -294,7 +321,7 @@ def batch_check_result(
     )
 
 
-def run_batch_check(  # noqa: PLR0913 - one knob per stage, all keyword-only
+def run_batch_check(
     ctx: ExecutionContext,
     *,
     plugin: BaseToolPlugin,
@@ -302,8 +329,6 @@ def run_batch_check(  # noqa: PLR0913 - one knob per stage, all keyword-only
     parse: Callable[[str], Sequence[IssueT]],
     policy: BatchCheckPolicy = DEFAULT_BATCH_CHECK_POLICY,
     cwd: str | None = None,
-    result_cwd: str | None = None,
-    tool_name: str | None = None,
     on_timeout: Callable[[], ToolResult] | None = None,
     on_error: Callable[[Exception], ToolResult] | None = None,
 ) -> ToolResult:
@@ -315,12 +340,9 @@ def run_batch_check(  # noqa: PLR0913 - one knob per stage, all keyword-only
             and the tool name.
         cmd: Fully built command line, file arguments included.
         parse: Parser turning the command's output into issues.
-        policy: How to derive the verdict and when to surface the output.
+        policy: How to derive the verdict, when to surface the output, and
+            whether the working directory is reported.
         cwd: Working directory the command runs in.
-        result_cwd: Working directory recorded on the ``ToolResult``. Tools
-            that resolve issue paths against a directory report it here.
-        tool_name: Name used in timeout messages when it differs from the
-            registered tool name.
         on_timeout: Builds the result for a timeout. Defaults to
             :func:`batch_timeout_result`.
         on_error: Builds the result for a launch or execution error. When
@@ -337,13 +359,14 @@ def run_batch_check(  # noqa: PLR0913 - one knob per stage, all keyword-only
         RuntimeError: Re-raised when the invocation fails and no ``on_error``
             handler was supplied.
     """
+    result_cwd = cwd if policy.report_cwd else None
     try:
         exit_success, output = run_subprocess_with_timeout(
             tool=plugin,
             cmd=cmd,
             timeout=ctx.timeout,
             cwd=cwd,
-            tool_name=tool_name,
+            tool_name=policy.tool_name,
         )
     except subprocess.TimeoutExpired:
         if on_timeout is not None:
@@ -352,7 +375,7 @@ def run_batch_check(  # noqa: PLR0913 - one knob per stage, all keyword-only
             plugin=plugin,
             timeout=ctx.timeout,
             cmd=cmd,
-            tool_name=tool_name,
+            tool_name=policy.tool_name,
             cwd=result_cwd,
         )
     except (OSError, ValueError, RuntimeError) as exc:
@@ -408,17 +431,14 @@ def _build_fix_summary(
     return "\n".join(lines) if lines else None
 
 
-def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
+def run_batch_fix(
     ctx: ExecutionContext,
     *,
     plugin: BaseToolPlugin,
-    check_cmd: list[str],
-    fix_cmd: list[str],
+    commands: BatchCommands,
     parse: Callable[[str], Sequence[IssueT]],
     policy: BatchFixPolicy,
     cwd: str | None = None,
-    result_cwd: str | None = None,
-    tool_name: str | None = None,
     on_timeout: Callable[[Sequence[IssueT]], ToolResult] | None = None,
     on_error: Callable[[Exception], ToolResult] | None = None,
 ) -> ToolResult:
@@ -431,14 +451,10 @@ def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
     Args:
         ctx: Prepared execution context from ``BaseToolPlugin.prepare``.
         plugin: Plugin the commands belong to.
-        check_cmd: Fully built check command, file arguments included.
-        fix_cmd: Fully built fix command, file arguments included.
+        commands: The check and fix command lines, file arguments included.
         parse: Parser turning command output into issues.
         policy: Per-tool wording and reporting choices.
         cwd: Working directory the commands run in.
-        result_cwd: Working directory recorded on the ``ToolResult``.
-        tool_name: Name used in timeout messages when it differs from the
-            registered tool name.
         on_timeout: Builds the result for a timeout, given the issues detected
             so far (empty for a timeout in the pre-fix check). Defaults to
             :func:`batch_fix_timeout_result`.
@@ -449,6 +465,7 @@ def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
         ToolResult carrying the surviving issues and the fix counts.
     """
     initial_issues: list[IssueT] = []
+    result_cwd = cwd if policy.report_cwd else None
 
     def run_stage(cmd: list[str]) -> str | ToolResult:
         """Run one stage of the fix pipeline.
@@ -474,7 +491,7 @@ def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=cwd,
-                tool_name=tool_name,
+                tool_name=policy.tool_name,
             )
         except subprocess.TimeoutExpired:
             if on_timeout is not None:
@@ -484,7 +501,7 @@ def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
                 timeout=ctx.timeout,
                 initial_issues=initial_issues,
                 cmd=cmd,
-                tool_name=tool_name,
+                tool_name=policy.tool_name,
                 cwd=result_cwd,
             )
         except (OSError, ValueError, RuntimeError) as exc:
@@ -493,16 +510,16 @@ def run_batch_fix(  # noqa: PLR0913 - one knob per stage, all keyword-only
             return on_error(exc)
         return output
 
-    check_output = run_stage(check_cmd)
+    check_output = run_stage(commands.check)
     if isinstance(check_output, ToolResult):
         return check_output
     initial_issues.extend(parse(check_output))
 
-    fix_output = run_stage(fix_cmd)
+    fix_output = run_stage(commands.fix)
     if isinstance(fix_output, ToolResult):
         return fix_output
 
-    verify_output = run_stage(check_cmd)
+    verify_output = run_stage(commands.check)
     if isinstance(verify_output, ToolResult):
         return verify_output
 

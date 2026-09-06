@@ -200,9 +200,9 @@ class RustfmtPlugin(BaseToolPlugin):
             parse=lambda output: parse_rustfmt_output(output=output),
             policy=BatchCheckPolicy(
                 output=BatchOutput.ON_ISSUES_OR_EXIT_FAILURE,
+                tool_name="rustfmt",
             ),
             cwd=str(cargo_root),
-            tool_name="rustfmt",
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
