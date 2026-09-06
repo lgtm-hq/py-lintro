@@ -119,6 +119,9 @@ dev = [
   # default groups. Without it they would importorskip into a silent pass.
   "mcp>=2,<3",
   "pytest-asyncio>=1.3.0",
+  # Randomises test order every run so nothing may depend on declaration
+  # order or on state a neighbour left behind (#2315).
+  "pytest-randomly>=4.0.1",
 ]
 build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 
