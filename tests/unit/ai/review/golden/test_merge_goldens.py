@@ -11,9 +11,8 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.orchestrator import (
-    _ChunkReviewPartial,
-    _payload_to_partial,
+from lintro.ai.review.merge import (
+    ChunkReviewPartial,
     merge_checklist_answers,
     merge_file_assessments,
     merge_findings,
@@ -21,6 +20,7 @@ from lintro.ai.review.orchestrator import (
     merge_review_results,
     merge_verdict_reasoning,
 )
+from lintro.ai.review.orchestrator import _payload_to_partial
 from tests.unit.ai.review.golden.golden_fixtures import GOLDEN_RESPONSES
 from tests.unit.ai.review.golden.golden_io import (
     assert_golden_json,
@@ -28,13 +28,13 @@ from tests.unit.ai.review.golden.golden_io import (
 )
 
 
-def _golden_partials() -> list[_ChunkReviewPartial]:
+def _golden_partials() -> list[ChunkReviewPartial]:
     """Build chunk partials from the fixed provider response payloads.
 
     Returns:
         One partial per payload file, in chunk order.
     """
-    partials: list[_ChunkReviewPartial] = []
+    partials: list[ChunkReviewPartial] = []
     for name, input_tokens, output_tokens, cost in GOLDEN_RESPONSES:
         response = AIResponse(
             content="",

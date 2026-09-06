@@ -88,6 +88,19 @@ caller explicitly opts out. The emitted bytes are unchanged and the #2298 prompt
 pass without regeneration; the orchestrator re-exports both builders so the facade is
 untouched.
 
+### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
+
+The third slice moves the fold-back stage out of the orchestrator: the partial a chunk
+returns (`ChunkReviewPartial`), the six `merge_*` functions that combine partials into
+one `ReviewResult`, the `finalize_partials` wrapper that merges and then applies the
+sensitivity policy, and `parse_review_response`. The merge rules are behaviour, not
+implementation detail, and the #2298 merge goldens pin them: findings deduplicate by
+`(file, line, title)` in first-seen order, a `yes` checklist answer from any chunk beats
+a `no` from any other regardless of evidence, chunk summaries join in chunk order,
+walkthrough bullets deduplicate by text and cap at `MAX_WALKTHROUGH_BULLETS`, and the
+first chunk to speak wins verdict prose and per-file assessments. The orchestrator
+re-exports the merge names, so the facade and every external importer are untouched.
+
 ## Exit and error contracts
 
 - Exit `0` — successful review, no P1 findings.

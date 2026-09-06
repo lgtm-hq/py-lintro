@@ -7,7 +7,7 @@ import json
 import os
 import time
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -22,7 +22,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.invoke import call_ai
-from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
+from lintro.ai.json_response import strip_json_fences
 from lintro.ai.model_pricing import (
     calculate_available_diff_tokens,
     get_context_window,
@@ -80,23 +80,29 @@ from lintro.ai.review.interrupt import (
     install_review_interrupt,
     sigterm_timeout_error,
 )
+from lintro.ai.review.merge import (
+    ChunkReviewPartial,
+    finalize_partials,
+    merge_checklist_answers,
+    merge_file_assessments,
+    merge_findings,
+    merge_pr_summaries,
+    merge_review_results,
+    merge_verdict_reasoning,
+    normalize_checklist_answer_value,
+    parse_review_response,
+)
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
-from lintro.ai.review.models.file_assessment import FileAssessment
-from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.models.summary_bullet import SummaryBullet
-from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 from lintro.ai.review.narrative_parser import (
-    MAX_WALKTHROUGH_BULLETS,
     parse_narrative,
     parse_summary_text,
 )
@@ -157,6 +163,7 @@ if TYPE_CHECKING:
     from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
+    "ChunkReviewPartial",
     "PromptInputs",
     "ReviewSessionOptions",
     "guard_changed_paths",
@@ -181,7 +188,7 @@ _GENERATED_CHECKLIST_ID_STRIDE = 32
 
 def _write_incremental_coverage_part(
     *,
-    collected: list[_ChunkReviewPartial],
+    collected: list[ChunkReviewPartial],
     resume: ResumePlan,
     context: ReviewContext,
     prior_state: ReviewState | None,
@@ -264,26 +271,6 @@ def _write_incremental_coverage_part(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class _ChunkReviewPartial:
-    """Intermediate review result for one chunk."""
-
-    summary: str
-    checklist: tuple[ChecklistAnswer, ...]
-    findings: tuple[ReviewFinding, ...]
-    input_tokens: int
-    output_tokens: int
-    cost_estimate: float
-    pr_summary: ReviewSummary | None = None
-    verdict_reasoning: VerdictReasoning | None = None
-    file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
-    files: tuple[str, ...] = field(default_factory=tuple)
-    flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
-    coverage_degradations: tuple[CoverageDegradation, ...] = field(
-        default_factory=tuple,
-    )
-
-
 def resolve_review_chunks(
     *,
     context: ReviewContext,
@@ -349,7 +336,7 @@ async def _review_one_chunk_until_stop(
     diff_budget: int,
     stop: asyncio.Event | None,
     timings: ReviewTimingRecorder | None = None,
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Review a single chunk, aborting persistably when *stop* is set.
 
     Args:
@@ -487,11 +474,11 @@ async def _review_all_chunks(
     strictness_section: str,
     next_generated_checklist_id: int = 1,
     diff_budget: int,
-    completed_sink: list[_ChunkReviewPartial] | None = None,
-    on_chunk_complete: Callable[[list[_ChunkReviewPartial]], None] | None = None,
+    completed_sink: list[ChunkReviewPartial] | None = None,
+    on_chunk_complete: Callable[[list[ChunkReviewPartial]], None] | None = None,
     stop: asyncio.Event | None = None,
     timings: ReviewTimingRecorder | None = None,
-) -> list[_ChunkReviewPartial]:
+) -> list[ChunkReviewPartial]:
     """Review all chunks with bounded concurrency.
 
     When ``completed_sink`` is provided, each successfully reviewed chunk's
@@ -538,7 +525,7 @@ async def _review_all_chunks(
                 on_chunk_complete(completed_sink)
         return [single]
 
-    partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
+    partials: list[ChunkReviewPartial | None] = [None] * len(chunks)
     max_workers = min(len(chunks), max_parallel_calls)
     first_error: ReviewExecutionError | None = None
 
@@ -551,7 +538,7 @@ async def _review_all_chunks(
     async def _run_chunk(
         chunk_index: int,
         chunk: ReviewChunk,
-    ) -> tuple[int, _ChunkReviewPartial | Exception]:
+    ) -> tuple[int, ChunkReviewPartial | Exception]:
         """Review one chunk, returning its index alongside the outcome.
 
         Failures are returned rather than raised so the caller keeps the
@@ -624,18 +611,18 @@ async def _review_all_chunks(
         asyncio.ensure_future(_run_chunk(chunk_index, chunk))
         for chunk_index, chunk in enumerate(chunks)
     ]
-    stop_task: asyncio.Future[tuple[int, _ChunkReviewPartial | Exception]] | None
+    stop_task: asyncio.Future[tuple[int, ChunkReviewPartial | Exception]] | None
     stop_task = None
     if stop is not None:
         interrupt = stop
 
-        async def _stop_as_timeout() -> tuple[int, _ChunkReviewPartial | Exception]:
+        async def _stop_as_timeout() -> tuple[int, ChunkReviewPartial | Exception]:
             """Surface SIGTERM as a persistable timeout outcome."""
             await interrupt.wait()
             return -1, sigterm_timeout_error()
 
         stop_task = asyncio.ensure_future(_stop_as_timeout())
-    tasks: list[asyncio.Future[tuple[int, _ChunkReviewPartial | Exception]]] = [
+    tasks: list[asyncio.Future[tuple[int, ChunkReviewPartial | Exception]]] = [
         *review_tasks,
     ]
     if stop_task is not None:
@@ -742,7 +729,7 @@ async def _review_chunk_with_progress(
     next_generated_checklist_id: int = 1,
     diff_budget: int = 0,
     timings: ReviewTimingRecorder | None = None,
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Review one chunk with progress tracking and error wrapping.
 
     A cost-cap stop is re-raised raw; any other failure is wrapped as a
@@ -1069,8 +1056,8 @@ async def run_review_async(
     partial = False
     durable_session_started = False
     stopped_reason = ""
-    collected: list[_ChunkReviewPartial] = []
-    partials: list[_ChunkReviewPartial] = []
+    collected: list[ChunkReviewPartial] = []
+    partials: list[ChunkReviewPartial] = []
     custom_results: list[CustomAgentPassResult] = []
     custom_agents_failed: list[str] = []
     synthesis_pass: SynthesisPass | None = None
@@ -1094,7 +1081,7 @@ async def run_review_async(
         if chunks:
             part_seq = 0
 
-            def _checkpoint(done: list[_ChunkReviewPartial]) -> None:
+            def _checkpoint(done: list[ChunkReviewPartial]) -> None:
                 """Write an incremental coverage part after each finished chunk."""
                 nonlocal part_seq
                 next_seq = part_seq + 1
@@ -1160,7 +1147,7 @@ async def run_review_async(
         provider_seconds = time.monotonic() - provider_started
         timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)
         merge_started = time.monotonic()
-        merged, filtered_findings, total_findings = _finalize_partials(
+        merged, filtered_findings, total_findings = finalize_partials(
             partials=partials,
             policy=review_sensitivity,
         )
@@ -1236,7 +1223,7 @@ async def run_review_async(
         partials = list(collected)
         partial = True
         merge_started = time.monotonic()
-        merged, filtered_findings, total_findings = _finalize_partials(
+        merged, filtered_findings, total_findings = finalize_partials(
             partials=partials,
             policy=review_sensitivity,
         )
@@ -1503,7 +1490,7 @@ async def run_review_async(
 def _chunk_summaries(
     *,
     chunks: list[ReviewChunk],
-    partials: list[_ChunkReviewPartial],
+    partials: list[ChunkReviewPartial],
 ) -> tuple[ChunkSummary, ...]:
     """Build the per-chunk digest the cross-chunk synthesis pass reads.
 
@@ -1555,230 +1542,6 @@ def _custom_agents_only_summary(
     )
 
 
-def _finalize_partials(
-    *,
-    partials: list[_ChunkReviewPartial],
-    policy: ReviewSensitivityPolicy,
-) -> tuple[ReviewResult, tuple[ReviewFinding, ...], int]:
-    """Merge partials and apply the sensitivity policy.
-
-    Args:
-        partials: Completed chunk partials to merge.
-        policy: Sensitivity policy used to filter findings.
-
-    Returns:
-        Tuple of ``(merged_result, filtered_findings, finding_count)``.
-    """
-    merged = merge_review_results(partials=partials)
-    filtered = filter_findings_by_policy(findings=merged.findings, policy=policy)
-    return merged, filtered, len(filtered)
-
-
-def parse_review_response(*, content: str) -> dict[str, Any]:
-    """Parse and validate AI review JSON response.
-
-    Args:
-        content: Raw or fenced JSON model response.
-
-    Returns:
-        Parsed review response dictionary.
-
-    Raises:
-        ValueError: When JSON is invalid or missing required keys.
-    """
-    try:
-        return parse_review_response_payload(content=content)
-    except ValueError:
-        raise
-
-
-def merge_findings(
-    *,
-    findings_groups: list[tuple[ReviewFinding, ...]],
-) -> tuple[ReviewFinding, ...]:
-    """Merge findings from multiple chunks, deduplicating by location.
-
-    Args:
-        findings_groups: Finding tuples from each chunk/pass.
-
-    Returns:
-        Deduplicated findings preserving first-seen order.
-    """
-    merged: list[ReviewFinding] = []
-    seen: set[tuple[str, int, str]] = set()
-    for group in findings_groups:
-        for finding in group:
-            key = (finding.file, finding.line, finding.title)
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(finding)
-    return tuple(merged)
-
-
-def merge_checklist_answers(
-    *,
-    checklist_groups: list[tuple[ChecklistAnswer, ...]],
-) -> tuple[ChecklistAnswer, ...]:
-    """Merge checklist answers with yes winning over no.
-
-    Args:
-        checklist_groups: Checklist answer tuples from each chunk/pass.
-
-    Returns:
-        Merged checklist answers keyed by checklist id.
-    """
-    by_id: dict[int, ChecklistAnswer] = {}
-    for group in checklist_groups:
-        for answer in group:
-            existing = by_id.get(answer.id)
-            if existing is None:
-                by_id[answer.id] = answer
-                continue
-            by_id[answer.id] = _pick_preferred_checklist_answer(
-                candidate=answer,
-                existing=existing,
-            )
-    return tuple(sorted(by_id.values(), key=lambda item: item.id))
-
-
-def merge_review_results(
-    *,
-    partials: list[_ChunkReviewPartial],
-) -> ReviewResult:
-    """Merge partial chunk results into a single review result shell.
-
-    Args:
-        partials: Partial results from each chunk.
-
-    Returns:
-        Review result without metadata (caller attaches metadata).
-    """
-    if not partials:
-        return ReviewResult(
-            metadata=_placeholder_metadata(),
-            summary="No review output.",
-            checklist=(),
-            findings=(),
-        )
-
-    summaries = [partial.summary for partial in partials if partial.summary.strip()]
-    summary = summaries[0] if len(summaries) == 1 else "\n\n".join(summaries)
-
-    return ReviewResult(
-        metadata=_placeholder_metadata(),
-        summary=summary,
-        checklist=merge_checklist_answers(
-            checklist_groups=[partial.checklist for partial in partials],
-        ),
-        findings=merge_findings(
-            findings_groups=[partial.findings for partial in partials],
-        ),
-        pr_summary=merge_pr_summaries(partials=partials),
-        verdict_reasoning=merge_verdict_reasoning(partials=partials),
-        file_assessments=merge_file_assessments(partials=partials),
-    )
-
-
-def merge_pr_summaries(
-    *,
-    partials: list[_ChunkReviewPartial],
-) -> ReviewSummary | None:
-    """Merge structured PR summaries across chunks.
-
-    Each chunk sees only part of the diff, so the headlines are joined and the
-    walkthrough bullets concatenated in chunk order, deduplicated by text and
-    capped at :data:`MAX_WALKTHROUGH_BULLETS` so a many-chunk review does not
-    produce an unreadable wall of bullets.
-
-    Args:
-        partials: Partial results from each chunk.
-
-    Returns:
-        The merged summary, or ``None`` when no chunk returned one.
-    """
-    summaries = [
-        partial.pr_summary for partial in partials if partial.pr_summary is not None
-    ]
-    if not summaries:
-        return None
-
-    headlines = [summary.headline for summary in summaries if summary.headline]
-    bullets: list[SummaryBullet] = []
-    seen: set[str] = set()
-    for summary in summaries:
-        for bullet in summary.walkthrough:
-            if bullet.text in seen:
-                continue
-            seen.add(bullet.text)
-            bullets.append(bullet)
-
-    headline = " ".join(headlines)
-    if not headline.strip():
-        # Every chunk's summary was headline-less (only walkthrough bullets),
-        # so there is nothing to join. Returning a ReviewSummary with a blank
-        # headline here would let renderers print an empty heading line; None
-        # matches what merge_pr_summaries returns when no chunk had a summary
-        # at all.
-        return None
-
-    return ReviewSummary(
-        headline=headline,
-        walkthrough=tuple(bullets[:MAX_WALKTHROUGH_BULLETS]),
-    )
-
-
-def merge_verdict_reasoning(
-    *,
-    partials: list[_ChunkReviewPartial],
-) -> VerdictReasoning | None:
-    """Merge verdict reasoning across chunks.
-
-    The reasoning must stay at most two short paragraphs, so the first chunk
-    that produced reasoning wins its prose; only the files-needing-attention
-    pointers are unioned across chunks, since a reviewer needs all of them.
-
-    Args:
-        partials: Partial results from each chunk.
-
-    Returns:
-        The merged reasoning, or ``None`` when no chunk returned any.
-    """
-    reasonings = [
-        partial.verdict_reasoning
-        for partial in partials
-        if partial.verdict_reasoning is not None
-    ]
-    if not reasonings:
-        return None
-
-    files: list[str] = []
-    for reasoning in reasonings:
-        files.extend(
-            path for path in reasoning.files_needing_attention if path not in files
-        )
-    return replace(reasonings[0], files_needing_attention=tuple(files))
-
-
-def merge_file_assessments(
-    *,
-    partials: list[_ChunkReviewPartial],
-) -> tuple[FileAssessment, ...]:
-    """Merge per-file assessments across chunks.
-
-    Args:
-        partials: Partial results from each chunk.
-
-    Returns:
-        One assessment per file, first chunk to assess a file winning.
-    """
-    by_path: dict[str, FileAssessment] = {}
-    for partial in partials:
-        for assessment in partial.file_assessments:
-            by_path.setdefault(assessment.file, assessment)
-    return tuple(by_path.values())
-
-
 async def _review_chunk(
     *,
     chunk: ReviewChunk,
@@ -1799,7 +1562,7 @@ async def _review_chunk(
     strictness_section: str = "",
     diff_budget: int = 0,
     timings: ReviewTimingRecorder | None = None,
-) -> tuple[_ChunkReviewPartial, int]:
+) -> tuple[ChunkReviewPartial, int]:
     """Run depth-controlled review for a single chunk.
 
     Args:
@@ -1834,7 +1597,7 @@ async def _review_chunk(
         changed_files=chunk.files,
     )
     extra_checklist = ""
-    extra_checklist_usage: _ChunkReviewPartial | None = None
+    extra_checklist_usage: ChunkReviewPartial | None = None
     if depth >= 2:
         tracker.on_step(chunk_index=chunk_index, step="generating questions")
         with recorder.phase(name=ReviewPhase.GENERATED_QUESTIONS):
@@ -2213,7 +1976,7 @@ async def _generate_extra_checklist(
     next_generated_checklist_id: int,
     repo_root: str = "",
     use_one_shot: bool = False,
-) -> tuple[str, int, _ChunkReviewPartial]:
+) -> tuple[str, int, ChunkReviewPartial]:
     """Generate depth-2 domain-specific checklist questions.
 
     Args:
@@ -2252,7 +2015,7 @@ async def _generate_extra_checklist(
         repo_root=repo_root or None,
         use_one_shot=use_one_shot,
     )
-    usage = _ChunkReviewPartial(
+    usage = ChunkReviewPartial(
         summary="",
         checklist=(),
         findings=(),
@@ -2305,7 +2068,7 @@ async def _run_adversarial_pass(
     budget: CostBudget,
     repo_root: str = "",
     use_one_shot: bool = False,
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Run depth-3 adversarial sweep for missed findings.
 
     Args:
@@ -2350,7 +2113,7 @@ async def _run_adversarial_pass(
         payload = json.loads(strip_json_fences(content=response.content))
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse adversarial sweep response")
-        return _ChunkReviewPartial(
+        return ChunkReviewPartial(
             summary="",
             checklist=(),
             findings=(),
@@ -2361,7 +2124,7 @@ async def _run_adversarial_pass(
 
     if not isinstance(payload, dict):
         logger.warning("Adversarial sweep payload was not an object")
-        return _ChunkReviewPartial(
+        return ChunkReviewPartial(
             summary="",
             checklist=(),
             findings=(),
@@ -2372,7 +2135,7 @@ async def _run_adversarial_pass(
 
     findings_raw = payload.get("findings", [])
     findings = parse_findings(raw_findings=findings_raw)
-    return _ChunkReviewPartial(
+    return ChunkReviewPartial(
         summary="",
         checklist=(),
         findings=findings,
@@ -2386,7 +2149,7 @@ def _payload_to_partial(
     *,
     response: AIResponse,
     payload: dict[str, Any],
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Convert parsed JSON payload to a chunk partial result.
 
     Accepts both the extended ``summary`` object (#1907) and the plain summary
@@ -2410,7 +2173,7 @@ def _payload_to_partial(
     findings = parse_findings(raw_findings=payload.get("findings", []))
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
 
-    return _ChunkReviewPartial(
+    return ChunkReviewPartial(
         summary=summary,
         checklist=checklist,
         findings=findings,
@@ -2448,7 +2211,7 @@ def _parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
         answers.append(
             ChecklistAnswer(
                 id=answer_id,
-                answer=_normalize_checklist_answer_value(answer=answer),
+                answer=normalize_checklist_answer_value(answer=answer),
                 evidence=evidence.strip(),
             ),
         )
@@ -2460,48 +2223,6 @@ def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
     if not checklist_items:
         return 0
     return int(max(item.id for item in checklist_items))
-
-
-def _normalize_checklist_answer_value(*, answer: str) -> str:
-    """Normalize checklist answers to the yes/no contract."""
-    normalized = answer.strip().lower()
-    if normalized not in {"yes", "no"}:
-        return "no"
-    return normalized
-
-
-def _checklist_answer_strength(*, answer: ChecklistAnswer) -> int:
-    """Score checklist answers for merge precedence.
-
-    Per epic #991's v3.1 contract, every ``yes`` must map to a finding, so a
-    ``yes`` from any chunk strictly wins over a ``no`` regardless of evidence.
-    Evidence only breaks ties between two answers of the same polarity. This
-    prevents an evidence-backed ``no`` from one chunk silently overturning a
-    bare ``yes`` from another and dropping the finding non-deterministically.
-
-    Args:
-        answer: Checklist answer to score.
-
-    Returns:
-        Strength score: yes-with-evidence 4, yes 3, no-with-evidence 2, no 1.
-    """
-    has_evidence = bool(answer.evidence.strip())
-    if answer.answer == "yes":
-        return 4 if has_evidence else 3
-    return 2 if has_evidence else 1
-
-
-def _pick_preferred_checklist_answer(
-    *,
-    candidate: ChecklistAnswer,
-    existing: ChecklistAnswer,
-) -> ChecklistAnswer:
-    """Pick the stronger checklist answer when merging chunk results."""
-    candidate_strength = _checklist_answer_strength(answer=candidate)
-    existing_strength = _checklist_answer_strength(answer=existing)
-    if candidate_strength >= existing_strength:
-        return candidate
-    return existing
 
 
 def _agent_scope_skips(
@@ -2613,19 +2334,4 @@ def _empty_review_result(
         checklist=(),
         findings=(),
         coverage=CoverageCounts(),
-    )
-
-
-def _placeholder_metadata() -> ReviewMetadata:
-    """Return placeholder metadata for merge-only results."""
-    return ReviewMetadata(
-        model="",
-        provider="",
-        context_window=0,
-        depth=0,
-        chunks_total=0,
-        chunks_current=0,
-        files_reviewed=0,
-        files_total=0,
-        checklist_items=0,
     )

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
-from lintro.ai.review.models.review_finding import ReviewFinding, Severity
-from lintro.ai.review.orchestrator import (
-    _parse_checklist,
+from lintro.ai.review.merge import (
     merge_checklist_answers,
     merge_findings,
 )
+from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.orchestrator import _parse_checklist
 
 
 def test_merge_findings_deduplicates_by_file_line_title() -> None:
