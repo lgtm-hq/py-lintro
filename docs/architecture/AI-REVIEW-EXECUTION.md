@@ -62,6 +62,17 @@ runner/session, planning/chunks, prompts/passes, response pipeline, merge/filter
 metadata modules without changing prompts, findings, severity, or exit semantics. Every
 provider call continues through `call_ai`; prompt redaction remains mandatory.
 
+### Session options (`lintro/ai/review/session.py`, #2301)
+
+The first slice of Phase 4 ends the keyword wall. `run_review` still takes the run's
+settings as keywords — that is the public facade every adapter calls — but it now packs
+them into a frozen `ReviewSessionOptions` and hands that single object down;
+`run_review_async` takes `(context, options=...)`. New settings are added as a field on
+the options object rather than as another keyword threaded through each layer. The
+graceful-stop predicates (`is_cost_cap_stop`, `cost_cap_reason`, `is_timeout_stop`,
+`timeout_reason`) and the `aborted_before_completion` wrapper live in the same module,
+since deciding whether a run stopped gracefully is session-level, not chunk-level.
+
 ## Exit and error contracts
 
 - Exit `0` — successful review, no P1 findings.

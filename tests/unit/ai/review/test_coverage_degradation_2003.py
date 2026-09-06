@@ -53,6 +53,7 @@ from lintro.ai.review.orchestrator import (
     run_review_async,
 )
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.mcp.toolkits.review import _run_metadata
 
 _CAP = CoverageDegradation(
@@ -649,16 +650,18 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
     ):
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.CLI,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.CLI,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
         )
 
     assert_that(result.metadata.findings_coverage_complete).is_false()

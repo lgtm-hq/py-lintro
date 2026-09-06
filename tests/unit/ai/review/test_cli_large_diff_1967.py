@@ -47,6 +47,7 @@ from lintro.ai.review.orchestrator import (
     resolve_review_chunks,
     run_review_async,
 )
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
 from tests.unit.ai.conftest import patch_cli_exec
 from tests.unit.ai.providers.test_cli_capability_guard import _FakeTransport
@@ -381,12 +382,14 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
     with pytest.raises(ReviewContextError) as exc_info:
         await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+            ),
         )
 
     assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.DIFF_TOO_LARGE)
@@ -445,12 +448,14 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
     ) as mock_call:
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+            ),
         )
 
     assert_that(result.metadata.chunks_total).is_greater_than(1)
