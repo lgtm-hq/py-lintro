@@ -37,6 +37,7 @@ from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.path_utils import find_file_upward
+from lintro.utils.plugin_tool_names import known_plugin_tool_names
 
 try:
     import yaml
@@ -968,9 +969,10 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
     Shared by the pyproject converter and the config validator so YAML
     ``tools:`` entries and TOML tool tables accept the same name set
     (``ToolName``, legacy aliases, and installed plugins). Plugin names come
-    from :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`, which
-    does not trigger a discovery pass. Execution and enforce key sets come
-    from the Pydantic models so the converter and validator cannot drift.
+    from :func:`~lintro.utils.plugin_tool_names.known_plugin_tool_names`, which
+    reads entry-point metadata and does not trigger a discovery pass. Execution
+    and enforce key sets come from the Pydantic models so the converter and
+    validator cannot drift.
 
     Returns:
         _PyprojectLintroCatalog: Known tool names (including aliases),
@@ -978,10 +980,9 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             execution/enforce field sets.
     """
     # Inline imports: ToolName is a static StrEnum that does not trigger
-    # the plugin registry. Discovery is imported here to avoid a circular
-    # dependency between config_loader and the tool subsystem.
+    # the plugin registry; `lintro.utils.config` is imported here to avoid a
+    # circular dependency between config_loader and the tool subsystem.
     from lintro.enums.tool_name import ToolName
-    from lintro.plugins.discovery import get_known_plugin_tool_names
     from lintro.utils.config import LEGACY_TOOL_SECTION_ALIASES
 
     known_tools = {t.value for t in ToolName} | {
@@ -1015,7 +1016,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
 
     # ToolName never sees entry-point-discovered tools, so config for an
     # externally installed plugin used to be dropped on the floor (#1757).
-    for plugin_name in get_known_plugin_tool_names():
+    for plugin_name in known_plugin_tool_names():
         variants = {
             plugin_name,
             plugin_name.replace("_", "-"),

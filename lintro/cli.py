@@ -2,20 +2,26 @@
 
 import codecs
 import contextlib
+import importlib
 import os
 import sys
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 import click
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
 from lintro import __version__
-from lintro.cli_utils.command_chainer import CommandChainer
 from lintro.utils.logger_setup import setup_cli_logging
+
+if TYPE_CHECKING:
+    from rich.table import Table
+
+# Configure loguru for CLI commands (help, version, etc.).
+# Only WARNING and above will show. DEBUG logs go to file when tool_executor
+# runs. This stays at import time: it must win over loguru's default handler
+# before any module that binds `logger` is imported, and it must bind the real
+# stderr rather than whichever stream is current when a command first runs.
+setup_cli_logging()
 
 
 def _is_utf8_encoding(encoding: str | None) -> bool:
@@ -65,35 +71,51 @@ def ensure_utf8_stdio() -> None:
     _reconfigure_stream_utf8(sys.stderr)
 
 
-# Configure loguru for CLI commands (help, version, etc.)
-# Only WARNING and above will show. DEBUG logs go to file when tool_executor runs.
-setup_cli_logging()
+# Subcommand modules are imported on first use rather than at import time.
+# Eagerly importing all sixteen pulls the execution pipeline, the plugin
+# registry, pydantic and `lintro.ai` into every `lintro --version` (#1305), so
+# the group below resolves a name to its module only when that command is
+# actually requested.
+#
+# Maps the canonical command name to the ``(module, attribute)`` pair holding
+# its :class:`click.Command`.
+_COMMAND_MODULES: dict[str, tuple[str, str]] = {
+    "badge": ("lintro.cli_utils.commands.badge", "badge_command"),
+    "check": ("lintro.cli_utils.commands.check", "check_command"),
+    "completions": ("lintro.cli_utils.commands.completions", "completions_command"),
+    "config": ("lintro.cli_utils.commands.config", "config_command"),
+    "deps": ("lintro.cli_utils.commands.deps", "deps_command"),
+    "doctor": ("lintro.cli_utils.commands.doctor", "doctor_command"),
+    "format": ("lintro.cli_utils.commands.format", "format_command"),
+    "init": ("lintro.cli_utils.commands.init", "init_command"),
+    "install": ("lintro.cli_utils.commands.install", "install_command"),
+    "licenses": ("lintro.cli_utils.commands.licenses", "licenses_command"),
+    "list-tools": ("lintro.cli_utils.commands.list_tools", "list_tools_command"),
+    "mcp": ("lintro.cli_utils.commands.mcp", "mcp_command"),
+    "review": ("lintro.cli_utils.commands.review", "review_command"),
+    "test": ("lintro.cli_utils.commands.test", "test_command"),
+    "versions": ("lintro.cli_utils.commands.versions", "versions_command"),
+    "watch": ("lintro.cli_utils.commands.watch", "watch_command"),
+}
 
-# E402: Module level imports below setup_cli_logging() are intentional.
-# Logging must be configured BEFORE importing modules that use loguru,
-# otherwise log messages during import get silently dropped or misconfigured.
-from lintro.cli_utils.commands.badge import badge_command  # noqa: E402
-from lintro.cli_utils.commands.check import check_command  # noqa: E402
-from lintro.cli_utils.commands.completions import completions_command  # noqa: E402
-from lintro.cli_utils.commands.config import config_command  # noqa: E402
-from lintro.cli_utils.commands.deps import deps_command  # noqa: E402
-from lintro.cli_utils.commands.doctor import doctor_command  # noqa: E402
-from lintro.cli_utils.commands.format import format_command  # noqa: E402
-from lintro.cli_utils.commands.init import init_command  # noqa: E402
-from lintro.cli_utils.commands.install import install_command  # noqa: E402
-from lintro.cli_utils.commands.licenses import licenses_command  # noqa: E402
-from lintro.cli_utils.commands.list_tools import list_tools_command  # noqa: E402
-from lintro.cli_utils.commands.mcp import mcp_command  # noqa: E402
-from lintro.cli_utils.commands.review import review_command  # noqa: E402
-from lintro.cli_utils.commands.test import test_command  # noqa: E402
-from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
-from lintro.cli_utils.commands.watch import watch_command  # noqa: E402
-from lintro.config.config_loader import (  # noqa: E402
-    LINTRO_CONFIG_FILENAMES,
-    clear_config_cache,
-)
-from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
-from lintro.utils.config import clear_pyproject_cache  # noqa: E402
+# Alias name -> canonical command name.
+_COMMAND_ALIASES: dict[str, str] = {
+    "chk": "check",
+    "lint": "check",
+    "comp": "completions",
+    "cfg": "config",
+    "fmt": "format",
+    "fix": "format",
+    "tst": "test",
+    "ls": "list-tools",
+    "tools": "list-tools",
+    "ins": "install",
+    "lic": "licenses",
+    "rev": "review",
+    "ver": "versions",
+    "version": "versions",
+    "w": "watch",
+}
 
 # Ignore-file name used by upward lookup. Kept next to the shared YAML
 # filenames so fingerprinting and ``find_lintro_ignore`` cannot drift.
@@ -139,6 +161,8 @@ def _compute_config_fingerprint() -> ConfigFingerprint:
     Returns:
         ConfigFingerprint: A hashable, comparable fingerprint of the inputs.
     """
+    from lintro.config.config_loader import LINTRO_CONFIG_FILENAMES
+
     cwd = Path.cwd().resolve()
     signatures: list[ConfigSignature] = []
 
@@ -179,6 +203,10 @@ def _maybe_clear_caches() -> None:
     ``LINTRO_NO_CACHE`` escape hatch is enabled. Otherwise the caches are reused
     to avoid redundant filesystem probing and re-parsing.
     """
+    from lintro.config.config_loader import clear_config_cache
+    from lintro.tools.core.runtime_discovery import clear_discovery_cache
+    from lintro.utils.config import clear_pyproject_cache
+
     global _last_config_fingerprint
 
     fingerprint = _compute_config_fingerprint()
@@ -195,7 +223,128 @@ class LintroGroup(click.Group):
     This group prints command aliases alongside their canonical names to make
     the CLI help output more discoverable. It also supports command chaining
     with comma-separated commands (e.g., lintro fmt , chk , tst).
+
+    Subcommands resolve lazily: :meth:`get_command` imports a command's module
+    the first time that command (or one of its aliases) is requested, so
+    ``lintro --version`` never pays for the execution pipeline (#1305).
     """
+
+    def get_command(
+        self,
+        ctx: click.Context,
+        cmd_name: str,
+    ) -> click.Command | None:
+        """Resolve a command name, importing its module on first use.
+
+        Args:
+            ctx: click.Context: The Click context.
+            cmd_name: str: The command name or alias to resolve.
+
+        Returns:
+            click.Command | None: The resolved command, or ``None`` when the
+            name is neither a canonical command nor a known alias.
+        """
+        existing = super().get_command(ctx, cmd_name)
+        if existing is not None:
+            return existing
+
+        canonical = _COMMAND_ALIASES.get(cmd_name, cmd_name)
+        target = _COMMAND_MODULES.get(canonical)
+        if target is None:
+            return None
+
+        module_path, attribute = target
+        command = cast(
+            click.Command,
+            # Module paths come from the static table above, never from
+            # user input.
+            getattr(
+                importlib.import_module(module_path),  # nosemgrep: non-literal-import
+                attribute,
+            ),
+        )
+        cast(Any, command)._canonical_name = canonical
+        # Cache under the canonical name and the requested alias so the next
+        # lookup (and ``self.commands``) skips the import entirely.
+        self.add_command(command, name=canonical)
+        if cmd_name != canonical:
+            self.add_command(command, name=cmd_name)
+        return command
+
+    def list_commands(
+        self,
+        ctx: click.Context,
+    ) -> list[str]:
+        """List every command name, including aliases, without importing them.
+
+        Args:
+            ctx: click.Context: The Click context.
+
+        Returns:
+            list[str]: Sorted canonical names, aliases, and any command added
+            at runtime (for example by a test or a plugin).
+        """
+        names = set(_COMMAND_MODULES) | set(_COMMAND_ALIASES) | set(self.commands)
+        return sorted(names)
+
+    def load_all_commands(
+        self,
+        ctx: click.Context | None = None,
+    ) -> None:
+        """Import and register every command, canonical names and aliases.
+
+        Needed by consumers that read ``Group.commands`` directly instead of
+        going through :meth:`get_command` — the man-page generator, for one.
+
+        Args:
+            ctx: click.Context | None: Context to resolve against; a throwaway
+                context is used when omitted.
+        """
+        context = ctx if ctx is not None else click.Context(self)
+        for name in self.list_commands(context):
+            self.get_command(context, name)
+
+    def _build_command_table(
+        self,
+        ctx: click.Context,
+    ) -> Table:
+        """Build the help table listing every command with its aliases.
+
+        Resolving the names materializes every subcommand, which is why help is
+        the one cold path that still pays for the full import (#1305).
+
+        Args:
+            ctx: click.Context: The Click context.
+
+        Returns:
+            Table: A Rich table of canonical names, aliases, and short help.
+        """
+        from rich.table import Table
+
+        canonical_map: dict[str, tuple[click.Command, list[str]]] = {}
+        for name in self.list_commands(ctx):
+            cmd = self.get_command(ctx, name)
+            if cmd is None:
+                continue
+            cmd_any = cast(Any, cmd)
+            if not hasattr(cmd_any, "_canonical_name"):
+                cmd_any._canonical_name = name
+            canonical = cast(str, getattr(cmd_any, "_canonical_name", name))
+            if canonical not in canonical_map:
+                canonical_map[canonical] = (cmd, [])
+            if name != canonical:
+                canonical_map[canonical][1].append(name)
+
+        table = Table(title="Commands", show_header=True, header_style="bold cyan")
+        table.add_column("Command", style="cyan", no_wrap=True)
+        table.add_column("Alias", style="yellow", no_wrap=True)
+        table.add_column("Description", style="white")
+
+        for canonical, (cmd, aliases) in sorted(canonical_map.items()):
+            alias_str = ", ".join(aliases) if aliases else "-"
+            table.add_row(canonical, alias_str, cmd.get_short_help_str())
+
+        return table
 
     def format_help(
         self,
@@ -208,6 +357,10 @@ class LintroGroup(click.Group):
             ctx: click.Context: The Click context.
             formatter: click.HelpFormatter: The help formatter (unused, we use Rich).
         """
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+
         console = Console()
 
         # Header panel
@@ -230,32 +383,7 @@ class LintroGroup(click.Group):
         console.print("  lintro COMMAND1 , COMMAND2 , ...  [dim](chain commands)[/dim]")
         console.print()
 
-        # Commands table
-        commands = self.list_commands(ctx)
-        canonical_map: dict[str, tuple[click.Command, list[str]]] = {}
-        for name in commands:
-            cmd = self.get_command(ctx, name)
-            if cmd is None:
-                continue
-            cmd_any = cast(Any, cmd)
-            if not hasattr(cmd_any, "_canonical_name"):
-                cmd_any._canonical_name = name
-            canonical = cast(str, getattr(cmd_any, "_canonical_name", name))
-            if canonical not in canonical_map:
-                canonical_map[canonical] = (cmd, [])
-            if name != canonical:
-                canonical_map[canonical][1].append(name)
-
-        table = Table(title="Commands", show_header=True, header_style="bold cyan")
-        table.add_column("Command", style="cyan", no_wrap=True)
-        table.add_column("Alias", style="yellow", no_wrap=True)
-        table.add_column("Description", style="white")
-
-        for canonical, (cmd, aliases) in sorted(canonical_map.items()):
-            alias_str = ", ".join(aliases) if aliases else "-"
-            table.add_row(canonical, alias_str, cmd.get_short_help_str())
-
-        console.print(table)
+        console.print(self._build_command_table(ctx))
         console.print()
 
         # Options
@@ -306,6 +434,8 @@ class LintroGroup(click.Group):
         Raises:
             SystemExit: If a command exits with a non-zero exit code.
         """
+        from lintro.cli_utils.command_chainer import CommandChainer
+
         # Clear the discovery/pyproject caches only when the config inputs
         # changed since the last in-process invocation (or when forced via
         # LINTRO_NO_CACHE). This keeps single-shot CLI semantics intact while
@@ -343,59 +473,6 @@ class LintroGroup(click.Group):
 def cli() -> None:
     """Lintro: Unified CLI for code formatting, linting, and quality assurance."""
     pass
-
-
-# Register canonical commands and set _canonical_name for help
-cast(Any, badge_command)._canonical_name = "badge"
-cast(Any, check_command)._canonical_name = "check"
-cast(Any, completions_command)._canonical_name = "completions"
-cast(Any, config_command)._canonical_name = "config"
-cast(Any, deps_command)._canonical_name = "deps"
-cast(Any, doctor_command)._canonical_name = "doctor"
-cast(Any, format_command)._canonical_name = "format"
-cast(Any, init_command)._canonical_name = "init"
-cast(Any, install_command)._canonical_name = "install"
-cast(Any, licenses_command)._canonical_name = "licenses"
-cast(Any, test_command)._canonical_name = "test"
-cast(Any, list_tools_command)._canonical_name = "list-tools"
-cast(Any, mcp_command)._canonical_name = "mcp"
-cast(Any, review_command)._canonical_name = "review"
-cast(Any, versions_command)._canonical_name = "versions"
-cast(Any, watch_command)._canonical_name = "watch"
-
-cli.add_command(badge_command, name="badge")
-cli.add_command(check_command, name="check")
-cli.add_command(completions_command, name="completions")
-cli.add_command(config_command, name="config")
-cli.add_command(deps_command, name="deps")
-cli.add_command(doctor_command, name="doctor")
-cli.add_command(format_command, name="format")
-cli.add_command(init_command, name="init")
-cli.add_command(install_command, name="install")
-cli.add_command(licenses_command, name="licenses")
-cli.add_command(test_command, name="test")
-cli.add_command(list_tools_command, name="list-tools")
-cli.add_command(mcp_command, name="mcp")
-cli.add_command(review_command, name="review")
-cli.add_command(versions_command, name="versions")
-cli.add_command(watch_command, name="watch")
-
-# Register aliases
-cli.add_command(check_command, name="chk")
-cli.add_command(check_command, name="lint")
-cli.add_command(completions_command, name="comp")
-cli.add_command(config_command, name="cfg")
-cli.add_command(format_command, name="fmt")
-cli.add_command(format_command, name="fix")
-cli.add_command(test_command, name="tst")
-cli.add_command(list_tools_command, name="ls")
-cli.add_command(list_tools_command, name="tools")
-cli.add_command(install_command, name="ins")
-cli.add_command(licenses_command, name="lic")
-cli.add_command(review_command, name="rev")
-cli.add_command(versions_command, name="ver")
-cli.add_command(versions_command, name="version")
-cli.add_command(watch_command, name="w")
 
 
 def main() -> None:

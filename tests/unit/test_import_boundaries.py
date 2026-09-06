@@ -27,9 +27,10 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 
-# Two-way cycles on `main` after #2290 removed `enums -> models`. Lower this
-# only together with the refactor that removes a cycle.
-EXPECTED_CYCLES = 11
+# Two-way cycles on `main` after #1305 removed `config -> plugins` and the
+# eager `cli_utils -> config` edge. Lower this only together with the refactor
+# that removes a cycle.
+EXPECTED_CYCLES = 9
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MODULE_NAME = "lintro_import_matrix"

@@ -97,7 +97,7 @@ def known_tool_names() -> frozenset[str]:
     pyproject tool tables accept the same names: ``ToolName`` (underscore
     and hyphen forms), legacy aliases such as ``markdownlint-cli2``, and
     installed plugin names from
-    :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`.
+    :func:`~lintro.utils.plugin_tool_names.known_plugin_tool_names`.
 
     Returns:
         frozenset[str]: Recognized tool identifiers.

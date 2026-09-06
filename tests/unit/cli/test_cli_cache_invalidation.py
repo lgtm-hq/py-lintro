@@ -54,8 +54,16 @@ def _spy_clear_functions(monkeypatch: MonkeyPatch) -> dict[str, list[int]]:
     def fake_clear_pyproject() -> None:
         calls["pyproject"][0] += 1
 
-    monkeypatch.setattr(cli_module, "clear_discovery_cache", fake_clear_discovery)
-    monkeypatch.setattr(cli_module, "clear_pyproject_cache", fake_clear_pyproject)
+    # The CLI imports these on demand (#1305), so patch them at the source
+    # modules rather than as `lintro.cli` attributes.
+    monkeypatch.setattr(
+        "lintro.tools.core.runtime_discovery.clear_discovery_cache",
+        fake_clear_discovery,
+    )
+    monkeypatch.setattr(
+        "lintro.utils.config.clear_pyproject_cache",
+        fake_clear_pyproject,
+    )
     return calls
 
 

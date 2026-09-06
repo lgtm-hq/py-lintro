@@ -914,7 +914,7 @@ def test_plugin_tool_name_is_not_unknown(
         monkeypatch: Pytest monkeypatch fixture.
     """
     monkeypatch.setattr(
-        "lintro.plugins.discovery.get_known_plugin_tool_names",
+        "lintro.config.config_loader.known_plugin_tool_names",
         lambda: frozenset({"acme_lint"}),
     )
     path = write_config(
@@ -941,7 +941,7 @@ def test_known_tool_names_includes_plugin_and_alias(
         monkeypatch: Pytest monkeypatch fixture.
     """
     monkeypatch.setattr(
-        "lintro.plugins.discovery.get_known_plugin_tool_names",
+        "lintro.config.config_loader.known_plugin_tool_names",
         lambda: frozenset({"acme_lint"}),
     )
 

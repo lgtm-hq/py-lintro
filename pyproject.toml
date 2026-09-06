@@ -686,8 +686,6 @@ layers = [
 ]
 unmatched_ignore_imports_alerting = "error"
 ignore_imports = [
-  # 1 edge owned by #1305
-  "lintro.config.config_loader -> lintro.plugins.discovery", # owned by #1305
   # 9 edges owned by #1972
   "lintro.cli_utils.commands.badge -> lintro.api.core",      # owned by #1972
   "lintro.cli_utils.commands.check -> lintro.api.core",      # owned by #1972
