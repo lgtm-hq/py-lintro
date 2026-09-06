@@ -28,11 +28,11 @@ _SHIELDS_STYLES: tuple[str, ...] = (
     "social",
 )
 
-# shields.io colour tokens. A clean run is bright green, warnings and info
-# findings are yellow, and any error is red — the same three-way split the old
-# score tiers used, now driven by what was actually found.
+# shields.io colour tokens. A clean run is bright green, any error is red, and
+# anything else outstanding — warnings, info, or both — is yellow. Same
+# three-way split the old score tiers used, now driven by what was found.
 COLOR_CLEAN: str = "brightgreen"
-COLOR_WARNINGS: str = "yellow"
+COLOR_NON_ERROR: str = "yellow"
 COLOR_ERRORS: str = "red"
 
 
@@ -74,7 +74,7 @@ def badge_color(counts: SeverityCounts) -> str:
     if counts.errors:
         return COLOR_ERRORS
     if counts.total:
-        return COLOR_WARNINGS
+        return COLOR_NON_ERROR
     return COLOR_CLEAN
 
 
@@ -239,19 +239,28 @@ def _counts_override(
     "--errors",
     type=click.IntRange(min=0),
     default=None,
-    help="Use this error count instead of running a check.",
+    help=(
+        "Use this error count instead of running a check. Passing any count "
+        "option skips the live check; omitted severities count as zero."
+    ),
 )
 @click.option(
     "--warnings",
     type=click.IntRange(min=0),
     default=None,
-    help="Use this warning count instead of running a check.",
+    help=(
+        "Use this warning count instead of running a check. Passing any count "
+        "option skips the live check; omitted severities count as zero."
+    ),
 )
 @click.option(
     "--info",
     type=click.IntRange(min=0),
     default=None,
-    help="Use this info count instead of running a check.",
+    help=(
+        "Use this info count instead of running a check. Passing any count "
+        "option skips the live check; omitted severities count as zero."
+    ),
 )
 def badge_command(
     paths: tuple[str, ...],

@@ -8,15 +8,24 @@ it wrong independently before this module existed (issue #1739):
 * The severity baseline must not record — or compare against — a run that did
   not measure the same population as a normal ``check``.
 
-A tool that runs over an empty path still returns ``skipped=False`` and
-``success=True`` with a ``"No … files found to check"`` message, which is
-indistinguishable from a clean pass unless the output is inspected. That is
-what :func:`result_inspected_files` is for.
+A tool that finds nothing to do still returns ``skipped=False`` and
+``success=True``, so its message is the only signal that nothing was looked
+at. :func:`result_inspected_files` classifies those messages.
+
+Known limitation
+----------------
+The classification is a heuristic over the result's text, and one shape is
+genuinely ambiguous: an **empty** ``output`` means "clean pass" for some
+wrappers (``ruff``, ``pydoclint``, ``semgrep``, ``gitleaks`` all return no
+output when they inspected files and found nothing) and "nothing to do" for
+others (``bandit`` deliberately nulls its output for the no-files case, see
+``bandit.py``). Empty output is therefore treated as *inspected*, because the
+opposite would make every clean run look unmeasured. Issue #2369 removes the
+ambiguity by giving no-work results a structured signal instead of a message.
 """
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
@@ -32,25 +41,61 @@ __all__ = [
     "run_inspected_files",
 ]
 
-# Real wrapper messages vary: "No files found to check.", "No Astro files to
-# check.", "No .py/.pyi files found to check.".
-_NO_FILES_CHECKED_RE = re.compile(r"(?i)\bno\b.*\bfiles?\b.*\bto check\b")
+#: Endings of the "nothing to do" messages wrappers emit, checked after the
+#: trailing period is stripped. Deliberately specific: a message like "No
+#: issues found" or "No typos found." means the tool *did* inspect files and
+#: found nothing, so a bare "found" test would misclassify a clean run.
+_NO_WORK_ENDINGS: tuple[str, ...] = (
+    "to check",
+    "to fix",
+    "to format",
+    "to lint",
+    "files found",
+    "include paths",
+)
+
+#: Substring marking a wrapper that bailed out because a prerequisite manifest
+#: was absent, e.g. "No Cargo.lock found; skipping cargo-audit.".
+_SKIPPING_MARKER = "; skipping"
+
+
+def _reports_no_work(text: str) -> bool:
+    """Return whether a result's text says the tool found nothing to do.
+
+    Args:
+        text: The result's combined ``output`` and ``formatted_output``.
+
+    Returns:
+        bool: ``True`` when the message names an empty file/path set rather
+        than a clean inspection.
+    """
+    for line in text.splitlines():
+        stripped = line.strip().rstrip(".").lower()
+        if not stripped.startswith("no "):
+            continue
+        if _SKIPPING_MARKER in stripped or stripped.endswith(_NO_WORK_ENDINGS):
+            return True
+    return False
 
 
 def result_inspected_files(result: ToolResult) -> bool:
     """Return whether a tool result looks like it actually inspected files.
+
+    Both ``output`` and ``formatted_output`` are searched, because some
+    wrappers put the message in only one of them.
 
     Args:
         result: One tool's completed result.
 
     Returns:
         bool: ``True`` when the tool was not skipped, did not time out, and
-        did not report an empty file set.
+        did not report an empty file or path set. See the module docstring for
+        why empty output counts as inspected.
     """
     if result.skipped or result.timed_out:
         return False
     text = f"{result.output or ''}\n{result.formatted_output or ''}"
-    return _NO_FILES_CHECKED_RE.search(text) is None
+    return not _reports_no_work(text)
 
 
 def run_inspected_files(results: Sequence[ToolResult]) -> bool:

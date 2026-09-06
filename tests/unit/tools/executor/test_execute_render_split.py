@@ -727,12 +727,28 @@ def _unmeasured_artifacts() -> list[tuple[str, RunArtifact]]:
         tool_results=[ToolResult(name="ruff", success=True, issues_count=0)],
     )
     early = RunArtifact(action=Action.CHECK, early_exit=True)
+    timed_out = RunArtifact(
+        action=Action.CHECK,
+        tool_results=[
+            ToolResult(
+                name="semgrep",
+                success=False,
+                skipped=False,
+                timed_out=True,
+                output="timed out after 300s",
+            ),
+        ],
+    )
+    real = [ToolResult(name="ruff", success=True, output="All checks passed")]
     return [
         ("empty", RunArtifact(action=Action.CHECK)),
         ("all-skipped", skipped_only),
         ("no-files-matched", no_files),
+        ("all-timed-out", timed_out),
         ("dry-run-preview", dry_run),
         ("early-exit", early),
+        ("fmt", RunArtifact(action=Action.FIX, tool_results=list(real))),
+        ("test", RunArtifact(action=Action.TEST, tool_results=list(real))),
     ]
 
 
@@ -869,13 +885,20 @@ def test_render_run_json_artifact_carries_the_counts_and_delta(
         capsys: Pytest stdout capture fixture.
     """
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
-    ctx.lintro_config.execution.artifacts = ["json"]
     artifact = _artifact_fixture()
     artifact.severity_counts = SeverityCounts(warnings=5)
     artifact.previous_severity_counts = SeverityCounts(warnings=1)
 
-    render_run(artifact, ctx=ctx, output_format="json")
+    # ``get_config`` caches a process-wide config whose ExecutionConfig is
+    # mutable, so this must be restored or it leaks into every later test.
+    original_artifacts = list(ctx.lintro_config.execution.artifacts)
+    ctx.lintro_config.execution.artifacts = ["json"]
+    try:
+        render_run(artifact, ctx=ctx, output_format="json")
+    finally:
+        ctx.lintro_config.execution.artifacts = original_artifacts
     capsys.readouterr()
 
     written = Path(".lintro") / "artifacts" / "json" / "results.json"
@@ -886,6 +909,33 @@ def test_render_run_json_artifact_carries_the_counts_and_delta(
     assert_that(summary["severity_delta"]).is_equal_to(
         {"error": 0, "warning": 4, "info": 0, "total": 4},
     )
+
+
+def test_render_run_json_omits_the_delta_without_a_baseline(
+    tmp_path: Path,
+    fake_logger: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A first run publishes counts but no delta key at all.
+
+    An absent key is unambiguous; a zero delta would read as "nothing changed"
+    for a run that had nothing to compare against.
+
+    Args:
+        tmp_path: Temporary directory standing in for the run directory.
+        fake_logger: Console logger double.
+        capsys: Pytest stdout capture fixture.
+    """
+    ctx = _context(tmp_path=tmp_path, fake_logger=fake_logger, output_format="json")
+    artifact = _artifact_fixture()
+    artifact.severity_counts = SeverityCounts(errors=2)
+    artifact.previous_severity_counts = None
+
+    render_run(artifact, ctx=ctx, output_format="json")
+
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert_that(summary).contains_key("severity_counts")
+    assert_that(summary).does_not_contain_key("severity_delta")
 
 
 def test_render_run_writes_the_run_reports(

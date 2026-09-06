@@ -321,7 +321,9 @@ In `--output-format json` the tallies appear under `summary`, alongside `total_i
 `total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
 object is **gone** — this is a breaking change for anything that read it.
 `severity_delta` appears only when a comparable baseline exists. `--output` files and
-configured JSON artifacts carry the same keys as the stdout document:
+configured JSON artifacts carry the same two severity keys; the rest of their `summary`
+object differs from the stdout document by design (it adds `timestamp` and `tools_run`,
+and omits `total_remaining`):
 
 ```json
 {

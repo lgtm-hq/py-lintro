@@ -175,3 +175,96 @@ def test_baseline_is_not_eligible_for_an_unmeasured_run(
             early_exit=early_exit,
         ),
     ).is_false()
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "No paths to check.",
+        "No Cargo.lock found; skipping cargo-audit.",
+        "No go.mod found; skipping golangci-lint.",
+        "No requirements or project files found; skipping pip-audit.",
+        "No import-linter configuration found; skipping.",
+        "No Python files under the configured pylint include paths.",
+        "No .proto files to format.",
+        "No Go files found to fix.",
+        "No .py/.pyi files found",
+    ],
+    ids=[
+        "osv-scanner-paths",
+        "cargo-audit",
+        "golangci-lint",
+        "pip-audit",
+        "import-linter",
+        "pylint-include",
+        "to-format",
+        "to-fix",
+        "files-found",
+    ],
+)
+def test_result_inspected_files_rejects_every_real_no_work_message(
+    output: str,
+) -> None:
+    """Every "nothing to do" message a wrapper actually emits is recognised.
+
+    These are literals taken from `lintro/tools/definitions/**`; the earlier
+    regex matched only the "No … files … to check" family and let the rest
+    through as if the tool had inspected something.
+
+    Args:
+        output: A real no-work message from a wrapped tool.
+    """
+    result = ToolResult(name="tool", success=True, skipped=False, output=output)
+
+    assert_that(result_inspected_files(result)).is_false()
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "No issues found",
+        "No typos found.",
+        "No fixes needed.",
+        "No fixes applied.",
+        "No conflicting settings between lintro and native configs",
+    ],
+    ids=["issues", "typos", "fixes-needed", "fixes-applied", "conflicts"],
+)
+def test_result_inspected_files_keeps_clean_pass_messages(output: str) -> None:
+    """A clean pass also starts with "No", and must not be mistaken for no work.
+
+    This is why the classifier tests specific endings rather than a bare
+    "found": "No typos found." means the tool inspected files.
+
+    Args:
+        output: A real clean-pass message from a wrapped tool.
+    """
+    result = ToolResult(name="tool", success=True, skipped=False, output=output)
+
+    assert_that(result_inspected_files(result)).is_true()
+
+
+def test_result_inspected_files_reads_formatted_output_too() -> None:
+    """A no-work message carried only in ``formatted_output`` still counts."""
+    result = ToolResult(
+        name="tool",
+        success=True,
+        skipped=False,
+        output=None,
+        formatted_output="No .rs files found to check.",
+    )
+
+    assert_that(result_inspected_files(result)).is_false()
+
+
+def test_result_inspected_files_treats_empty_output_as_inspected() -> None:
+    """Empty output is ambiguous, and is resolved in favour of "inspected".
+
+    `ruff` returns no output for a clean pass over real files, while `bandit`
+    nulls its output for the no-files case; the two are byte-identical. Failing
+    the other way would make every clean run look unmeasured. Issue #2369
+    replaces the heuristic with a structured signal.
+    """
+    result = ToolResult(name="ruff", success=True, skipped=False, output=None)
+
+    assert_that(result_inspected_files(result)).is_true()

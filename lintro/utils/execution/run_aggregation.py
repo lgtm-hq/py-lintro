@@ -83,6 +83,10 @@ def finalize_artifact(
         action=ctx.action,
         dry_run_preview=ctx.dry_run_preview,
         tool_results=all_results,
+        # Always False here: an early-exit run returns a bare RunArtifact
+        # without reaching this function. Named anyway so both call sites pass
+        # the same arguments and cannot drift apart.
+        early_exit=False,
     )
     log_root = resolve_log_root(ctx.output_manager) if eligible else None
     previous_counts = read_severity_baseline(log_root) if log_root else None
