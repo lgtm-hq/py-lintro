@@ -13,6 +13,7 @@ from typing import cast
 
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
 from tests.integration._tools import require_tool
@@ -51,6 +52,36 @@ def _stage_fixture(tmp_path: Path) -> Path:
     return dest
 
 
+def _diagnostics(result: ToolResult) -> str:
+    """Render everything golangci-lint returned, for an assertion message.
+
+    A missing sub-linter code means golangci-lint did not report the finding,
+    which is invisible from the codes alone. #2391 spent three CI runs on that
+    blind spot, so every failure now carries the tool-level fields plus the
+    position-less ``(module)`` diagnostics golangci-lint uses for build,
+    config, and typecheck failures.
+
+    Args:
+        result: The ToolResult returned by the golangci-lint plugin.
+
+    Returns:
+        A multi-line description of the run's outcome.
+    """
+    issues = cast(list[GolangciLintIssue], result.issues or [])
+    module_level = [issue for issue in issues if issue.file == "(module)"]
+    lines = [
+        f"success={result.success}",
+        f"timed_out={result.timed_out}",
+        f"issues_count={result.issues_count}",
+        f"codes={sorted({issue.code for issue in issues})}",
+        f"raw output={result.output!r}",
+    ]
+    if module_level:
+        lines.append("(module)-level diagnostics:")
+        lines.extend(f"  [{issue.code}] {issue.message}" for issue in module_level)
+    return "\n".join(lines)
+
+
 def test_fixture_exists() -> None:
     """The committed Go fixture module is present."""
     assert_that((_FIXTURE / "go.mod").exists()).is_true()
@@ -58,20 +89,33 @@ def test_fixture_exists() -> None:
 
 
 def test_check_detects_violations(tmp_path: Path) -> None:
-    """golangci-lint detects the seeded errcheck/ineffassign violations."""
+    """golangci-lint detects the seeded errcheck/ineffassign violations.
+
+    This assertion went intermittently red in the Docker integration job
+    (#2391). The cause was golangci-lint's exclusive start-up file lock: with
+    the suite running under ``-n auto``, a second worker's instance exited 3
+    with ``parallel golangci-lint is running`` and an empty ``Issues`` array,
+    so the codes simply were not there. The plugin now passes
+    ``--allow-parallel-runners``; the assertion itself is unchanged.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the staged fixture.
+    """
     module = _stage_fixture(tmp_path)
     plugin = GolangciLintPlugin()
     result = plugin.check([str(module)], {})
+    diagnostics = _diagnostics(result)
 
-    assert_that(result.issues_count).is_greater_than_or_equal_to(2)
-    assert_that(result.success).is_false()
-    assert_that(result.issues).is_not_none()
+    counted = assert_that(result.issues_count).described_as(diagnostics)
+    counted.is_greater_than_or_equal_to(2)
+    assert_that(result.success).described_as(diagnostics).is_false()
+    assert_that(result.issues).described_as(diagnostics).is_not_none()
     issues = cast(list[GolangciLintIssue], result.issues)
     codes = {issue.code for issue in issues}
-    assert_that(codes).contains("errcheck", "ineffassign")
+    assert_that(codes).described_as(diagnostics).contains("errcheck", "ineffassign")
     for issue in issues:
-        assert_that(issue.file).is_not_empty()
-        assert_that(issue.line).is_greater_than(0)
+        assert_that(issue.file).described_as(diagnostics).is_not_empty()
+        assert_that(issue.line).described_as(diagnostics).is_greater_than(0)
 
 
 def test_doc_url_resolves_for_every_detected_linter(tmp_path: Path) -> None:
@@ -90,13 +134,14 @@ def test_doc_url_resolves_for_every_detected_linter(tmp_path: Path) -> None:
     module = _stage_fixture(tmp_path)
     plugin = GolangciLintPlugin()
     result = plugin.check([str(module)], {})
-    assert_that(result.issues).is_not_none()
+    diagnostics = _diagnostics(result)
+    assert_that(result.issues).described_as(diagnostics).is_not_none()
     issues = cast(list[GolangciLintIssue], result.issues)
     codes = sorted({issue.code for issue in issues})
 
     # The fixture seeds these two sub-linters; asserting them by name keeps the
     # test meaningful whatever extra diagnostics a toolchain version adds.
-    assert_that(codes).contains("errcheck", "ineffassign")
+    assert_that(codes).described_as(diagnostics).contains("errcheck", "ineffassign")
     for code in codes:
         if not code:
             # A finding with no originating sub-linter has no per-linter page.

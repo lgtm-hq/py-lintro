@@ -258,6 +258,66 @@ def format_pytest_issues_table(issues: list[PytestIssue]) -> str:
     return table
 
 
+#: Longest raw pytest failure section reproduced in the output. Long enough for
+#: a handful of ``--tb short`` tracebacks, short enough that a mass failure
+#: cannot bury the summary it is appended to.
+FAILURE_SECTION_MAX_CHARS: int = 20_000
+
+#: Section headers pytest prints after the failure bodies. The failure section
+#: runs from the ``FAILURES`` banner up to the first of these.
+_FAILURE_SECTION_END_MARKERS: tuple[str, ...] = (
+    "= short test summary info =",
+    "= warnings summary =",
+    "= slowest ",
+    "= PASSES =",
+    "= ERRORS =",
+)
+
+
+def extract_failure_section(raw_output: str | None) -> str:
+    """Return pytest's own ``FAILURES`` block from a captured run.
+
+    The table lintro builds from parsed issues truncates each message to one
+    short line, which is enough to see *that* a test failed and never enough to
+    see *why*. In the Docker integration job that table is the only artifact in
+    the log, so an intermittent failure there could not be diagnosed at all
+    (#2391). Reproducing pytest's own section restores the assertion text and
+    the captured stdout/stderr of the failing test.
+
+    Args:
+        raw_output: Raw pytest output, or None when it was not captured.
+
+    Returns:
+        The failure section, truncated to
+        :data:`FAILURE_SECTION_MAX_CHARS`, or an empty string when the output
+        carries no failure section.
+    """
+    if not raw_output:
+        return ""
+    lines = raw_output.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if "= FAILURES =" in line),
+        None,
+    )
+    if start is None:
+        return ""
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if any(marker in lines[i] for marker in _FAILURE_SECTION_END_MARKERS)
+        ),
+        len(lines),
+    )
+    section = "\n".join(lines[start:end]).strip()
+    if len(section) > FAILURE_SECTION_MAX_CHARS:
+        section = (
+            section[:FAILURE_SECTION_MAX_CHARS]
+            + "\n... (failure section truncated by lintro)"
+        )
+    return section
+
+
 def build_output_with_failures(
     summary_data: dict[str, Any],
     all_issues: list[PytestIssue],
@@ -310,5 +370,15 @@ def build_output_with_failures(
             # Just show count if many skipped
             output_lines.append("")
             output_lines.append(f"- {len(skipped)} tests skipped")
+
+        # The table above truncates every message to one short line, so append
+        # pytest's own failure section: without it a CI log carries no
+        # assertion text and an intermittent failure cannot be diagnosed
+        # (#2391).
+        if failed or errors:
+            failure_section = extract_failure_section(raw_output)
+            if failure_section:
+                output_lines.append("")
+                output_lines.append(failure_section)
 
     return "\n".join(output_lines)

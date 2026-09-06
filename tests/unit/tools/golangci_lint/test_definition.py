@@ -5,7 +5,10 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
+from lintro.tools.definitions.golangci_lint import (
+    GolangciLintPlugin,
+    _build_golangci_lint_command,
+)
 
 
 def test_definition_basics() -> None:
@@ -42,3 +45,21 @@ def test_doc_url_for_linter() -> None:
 def test_doc_url_empty_code_returns_none() -> None:
     """doc_url() returns None when no code is supplied."""
     assert_that(GolangciLintPlugin().doc_url("")).is_none()
+
+
+def test_check_command_allows_parallel_runners() -> None:
+    """The run command opts out of golangci-lint's exclusive start-up lock.
+
+    Without ``--allow-parallel-runners`` a second concurrent instance exits 3
+    with ``parallel golangci-lint is running`` and an empty ``Issues`` array,
+    so findings silently vanish under a parallel test suite (#2391).
+    """
+    assert_that(_build_golangci_lint_command(fix=False)).contains(
+        "--allow-parallel-runners",
+    )
+
+
+def test_fix_command_allows_parallel_runners() -> None:
+    """The ``--fix`` command carries the same opt-out as the check command."""
+    cmd = _build_golangci_lint_command(fix=True)
+    assert_that(cmd).contains("--allow-parallel-runners", "--fix")
