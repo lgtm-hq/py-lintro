@@ -207,25 +207,19 @@ lintro/
 │   └── yamllint/
 ├── tools/
 │   ├── core/
-│   ├── definitions/
-│   │   ├── actionlint.py
-│   │   ├── bandit.py
-│   │   ├── black.py
-│   │   ├── clippy.py
-│   │   ├── pydoclint.py
-│   │   ├── hadolint.py
-│   │   ├── markdownlint.py
-│   │   ├── mypy.py
-│   │   ├── oxfmt.py
-│   │   ├── oxlint.py
-│   │   ├── prettier.py
-│   │   ├── pytest.py          # re-export shim (#2311)
-│   │   ├── ruff.py            # re-export shim (#2311)
-│   │   └── yamllint.py
-│   ├── pytest/                # per-tool package
+│   ├── actionlint/            # one package per tool (#2311)
+│   │   ├── __init__.py        # the package's import surface
+│   │   └── definition.py      # plugin + ToolDefinition; discovery's entry point
+│   ├── bandit/
+│   ├── hadolint/
+│   ├── ts_checker/            # shared family: no plugin, no definition.py
+│   │   ├── base.py
+│   │   ├── command.py
+│   │   └── execution.py
+│   ├── pytest/
 │   │   ├── definition.py      # plugin + ToolDefinition
 │   │   └── ...                # command builder, executor, parsers
-│   └── ruff/                  # per-tool package
+│   └── ruff/
 │       ├── definition.py      # plugin + ToolDefinition
 │       ├── check.py
 │       ├── commands.py

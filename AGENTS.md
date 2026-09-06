@@ -140,8 +140,9 @@ cycle deletes its entries. Lazy (function-body) imports are not a fix: `import-l
 and `scripts/ci/import_matrix.py` both count them, and
 `tests/unit/test_import_boundaries.py` pins the two-way cycle count. Exception: a new
 tool package records its three `-> lintro.plugins.{base,protocol,registry}` edges under
-issue #2311, which owns the `tools -> plugins` direction until the plugin contract moves
-below the `tools` layer.
+issue #2410, which owns the `lintro.plugins` / `lintro.tools` cycle: discovery in
+`lintro.plugins` imports `lintro.tools`, while the plugin base-class edge runs the other
+way.
 
 ## Duplicate code (#2293)
 
