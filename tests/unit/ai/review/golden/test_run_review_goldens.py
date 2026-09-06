@@ -8,6 +8,7 @@ a provider client.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -37,9 +38,11 @@ from tests.unit.ai.review.golden.golden_fixtures import (
     golden_review_context,
 )
 from tests.unit.ai.review.golden.golden_io import (
+    SNAPSHOT_DIR,
     assert_golden_json,
     dump_json,
     load_payload,
+    to_jsonable,
 )
 
 #: Provider identity used by the goldens. Deliberately not a real provider:
@@ -222,3 +225,21 @@ def test_resolve_review_chunks_plan_matches_golden() -> None:
     }
 
     assert_golden_json(name="chunk_plan.golden", value=plans)
+
+
+def test_run_review_findings_match_the_merge_golden() -> None:
+    """The replayed run and the direct merge agree on the merged findings.
+
+    ``_replay_call_ai`` picks a payload by looking for the rename source path
+    in the prompt. That is a substring discriminator, so this test is the loud
+    failure mode for it: replaying one payload twice collapses the merge and
+    this comparison breaks, which is exactly how the original mis-keyed replay
+    was caught. It also keeps the two golden modules describing one run.
+    """
+    result = _run_golden_review()
+    merged = json.loads(
+        (SNAPSHOT_DIR / "merged_review_result.golden").read_text(encoding="utf-8"),
+    )
+
+    assert_that(to_jsonable(result.findings)).is_equal_to(merged["findings"])
+    assert_that(to_jsonable(result.checklist)).is_equal_to(merged["checklist"])

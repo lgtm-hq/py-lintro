@@ -205,10 +205,9 @@ def _capture_calls(
     workspace = _write_parity_workspace(tmp_path, exclude_paths=exclude_paths)
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
-    # One factory serves both surfaces, so the provider each adapter receives
-    # is decided by how many times production asks for one — not by the patch
-    # style. With a per-surface stub the "each builds its own" assertion could
-    # never fail, however production changed (#2302 moves this ownership).
+    # One factory serves both surfaces so the recorded call count and configs
+    # come from production asking, not from the patch style. It cannot observe
+    # caching inside the real get_provider, which is replaced here.
     provider_configs: list[Any] = []
 
     def _build_provider(config: Any, **_kwargs: Any) -> _FakeProvider:
@@ -353,10 +352,13 @@ def test_each_surface_builds_its_own_provider_from_an_equivalent_config(
 ) -> None:
     """Each adapter constructs a provider of its own from the same effective config.
 
-    Both surfaces are served by one ``get_provider`` factory that returns a new
-    instance per call, so the identity assertion fails the moment production
-    starts sharing a single provider — which is exactly what Phase 5 (#2302)
-    changes when it moves provider lifetime into the run session.
+    What this pins: both adapters ask for a provider (twice in total, from
+    equivalent effective config) and each ``run_review`` call receives its own
+    instance, so a Phase 3 change that stopped one surface constructing a
+    provider reddens here. What it cannot see: ``get_provider`` is replaced on
+    both adapter bindings, so a singleton or session cache *inside* the real
+    ``lintro.ai.providers.get_provider`` would not surface — Phase 5 (#2302)
+    needs its own pin for the shared-lifetime end state.
 
     Args:
         tmp_path: Pytest temporary directory.

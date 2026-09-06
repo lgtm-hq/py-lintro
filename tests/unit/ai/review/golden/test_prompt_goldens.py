@@ -53,15 +53,19 @@ def _production_strictness_section() -> str:
 
 
 def _production_interaction_paths() -> str:
-    """Return the interaction paths production generates for the fixture.
+    """Return the interaction paths production generates for chunk 1.
+
+    ``_review_chunk`` passes ``changed_files=chunk.files``, not the whole
+    context, so the helper does the same. ``golden_classifications()`` is a
+    fixed fixture rather than ``classify_changed_files`` output, so the emitted
+    paths follow the fixture's domains and not the classifier's.
 
     Returns:
         Domain-triggered path text for the fixture's classifications.
     """
-    context = golden_review_context()
     return generate_interaction_paths(
         classifications=golden_classifications(),
-        changed_files=[file.path for file in context.changed_files],
+        changed_files=list(golden_chunks()[0].files),
     )
 
 

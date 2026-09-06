@@ -33,13 +33,14 @@ Lintro's AI review subsystem holds these invariants across every refactor in #19
 
 **1. `run_review` is the facade.** Adapters call
 `lintro.ai.review.orchestrator.run_review` for review _execution_, and it is the one
-sync/async boundary: `asyncio.run` is entered exactly once so a single event loop, and
-therefore a single provider client, serves a whole review. Moving phases into new
-modules may not add a second public entry point for review execution. This is about
-execution, not module access: the CLI also imports `guard_changed_paths` from the same
-module and calls it _after_ the run, which is a pure post-run helper rather than a
-second execution facade. [ADR-0006](0006-ai-effective-config-and-review-execution.md)
-records the same seam as `run_review` / `run_review_async`.
+sync/async boundary: `asyncio.run` is entered exactly once so one event loop serves the
+whole review — the adapter's provider client and any per-agent providers a custom-agent
+`model` override builds (see invariant 5). Moving phases into new modules may not add a
+second public entry point for review execution. This is about execution, not module
+access: the CLI also imports `guard_changed_paths` from the same module and calls it
+_after_ the run, which is a pure post-run helper rather than a second execution facade.
+[ADR-0006](0006-ai-effective-config-and-review-execution.md) records the same seam as
+`run_review` / `run_review_async`.
 
 **2. Every provider call goes through `call_ai`.** `lintro.ai.invoke.call_ai` is the
 sole dispatch point for retries, fallback, budget accounting, and transport selection.
