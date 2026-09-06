@@ -31,6 +31,9 @@ SNAPSHOT_DIR: Path = Path(__file__).resolve().parent / "snapshots"
 #: Directory holding the fixed provider response payloads.
 PAYLOAD_DIR: Path = Path(__file__).resolve().parent / "payloads"
 
+#: Upper bound on unified-diff lines reported for a golden mismatch.
+MAX_DIFF_LINES: int = 120
+
 
 def goldens_are_being_updated() -> bool:
     """Return whether the run should rewrite goldens instead of asserting.
@@ -141,7 +144,7 @@ def assert_golden(*, name: str, actual: str) -> None:
     if actual != expected:
         # pytest does not rewrite asserts in a helper module, so the diff has
         # to be built here or a failure says only "the bytes moved".
-        diff = "".join(
+        lines = list(
             difflib.unified_diff(
                 expected.splitlines(keepends=True),
                 actual.splitlines(keepends=True),
@@ -150,6 +153,12 @@ def assert_golden(*, name: str, actual: str) -> None:
                 n=3,
             ),
         )
+        # A rewritten 10 KB prompt golden would otherwise bury the failure in
+        # its own diff; the first chunk is what identifies the change.
+        truncated = len(lines) > MAX_DIFF_LINES
+        diff = "".join(lines[:MAX_DIFF_LINES])
+        if truncated:
+            diff += f"... {len(lines) - MAX_DIFF_LINES} more diff line(s)\n"
         msg = (
             f"golden mismatch for {name}: review behaviour changed. "
             f"If the change is intended, say so in the PR body and rerun with "
