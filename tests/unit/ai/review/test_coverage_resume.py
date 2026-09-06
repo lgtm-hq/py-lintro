@@ -13,6 +13,7 @@ from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.coverage import (
     MAX_FLAGS_PER_ROUND,
     ClassifiedFile,
+    ClassifyFilesRequest,
     carry_unserved_flags,
     classify_files,
     consume_served_flags,
@@ -86,9 +87,11 @@ def test_identical_hash_inherits_sampled_coverage() -> None:
     """A sampled-out sibling with the same hash counts as covered."""
     hashes = {"keep.py": "aaa", "skip.py": "aaa", "other.py": "bbb"}
     classified = classify_files(
-        eligible_paths=("keep.py", "skip.py", "other.py"),
-        current_hashes=hashes,
-        coverage=(CoverageRecord("keep.py", "aaa"),),
+        request=ClassifyFilesRequest(
+            eligible_paths=("keep.py", "skip.py", "other.py"),
+            current_hashes=hashes,
+            coverage=(CoverageRecord("keep.py", "aaa"),),
+        ),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["keep.py"]).is_equal_to(FileReviewNeed.COVERED)
@@ -99,13 +102,15 @@ def test_identical_hash_inherits_sampled_coverage() -> None:
 def test_group_invalidation_skips_broadcast() -> None:
     """pyproject.toml does not fan out to the rest of a group."""
     classified = classify_files(
-        eligible_paths=("pkg/a.py", "pyproject.toml"),
-        current_hashes={"pkg/a.py": "1", "pyproject.toml": "2"},
-        coverage=(
-            CoverageRecord("pkg/a.py", "1"),
-            CoverageRecord("pyproject.toml", "old"),
+        request=ClassifyFilesRequest(
+            eligible_paths=("pkg/a.py", "pyproject.toml"),
+            current_hashes={"pkg/a.py": "1", "pyproject.toml": "2"},
+            coverage=(
+                CoverageRecord("pkg/a.py", "1"),
+                CoverageRecord("pyproject.toml", "old"),
+            ),
+            groups=(("pkg/a.py", "pyproject.toml"),),
         ),
-        groups=(("pkg/a.py", "pyproject.toml"),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["pyproject.toml"]).is_equal_to(FileReviewNeed.DIRECTLY_CHANGED)
@@ -115,13 +120,15 @@ def test_group_invalidation_skips_broadcast() -> None:
 def test_group_mate_is_invalidated_when_peer_changes() -> None:
     """A semantic-group mate of a changed file re-enters the queue."""
     classified = classify_files(
-        eligible_paths=("a.py", "a_test.py"),
-        current_hashes={"a.py": "new", "a_test.py": "same"},
-        coverage=(
-            CoverageRecord("a.py", "old"),
-            CoverageRecord("a_test.py", "same"),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "a_test.py"),
+            current_hashes={"a.py": "new", "a_test.py": "same"},
+            coverage=(
+                CoverageRecord("a.py", "old"),
+                CoverageRecord("a_test.py", "same"),
+            ),
+            groups=(("a.py", "a_test.py"),),
         ),
-        groups=(("a.py", "a_test.py"),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.DIRECTLY_CHANGED)
@@ -142,14 +149,16 @@ def test_import_invalidation_is_one_hop() -> None:
     )
     assert_that(reverse["c.py"]).is_equal_to({"b.py"})
     classified = classify_files(
-        eligible_paths=("a.py", "b.py", "c.py"),
-        current_hashes={"a.py": "1", "b.py": "1", "c.py": "2"},
-        coverage=(
-            CoverageRecord("a.py", "1"),
-            CoverageRecord("b.py", "1"),
-            CoverageRecord("c.py", "1"),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "b.py", "c.py"),
+            current_hashes={"a.py": "1", "b.py": "1", "c.py": "2"},
+            coverage=(
+                CoverageRecord("a.py", "1"),
+                CoverageRecord("b.py", "1"),
+                CoverageRecord("c.py", "1"),
+            ),
+            import_importers=reverse,
         ),
-        import_importers=reverse,
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["c.py"]).is_equal_to(FileReviewNeed.DIRECTLY_CHANGED)
@@ -160,13 +169,15 @@ def test_import_invalidation_is_one_hop() -> None:
 def test_flag_is_one_way_and_allowlisted() -> None:
     """Flags cannot invent files or push never-reviewed paths."""
     classified = classify_files(
-        eligible_paths=("covered.py", "fresh.py"),
-        current_hashes={"covered.py": "h1", "fresh.py": "h2"},
-        coverage=(CoverageRecord("covered.py", "h1"),),
-        flags=(
-            FlaggedFile("covered.py", "contract change", "h1"),
-            FlaggedFile("fresh.py", "please", "h2"),
-            FlaggedFile("outside.py", "nope", "h3"),
+        request=ClassifyFilesRequest(
+            eligible_paths=("covered.py", "fresh.py"),
+            current_hashes={"covered.py": "h1", "fresh.py": "h2"},
+            coverage=(CoverageRecord("covered.py", "h1"),),
+            flags=(
+                FlaggedFile("covered.py", "contract change", "h1"),
+                FlaggedFile("fresh.py", "please", "h2"),
+                FlaggedFile("outside.py", "nope", "h3"),
+            ),
         ),
     )
     by_path = {item.path: item.need for item in classified}
@@ -337,9 +348,11 @@ def test_hashes_for_diffs_and_coverage_counts() -> None:
     diffs = {"a.py": "+one\n", "b.py": "+two\n"}
     hashes = hashes_for_diffs(diffs=diffs)
     classified = classify_files(
-        eligible_paths=("a.py", "b.py"),
-        current_hashes=hashes,
-        coverage=(),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "b.py"),
+            current_hashes=hashes,
+            coverage=(),
+        ),
     )
     counts = coverage_counts(classified=classified, reviewed_now=("a.py",))
     assert_that(counts.reviewed).is_equal_to(1)
@@ -363,9 +376,11 @@ def test_same_round_sampled_siblings_inherit_without_prior() -> None:
     """A representative reviewed this round covers identical-hash siblings."""
     hashes = {"keep.py": "aaa", "skip.py": "aaa", "other.py": "bbb"}
     classified = classify_files(
-        eligible_paths=("keep.py", "skip.py", "other.py"),
-        current_hashes=hashes,
-        coverage=(),
+        request=ClassifyFilesRequest(
+            eligible_paths=("keep.py", "skip.py", "other.py"),
+            current_hashes=hashes,
+            coverage=(),
+        ),
     )
     reviewed = inherit_same_round_paths(
         reviewed_now=("keep.py",),
@@ -404,14 +419,16 @@ def test_inherited_sibling_is_not_a_matcher_reviewed_path(
 def test_pending_group_invalidation_survives_after_peer_is_covered() -> None:
     """An unserved group-mate stays queued via persisted pending state."""
     classified = classify_files(
-        eligible_paths=("a.py", "g.py"),
-        current_hashes={"a.py": "H2", "g.py": "G1"},
-        coverage=(
-            CoverageRecord("a.py", "H2", round=2),
-            CoverageRecord("g.py", "G1", round=1),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "g.py"),
+            current_hashes={"a.py": "H2", "g.py": "G1"},
+            coverage=(
+                CoverageRecord("a.py", "H2", round=2),
+                CoverageRecord("g.py", "G1", round=1),
+            ),
+            groups=(("a.py", "g.py"),),
+            pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
         ),
-        groups=(("a.py", "g.py"),),
-        pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
@@ -423,14 +440,16 @@ def test_reviewing_pending_file_converges_on_the_next_round() -> None:
     from lintro.ai.review.coverage import pending_invalidations_for
 
     classified = classify_files(
-        eligible_paths=("a.py", "g.py"),
-        current_hashes={"a.py": "H2", "g.py": "G1"},
-        coverage=(
-            CoverageRecord("a.py", "H2", round=2),
-            CoverageRecord("g.py", "G1", round=1),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "g.py"),
+            current_hashes={"a.py": "H2", "g.py": "G1"},
+            coverage=(
+                CoverageRecord("a.py", "H2", round=2),
+                CoverageRecord("g.py", "G1", round=1),
+            ),
+            groups=(("a.py", "g.py"),),
+            pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
         ),
-        groups=(("a.py", "g.py"),),
-        pending_invalidations=(("g.py", FileReviewNeed.GROUP_INVALIDATED.value),),
     )
     pending = pending_invalidations_for(
         classified=classified,
@@ -438,14 +457,16 @@ def test_reviewing_pending_file_converges_on_the_next_round() -> None:
     )
     assert_that(pending).is_empty()
     settled = classify_files(
-        eligible_paths=("a.py", "g.py"),
-        current_hashes={"a.py": "H2", "g.py": "G1"},
-        coverage=(
-            CoverageRecord("a.py", "H2", round=2),
-            CoverageRecord("g.py", "G1", round=3),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "g.py"),
+            current_hashes={"a.py": "H2", "g.py": "G1"},
+            coverage=(
+                CoverageRecord("a.py", "H2", round=2),
+                CoverageRecord("g.py", "G1", round=3),
+            ),
+            groups=(("a.py", "g.py"),),
+            pending_invalidations=pending,
         ),
-        groups=(("a.py", "g.py"),),
-        pending_invalidations=pending,
     )
     by_path = {item.path: item.need for item in settled}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
@@ -477,14 +498,16 @@ def test_pending_import_invalidation_is_cleared_when_reviewed() -> None:
         directly_changed={"b.py"},
     )
     classified = classify_files(
-        eligible_paths=("a.py", "b.py"),
-        current_hashes={"a.py": "A1", "b.py": "B2"},
-        coverage=(
-            CoverageRecord("a.py", "A1", round=1),
-            CoverageRecord("b.py", "B2", round=2),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "b.py"),
+            current_hashes={"a.py": "A1", "b.py": "B2"},
+            coverage=(
+                CoverageRecord("a.py", "A1", round=1),
+                CoverageRecord("b.py", "B2", round=2),
+            ),
+            import_importers=reverse,
+            pending_invalidations=(("a.py", FileReviewNeed.IMPORT_INVALIDATED.value),),
         ),
-        import_importers=reverse,
-        pending_invalidations=(("a.py", FileReviewNeed.IMPORT_INVALIDATED.value),),
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["b.py"]).is_equal_to(FileReviewNeed.COVERED)
@@ -525,10 +548,12 @@ def test_flag_cap_stops_at_eight() -> None:
     )
     hashes = {f"f{index}.py": "h" for index in range(MAX_FLAGS_PER_ROUND + 2)}
     classified = classify_files(
-        eligible_paths=tuple(hashes),
-        current_hashes=hashes,
-        coverage=coverage,
-        flags=flags,
+        request=ClassifyFilesRequest(
+            eligible_paths=tuple(hashes),
+            current_hashes=hashes,
+            coverage=coverage,
+            flags=flags,
+        ),
     )
     flagged = [
         item.path for item in classified if item.need is FileReviewNeed.MODEL_FLAGGED
@@ -569,13 +594,15 @@ def test_unserved_model_flag_survives_until_the_path_is_covered() -> None:
     )
     assert_that([flag.path for flag in carried]).is_equal_to(["extras.py"])
     classified = classify_files(
-        eligible_paths=("a.py", "extras.py"),
-        current_hashes={"a.py": "H1", "extras.py": "H2"},
-        coverage=(
-            CoverageRecord("a.py", "H1", round=2),
-            CoverageRecord("extras.py", "H2", round=1),
+        request=ClassifyFilesRequest(
+            eligible_paths=("a.py", "extras.py"),
+            current_hashes={"a.py": "H1", "extras.py": "H2"},
+            coverage=(
+                CoverageRecord("a.py", "H1", round=2),
+                CoverageRecord("extras.py", "H2", round=1),
+            ),
+            flags=carried,
         ),
-        flags=carried,
     )
     by_path = {item.path: item.need for item in classified}
     assert_that(by_path["a.py"]).is_equal_to(FileReviewNeed.COVERED)
@@ -593,11 +620,13 @@ def test_same_path_hash_is_flagged_only_once() -> None:
     )
     assert_that(consumed).is_equal_to((("extras.py", "H2"),))
     classified = classify_files(
-        eligible_paths=("extras.py",),
-        current_hashes={"extras.py": "H2"},
-        coverage=(CoverageRecord("extras.py", "H2", round=2),),
-        flags=(FlaggedFile("extras.py", "again", "H2"),),
-        consumed_flags=consumed,
+        request=ClassifyFilesRequest(
+            eligible_paths=("extras.py",),
+            current_hashes={"extras.py": "H2"},
+            coverage=(CoverageRecord("extras.py", "H2", round=2),),
+            flags=(FlaggedFile("extras.py", "again", "H2"),),
+            consumed_flags=consumed,
+        ),
     )
     assert_that(classified[0].need).is_equal_to(FileReviewNeed.COVERED)
 

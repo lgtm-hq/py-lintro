@@ -1253,7 +1253,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
 
 
 def _single_chunk() -> ReviewChunk:
-    """Build a one-file review chunk for direct ``_review_chunk`` tests."""
+    """Build a one-file review chunk for direct ``review_chunk`` tests."""
     return ReviewChunk(
         id=1,
         files=["src/main.py"],
@@ -1263,7 +1263,7 @@ def _single_chunk() -> ReviewChunk:
 
 
 def _single_file_context() -> ReviewContext:
-    """Build a minimal review context for direct ``_review_chunk`` tests."""
+    """Build a minimal review context for direct ``review_chunk`` tests."""
     return ReviewContext(
         base_ref="main",
         head_ref="feature",
@@ -1287,7 +1287,8 @@ def _chunk_run_plan(*, budget: CostBudget) -> ChunkRunPlan:
         budget: Cost budget the chunk's provider calls record against.
 
     Returns:
-        A plan whose only variation from the defaults is the budget.
+        A plan over the single-file fixture context. Every other field is
+        fixed here, so the budget is the only value a caller varies.
     """
     return ChunkRunPlan(
         context=_single_file_context(),

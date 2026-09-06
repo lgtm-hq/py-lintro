@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from assertpy import assert_that
@@ -169,6 +170,25 @@ def test_excluded_paths_are_skipped(
     )
 
     assert_that(violations).is_empty()
+
+
+def test_default_baseline_matches_the_configured_baseline() -> None:
+    """The in-code default and the pyproject baseline are the same list.
+
+    ``resolve_module_size_settings`` falls back to
+    :data:`DEFAULT_MODULE_SIZE_BASELINE` whenever the configured value is
+    missing or malformed, so a repo whose ``pyproject.toml`` baseline had
+    drifted from the default would silently grandfather a different set of
+    modules on that fallback path. Pinning the two together keeps the gate's
+    two sources of truth one source of truth (#2301).
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    parsed = tomllib.loads(
+        (repo_root / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    configured = parsed["tool"]["lintro"]["module_size"]["baseline"]
+
+    assert_that(tuple(configured)).is_equal_to(DEFAULT_MODULE_SIZE_BASELINE)
 
 
 def test_default_threshold_is_eight_hundred() -> None:

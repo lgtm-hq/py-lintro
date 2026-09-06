@@ -70,12 +70,13 @@ suppression. `run_review_async` reads as three steps:
 | Step   | Module                                | What it owns                                                                                  |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Plan   | `lintro/ai/review/run_planning.py`    | Sensitivity policy, diff budget (incl. the CLI ceiling), chunks, resume plan, agent selection |
-| Run    | `lintro/ai/review/chunk_runner.py`    | Bounded-concurrency fan-out, graceful stops, incremental coverage checkpoints                 |
+| Run    | `lintro/ai/review/run_execution.py`   | The provider-call sequence and the two finalizers (completed / gracefully stopped)            |
+|        | `lintro/ai/review/chunk_runner.py`    | Bounded-concurrency fan-out, graceful stops, incremental coverage checkpoints                 |
 |        | `lintro/ai/review/chunk_pass.py`      | One chunk's depth-1/2/3 passes                                                                |
 | Report | `lintro/ai/review/result_assembly.py` | Totals, file selection, coverage records, flag reconciliation, `ReviewMetadata`               |
 
-The Run step is a sequence the orchestrator still owns, not a single module: after the
-chunk fan-out it calls the custom-agent passes (`custom_agent_runner.py`), merges and
+The Run step is a sequence, not a single call: `run_execution.execute_run` runs the
+chunk fan-out, then the custom-agent passes (`custom_agent_runner.py`), merges and
 filters (`merge.py`), and may run the cross-chunk synthesis pass (`synthesis.py`). The
 two halves of the flow travel as frozen objects: `ReviewRunPlan` (what the run resolved
 to do) and `ReviewRunOutcome` (what it produced, completed or stopped).
@@ -176,6 +177,46 @@ With every mover landed, the orchestrator's re-exports are gone: external caller
 so on). Behaviour is unchanged throughout and the #2298 goldens pass without
 regeneration.
 
+### Module-size ratchet (#2301, closing slice)
+
+The last slice split the seven remaining modules in `lintro/ai/review/` that were over
+500 lines. Each split follows the same rule the earlier slices did — move the functions
+verbatim, keep the public names importable from the module that had them, change nothing
+a golden can see:
+
+| Module split         | Sibling it gained                                  | Seam                                                          |
+| -------------------- | -------------------------------------------------- | ------------------------------------------------------------- |
+| `orchestrator.py`    | `run_execution.py`                                 | The facade and the three steps vs. the provider-call sequence |
+| `custom_agents.py`   | `custom_agent_types.py`, `custom_agent_parsing.py` | Schema types vs. front-matter parsing vs. discovery/selection |
+| `agent_prompts.py`   | `agent_prompt_text.py`                             | Wrapping/fencing/titles vs. the prompt bodies and panels      |
+| `finding_matcher.py` | `finding_pairing.py`                               | Identity and the round walk vs. per-fingerprint pairing       |
+| `coverage.py`        | `coverage_rounds.py`                               | One round's classification vs. round-to-round carry-over      |
+| `severity_gate.py`   | `cross_chunk_gate.py`                              | The P1 evidence gate vs. the cross-chunk contradiction guard  |
+| `preparation.py`     | `preparation_resolvers.py`                         | Request/result types and entry points vs. field resolution    |
+
+The same slice bundled the last three signatures in the package that took more than 8
+arguments into frozen `kw_only` request objects, the shape `PromptInputs` and
+`ChunkReviewRequest` already use:
+
+| Function                  | Was | Request object           |
+| ------------------------- | --: | ------------------------ |
+| `classify_files`          |   9 | `ClassifyFilesRequest`   |
+| `run_custom_agent_passes` |  10 | `CustomAgentPassRequest` |
+| `run_synthesis_pass`      |  12 | `SynthesisPassRequest`   |
+
+Their `PLR0913` entries left the #2291 structural baseline with them, which also took
+`synthesis.py` back over 500 lines — so its response reading
+(`parse_synthesis_findings`, `deduplicate_synthesis_findings`) moved to
+`lintro/ai/review/synthesis_response.py`.
+
+`tests/unit/ai/review/test_review_module_sizes.py` is the ratchet that keeps both true:
+no module directly in `lintro/ai/review/` may exceed 500 lines, and no function in one
+may take more than 8 parameters. The GitHub-surface modules are named exceptions owned
+by #1974, and the `chunker/` and `context/` subpackages are part of the wider burn-down
+owned by #1995. The repo-wide `[tool.lintro.module_size]` gate warns at 800 lines, so it
+cannot hold the first line on its own, and the second is otherwise only held by the
+absence of a baseline entry someone could add.
+
 ## Exit and error contracts
 
 - Exit `0` — successful review, no P1 findings.
@@ -191,8 +232,8 @@ Phase 1 locks the gaps listed in ADR-0006:
 
 - `tests/unit/test_core_ai_import_boundary.py` — AC10 / #724 import edge.
 - `tests/unit/ai/review/test_review_session_options.py` — the single options surface:
-  `run_review` declares no keyword (and no default) of its own and forwards the caller's
-  object unchanged.
+  `run_review` declares no keyword (and no default) of its own, forwards the caller's
+  object unchanged, and the whole defaulted field set is pinned as a snapshot.
 - `tests/unit/ai/review/test_architecture_characterization.py` — CLI/MCP preparation,
   effective-config parity, metadata keys, error mapping, exit `0`/`1`/`2`.
 - `tests/unit/ai/review/golden/` — prompt bytes, chunk plan, merge output, merged
@@ -201,7 +242,10 @@ Phase 1 locks the gaps listed in ADR-0006:
 - `tests/unit/ai/review/test_cli_mcp_parity.py` — CLI/MCP parity: for equal
   `ReviewRunRequest` values over one workspace the two surfaces produce an **equal**
   `PreparedReview` (custom agents included — the fixture ships an agent file), and the
-  only divergence left is the named `ReviewExecutionPolicy` allowlist. MCP's post-prep
+  only divergence left is the named `ReviewExecutionPolicy` allowlist. It also pins the
+  `execute_review` packing: every `ReviewSessionOptions` field an adapter fills is
+  asserted against its named source (`PreparedReview` or `ReviewExecutionPolicy`), and
+  the only fields left at a default are `timeout` and `stop`. MCP's post-prep
   `with_max_cost_usd` clamp is the one thing it applies to the prepared review
   afterwards.
 - `tests/unit/ai/review/test_architecture_characterization_1972.py` — gap coverage:

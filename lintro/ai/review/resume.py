@@ -9,6 +9,7 @@ from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.coverage import (
     BROADCAST_FILENAMES,
     ClassifiedFile,
+    ClassifyFilesRequest,
     classify_files,
     coverage_counts,
     hashes_for_diffs,
@@ -89,15 +90,17 @@ def plan_resume(
         directly_changed=import_targets,
     )
     classified = classify_files(
-        eligible_paths=eligible,
-        current_hashes=hashes,
-        coverage=coverage,
-        groups=groups,
-        import_importers=imports,
-        flags=flags,
-        pending_invalidations=pending,
-        consumed_flags=consumed,
-        force_full=force_full,
+        request=ClassifyFilesRequest(
+            eligible_paths=eligible,
+            current_hashes=hashes,
+            coverage=coverage,
+            groups=groups,
+            import_importers=imports,
+            flags=flags,
+            pending_invalidations=pending,
+            consumed_flags=consumed,
+            force_full=force_full,
+        ),
     )
     return ResumePlan(
         classified=classified,

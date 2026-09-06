@@ -5,6 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from lintro.ai.review.coverage_rounds import (
+    carry_unserved_flags,
+    consume_served_flags,
+    hashes_for_diffs,
+    inherit_same_round_paths,
+    latest_coverage_by_path,
+)
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_review_need import (
     FILE_REVIEW_NEED_PRIORITY,
@@ -16,12 +23,12 @@ from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.patch_hash import normalized_patch_hash
 
 __all__ = [
     "BROADCAST_FILENAMES",
     "MAX_FLAGS_PER_ROUND",
     "ClassifiedFile",
+    "ClassifyFilesRequest",
     "classify_files",
     "coverage_counts",
     "directly_changed_paths",
@@ -30,6 +37,7 @@ __all__ = [
     "carry_unserved_flags",
     "consume_served_flags",
     "pending_invalidations_for",
+    "hashes_for_diffs",
     "queue_paths",
     "review_eligible_paths",
 ]
@@ -111,21 +119,15 @@ def review_eligible_paths(
     return tuple(sorted(set(eligible)))
 
 
-def classify_files(
-    *,
-    eligible_paths: Sequence[str],
-    current_hashes: Mapping[str, str],
-    coverage: Sequence[CoverageRecord],
-    groups: Sequence[Sequence[str]] = (),
-    import_importers: Mapping[str, set[str]] | None = None,
-    flags: Sequence[FlaggedFile] = (),
-    pending_invalidations: Sequence[tuple[str, str]] = (),
-    consumed_flags: Sequence[tuple[str, str]] = (),
-    force_full: bool = False,
-) -> tuple[ClassifiedFile, ...]:
-    """Classify each eligible file for this resume round.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ClassifyFilesRequest:
+    """Everything one resume round's classification reads.
 
-    Args:
+    Grouping the round's inputs keeps :func:`classify_files` to one argument
+    and makes a new input a field here rather than another keyword threaded
+    through every caller (issue #2301).
+
+    Attributes:
         eligible_paths: Review-eligible paths at HEAD.
         current_hashes: Current normalized patch hash per path.
         coverage: Prior coverage records (possibly empty).
@@ -136,13 +138,34 @@ def classify_files(
             capped round.
         consumed_flags: ``(path, hash)`` pairs already honored once.
         force_full: When True, treat every file as never-reviewed.
+    """
+
+    eligible_paths: Sequence[str]
+    current_hashes: Mapping[str, str]
+    coverage: Sequence[CoverageRecord]
+    groups: Sequence[Sequence[str]] = ()
+    import_importers: Mapping[str, set[str]] | None = None
+    flags: Sequence[FlaggedFile] = ()
+    pending_invalidations: Sequence[tuple[str, str]] = ()
+    consumed_flags: Sequence[tuple[str, str]] = ()
+    force_full: bool = False
+
+
+def classify_files(*, request: ClassifyFilesRequest) -> tuple[ClassifiedFile, ...]:
+    """Classify each eligible file for this resume round.
+
+    Args:
+        request: The round's inputs.
 
     Returns:
         One classification per eligible path, in path order.
     """
-    by_path = latest_coverage_by_path(coverage)
-    covered_hashes = {(record.path, record.patch_hash) for record in coverage}
-    if force_full:
+    eligible_paths = request.eligible_paths
+    current_hashes = request.current_hashes
+
+    by_path = latest_coverage_by_path(request.coverage)
+    covered_hashes = {(record.path, record.patch_hash) for record in request.coverage}
+    if request.force_full:
         return tuple(
             ClassifiedFile(
                 path=path,
@@ -171,24 +194,24 @@ def classify_files(
     broadcast = _broadcast_paths(eligible_paths)
     group_invalidated = _group_invalidated(
         eligible_paths=eligible_paths,
-        groups=groups,
+        groups=request.groups,
         directly_changed=directly_changed,
         broadcast=broadcast,
     )
-    pending_group, pending_import = _pending_sets(pending_invalidations)
+    pending_group, pending_import = _pending_sets(request.pending_invalidations)
     group_invalidated.update(pending_group)
-    graph = import_importers or {}
+    graph = request.import_importers or {}
     import_invalidated: set[str] = set()
     for imported in directly_changed:
         import_invalidated.update(graph.get(imported, set()))
     import_invalidated.update(pending_import)
 
     allowed_flags = _allowed_flags(
-        flags=flags,
+        flags=request.flags,
         eligible_paths=set(eligible_paths),
         current_hashes=current_hashes,
         covered_hashes=covered_hashes,
-        consumed_flags=consumed_flags,
+        consumed_flags=request.consumed_flags,
     )
 
     classified: list[ClassifiedFile] = []
@@ -318,72 +341,6 @@ def directly_changed_paths(
     return changed
 
 
-def carry_unserved_flags(
-    *,
-    new_flags: Sequence[FlaggedFile],
-    prior_flags: Sequence[FlaggedFile],
-    covered_now: Iterable[str],
-) -> tuple[FlaggedFile, ...]:
-    """Keep prior model flags whose path was not covered this round.
-
-    A capped round can leave a ``MODEL_FLAGGED`` path unserved. Those
-    flags must persist; otherwise the next classify treats the path as
-    ``COVERED`` and the request disappears.
-
-    Args:
-        new_flags: Flags produced by this round's completed chunks.
-        prior_flags: Flags carried from the previous trusted state.
-        covered_now: Paths covered this round, including same-hash
-            inheritance.
-
-    Returns:
-        This round's flags plus unserved prior flags, de-duplicated by
-        path with new flags winning.
-    """
-    covered = set(covered_now)
-    new = tuple(new_flags)
-    new_paths = {flag.path for flag in new}
-    unserved = tuple(
-        flag
-        for flag in prior_flags
-        if flag.path not in covered and flag.path not in new_paths
-    )
-    return (*new, *unserved)
-
-
-def consume_served_flags(
-    *,
-    prior_consumed: Sequence[tuple[str, str]],
-    flags: Sequence[FlaggedFile],
-    covered_now: Iterable[str],
-    current_hashes: Mapping[str, str],
-) -> tuple[tuple[str, str], ...]:
-    """Remember ``(path, hash)`` pairs whose flag was honored this round.
-
-    The same file+hash may be flagged only once (#2154). After the
-    provider reads that path (or a same-hash sibling covers it), a
-    repeat flag cannot re-queue it.
-
-    Args:
-        prior_consumed: Honored pairs from previous rounds.
-        flags: Prior and newly emitted flags considered this round.
-        covered_now: Paths covered this round, including inheritance.
-        current_hashes: Current normalized patch hash per path.
-
-    Returns:
-        Deduplicated honored pairs, prior first.
-    """
-    consumed = dict.fromkeys(prior_consumed)
-    covered = set(covered_now)
-    for flag in flags:
-        if flag.path not in covered:
-            continue
-        patch_hash = flag.patch_hash or current_hashes.get(flag.path, "")
-        if patch_hash:
-            consumed[(flag.path, patch_hash)] = None
-    return tuple(consumed)
-
-
 def pending_invalidations_for(
     *,
     classified: Sequence[ClassifiedFile],
@@ -410,62 +367,6 @@ def pending_invalidations_for(
         }
         and item.path not in reviewed
     )
-
-
-def inherit_same_round_paths(
-    *,
-    reviewed_now: Sequence[str],
-    eligible_paths: Sequence[str],
-    current_hashes: Mapping[str, str],
-) -> tuple[str, ...]:
-    """Credit sampled siblings that share a reviewed representative's hash.
-
-    Args:
-        reviewed_now: Paths the provider actually read.
-        eligible_paths: Review-eligible paths at HEAD.
-        current_hashes: Current normalized patch hash per path.
-
-    Returns:
-        ``reviewed_now`` plus same-hash siblings, de-duplicated.
-    """
-    reviewed = list(dict.fromkeys(reviewed_now))
-    reviewed_hashes = {
-        current_hashes.get(path, "")
-        for path in reviewed
-        if current_hashes.get(path, "")
-    }
-    extras = [
-        path
-        for path in eligible_paths
-        if path not in reviewed
-        and current_hashes.get(path, "") in reviewed_hashes
-        and current_hashes.get(path, "")
-    ]
-    return (*reviewed, *extras)
-
-
-def latest_coverage_by_path(
-    coverage: Sequence[CoverageRecord],
-) -> dict[str, CoverageRecord]:
-    """Keep the highest-round record per path."""
-    latest: dict[str, CoverageRecord] = {}
-    for record in coverage:
-        current = latest.get(record.path)
-        if current is None or record.round >= current.round:
-            latest[record.path] = record
-    return latest
-
-
-def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
-    """Hash each per-file unified diff.
-
-    Args:
-        diffs: Path to unified diff text.
-
-    Returns:
-        Path to normalized patch hash.
-    """
-    return {path: normalized_patch_hash(text) for path, text in diffs.items()}
 
 
 def _inherit_sampled_hashes(
