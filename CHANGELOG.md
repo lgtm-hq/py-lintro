@@ -21,6 +21,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.5] - 2026-09-06
+
+### Changed
+
+- **tools**: add `run_batch_check` and migrate 14 definitions (PR E) (#2385) (dfb53d6)
+- **ai**: move review prompt construction out of the orchestrator (#2384) (4d0fe5d)
+- **ai**: carry review run settings in a session options object (#2383) (8f3eccc)
+- **tools**: add `run_per_file_check` and migrate 6 definitions (PR D) (#2382) (50ce56d)
+- **ai**: step 3 — shared review preparation consumed by the CLI and MCP adapters
+  (#2377) (45a37ba)
+- **tools**: add `run_per_file_fix` and migrate 3 definitions (PR B) (#2380) (06bb54c)
+- **tools**: factor the shared check/fix scaffolding out of the 45 tool definitions — PR
+  A (#2376) (9f70219)
+- **ai**: step 2 — one effective-config resolver for every AI surface (#2373) (060f616)
+- **cli**: cut cold-start via lazy imports (#2372) (088a7ac)
+- **quality**: close the phase 0 checkpoint follow-ups (#2370) (52a4dcf)
+- **ai**: add characterization gap list and golden tests before the review decomposition
+  (#2363) (7ffbba4)
+- **packaging**: find packages, ship py.typed, trim the sdist (#2364) (638f8ce)
+- **core**: delete the setup command and the health score (#2362) (61df25b)
+- **deps**: one dev dependency list, delete tox, widen the matrix (#2361) (90d4214)
+
+### Fixed
+
+- **deps**: keep pydoclint importable against docstring-parser (#2381) (c26ca50)
+
 ## [0.147.4] - 2026-09-06
 
 ### Fixed
