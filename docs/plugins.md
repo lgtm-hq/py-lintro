@@ -210,6 +210,44 @@ The `BaseToolPlugin` base class provides useful methods:
 - `_get_executable_command(tool_name)` - Get command with proper path
 - `_discover_files(paths, patterns)` - Find files matching patterns
 
+### Per-file fix runs
+
+Tools that fix one file at a time should not write their own loop. Call
+`lintro.tools.core.fix_runner.run_per_file_fix()` from `fix()` with the two command
+builders, the parser and a `PerFileFixPolicy`; it runs check -> fix -> optional
+verification per file and aggregates the initial/fixed/remaining counts into a single
+`ToolResult`.
+
+```python
+from lintro.tools.core.fix_runner import (
+    PerFileFixPolicy,
+    VerifyMode,
+    run_per_file_fix,
+)
+
+
+def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options, no_files_message="No files to format.")
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_per_file_fix(
+        ctx,
+        plugin=self,
+        check_command=self._diff_command,
+        fix_command=self._write_command,
+        parse=lambda output: parse_mytool_output(output=output),
+        policy=PerFileFixPolicy(
+            check_failure_message="mytool check failed before fix",
+            verify=VerifyMode.AFTER_SUCCESS,
+            verify_failure_message="mytool recheck failed",
+        ),
+    )
+```
+
+`VerifyMode` picks how surviving issues are counted: `NEVER` trusts the fix command's
+exit status, `AFTER_SUCCESS` re-checks only after a clean fix, and `ALWAYS` re-checks
+even when the fix exits non-zero (for tools that apply fixes partially).
+
 ### Execution Isolation (important for correctness)
 
 Registered plugin instances are process-wide singletons with mutable option state.

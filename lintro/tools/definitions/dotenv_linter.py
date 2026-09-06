@@ -22,9 +22,14 @@ from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
     parse_dotenv_linter_output,
 )
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
+from lintro.plugins.file_processor import FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.fix_runner import (
+    PerFileFixPolicy,
+    VerifyMode,
+    run_per_file_fix,
+)
 from lintro.tools.core.option_validators import (
     filter_none_options,
     normalize_str_or_list,
@@ -38,6 +43,22 @@ if TYPE_CHECKING:
 DOTENV_LINTER_DEFAULT_TIMEOUT: int = 30
 DOTENV_LINTER_DEFAULT_PRIORITY: int = 50
 DOTENV_LINTER_FILE_PATTERNS: list[str] = [".env", ".env.*", "*.env"]
+
+
+def _mark_unfixable(issue: BaseIssue) -> BaseIssue:
+    """Clear an issue's ``fixable`` flag after a fix attempt failed to clear it.
+
+    Args:
+        issue: Issue that survived a dotenv-linter fix run.
+
+    Returns:
+        A copy of the issue that no longer advertises an auto-fix, or the
+        issue unchanged when it carries no ``fixable`` flag.
+    """
+    if isinstance(issue, DotenvLinterIssue):
+        return replace(issue, fixable=False)
+    return issue
+
 
 # Convert a CamelCase check name to snake_case for the docs deep-link.
 _CAMEL_TO_SNAKE_RE: re.Pattern[str] = re.compile(r"(?<!^)(?=[A-Z])")
@@ -154,6 +175,42 @@ class DotenvLinterPlugin(BaseToolPlugin):
 
         return args
 
+    def _check_command(self, file_path: str) -> list[str]:
+        """Build the dotenv-linter check command for one file.
+
+        Args:
+            file_path: Path to the ``.env`` file to check.
+
+        Returns:
+            Command line for dotenv-linter in check mode.
+        """
+        return [
+            *self._get_executable_command(tool_name="dotenv-linter"),
+            "check",
+            *self._build_common_args(),
+            file_path,
+        ]
+
+    def _fix_command(self, file_path: str) -> list[str]:
+        """Build the dotenv-linter fix command for one file.
+
+        ``--no-backup`` prevents dotenv-linter from writing ``.env.bak``
+        files alongside the fixed file.
+
+        Args:
+            file_path: Path to the ``.env`` file to fix.
+
+        Returns:
+            Command line for dotenv-linter in fix mode.
+        """
+        return [
+            *self._get_executable_command(tool_name="dotenv-linter"),
+            "fix",
+            "--no-backup",
+            *self._build_common_args(),
+            file_path,
+        ]
+
     def _process_single_file(
         self,
         file_path: str,
@@ -168,14 +225,11 @@ class DotenvLinterPlugin(BaseToolPlugin):
         Returns:
             FileProcessingResult with processing outcome.
         """
-        cmd = [
-            *self._get_executable_command(tool_name="dotenv-linter"),
-            "check",
-            *self._build_common_args(),
-            file_path,
-        ]
         try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
+            success, output = self._run_subprocess(
+                cmd=self._check_command(file_path),
+                timeout=timeout,
+            )
             issues = parse_dotenv_linter_output(output=output)
             # dotenv-linter exits non-zero when it reports problems. Treat a
             # non-zero exit with no parsed issues as a genuine failure so real
@@ -207,136 +261,6 @@ class DotenvLinterPlugin(BaseToolPlugin):
                 issues=[],
                 error=str(e),
             )
-
-    def _process_single_file_fix(
-        self,
-        file_path: str,
-        timeout: int,
-    ) -> FileFixResult:
-        """Fix a single ``.env`` file with dotenv-linter.
-
-        Runs an initial check to capture the pre-fix issue set, applies the
-        fix in place, then re-checks to determine which issues remain. This
-        keeps the ToolResult invariant intact
-        (``initial = fixed + remaining``) even for checks dotenv-linter cannot
-        auto-fix.
-
-        Args:
-            file_path: Path to the ``.env`` file to fix.
-            timeout: Timeout in seconds for each dotenv-linter command.
-
-        Returns:
-            FileFixResult with per-file processing result and fix metrics.
-        """
-        initial = self._process_single_file(file_path, timeout)
-        if initial.skipped or initial.error:
-            return FileFixResult(
-                file_result=initial,
-                initial_count=0,
-                fixed_count=0,
-                initial_issues=[],
-            )
-
-        initial_issues: list[DotenvLinterIssue] = [
-            issue for issue in initial.issues if isinstance(issue, DotenvLinterIssue)
-        ]
-        if not initial_issues:
-            return FileFixResult(
-                file_result=FileProcessingResult(success=True, output="", issues=[]),
-                initial_count=0,
-                fixed_count=0,
-                initial_issues=[],
-            )
-
-        # ``--no-backup`` prevents dotenv-linter from writing ``.env.bak``
-        # files alongside the fixed file.
-        fix_cmd = [
-            *self._get_executable_command(tool_name="dotenv-linter"),
-            "fix",
-            "--no-backup",
-            *self._build_common_args(),
-            file_path,
-        ]
-        try:
-            fix_success, fix_output = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output="",
-                    issues=initial_issues,
-                    skipped=True,
-                    timed_out=True,
-                ),
-                initial_count=len(initial_issues),
-                fixed_count=0,
-                initial_issues=initial_issues,
-            )
-        except (OSError, ValueError, RuntimeError) as e:
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output="",
-                    issues=initial_issues,
-                    error=str(e),
-                ),
-                initial_count=len(initial_issues),
-                fixed_count=0,
-                initial_issues=initial_issues,
-            )
-
-        if not fix_success:
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output=fix_output,
-                    issues=initial_issues,
-                ),
-                initial_count=len(initial_issues),
-                fixed_count=0,
-                initial_issues=initial_issues,
-            )
-
-        # Re-check to determine which issues remain after fixing. Issues that
-        # survived an attempted fix are marked non-fixable so downstream
-        # consumers do not offer an auto-fix that was already tried.
-        recheck = self._process_single_file(file_path, timeout)
-        if recheck.error or (not recheck.success and not recheck.issues):
-            # Recheck failed without parseable diagnostics — preserve the
-            # original issues as remaining rather than treating an empty list
-            # as "everything was fixed".
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output=recheck.output or recheck.error or fix_output,
-                    issues=[replace(issue, fixable=False) for issue in initial_issues],
-                    error=recheck.error or "dotenv-linter recheck failed",
-                    timed_out=recheck.timed_out,
-                ),
-                initial_count=len(initial_issues),
-                fixed_count=0,
-                initial_issues=initial_issues,
-            )
-        remaining_issues: list[DotenvLinterIssue] = [
-            replace(issue, fixable=False)
-            for issue in recheck.issues
-            if isinstance(issue, DotenvLinterIssue)
-        ]
-        fixed_count = max(len(initial_issues) - len(remaining_issues), 0)
-
-        return FileFixResult(
-            file_result=FileProcessingResult(
-                success=recheck.success and not remaining_issues,
-                output=recheck.output,
-                issues=remaining_issues,
-            ),
-            initial_count=len(initial_issues),
-            fixed_count=fixed_count,
-            initial_issues=initial_issues,
-        )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check ``.env`` files with dotenv-linter.
@@ -385,80 +309,20 @@ class DotenvLinterPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        initial_issues_total = 0
-        fixed_issues_total = 0
-        fixed_files: list[str] = []
-        all_initial_issues: list[BaseIssue] = []
-        all_remaining_issues: list[BaseIssue] = []
-
-        def process_fix(file_path: str) -> FileProcessingResult:
-            """Fix a single file, accumulating fix metrics.
-
-            Args:
-                file_path: Path to the file to fix.
-
-            Returns:
-                FileProcessingResult with the per-file outcome.
-            """
-            nonlocal initial_issues_total, fixed_issues_total
-            fix_result = self._process_single_file_fix(
-                file_path=file_path,
-                timeout=ctx.timeout,
-            )
-            initial_issues_total += fix_result.initial_count
-            fixed_issues_total += fix_result.fixed_count
-            all_initial_issues.extend(fix_result.initial_issues)
-            all_remaining_issues.extend(fix_result.remaining_issues)
-            if fix_result.fixed_count > 0:
-                fixed_files.append(file_path)
-            return fix_result.file_result
-
-        result = self._process_files_with_progress(
-            files=ctx.files,
-            processor=process_fix,
-            timeout=ctx.timeout,
-            label="Fixing files",
-        )
-
-        # Count what the post-fix re-check actually reported rather than the
-        # arithmetic remainder: a fix can change the issue set (new findings
-        # surfacing after rewrites), and issues_count must match ``issues``.
-        # When the re-check reports more than the initial pass saw, grow the
-        # initial total so initial = fixed + remaining stays valid.
-        remaining_issues = len(all_remaining_issues)
-        if fixed_issues_total + remaining_issues > initial_issues_total:
-            initial_issues_total = fixed_issues_total + remaining_issues
-
-        summary_parts: list[str] = []
-        if fixed_issues_total > 0:
-            summary_parts.append(
-                f"Fixed {fixed_issues_total} issue(s) in {len(fixed_files)} file(s)",
-            )
-        if remaining_issues > 0:
-            summary_parts.append(
-                f"Found {remaining_issues} issue(s) that could not be fixed",
-            )
-        if result.execution_failures > 0:
-            summary_parts.append(
-                f"Failed to process {result.execution_failures} file(s)",
-            )
-
-        summary = "\n".join(summary_parts) if summary_parts else "No fixes needed."
-        per_file_output = result.build_output(timeout=ctx.timeout) or ""
-        if per_file_output.strip():
-            final_output = f"{summary}\n\n{per_file_output}".rstrip()
-        else:
-            final_output = summary
-
-        return ToolResult(
-            name=self.definition.name,
-            success=result.all_success and remaining_issues == 0,
-            output=final_output,
-            issues_count=remaining_issues,
-            issues=all_remaining_issues,
-            initial_issues_count=initial_issues_total,
-            fixed_issues_count=fixed_issues_total,
-            remaining_issues_count=remaining_issues,
-            initial_issues=all_initial_issues if all_initial_issues else None,
-            timed_out=result.timed_out,
+        return run_per_file_fix(
+            ctx,
+            plugin=self,
+            check_command=self._check_command,
+            fix_command=self._fix_command,
+            parse=lambda output: parse_dotenv_linter_output(output=output),
+            policy=PerFileFixPolicy(
+                check_failure_message="dotenv-linter check failed",
+                # Re-check after a successful fix: dotenv-linter cannot fix
+                # every check, and surviving issues must not be offered for
+                # an auto-fix that was already attempted.
+                verify=VerifyMode.AFTER_SUCCESS,
+                verify_failure_message="dotenv-linter recheck failed",
+                remaining_transform=_mark_unfixable,
+                report_verify_output=True,
+            ),
         )
