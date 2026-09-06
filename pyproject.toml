@@ -416,11 +416,13 @@ exclude = [
 # baseline, so the ratchet is a count: `duplicate_code_baseline` is the number
 # of R0801 blocks present when the gate landed, and the run fails when the
 # count is higher. Lower this number in the PR that removes duplication; never
-# raise it. #2311 is done when it reaches 0. See
+# raise it, and lower `MAX_ALLOWED_DUPLICATE_CODE_BASELINE` in
+# tests/unit/test_duplicate_code_baseline.py in the same commit — the two are
+# compared exactly. #2311 is done when it reaches 0. See
 # lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = ["lintro/tools/definitions"]
-duplicate_code_baseline = 34
+duplicate_code_baseline = 29
 
 [tool.lintro.ruff]
 
@@ -619,12 +621,14 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 144 edges owned by #2311
+  # 146 edges owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
   "lintro.tools -> lintro.plugins",                                                 # owned by #2311
   "lintro.tools.core.command_builders -> lintro.plugins.subprocess_executor",       # owned by #2311
+  "lintro.tools.core.fix_runner -> lintro.plugins.base",                            # owned by #2311
+  "lintro.tools.core.fix_runner -> lintro.plugins.file_processor",                  # owned by #2311
   "lintro.tools.core.tool_installer -> lintro.plugins.execution_preparation",       # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.discovery",                     # owned by #2311

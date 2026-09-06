@@ -51,7 +51,7 @@ DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
 #: that removes duplication, never raise it. #2311 drives it to 0. This one is
 #: compared exactly against ``pyproject.toml``; no tool runs, so no environment
 #: can move it.
-MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 34
+MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 29
 
 #: pylint exit-status bit meaning "a fatal message was issued".
 PYLINT_FATAL_EXIT_BIT: int = 1
