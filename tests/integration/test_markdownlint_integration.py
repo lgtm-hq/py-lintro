@@ -6,14 +6,11 @@ from pathlib import Path
 
 import pytest
 from assertpy import assert_that
-from loguru import logger
 
 from lintro.parsers.markdownlint.markdownlint_issue import MarkdownlintIssue
 from lintro.plugins import ToolRegistry
 from tests.integration._tools import require_command
 
-logger.remove()
-logger.add(lambda msg: print(msg, end=""), level="INFO")
 SAMPLE_FILE = "test_samples/tools/config/markdown/markdownlint_violations.md"
 
 

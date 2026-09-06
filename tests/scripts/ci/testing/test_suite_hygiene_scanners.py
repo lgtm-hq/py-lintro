@@ -296,12 +296,18 @@ def test_scanner_main_exits_zero_on_a_clean_tree(
 
 
 @pytest.mark.parametrize(
-    "module_name",
-    ["scan_duplicate_test_bodies", "scan_mock_only_tests"],
+    ("module_name", "canary_stem"),
+    [
+        ("scan_duplicate_test_bodies", "canary_duplicates"),
+        ("scan_mock_only_tests", "canary_mock_only"),
+    ],
     ids=["duplicates", "mock-only"],
 )
 def test_scanner_main_without_root_scans_the_repository_tests_tree(
     module_name: str,
+    canary_stem: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``main([])`` gates the same tree the no-arg library finders do.
@@ -309,17 +315,23 @@ def test_scanner_main_without_root_scans_the_repository_tests_tree(
     CI runs the scanners as CLIs without ``--root``, so the default has to be
     the repository ``tests/`` tree rather than the working directory: a
     cwd-relative default would sweep ``.venv`` and site-packages and make the
-    zero-count gate host-dependent.
+    zero-count gate host-dependent. Running from a directory that holds a
+    planted canary makes that observable — a cwd default would report it.
 
     Args:
         module_name: Scanner module stem under ``scripts/ci/testing``.
+        canary_stem: Canary file stem under ``canary/``, without any suffix.
+        tmp_path: Pytest temporary directory holding the planted canary.
+        monkeypatch: Pytest monkeypatch fixture, used to move the cwd.
         capsys: Pytest capture fixture for the printed report.
     """
     scanner = _load(module_name)
-
-    assert_that(scanner.REPO_ROOT / "tests").is_equal_to(ROOT / "tests")
+    _plant_canary(stem=canary_stem, tmp_path=tmp_path)
+    monkeypatch.chdir(tmp_path)
 
     exit_code = scanner.main([])
 
     assert_that(exit_code).is_equal_to(0)
-    assert_that(capsys.readouterr().out.split()).contains("0")
+    out = capsys.readouterr().out
+    assert_that(out.split()).contains("0")
+    assert_that(out).does_not_contain("test_canary")

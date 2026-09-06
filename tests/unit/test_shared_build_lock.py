@@ -139,3 +139,52 @@ def test_release_only_removes_the_lock_this_worker_still_owns(
 
     assert_that(_release_lock(lock=lock, token=f"{os.getpid()}:mine")).is_true()
     assert_that(lock.exists()).is_false()
+
+
+@pytest.mark.parametrize(
+    ("token_kind", "contents"),
+    [
+        ("empty-file", ""),
+        ("no-pid", "notapid:abc123"),
+        ("blank-pid", ":abc123"),
+        ("negative-pid", "-1:abc123"),
+    ],
+)
+def test_reclaim_leaves_a_lock_it_cannot_attribute_to_a_dead_owner(
+    token_kind: str,
+    contents: str,
+    tmp_path: Path,
+) -> None:
+    """A lock whose token names no pid is never reclaimed.
+
+    Failing open on an unparseable token is how a waiter would delete a live
+    successor's lock and let two ``uv build`` runs overlap, so anything that
+    is not a pid this code wrote must be left alone.
+
+    Args:
+        token_kind: Human-readable name of the malformed token under test.
+        contents: Exact bytes written into the lock file.
+        tmp_path: Pytest temporary directory holding the lock file.
+    """
+    lock = tmp_path / "lintro-dist.lock"
+    lock.write_text(contents, encoding="utf-8")
+
+    reclaimed = _reclaim_stale_lock(lock=lock)
+
+    assert_that(reclaimed).is_false()
+    assert_that(lock.read_text(encoding="utf-8")).is_equal_to(contents)
+
+
+def test_reclaim_and_release_report_false_for_a_missing_lock(
+    tmp_path: Path,
+) -> None:
+    """Neither helper invents work when the lock file is already gone.
+
+    Args:
+        tmp_path: Pytest temporary directory that holds no lock file.
+    """
+    lock = tmp_path / "lintro-dist.lock"
+
+    assert_that(_reclaim_stale_lock(lock=lock)).is_false()
+    assert_that(_release_lock(lock=lock, token=f"{os.getpid()}:mine")).is_false()
+    assert_that(lock.exists()).is_false()

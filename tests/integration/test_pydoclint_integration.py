@@ -17,8 +17,6 @@ from tests.integration._tools import require_tool
 
 pytestmark = require_tool("pydoclint")
 
-logger.remove()
-logger.add(lambda msg: print(msg, end=""), level="INFO")
 
 SAMPLE_FILE = "test_samples/tools/python/pydoclint/pydoclint_violations.py"
 
