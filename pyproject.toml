@@ -100,8 +100,10 @@ Source = "https://github.com/lgtm-hq/py-lintro"
 # the same top-level `docstring_parser` module. In a sync that also has `full`
 # the fork arrives via pydoclint, but `uv sync --extra ai` on its own would then
 # install neither and `anthropic.lib.tools` would raise ModuleNotFoundError.
-# This group puts the fork back for exactly those syncs — `ai-review.yml` and
-# `scripts/ci/run-ai-contract-tests.sh` pass `--group ai-runtime`.
+# This group puts the fork back for exactly those syncs, and no call site has to
+# ask for it: `[tool.uv] default-groups` below lists `ai-runtime` alongside
+# `dev`, so a plain `uv sync --extra ai` already carries the fork. `ai-review.yml`
+# and `scripts/ci/run-ai-contract-tests.sh` therefore pass no `--group` flag.
 #
 # It is deliberately NOT on the published `ai` extra: the override is a uv
 # workspace setting that pip never reads, so shipping the fork in wheel metadata
@@ -293,7 +295,7 @@ max-statements = 50
 "lintro/tools/core/update_channels.py" = ["PLR0912"]
 "lintro/tools/core/version_parsing.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/_ts_checker_execution.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/definitions/astro_check.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/definitions/astro_check.py" = ["PLR0912"]
 "lintro/tools/definitions/bandit.py" = ["C901", "PLR0912", "PLR0913"]
 "lintro/tools/definitions/buf.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/mypy.py" = ["C901", "PLR0912", "PLR0915"]
@@ -302,7 +304,6 @@ max-statements = 50
 "lintro/tools/definitions/ruff.py" = ["PLR0913"]
 "lintro/tools/definitions/spectral.py" = ["PLR0912"]
 "lintro/tools/definitions/stylelint.py" = ["PLR0912"]
-"lintro/tools/definitions/svelte_check.py" = ["PLR0912"]
 "lintro/tools/definitions/yamllint.py" = ["PLR0912", "PLR0915"]
 "lintro/tools/implementations/pytest/collection.py" = ["PLR0912"]
 "lintro/tools/implementations/pytest/coverage_processor.py" = [
@@ -426,11 +427,14 @@ exclude = [
 # raise it, and lower `MAX_ALLOWED_DUPLICATE_CODE_BASELINE` in
 # tests/unit/test_duplicate_code_baseline.py in the same commit — that test
 # asserts this value is `<=` the ceiling recorded there, so leaving the ceiling
-# behind would silently allow the baseline to climb back. #2311 is done when it
-# reaches 0. See lintro/utils/duplicate_code.py.
+# behind would silently allow the baseline to climb back. #2311 drove the count
+# to 0, so the gate is now zero-tolerance: any new clone set in the definitions
+# package fails the run. The live guard stays `<=` so a pylint/astroid build
+# that reports a phantom finding is the only way this can move, and the fix is
+# to delete the duplication. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
 include = ["lintro/tools/definitions"]
-duplicate_code_baseline = 3
+duplicate_code_baseline = 0
 
 [tool.lintro.ruff]
 
@@ -656,7 +660,7 @@ ignore_imports = [
   "lintro.cli_utils.commands.mcp -> lintro.mcp.server",      # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.core",       # owned by #1972
   "lintro.cli_utils.commands.test -> lintro.api.pipeline",   # owned by #1972
-  # 143 edges owned by #2311
+  # 144 edges owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.command_builders",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.config_injection",     # owned by #2311
   "lintro.plugins.execution_preparation -> lintro.tools.core.version_requirements", # owned by #2311
@@ -667,6 +671,7 @@ ignore_imports = [
   "lintro.tools.core.command_builders -> lintro.plugins.subprocess_executor",       # owned by #2311
   "lintro.tools.core.fix_runner -> lintro.plugins.base",                            # owned by #2311
   "lintro.tools.core.fix_runner -> lintro.plugins.file_processor",                  # owned by #2311
+  "lintro.tools.core.node_modules -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.tool_installer -> lintro.plugins.execution_preparation",       # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.discovery",                     # owned by #2311

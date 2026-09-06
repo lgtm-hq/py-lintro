@@ -7,10 +7,8 @@ uses deny.toml for configuration.
 
 from __future__ import annotations
 
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -20,6 +18,7 @@ from lintro.parsers.cargo_deny.cargo_deny_parser import parse_cargo_deny_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.cargo import find_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -33,45 +32,6 @@ from lintro.tools.core.timeout_utils import (
 CARGO_DENY_DEFAULT_TIMEOUT: int = 60
 CARGO_DENY_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 CARGO_DENY_FILE_PATTERNS: list[str] = ["Cargo.toml", "deny.toml"]
-
-
-def _find_cargo_root(paths: list[str]) -> Path | None:
-    """Return the nearest directory containing Cargo.toml for given paths.
-
-    Args:
-        paths: List of file paths to search from.
-
-    Returns:
-        Path to Cargo.toml directory, or None if not found.
-    """
-    roots: list[Path] = []
-    for raw_path in paths:
-        current = Path(raw_path).resolve()
-        # If it's a file, start from its parent
-        if current.is_file():
-            current = current.parent
-        # Search upward for Cargo.toml
-        for candidate in [current, *list(current.parents)]:
-            manifest = candidate / "Cargo.toml"
-            if manifest.exists():
-                roots.append(candidate)
-                break
-
-    if not roots:
-        return None
-
-    # Prefer a single root; if multiple, use common path when valid
-    unique_roots = set(roots)
-    if len(unique_roots) == 1:
-        return roots[0]
-
-    try:
-        common = Path(os.path.commonpath([str(r) for r in unique_roots]))
-    except ValueError:
-        return None
-
-    manifest = common / "Cargo.toml"
-    return common if manifest.exists() else None
 
 
 def _build_cargo_deny_command() -> list[str]:
@@ -173,7 +133,7 @@ class CargoDenyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = _find_cargo_root(ctx.files)
+        cargo_root = find_cargo_root(ctx.files)
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,

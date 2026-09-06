@@ -48,10 +48,11 @@ DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
 
 #: Ceiling on the baseline, recorded when the gate landed and deliberately not
 #: derived from the config. It may only go *down*: lower it in the pull request
-#: that removes duplication, never raise it. #2311 drives it to 0. The
-#: configured baseline is asserted to be ``<=`` this ceiling; no tool runs, so
-#: no environment can move it.
-MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 3
+#: that removes duplication, never raise it. #2311 drove it to 0, so the gate is
+#: zero-tolerance and this constant has nowhere left to fall. The configured
+#: baseline is asserted to be ``<=`` this ceiling; no tool runs, so no
+#: environment can move it.
+MAX_ALLOWED_DUPLICATE_CODE_BASELINE: int = 0
 
 #: pylint exit-status bit meaning "a fatal message was issued".
 PYLINT_FATAL_EXIT_BIT: int = 1
@@ -196,20 +197,14 @@ def _assert_within_baseline(*, count: int, baseline: int) -> None:
     ).is_less_than_or_equal_to(baseline)
 
 
-@pytest.mark.parametrize(
-    "offset",
-    [-MAX_ALLOWED_DUPLICATE_CODE_BASELINE, -2, -1, 0],
-    ids=["none", "two-below-baseline", "one-below-baseline", "at-baseline"],
-)
-def test_a_live_count_at_or_below_the_baseline_is_accepted(offset: int) -> None:
-    """The live comparison passes for any count that has not grown.
+def test_a_live_count_at_the_baseline_is_accepted() -> None:
+    """The live comparison passes for a count that has not grown.
 
-    Args:
-        offset: Distance from the baseline, so the cases track the constant as
-            #2311 lowers it instead of pinning today's number.
+    The baseline reached 0 in #2311, so a clone-free definitions package is the
+    only count the gate now accepts; anything else is growth.
     """
     _assert_within_baseline(
-        count=MAX_ALLOWED_DUPLICATE_CODE_BASELINE + offset,
+        count=MAX_ALLOWED_DUPLICATE_CODE_BASELINE,
         baseline=MAX_ALLOWED_DUPLICATE_CODE_BASELINE,
     )
 

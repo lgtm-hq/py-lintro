@@ -348,6 +348,54 @@ middle section is bespoke — a missing-config skip, a per-module loop, a depend
 hint — can still share the timeout and result-construction shapes without adopting the
 whole runner.
 
+### Ecosystem preconditions
+
+Two families of tools cannot run from the directory lintro discovered their files in.
+`lintro.tools.core` carries the shared preconditions so each definition states the
+requirement rather than reimplementing it.
+
+**Cargo workspaces.** `cargo clippy`, `cargo fmt` and `cargo deny` must be launched from
+a directory that owns a `Cargo.toml`, but lintro hands the plugin whatever its file
+patterns matched — `*.rs` for clippy and rustfmt, `Cargo.toml` and `deny.toml` for
+cargo-deny. `find_cargo_root()` walks every path upward to the nearest manifest and
+reconciles the results: one package wins outright, several fall back to their common
+ancestor and only if that ancestor owns a `Cargo.toml` of its own.
+
+```python
+from lintro.tools.core.cargo import find_cargo_root
+
+cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
+if cargo_root is None:
+    return ToolResult(name=self.definition.name, success=True, output="...", issues_count=0)
+```
+
+`tool_label` is optional and affects logging only: pass it to explain an unresolvable
+multi-package layout to the user, leave it out to fail silently and let the caller emit
+its own skip message.
+
+**Node dependencies.** `astro-check` and `svelte-check` ship inside the project they
+lint, so neither exists until `node_modules` is populated. `ensure_node_modules()` makes
+the three-way decision — skip on a read-only directory, install when the user passed
+`--auto-install`, otherwise skip with the instruction to pass it — and returns the skip
+`ToolResult` for the caller to return, or `None` when the tool may proceed.
+
+```python
+from lintro.tools.core.node_modules import ensure_node_modules
+
+skip_result = ensure_node_modules(
+    plugin=self,
+    cwd=cwd_path,
+    auto_install=bool(merged_options.get("auto_install", False)),
+    tool_label="astro-check",
+)
+if skip_result is not None:
+    return skip_result
+```
+
+`tool_label` is the human-facing tool name; it names the tool in both the log lines and
+the `Skipping <tool>: ...` message, so it is the spelling users see rather than the
+registered snake_case name.
+
 ### Execution Isolation (important for correctness)
 
 Registered plugin instances are process-wide singletons with mutable option state.

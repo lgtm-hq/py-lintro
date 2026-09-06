@@ -83,7 +83,7 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/tools/core/update_channels.py": ("PLR0912",),
     "lintro/tools/core/version_parsing.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/tools/definitions/_ts_checker_execution.py": ("PLR0912", "PLR0915"),
-    "lintro/tools/definitions/astro_check.py": ("C901", "PLR0912", "PLR0915"),
+    "lintro/tools/definitions/astro_check.py": ("PLR0912",),
     "lintro/tools/definitions/bandit.py": ("C901", "PLR0912", "PLR0913"),
     "lintro/tools/definitions/buf.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/tools/definitions/mypy.py": ("C901", "PLR0912", "PLR0915"),
@@ -92,7 +92,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/tools/definitions/ruff.py": ("PLR0913",),
     "lintro/tools/definitions/spectral.py": ("PLR0912",),
     "lintro/tools/definitions/stylelint.py": ("PLR0912",),
-    "lintro/tools/definitions/svelte_check.py": ("PLR0912",),
     "lintro/tools/definitions/yamllint.py": ("PLR0912", "PLR0915"),
     "lintro/tools/implementations/pytest/collection.py": ("PLR0912",),
     "lintro/tools/implementations/pytest/coverage_processor.py": ("C901", "PLR0912"),
@@ -153,8 +152,8 @@ BASELINE: dict[str, tuple[str, ...]] = {
 #: suppression that a previous ratchet step removed. Both may only go *down*,
 #: and both are pinned to the exact live counts (issue #1739): any slack here
 #: is room for exactly that reintroduction.
-BASELINE_MAX_FILES: int = 97
-BASELINE_MAX_SUPPRESSIONS: int = 193
+BASELINE_MAX_FILES: int = 94
+BASELINE_MAX_SUPPRESSIONS: int = 182
 
 #: Ceilings, not current values: the configured thresholds may be lowered
 #: without touching these constants (ratchet plan for complexity: 15 -> 12 ->

@@ -11,10 +11,8 @@ a Cargo.toml file in the project.
 
 from __future__ import annotations
 
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
@@ -33,6 +31,7 @@ from lintro.tools.core.batch_runner import (
     batch_fix_timeout_result,
     run_batch_check,
 )
+from lintro.tools.core.cargo import find_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -45,45 +44,6 @@ from lintro.tools.core.timeout_utils import (
 CLIPPY_DEFAULT_TIMEOUT: int = 120
 CLIPPY_DEFAULT_PRIORITY: int = 85
 CLIPPY_FILE_PATTERNS: list[str] = ["*.rs", "Cargo.toml"]
-
-
-def _find_cargo_root(paths: list[str]) -> Path | None:
-    """Return the nearest directory containing Cargo.toml for given paths.
-
-    Args:
-        paths: List of file paths to search from.
-
-    Returns:
-        Path to Cargo.toml directory, or None if not found.
-    """
-    roots: list[Path] = []
-    for raw_path in paths:
-        current = Path(raw_path).resolve()
-        # If it's a file, start from its parent
-        if current.is_file():
-            current = current.parent
-        # Search upward for Cargo.toml
-        for candidate in [current] + list(current.parents):
-            manifest = candidate / "Cargo.toml"
-            if manifest.exists():
-                roots.append(candidate)
-                break
-
-    if not roots:
-        return None
-
-    # Prefer a single root; if multiple, use common path when valid
-    unique_roots = set(roots)
-    if len(unique_roots) == 1:
-        return roots[0]
-
-    try:
-        common = Path(os.path.commonpath([str(r) for r in unique_roots]))
-    except ValueError:
-        return None
-
-    manifest = common / "Cargo.toml"
-    return common if manifest.exists() else None
 
 
 def _build_clippy_command(fix: bool = False) -> list[str]:
@@ -219,7 +179,7 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = _find_cargo_root(ctx.files)
+        cargo_root = find_cargo_root(ctx.files)
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
@@ -265,7 +225,7 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = _find_cargo_root(ctx.files)
+        cargo_root = find_cargo_root(ctx.files)
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,

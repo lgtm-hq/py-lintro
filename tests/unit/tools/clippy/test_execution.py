@@ -101,6 +101,90 @@ def test_check_reports_parsed_issues(
     assert_that(first_issue.file).is_equal_to("src/lib.rs")
 
 
+def test_check_keeps_raw_output_when_a_failed_run_parses_nothing(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """A compile error is only legible as raw text, so the text survives.
+
+    Clippy runs under ``BatchSuccess.EXIT_STATUS`` with
+    ``BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES``: a non-zero exit with
+    nothing parsed is a build or configuration failure rather than a lint, and
+    dropping the output would leave the user with no diagnosis at all.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    rs_file = _cargo_project(tmp_path)
+    compile_error = "error[E0433]: failed to resolve: use of undeclared crate\n"
+
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        return_value=(False, compile_error),
+    ):
+        result = clippy_plugin.check([str(rs_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).is_equal_to(compile_error)
+
+
+def test_check_drops_raw_output_when_a_failed_run_parses_findings(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed lint run reports its findings, not the cargo JSON stream.
+
+    The same policy pair suppresses the output once anything was parsed, so
+    the formatter renders the issue table instead of raw diagnostic JSON.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    rs_file = _cargo_project(tmp_path)
+
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        return_value=(False, _CLIPPY_ISSUE),
+    ):
+        result = clippy_plugin.check([str(rs_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).is_none()
+
+
+def test_check_ignores_findings_when_the_command_exited_clean(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """Under ``BatchSuccess.EXIT_STATUS`` a zero exit is a pass regardless.
+
+    Clippy's warnings do not by themselves fail the run; the exit status is
+    the whole verdict.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    rs_file = _cargo_project(tmp_path)
+
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        return_value=(True, _CLIPPY_ISSUE),
+    ):
+        result = clippy_plugin.check([str(rs_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).is_none()
+
+
 def test_fix_counts_initial_and_remaining(
     clippy_plugin: ClippyPlugin,
     tmp_path: Path,

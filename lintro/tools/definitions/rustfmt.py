@@ -7,13 +7,9 @@ by parsing Rust code and re-printing it with its own rules. It runs via
 
 from __future__ import annotations
 
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
-
-from loguru import logger
 
 from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
@@ -29,6 +25,7 @@ from lintro.tools.core.batch_runner import (
     batch_fix_timeout_result,
     run_batch_check,
 )
+from lintro.tools.core.cargo import find_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -41,57 +38,6 @@ from lintro.tools.core.timeout_utils import (
 RUSTFMT_DEFAULT_TIMEOUT: int = 60
 RUSTFMT_DEFAULT_PRIORITY: int = 80  # Formatter, runs after linters
 RUSTFMT_FILE_PATTERNS: list[str] = ["*.rs"]
-
-
-def _find_cargo_root(paths: list[str]) -> Path | None:
-    """Return the nearest directory containing Cargo.toml for given paths.
-
-    Args:
-        paths: List of file paths to search from.
-
-    Returns:
-        Path to Cargo.toml directory, or None if not found.
-    """
-    roots: list[Path] = []
-    for raw_path in paths:
-        current = Path(raw_path).resolve()
-        # If it's a file, start from its parent
-        if current.is_file():
-            current = current.parent
-        # Search upward for Cargo.toml
-        for candidate in [current, *list(current.parents)]:
-            manifest = candidate / "Cargo.toml"
-            if manifest.exists():
-                roots.append(candidate)
-                break
-
-    if not roots:
-        return None
-
-    # Prefer a single root; if multiple, use common path when valid
-    unique_roots = set(roots)
-    if len(unique_roots) == 1:
-        return roots[0]
-
-    try:
-        common = Path(os.path.commonpath([str(r) for r in unique_roots]))
-    except ValueError:
-        logger.warning(
-            "Multiple Cargo roots found on different drives; cannot determine "
-            "common workspace root. Skipping rustfmt.",
-        )
-        return None
-
-    manifest = common / "Cargo.toml"
-    if manifest.exists():
-        return common
-
-    logger.warning(
-        "Multiple Cargo roots found ({}) without a common workspace Cargo.toml. "
-        "Consider creating a workspace or running rustfmt on each crate separately.",
-        ", ".join(str(r) for r in unique_roots),
-    )
-    return None
 
 
 def _build_rustfmt_check_command() -> list[str]:
@@ -180,7 +126,7 @@ class RustfmtPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = _find_cargo_root(ctx.files)
+        cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
@@ -224,7 +170,7 @@ class RustfmtPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = _find_cargo_root(ctx.files)
+        cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
