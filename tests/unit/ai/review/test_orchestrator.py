@@ -49,6 +49,7 @@ from lintro.ai.review.prompts import (
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.state_store import load_ci_state, write_state_part
+from tests.unit.ai.review.conftest import patch_review_call_ai
 
 
 def _sample_response_json(
@@ -155,7 +156,7 @@ def test_run_review_marks_cli_transport_tokens_estimated() -> None:
     provider = _mock_provider(content=_sample_response_json())
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -221,7 +222,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_recording_call_ai,
         ),
     ):
@@ -291,7 +292,7 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_timeout_second_call,
         ),
     ):
@@ -361,7 +362,7 @@ async def test_run_review_returns_partial_on_sigterm() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_hang_second_call,
         ),
     ):
@@ -433,7 +434,7 @@ async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_die_after_stop,
         ),
     ):
@@ -515,7 +516,7 @@ def test_run_review_writes_incremental_coverage_parts(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_recording_call_ai,
         ),
     ):
@@ -581,7 +582,7 @@ def test_incremental_state_json_wins_over_downloaded_prior(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -642,7 +643,7 @@ def test_incremental_checkpoint_keeps_prior_findings(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -720,7 +721,7 @@ def test_incremental_checkpoint_keeps_this_run_findings(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_timeout_b,
         ),
     ):
@@ -807,7 +808,7 @@ def test_incremental_checkpoint_applies_sensitivity_filter(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -882,7 +883,7 @@ def test_incremental_checkpoint_keeps_inherited_sibling_findings(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -950,7 +951,7 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_timeout_b,
         ),
     ):
@@ -997,10 +998,7 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
             budget.record(response.cost_estimate)
         return response
 
-    with patch(
-        "lintro.ai.review.orchestrator.call_ai",
-        side_effect=_recording_call_ai,
-    ):
+    with patch_review_call_ai(side_effect=_recording_call_ai):
         result = run_review(
             _one_file_context(),
             provider=provider,
@@ -1062,7 +1060,7 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_flaky_call_ai,
         ),
         pytest.raises(AIError),
@@ -1106,8 +1104,7 @@ def test_run_review_depth1_returns_review_result() -> None:
     ]
     provider = _mock_provider(content=_sample_response_json())
 
-    with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+    with patch_review_call_ai(
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -1194,8 +1191,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
         ),
     ]
 
-    with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+    with patch_review_call_ai(
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -1272,10 +1268,7 @@ async def test_review_chunk_checks_budget_before_each_provider_call() -> None:
 
     with (
         patch.object(budget, "check", side_effect=_record_check),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_fake_call_ai,
-        ),
+        patch_review_call_ai(side_effect=_fake_call_ai),
     ):
         await _review_chunk(
             chunk=_single_chunk(),
@@ -1318,10 +1311,7 @@ async def test_review_chunk_budget_stops_runaway_calls() -> None:
         budget.record(response.cost_estimate)
         return response
 
-    with patch(
-        "lintro.ai.review.orchestrator.call_ai",
-        side_effect=_fake_call_ai,
-    ):
+    with patch_review_call_ai(side_effect=_fake_call_ai):
         with pytest.raises(AIError):
             await _review_chunk(
                 chunk=_single_chunk(),
@@ -1446,10 +1436,7 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_track_concurrency,
-        ),
+        patch_review_call_ai(side_effect=_track_concurrency),
     ):
         run_review(
             context,
@@ -1559,7 +1546,7 @@ def test_run_review_serializes_when_cost_cap_is_set(tmp_path: Path) -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_track_concurrency,
         ),
     ):
@@ -1619,10 +1606,7 @@ def test_run_review_parallelizes_depth_two_chunks(tmp_path: Path) -> None:
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_track_concurrency,
-        ),
+        patch_review_call_ai(side_effect=_track_concurrency),
     ):
         result = run_review(
             context,
@@ -1706,7 +1690,7 @@ def test_run_review_merges_chunks_in_index_order(tmp_path: Path) -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_slow_first_chunk,
         ),
     ):
@@ -1761,7 +1745,7 @@ def test_run_review_records_phase_timings(tmp_path: Path) -> None:
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_fast_call,
         ),
     ):
@@ -1831,7 +1815,7 @@ def test_run_review_budget_cutoff_keeps_completed_under_parallelism(
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=_expensive_call,
         ),
     ):
@@ -1878,7 +1862,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError),
@@ -1923,7 +1907,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError) as exc_info,
@@ -1976,7 +1960,7 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
     progress.on_complete.side_effect = BrokenPipeError()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -2033,11 +2017,11 @@ def test_run_review_uses_git_native_prompt_for_cli_transport() -> None:
         return ("system", "user")
 
     with patch(
-        "lintro.ai.review.orchestrator.build_git_native_review_prompt",
+        "lintro.ai.review.response_pipeline.build_git_native_review_prompt",
         _build,
     ):
         with patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.response_pipeline.call_ai",
             return_value=provider.complete("prompt"),
         ):
             result = run_review(
@@ -2191,7 +2175,7 @@ def _run_single_chunk_review(provider: MagicMock) -> None:
         provider: The provider mock under test.
     """
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2245,7 +2229,7 @@ def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
     ]
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2278,7 +2262,7 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
     context = _one_file_context()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2307,19 +2291,19 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
 async def test_generated_checklist_ids_capped_at_stride() -> None:
     """Model-controlled question counts cannot cross the per-chunk id stride.
 
-    Parallel chunks get disjoint id ranges of ``_GENERATED_CHECKLIST_ID_STRIDE``;
+    Parallel chunks get disjoint id ranges of ``GENERATED_CHECKLIST_ID_STRIDE``;
     accepting more generated questions than the stride would collide with the
     next chunk's range and corrupt the checklist merge (#1969).
     """
     from lintro.ai.budget import CostBudget
-    from lintro.ai.review.orchestrator import (
-        _GENERATED_CHECKLIST_ID_STRIDE,
-        _generate_extra_checklist,
+    from lintro.ai.review.checklist_pass import (
+        GENERATED_CHECKLIST_ID_STRIDE,
+        generate_extra_checklist,
     )
 
     oversized = [
         {"id": f"G{i}", "question": f"Question {i}?"}
-        for i in range(_GENERATED_CHECKLIST_ID_STRIDE + 10)
+        for i in range(GENERATED_CHECKLIST_ID_STRIDE + 10)
     ]
     payload = json.dumps({"generated_questions": oversized})
     context = ReviewContext(
@@ -2347,10 +2331,10 @@ async def test_generated_checklist_ids_capped_at_stride() -> None:
     )
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.checklist_pass.call_ai",
         return_value=response,
     ):
-        text, next_id, _usage = await _generate_extra_checklist(
+        text, next_id, _usage = await generate_extra_checklist(
             chunk=chunk,
             context=context,
             provider=_mock_provider(content=payload),
@@ -2359,5 +2343,5 @@ async def test_generated_checklist_ids_capped_at_stride() -> None:
             next_generated_checklist_id=100,
         )
 
-    assert_that(next_id).is_equal_to(100 + _GENERATED_CHECKLIST_ID_STRIDE)
-    assert_that(text.splitlines()).is_length(_GENERATED_CHECKLIST_ID_STRIDE)
+    assert_that(next_id).is_equal_to(100 + GENERATED_CHECKLIST_ID_STRIDE)
+    assert_that(text.splitlines()).is_length(GENERATED_CHECKLIST_ID_STRIDE)

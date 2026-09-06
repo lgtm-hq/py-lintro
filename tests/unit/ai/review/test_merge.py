@@ -10,7 +10,7 @@ from lintro.ai.review.merge import (
 )
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
-from lintro.ai.review.orchestrator import _parse_checklist
+from lintro.ai.review.response_pipeline import parse_checklist
 
 
 def test_merge_findings_deduplicates_by_file_line_title() -> None:
@@ -76,7 +76,7 @@ def test_merge_checklist_answers_yes_wins_regardless_of_order() -> None:
 
 def test_parse_checklist_treats_null_evidence_as_empty() -> None:
     """JSON null evidence must not become the literal string 'None'."""
-    answers = _parse_checklist(
+    answers = parse_checklist(
         raw_checklist=[{"id": 1, "answer": "yes", "evidence": None}],
     )
 
@@ -86,7 +86,7 @@ def test_parse_checklist_treats_null_evidence_as_empty() -> None:
 
 def test_merge_checklist_answers_null_evidence_yes_still_wins() -> None:
     """Null-evidence yes answers parsed from JSON still beat evidence-backed no."""
-    null_evidence_yes = _parse_checklist(
+    null_evidence_yes = parse_checklist(
         raw_checklist=[{"id": 1, "answer": "yes", "evidence": None}],
     )[0]
     supported_no = ChecklistAnswer(id=1, answer="no", evidence="src/main.py:10")

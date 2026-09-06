@@ -294,7 +294,10 @@ def _run(
             ),
         )
         stack.enter_context(
-            patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+            patch(
+                "lintro.ai.review.response_pipeline.call_ai",
+                side_effect=_chunk_call,
+            ),
         )
         stack.enter_context(
             patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
@@ -825,7 +828,7 @@ def test_synthesized_duplicate_of_a_chunk_finding_is_dropped() -> None:
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
@@ -1581,7 +1584,7 @@ def test_restatements_never_consume_the_cap_window() -> None:
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
@@ -1742,7 +1745,7 @@ def test_a_partial_run_never_spends_the_extra_call() -> None:
             "lintro.ai.review.orchestrator.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.response_pipeline.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(

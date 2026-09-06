@@ -46,13 +46,12 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.orchestrator import (
-    # Deliberate private import: the retry loop is unit-tested at the helper
-    # seam, matching the #1967 tests that already pin this function.
-    _invoke_chunk_review,
-    run_review_async,
-)
+from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.response_pipeline import (
+    ChunkReviewRequest,
+    invoke_chunk_review,
+)
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.mcp.toolkits.review import _run_metadata
 
@@ -535,30 +534,32 @@ async def _degradations_for(
         return _ok_response()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        _response, _elapsed, degradations = await _invoke_chunk_review(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.CLI,
+        _response, _elapsed, degradations = await invoke_chunk_review(
+            request=ChunkReviewRequest(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.CLI,
+                ),
+                checklist_text="",
+                checklist_count=0,
+                interaction_paths="",
+                lint_results=None,
+                extra_checklist="",
+                strictness_section="",
+                budget=budget,
+                repo_root=str(tmp_path),
+                use_one_shot=True,
+                diff_budget=10_000,
+                max_findings=max_findings,
+                chunk_index=3,
             ),
-            checklist_text="",
-            checklist_count=0,
-            interaction_paths="",
-            lint_results=None,
-            extra_checklist="",
-            strictness_section="",
-            budget=budget,
-            repo_root=str(tmp_path),
-            use_one_shot=True,
-            diff_budget=10_000,
-            max_findings=max_findings,
-            chunk_index=3,
         )
     return degradations
 
@@ -645,7 +646,7 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
     provider.capabilities.supports_sessions = False
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(return_value=_ok_response()),
     ):
         result = await run_review_async(

@@ -39,13 +39,15 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
-    # Deliberate private import: the retry loop is unit-tested at the helper
-    # seam because driving it through run_review_async needs a full provider
-    # + chunking stack for no extra coverage. Update this import when the
-    # helper is renamed (#1967 review).
-    _invoke_chunk_review,
     resolve_review_chunks,
     run_review_async,
+)
+from lintro.ai.review.response_pipeline import (
+    # Deliberate helper-seam import: the retry loop is unit-tested here
+    # because driving it through run_review_async needs a full provider
+    # + chunking stack for no extra coverage (#1967 review).
+    ChunkReviewRequest,
+    invoke_chunk_review,
 )
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
@@ -443,7 +445,7 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
     )
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(return_value=ok_response),
     ) as mock_call:
         result = await run_review_async(
@@ -524,26 +526,28 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         return ok_response
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.response_pipeline.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        response, _elapsed, _degradations = await _invoke_chunk_review(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=ai_config,
-            checklist_text="",
-            checklist_count=0,
-            interaction_paths="",
-            lint_results=None,
-            extra_checklist="",
-            strictness_section="",
-            budget=budget,
-            repo_root=str(tmp_path),
-            use_one_shot=True,
-            diff_budget=10_000,
-            max_findings=CLI_MAX_FINDINGS_PER_CALL,
-            chunk_index=0,
+        response, _elapsed, _degradations = await invoke_chunk_review(
+            request=ChunkReviewRequest(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                checklist_text="",
+                checklist_count=0,
+                interaction_paths="",
+                lint_results=None,
+                extra_checklist="",
+                strictness_section="",
+                budget=budget,
+                repo_root=str(tmp_path),
+                use_one_shot=True,
+                diff_budget=10_000,
+                max_findings=CLI_MAX_FINDINGS_PER_CALL,
+                chunk_index=0,
+            ),
         )
 
     assert_that(calls).is_length(2)

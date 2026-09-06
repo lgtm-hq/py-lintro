@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from subprocess import (
     CompletedProcess,
 )  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
+from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +21,10 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from tests.unit.ai.review.review_fixtures import load_review_fixture
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -271,3 +278,33 @@ def sample_review_result() -> ReviewResult:
             ),
         ),
     )
+
+
+def patch_review_call_ai(**patch_kwargs: Any) -> AbstractContextManager[None]:
+    """Patch the ``call_ai`` seam of every module that makes a review call.
+
+    The chunk pipeline, the depth-2 checklist pass and the depth-3 adversarial
+    sweep each bind ``call_ai`` in their own module, so a depth >= 2 test has to
+    pin all three seams with the same stub to see every provider call.
+
+    Args:
+        **patch_kwargs: Keyword arguments forwarded to each ``mock.patch`` call
+            (typically ``side_effect`` or ``return_value``).
+
+    Returns:
+        A context manager that installs the patch on all three modules.
+    """
+    targets = (
+        "lintro.ai.review.response_pipeline.call_ai",
+        "lintro.ai.review.checklist_pass.call_ai",
+        "lintro.ai.review.adversarial_pass.call_ai",
+    )
+
+    @contextmanager
+    def _patched() -> Iterator[None]:
+        with ExitStack() as stack:
+            for target in targets:
+                stack.enter_context(patch(target, **patch_kwargs))
+            yield
+
+    return _patched()

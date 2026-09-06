@@ -101,6 +101,38 @@ walkthrough bullets deduplicate by text and cap at `MAX_WALKTHROUGH_BULLETS`, an
 first chunk to speak wins verdict prose and per-file assessments. The orchestrator
 re-exports the merge names, so the facade and every external importer are untouched.
 
+### Per-chunk passes (`response_pipeline.py`, the two pass modules, #2301)
+
+The fourth slice moves everything that happens _inside_ one chunk out of the
+orchestrator, leaving it the chunk scheduler it is meant to be.
+
+`lintro/ai/review/response_pipeline.py` owns the main round-trip: `invoke_chunk_review`
+builds the prompt through `PromptInputs`, calls the provider, and — when CLI transport
+hits its output-token ceiling mid-JSON — retries once with a tighter findings cap
+(#1967). Both the cap and the retry are recorded as `CoverageDegradation` entries, so a
+capped chunk can never present as an unlimited one (#2003). Its sixteen inputs travel as
+one frozen `ChunkReviewRequest` rather than a keyword wall.
+`parse_review_payload_with_recovery` runs the parse ladder — parse, then at most one
+schema-reminder retry when the timeout budget allows one, then recovery of the prose as
+unstructured findings — so a paid-for answer is never discarded (#1853); it folds the
+retry's usage in through `merge_response_usage`. `payload_to_partial` and
+`parse_checklist` turn the parsed payload into the `ChunkReviewPartial` the merge layer
+consumes.
+
+`lintro/ai/review/checklist_pass.py` owns the depth-2 generated checklist:
+`generate_extra_checklist` asks the model for domain-specific questions and truncates
+the answer at `GENERATED_CHECKLIST_ID_STRIDE`, which is what keeps parallel chunks on
+disjoint generated-id ranges so `merge_checklist_answers` cannot collide.
+`lintro/ai/review/adversarial_pass.py` owns the depth-3 sweep: `run_adversarial_pass`
+returns findings and usage only, and degrades to usage alone when the answer is
+malformed.
+
+`call_ai` is now bound in these three modules rather than in the orchestrator, so a test
+that stubs the provider seam for a depth >= 2 run patches all three (the
+`patch_review_call_ai` helper in `tests/unit/ai/review/conftest.py` does exactly that).
+Behaviour is unchanged and the #2298 goldens pass without regeneration; the orchestrator
+re-exports the moved names until the final slice removes the facade shims.
+
 ## Exit and error contracts
 
 - Exit `0` — successful review, no P1 findings.
