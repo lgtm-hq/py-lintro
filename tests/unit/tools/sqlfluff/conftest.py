@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
+from lintro.tools.sqlfluff.definition import SqlfluffPlugin
 
 
 @pytest.fixture

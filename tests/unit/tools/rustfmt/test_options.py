@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.rustfmt import (
+from lintro.tools.rustfmt.definition import (
     RUSTFMT_DEFAULT_PRIORITY,
     RUSTFMT_DEFAULT_TIMEOUT,
     RustfmtPlugin,

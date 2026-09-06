@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.rustfmt import RustfmtPlugin
+from lintro.tools.rustfmt.definition import RustfmtPlugin
 
 # =============================================================================
 # Tests for RustfmtPlugin.check method

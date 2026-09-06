@@ -297,8 +297,6 @@ max-statements = 50
 "lintro/tools/core/update_channels.py" = ["PLR0912"]
 "lintro/tools/core/version_parsing.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/definitions/_ts_checker_execution.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/definitions/spectral.py" = ["PLR0912"]
-"lintro/tools/definitions/stylelint.py" = ["PLR0912"]
 "lintro/tools/definitions/yamllint.py" = ["PLR0912", "PLR0915"]
 "lintro/tools/mypy/definition.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/oxlint/definition.py" = ["PLR0913"]
@@ -317,6 +315,8 @@ max-statements = 50
 "lintro/tools/ruff/commands.py" = ["PLR0912"]
 "lintro/tools/ruff/definition.py" = ["PLR0913"]
 "lintro/tools/ruff/fix.py" = ["C901", "PLR0912", "PLR0915"]
+"lintro/tools/spectral/definition.py" = ["PLR0912"]
+"lintro/tools/stylelint/definition.py" = ["PLR0912"]
 "lintro/utils/console/logger.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/utils/console/pre_execution_summary.py" = ["PLR0912"]
 "lintro/utils/display_helpers.py" = ["PLR0912"]
@@ -449,8 +449,18 @@ include = [
   "lintro/tools/oxlint",
   "lintro/tools/pip_audit",
   "lintro/tools/prettier",
+  "lintro/tools/pydoclint",
+  "lintro/tools/pylint",
   "lintro/tools/pytest",
   "lintro/tools/ruff",
+  "lintro/tools/rustfmt",
+  "lintro/tools/semgrep",
+  "lintro/tools/shellcheck",
+  "lintro/tools/shfmt",
+  "lintro/tools/spectral",
+  "lintro/tools/sqlfluff",
+  "lintro/tools/stylelint",
+  "lintro/tools/svelte_check",
 ]
 duplicate_code_baseline = 0
 
@@ -724,36 +734,6 @@ ignore_imports = [
   "lintro.tools.core.tool_manager -> lintro.plugins.registry",                      # owned by #2311
   "lintro.tools.definitions._ts_checker_base -> lintro.plugins.base",               # owned by #2311
   "lintro.tools.definitions._ts_checker_execution -> lintro.plugins.base",          # owned by #2311
-  "lintro.tools.definitions.pydoclint -> lintro.plugins.base",                      # owned by #2311
-  "lintro.tools.definitions.pydoclint -> lintro.plugins.protocol",                  # owned by #2311
-  "lintro.tools.definitions.pydoclint -> lintro.plugins.registry",                  # owned by #2311
-  "lintro.tools.definitions.pylint -> lintro.plugins.base",                         # owned by #2311
-  "lintro.tools.definitions.pylint -> lintro.plugins.protocol",                     # owned by #2311
-  "lintro.tools.definitions.pylint -> lintro.plugins.registry",                     # owned by #2311
-  "lintro.tools.definitions.rustfmt -> lintro.plugins.base",                        # owned by #2311
-  "lintro.tools.definitions.rustfmt -> lintro.plugins.protocol",                    # owned by #2311
-  "lintro.tools.definitions.rustfmt -> lintro.plugins.registry",                    # owned by #2311
-  "lintro.tools.definitions.semgrep -> lintro.plugins.base",                        # owned by #2311
-  "lintro.tools.definitions.semgrep -> lintro.plugins.protocol",                    # owned by #2311
-  "lintro.tools.definitions.semgrep -> lintro.plugins.registry",                    # owned by #2311
-  "lintro.tools.definitions.shellcheck -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.shellcheck -> lintro.plugins.protocol",                 # owned by #2311
-  "lintro.tools.definitions.shellcheck -> lintro.plugins.registry",                 # owned by #2311
-  "lintro.tools.definitions.shfmt -> lintro.plugins.base",                          # owned by #2311
-  "lintro.tools.definitions.shfmt -> lintro.plugins.protocol",                      # owned by #2311
-  "lintro.tools.definitions.shfmt -> lintro.plugins.registry",                      # owned by #2311
-  "lintro.tools.definitions.spectral -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.spectral -> lintro.plugins.protocol",                   # owned by #2311
-  "lintro.tools.definitions.spectral -> lintro.plugins.registry",                   # owned by #2311
-  "lintro.tools.definitions.sqlfluff -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.sqlfluff -> lintro.plugins.protocol",                   # owned by #2311
-  "lintro.tools.definitions.sqlfluff -> lintro.plugins.registry",                   # owned by #2311
-  "lintro.tools.definitions.stylelint -> lintro.plugins.base",                      # owned by #2311
-  "lintro.tools.definitions.stylelint -> lintro.plugins.protocol",                  # owned by #2311
-  "lintro.tools.definitions.stylelint -> lintro.plugins.registry",                  # owned by #2311
-  "lintro.tools.definitions.svelte_check -> lintro.plugins.base",                   # owned by #2311
-  "lintro.tools.definitions.svelte_check -> lintro.plugins.protocol",               # owned by #2311
-  "lintro.tools.definitions.svelte_check -> lintro.plugins.registry",               # owned by #2311
   "lintro.tools.definitions.taplo -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.definitions.taplo -> lintro.plugins.protocol",                      # owned by #2311
   "lintro.tools.definitions.taplo -> lintro.plugins.registry",                      # owned by #2311
@@ -817,12 +797,42 @@ ignore_imports = [
   "lintro.tools.prettier.definition -> lintro.plugins.base",                        # owned by #2311
   "lintro.tools.prettier.definition -> lintro.plugins.protocol",                    # owned by #2311
   "lintro.tools.prettier.definition -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.pydoclint.definition -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.pydoclint.definition -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.pydoclint.definition -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.pylint.definition -> lintro.plugins.base",                          # owned by #2311
+  "lintro.tools.pylint.definition -> lintro.plugins.protocol",                      # owned by #2311
+  "lintro.tools.pylint.definition -> lintro.plugins.registry",                      # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.protocol",                      # owned by #2311
   "lintro.tools.pytest.definition -> lintro.plugins.registry",                      # owned by #2311
   "lintro.tools.ruff.definition -> lintro.plugins.base",                            # owned by #2311
   "lintro.tools.ruff.definition -> lintro.plugins.protocol",                        # owned by #2311
   "lintro.tools.ruff.definition -> lintro.plugins.registry",                        # owned by #2311
+  "lintro.tools.rustfmt.definition -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.rustfmt.definition -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.rustfmt.definition -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.semgrep.definition -> lintro.plugins.base",                         # owned by #2311
+  "lintro.tools.semgrep.definition -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.semgrep.definition -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.shellcheck.definition -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.shellcheck.definition -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.shellcheck.definition -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.shfmt.definition -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.shfmt.definition -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.shfmt.definition -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.spectral.definition -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.spectral.definition -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.spectral.definition -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.sqlfluff.definition -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.sqlfluff.definition -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.sqlfluff.definition -> lintro.plugins.registry",                    # owned by #2311
+  "lintro.tools.stylelint.definition -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.stylelint.definition -> lintro.plugins.protocol",                   # owned by #2311
+  "lintro.tools.stylelint.definition -> lintro.plugins.registry",                   # owned by #2311
+  "lintro.tools.svelte_check.definition -> lintro.plugins.base",                    # owned by #2311
+  "lintro.tools.svelte_check.definition -> lintro.plugins.protocol",                # owned by #2311
+  "lintro.tools.svelte_check.definition -> lintro.plugins.registry",                # owned by #2311
   # 61 edges owned by #2312
   "lintro.utils.async_tool_executor -> lintro.plugins.base",                                    # owned by #2312
   "lintro.utils.doctor_report -> lintro.ai.doctor_checks",                                      # owned by #2312

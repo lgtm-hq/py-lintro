@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.pylint import PylintPlugin, find_pylint_config
+from lintro.tools.pylint.definition import PylintPlugin, find_pylint_config
 from tests.unit.tools.pylint.conftest import make_result
 
 _VERSION_PATCH = "lintro.plugins.execution_preparation.verify_tool_version"

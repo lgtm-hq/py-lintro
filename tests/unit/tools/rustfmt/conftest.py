@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.rustfmt import RustfmtPlugin
+from lintro.tools.rustfmt.definition import RustfmtPlugin
 
 
 @pytest.fixture

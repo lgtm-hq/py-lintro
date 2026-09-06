@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.sqlfluff import (
+from lintro.tools.sqlfluff.definition import (
     SQLFLUFF_DEFAULT_TIMEOUT,
     SqlfluffPlugin,
 )
@@ -148,7 +148,7 @@ def test_build_lint_command_basic(sqlfluff_plugin: SqlfluffPlugin) -> None:
     Args:
         sqlfluff_plugin: The SqlfluffPlugin instance to test.
     """
-    from lintro.tools.definitions.sqlfluff import SQLFLUFF_DEFAULT_FORMAT
+    from lintro.tools.sqlfluff.definition import SQLFLUFF_DEFAULT_FORMAT
 
     cmd = sqlfluff_plugin._build_lint_command(files=["test.sql"])
 

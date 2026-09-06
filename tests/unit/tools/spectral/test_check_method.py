@@ -13,7 +13,7 @@ from assertpy import assert_that
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.spectral.definition import SpectralPlugin
 
 MOCK_OUTPUT = (
     '[{"code": "operation-operationId", "path": ["paths", "/users", "get"], '

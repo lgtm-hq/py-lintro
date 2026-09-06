@@ -18,9 +18,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.check_runner import PerFileCheckPolicy
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
-from lintro.tools.definitions.shellcheck import ShellcheckPlugin
 from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
+from lintro.tools.shellcheck.definition import ShellcheckPlugin
 
 #: One shellcheck finding in the json1 format the plugin asks for.
 SHELLCHECK_FINDING: str = """[
@@ -259,7 +259,7 @@ def test_a_parser_failure_fails_only_that_file(tmp_path: Path) -> None:
     with (
         patch.object(plugin, "_run_subprocess", return_value=(True, "[]")),
         patch(
-            "lintro.tools.definitions.shellcheck.parse_shellcheck_output",
+            "lintro.tools.shellcheck.definition.parse_shellcheck_output",
             side_effect=[ValueError("malformed report"), []],
         ),
     ):

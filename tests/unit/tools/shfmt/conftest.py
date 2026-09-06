@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.shfmt import ShfmtPlugin
+from lintro.tools.shfmt.definition import ShfmtPlugin
 
 
 @pytest.fixture

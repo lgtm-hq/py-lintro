@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 def test_set_options_quiet(pydoclint_plugin: PydoclintPlugin) -> None:

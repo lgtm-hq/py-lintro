@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.shfmt import ShfmtPlugin
+from lintro.tools.shfmt.definition import ShfmtPlugin
 from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:

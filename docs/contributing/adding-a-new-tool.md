@@ -17,12 +17,12 @@ guides.
 **Pick a reference implementation.** Do not write plugin/parser code from scratch.
 Mirror the closest existing tool:
 
-| Tool type              | Reference                                |
-| ---------------------- | ---------------------------------------- |
-| Simple linter (no fix) | `lintro/tools/actionlint/definition.py`  |
-| Linter + formatter     | `lintro/tools/ruff/definition.py`        |
-| Security scanner       | `lintro/tools/bandit/definition.py`      |
-| Shell tool             | `lintro/tools/definitions/shellcheck.py` |
+| Tool type              | Reference                               |
+| ---------------------- | --------------------------------------- |
+| Simple linter (no fix) | `lintro/tools/actionlint/definition.py` |
+| Linter + formatter     | `lintro/tools/ruff/definition.py`       |
+| Security scanner       | `lintro/tools/bandit/definition.py`     |
+| Shell tool             | `lintro/tools/shellcheck/definition.py` |
 
 Read all files for that reference tool (definition, parser package, unit tests,
 integration test, test samples) before writing any new code.

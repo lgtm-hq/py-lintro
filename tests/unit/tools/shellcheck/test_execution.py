@@ -9,7 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
-from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from lintro.tools.shellcheck.definition import ShellcheckPlugin
 from tests.test_samples_helpers import copy_sample
 
 # Tests for ShellcheckPlugin.check method

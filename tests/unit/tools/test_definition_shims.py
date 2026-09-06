@@ -50,8 +50,18 @@ from lintro.tools.definitions import oxlint as oxlint_shim
 from lintro.tools.definitions import oxlint_doctor as oxlint_doctor_shim
 from lintro.tools.definitions import pip_audit as pip_audit_shim
 from lintro.tools.definitions import prettier as prettier_shim
+from lintro.tools.definitions import pydoclint as pydoclint_shim
+from lintro.tools.definitions import pylint as pylint_shim
 from lintro.tools.definitions import pytest as pytest_shim
 from lintro.tools.definitions import ruff as ruff_shim
+from lintro.tools.definitions import rustfmt as rustfmt_shim
+from lintro.tools.definitions import semgrep as semgrep_shim
+from lintro.tools.definitions import shellcheck as shellcheck_shim
+from lintro.tools.definitions import shfmt as shfmt_shim
+from lintro.tools.definitions import spectral as spectral_shim
+from lintro.tools.definitions import sqlfluff as sqlfluff_shim
+from lintro.tools.definitions import stylelint as stylelint_shim
+from lintro.tools.definitions import svelte_check as svelte_check_shim
 from lintro.tools.dotenv_linter import definition as dotenv_linter_package
 from lintro.tools.gitleaks import definition as gitleaks_package
 from lintro.tools.golangci_lint import definition as golangci_lint_package
@@ -67,8 +77,18 @@ from lintro.tools.oxlint import definition as oxlint_package
 from lintro.tools.oxlint import doctor as oxlint_doctor_package
 from lintro.tools.pip_audit import definition as pip_audit_package
 from lintro.tools.prettier import definition as prettier_package
+from lintro.tools.pydoclint import definition as pydoclint_package
+from lintro.tools.pylint import definition as pylint_package
 from lintro.tools.pytest import definition as pytest_package
 from lintro.tools.ruff import definition as ruff_package
+from lintro.tools.rustfmt import definition as rustfmt_package
+from lintro.tools.semgrep import definition as semgrep_package
+from lintro.tools.shellcheck import definition as shellcheck_package
+from lintro.tools.shfmt import definition as shfmt_package
+from lintro.tools.spectral import definition as spectral_package
+from lintro.tools.sqlfluff import definition as sqlfluff_package
+from lintro.tools.stylelint import definition as stylelint_package
+from lintro.tools.svelte_check import definition as svelte_check_package
 
 #: Repository root, so the child interpreter runs against this checkout.
 REPO_ROOT: Path = Path(__file__).resolve().parents[3]
@@ -114,8 +134,18 @@ MOVED_TOOLS: list[tuple[ModuleType, ModuleType, str, str]] = [
     (oxlint_shim, oxlint_package, "OxlintPlugin", "oxlint"),
     (pip_audit_shim, pip_audit_package, "PipAuditPlugin", "pip_audit"),
     (prettier_shim, prettier_package, "PrettierPlugin", "prettier"),
+    (pydoclint_shim, pydoclint_package, "PydoclintPlugin", "pydoclint"),
+    (pylint_shim, pylint_package, "PylintPlugin", "pylint"),
     (pytest_shim, pytest_package, "PytestPlugin", "pytest"),
     (ruff_shim, ruff_package, "RuffPlugin", "ruff"),
+    (rustfmt_shim, rustfmt_package, "RustfmtPlugin", "rustfmt"),
+    (semgrep_shim, semgrep_package, "SemgrepPlugin", "semgrep"),
+    (shellcheck_shim, shellcheck_package, "ShellcheckPlugin", "shellcheck"),
+    (shfmt_shim, shfmt_package, "ShfmtPlugin", "shfmt"),
+    (spectral_shim, spectral_package, "SpectralPlugin", "spectral"),
+    (sqlfluff_shim, sqlfluff_package, "SqlfluffPlugin", "sqlfluff"),
+    (stylelint_shim, stylelint_package, "StylelintPlugin", "stylelint"),
+    (svelte_check_shim, svelte_check_package, "SvelteCheckPlugin", "svelte-check"),
 ]
 
 #: Readable parametrisation ids, one per entry of :data:`MOVED_TOOLS`.

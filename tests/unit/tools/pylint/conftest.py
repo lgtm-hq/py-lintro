@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.pylint import PylintPlugin
+from lintro.tools.pylint.definition import PylintPlugin
 
 #: Body of the R0801 message pylint emits for a two-file clone set.
 R0801_MESSAGE = (

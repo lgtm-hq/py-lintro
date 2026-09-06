@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.stylelint import StylelintPlugin
+from lintro.tools.stylelint.definition import StylelintPlugin
 from tests.test_samples_helpers import copy_sample
 from tests.unit.tools.conftest import record_subprocess_argv
 from tests.unit.tools.stylelint.conftest import make_ctx
