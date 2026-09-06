@@ -381,14 +381,14 @@ def prepare_review(
         resolved: The effective AI configuration for this invocation, from
             :func:`~lintro.ai.effective_config.resolve_effective_ai_config`.
 
+    Two failures propagate from the helpers this calls, and each adapter
+    translates them into its own error surface rather than the shared layer
+    picking one: ``ReviewContextError`` when the diff context cannot be
+    collected, and ``ReviewPreparationError`` when the request resolves to a
+    review that would review nothing.
+
     Returns:
         PreparedReview: The prepared review, ready for :func:`execute_review`.
-
-    Raises:
-        ReviewContextError: When the diff context cannot be collected. Adapters
-            translate it into their own error surface.
-        ReviewPreparationError: When the request resolves to a review that
-            would review nothing.
     """
     review_config = request.lintro_config.review
     ai_config = apply_resolved_transport(

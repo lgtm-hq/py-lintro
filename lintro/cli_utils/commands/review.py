@@ -859,15 +859,16 @@ def _finish_review(
 ) -> NoReturn:
     """Run the prepared review and own everything after it.
 
+    Declared ``NoReturn``: every path ends in the ``SystemExit`` one of the
+    helpers below raises — the convergence skip, a review failure, or the
+    render/post tail carrying the run's exit code.
+
     Args:
         options: The command's Click-populated options.
         lintro_config: Loaded project configuration.
         resolved_ai: Effective AI configuration for this invocation.
         prepared: The prepared review.
         targets: Resolved GitHub target for this run.
-
-    Raises:
-        SystemExit: Always; carries the review's exit code.
     """
     resolved_profile = resolve_transport_settings(prepared.ai_config)
     logger.info(
@@ -949,15 +950,15 @@ def _check_convergence(
     can finish complete and quiet while still queueing a flag for the round
     after.
 
+    Returns normally when the round must run. When it converged,
+    :func:`_finish_converged_review` stamps the outcome and raises
+    ``SystemExit``, so this never returns on that path.
+
     Args:
         options: The command's Click-populated options.
         lintro_config: Loaded project configuration.
         prior_state: State loaded for this invocation.
         targets: Resolved GitHub target for this run.
-
-    Raises:
-        SystemExit: When the round converged, via
-            :func:`_finish_converged_review`.
     """
     convergence = lintro_config.review.convergence
     decision = evaluate_convergence(
@@ -998,12 +999,12 @@ def _run_round(
         targets: Resolved GitHub target for this run.
         console: Terminal console for error rendering.
 
+    A provider or review failure never returns: :func:`_fail_review_command`
+    renders it on the surface the run asked for and raises ``SystemExit`` with
+    the review-error exit code.
+
     Returns:
         ReviewResult: The completed review.
-
-    Raises:
-        SystemExit: When the provider or the review itself failed, via
-            :func:`_fail_review_command`.
     """
     provider = None
     try:

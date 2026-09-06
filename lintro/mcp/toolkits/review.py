@@ -42,7 +42,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
@@ -354,18 +354,22 @@ def _resolve_ai_config(*, workspace: Path) -> tuple[Any, ResolvedAIConfig]:
     return lintro_config, resolved
 
 
-def _context_error(*, exc: ReviewContextError) -> McpError:
-    """Translate a review-context failure into the tool's error taxonomy.
+def _raise_context_error(*, exc: ReviewContextError) -> NoReturn:
+    """Re-raise a review-context failure in the tool's error taxonomy.
+
+    Called rather than ``raise``-ed, in the same shape as the rest of this
+    package's terminal helpers: it never returns, and the ``NoReturn`` type
+    says so.
 
     Args:
         exc: The context failure raised during preparation or, for the
             diff-size ceiling (#1967), inside the review run itself.
 
-    Returns:
+    Raises:
         McpError: :attr:`McpErrorCode.INVALID_INPUT` when the failure describes
-        the caller's request, :attr:`McpErrorCode.TOOL_UNAVAILABLE` when this
-        workspace cannot serve reviews at all, and
-        :attr:`McpErrorCode.EXECUTION_ERROR` otherwise.
+            the caller's request, :attr:`McpErrorCode.TOOL_UNAVAILABLE` when
+            this workspace cannot serve reviews at all, and
+            :attr:`McpErrorCode.EXECUTION_ERROR` otherwise.
     """
     code = str(exc.code.value)
     if code in _UNAVAILABLE_CONTEXT_CODES:
@@ -374,11 +378,11 @@ def _context_error(*, exc: ReviewContextError) -> McpError:
         mcp_code = McpErrorCode.INVALID_INPUT
     else:
         mcp_code = McpErrorCode.EXECUTION_ERROR
-    return McpError(
+    raise McpError(
         code=mcp_code,
         message=str(exc),
         detail={"tool": "lintro_review", "context_error": code},
-    )
+    ) from exc
 
 
 def _finding_body(*, finding: ReviewFinding) -> str:
@@ -655,12 +659,11 @@ def _build_request(
         workspace: Workspace root the review is anchored to.
         lintro_config: Loaded Lintro configuration.
 
+    A ``paths`` entry outside the workspace propagates from
+    :func:`_relative_paths` as :attr:`McpErrorCode.INVALID_INPUT`.
+
     Returns:
         ReviewRunRequest: The request the shared preparation consumes.
-
-    Raises:
-        McpError: :attr:`McpErrorCode.INVALID_INPUT` when a ``paths`` entry
-            lies outside the workspace.
     """
     from lintro.ai.review.preparation import ReviewRunRequest
 
@@ -736,7 +739,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
         # "Nothing changed" is an answer, not a failure; every other context
         # code — including the diff-size ceiling (#1967) — is mapped.
         if str(exc.code.value) != _NO_CHANGES_CODE:
-            raise _context_error(exc=exc) from exc
+            _raise_context_error(exc=exc)
         return _no_changes_payload(
             ai_config=ai_config,
             depth=resolve_review_depth(request),
@@ -761,7 +764,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     try:
         result = execute_review(prepared, provider=provider)
     except ReviewContextError as exc:
-        raise _context_error(exc=exc) from exc
+        _raise_context_error(exc=exc)
     except (AIError, ValueError) as exc:
         failure = _review_failure(provider_name=str(provider.name), error=exc)
         raise McpError(
