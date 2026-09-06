@@ -56,7 +56,12 @@ def _get_find_directive() -> dict[str, object]:
 
 @pytest.mark.parametrize("package", sorted(_discover_packages_from_source()))
 def test_package_importable(package: str) -> None:
-    """Verify each source-tree package can be imported successfully.
+    """Verify each source-tree package imports cleanly.
+
+    This imports from the checkout, so it proves the module is importable at
+    all, not that it reaches the wheel. Distribution membership is asserted by
+    ``tests/integration/test_built_package.py``, which inspects the built
+    archives.
 
     Args:
         package: Dotted package name discovered in the source tree.
@@ -72,8 +77,8 @@ def test_package_importable(package: str) -> None:
     except ImportError as e:
         pytest.fail(
             f"Failed to import '{package}': {e}\n"
-            f"This likely means the package is excluded by "
-            f"[tool.setuptools.packages.find] in pyproject.toml",
+            f"The package is broken in the source tree; whether it ships is "
+            f"checked by tests/integration/test_built_package.py",
         )
 
 

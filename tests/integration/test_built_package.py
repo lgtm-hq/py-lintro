@@ -7,6 +7,7 @@ when the package is installed (not in editable mode).
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 import tarfile
@@ -96,6 +97,7 @@ def test_built_wheel_imports() -> None:
                 # Import the installed wheel, not the source tree the test
                 # runner happens to sit in.
                 cwd=str(tmpdir_path),
+                env=_isolated_env(),
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -110,6 +112,7 @@ def test_built_wheel_imports() -> None:
         cli_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "lintro", "--version"],
             cwd=str(tmpdir_path),
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=10,
@@ -165,6 +168,7 @@ def test_built_wheel_with_full_extra() -> None:
             import_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
                 [str(python_exe), "-c", f"import {module}"],
                 cwd=str(tmpdir_path),
+                env=_isolated_env(),
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -172,6 +176,22 @@ def test_built_wheel_with_full_extra() -> None:
             assert_that(import_result.returncode).described_as(
                 f"Expected {module} from lintro[full]",
             ).is_equal_to(0)
+
+
+def _isolated_env() -> dict[str, str]:
+    """Build a subprocess environment that cannot reach the source tree.
+
+    ``cwd`` alone is not enough: an inherited ``PYTHONPATH`` would put the
+    checkout back on ``sys.path`` and let a module missing from the built
+    distribution satisfy an import. This mirrors ``run_isolated`` in
+    ``scripts/ci/test-verify-imports.sh``.
+
+    Returns:
+        A copy of the current environment with ``PYTHONPATH`` removed.
+    """
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    return env
 
 
 def _build_distributions(dist_dir: Path) -> None:
@@ -237,6 +257,15 @@ def test_built_distributions_ship_the_whole_package_and_no_tests() -> None:
             "packages missing from the wheel",
         ).is_empty()
         assert_that(wheel_names).contains("lintro/py.typed")
+        # Declared package data, not modules: discovery never sees these, so
+        # only [tool.setuptools.package-data] puts them in the wheel.
+        project_root = Path(__file__).parent.parent.parent
+        ascii_art = sorted(
+            art.relative_to(project_root).as_posix()
+            for art in (project_root / "lintro" / "ascii-art").glob("*.txt")
+        )
+        assert_that(ascii_art).is_not_empty()
+        assert_that(wheel_names).contains(*ascii_art)
 
         # Only the package itself and its dist-info may sit at the top level.
         # ``lintro_build`` is checked by name because a prefix test would let the
@@ -259,16 +288,22 @@ def test_built_distributions_ship_the_whole_package_and_no_tests() -> None:
                 if "/" in name
             }
 
+        # evals/ is repo-only tooling that MANIFEST.in prunes (#2147).
         leaked = sorted(
-            path for path in sdist_paths if path.startswith(("tests/", "test_samples/"))
+            path
+            for path in sdist_paths
+            if path.startswith(("tests/", "test_samples/", "evals/"))
         )
-        assert_that(leaked).described_as("test trees leaked into the sdist").is_empty()
+        assert_that(leaked).described_as(
+            "repo-only trees leaked into the sdist",
+        ).is_empty()
         # The in-tree PEP 517 backend must survive the MANIFEST.in trim, or the
         # sdist cannot be built from.
         assert_that(sdist_paths).contains("lintro_build/backend.py", "lintro/py.typed")
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(600)
 def test_built_sdist_installs_and_runs() -> None:
     """Verify the sdist installs into a clean venv and the CLI runs.
 
@@ -322,6 +357,7 @@ def test_built_sdist_installs_and_runs() -> None:
                 # so running from the checkout would import the source tree
                 # instead of the freshly installed distribution.
                 cwd=str(tmpdir_path),
+                env=_isolated_env(),
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -333,6 +369,7 @@ def test_built_sdist_installs_and_runs() -> None:
         version_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(cli_exe), "--version"],
             cwd=str(tmpdir_path),
+            env=_isolated_env(),
             capture_output=True,
             text=True,
             timeout=60,
