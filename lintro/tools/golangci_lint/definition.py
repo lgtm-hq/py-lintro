@@ -50,9 +50,9 @@ GOLANGCI_LINT_FILE_PATTERNS: list[str] = ["*.go", "go.mod"]
 def _find_go_module_roots(paths: list[str]) -> list[Path]:
     """Return the distinct ``go.mod`` module roots covering the given paths.
 
-    When the selected paths span multiple Go modules that share a common
-    parent with its own ``go.mod``, that single parent is returned; otherwise
-    each distinct module root is returned so every selected module is linted.
+    Each path walks up to its nearest enclosing ``go.mod``. A nested module is
+    a distinct root and is returned alongside its parent module, so every
+    selected module is linted independently.
 
     Args:
         paths: List of file paths to search from.

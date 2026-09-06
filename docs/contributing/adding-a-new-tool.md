@@ -63,9 +63,11 @@ gets a package instead (see `lintro/tools/ruff/`):
   them in `__all__`, so no caller reaches past the package.
 - `lintro/tools/definitions/<tool>.py` — a re-export shim carrying the same names, so
   plugin discovery (which scans that package) still registers the tool.
-- `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include` in
-  the same change. The duplicate-code gate's scope follows the files, so a package left
-  out of that list is a definition that silently escapes the ratchet.
+- `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include`, and
+  add the same path to `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py`,
+  in the same change. The duplicate-code gate's scope follows the files, so a package
+  left out of `include` is a definition that silently escapes the ratchet, and the test
+  asserts the two lists are equal.
 
 Structure (mirrored from your reference tool):
 
@@ -588,7 +590,9 @@ Implementation checklist:
       `lintro/tools/<tool>/definition.py`, `lintro/tools/<tool>/__init__.py` re-exports
       them, and this module is the re-export shim
 - [ ] `pyproject.toml` — `[tool.lintro.pylint] include` gains `lintro/tools/<tool>` when
-      the tool is a package (duplicate-code gate scope follows the files)
+      the tool is a package, and `GATE_PACKAGES` in
+      `tests/unit/test_duplicate_code_baseline.py` gains the same path (duplicate-code
+      gate scope follows the files, and the test asserts the two lists are equal)
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
