@@ -8,10 +8,10 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.implementations.ruff.fix import execute_ruff_fix
+from lintro.tools.ruff.fix import execute_ruff_fix
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
 
 def test_execute_ruff_fix_with_real_plugin_no_files(

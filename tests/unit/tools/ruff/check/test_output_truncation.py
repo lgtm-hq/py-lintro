@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def _messages_at(records: list[tuple[str, str]], level: str) -> list[str]:
@@ -39,11 +39,11 @@ def test_check_failure_logs_output_to_debug_only(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             return_value=(False, long_output),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
     ):
@@ -78,15 +78,15 @@ def test_format_check_failure_logs_output_to_debug_only(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             side_effect=[(True, "[]"), (False, long_format_output)],
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_format_check_output",
+            "lintro.tools.ruff.check.parse_ruff_format_check_output",
             return_value=[],
         ),
     ):
@@ -118,11 +118,11 @@ def test_check_success_does_not_log_output(
     """
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
     ):

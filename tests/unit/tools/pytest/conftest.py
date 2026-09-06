@@ -11,13 +11,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
-from lintro.tools.implementations.pytest.pytest_result_processor import (
+from lintro.tools.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.pytest_result_processor import (
     PytestResultProcessor,
 )
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 @pytest.fixture
@@ -80,19 +80,19 @@ def sample_pytest_plugin() -> Generator[PytestPlugin, None, None]:
     Yields:
         PytestPlugin: A PytestPlugin instance.
     """
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
     with (
         patch(
-            "lintro.tools.definitions.pytest.load_lintro_ignore",
+            "lintro.tools.pytest.definition.load_lintro_ignore",
             return_value=[],
         ),
         patch(
-            "lintro.tools.definitions.pytest.load_pytest_config",
+            "lintro.tools.pytest.definition.load_pytest_config",
             return_value={},
         ),
         patch(
-            "lintro.tools.definitions.pytest.load_file_patterns_from_config",
+            "lintro.tools.pytest.definition.load_file_patterns_from_config",
             return_value=[],
         ),
     ):

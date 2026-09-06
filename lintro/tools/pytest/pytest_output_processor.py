@@ -9,21 +9,21 @@ All functions are re-exported from submodules for backwards compatibility.
 
 from __future__ import annotations
 
-from lintro.tools.implementations.pytest.coverage_processor import (
+from lintro.tools.pytest.coverage_processor import (
     extract_coverage_report,
     parse_coverage_summary,
 )
-from lintro.tools.implementations.pytest.formatters import (
+from lintro.tools.pytest.formatters import (
     _extract_brief_message,
     build_output_with_failures,
     format_pytest_issue,
     format_pytest_issues_table,
     process_test_summary,
 )
-from lintro.tools.implementations.pytest.output_parsers import (
+from lintro.tools.pytest.output_parsers import (
     parse_pytest_output_with_fallback,
 )
-from lintro.tools.implementations.pytest.test_analytics import (
+from lintro.tools.pytest.test_analytics import (
     PYTEST_FLAKY_FAILURE_RATE,
     PYTEST_FLAKY_MIN_RUNS,
     PYTEST_SLOW_TEST_THRESHOLD,

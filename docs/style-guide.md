@@ -219,12 +219,17 @@ lintro/
 │   │   ├── oxfmt.py
 │   │   ├── oxlint.py
 │   │   ├── prettier.py
-│   │   ├── pytest.py
-│   │   ├── ruff.py
+│   │   ├── pytest.py          # re-export shim (#2311)
+│   │   ├── ruff.py            # re-export shim (#2311)
 │   │   └── yamllint.py
-│   └── implementations/
-│       ├── pytest/
-│       └── ruff/
+│   ├── pytest/                # per-tool package
+│   │   ├── definition.py      # plugin + ToolDefinition
+│   │   └── ...                # command builder, executor, parsers
+│   └── ruff/                  # per-tool package
+│       ├── definition.py      # plugin + ToolDefinition
+│       ├── check.py
+│       ├── commands.py
+│       └── fix.py
 └── utils/
     ├── console_logger.py
     ├── logger_setup.py

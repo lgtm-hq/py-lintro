@@ -1,15 +1,17 @@
 """Ratchet gate for the duplicate-code baseline (issue #2293).
 
-``pyproject.toml`` scopes pylint's ``duplicate-code`` checker to
-``lintro/tools/definitions`` and records today's ``R0801`` count as
+``pyproject.toml`` scopes pylint's ``duplicate-code`` checker to the
+tool-definition modules — ``lintro/tools/definitions`` plus the per-tool
+packages #2311 has moved definitions into — and records today's ``R0801``
+count as
 ``[tool.lintro.pylint] duplicate_code_baseline``. That number is a burn-down
 target owned by #2311, which is done when it reaches 0.
 
 Two guards live here. The configured baseline may never exceed the ceiling
 recorded when the gate landed — an exact, tool-free comparison between
 ``pyproject.toml`` and this module's constant — and, wherever pylint is
-installed (which includes CI), what pylint actually reports on the definitions
-package must not be *above* the baseline.
+installed (which includes CI), what pylint actually reports on those packages
+must not be *above* the baseline.
 
 The live comparison is deliberately ``<=`` rather than ``==``. pylint's
 ``R0801`` count is a property of the resolved toolchain as well as the code:
@@ -43,8 +45,15 @@ from lintro.utils.duplicate_code import (
 #: Repository root, resolved from this file's location.
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
-#: The package the gate is scoped to.
-DEFINITIONS_PACKAGE: str = "lintro/tools/definitions"
+#: The packages the gate is scoped to, mirroring ``[tool.lintro.pylint]
+#: include``. #2311 moves each tool into its own ``lintro/tools/<name>``
+#: package, and the gate's scope follows the modules it moves so a definition
+#: cannot escape the ratchet by changing address.
+GATE_PACKAGES: tuple[str, ...] = (
+    "lintro/tools/definitions",
+    "lintro/tools/pytest",
+    "lintro/tools/ruff",
+)
 
 #: Ceiling on the baseline, recorded when the gate landed and deliberately not
 #: derived from the config. It may only go *down*: lower it in the pull request
@@ -87,7 +96,7 @@ def _lintro_pylint_config() -> dict[str, Any]:
 
 
 def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
-    """Run pylint over the definitions package and count ``R0801`` messages.
+    """Run pylint over the gate's packages and count ``R0801`` messages.
 
     Args:
         pylint_executable: Absolute path to the pylint binary.
@@ -99,13 +108,14 @@ def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
     # so a future subpackage would be analysed there and must be counted here.
     files = sorted(
         str(path)
-        for path in (REPO_ROOT / DEFINITIONS_PACKAGE).rglob("*.py")
+        for package in GATE_PACKAGES
+        for path in (REPO_ROOT / package).rglob("*.py")
         if "__pycache__" not in path.parts
     )
     # A ``<=`` comparison passes on a count of zero, so a measurement that
     # analysed nothing would look like a clean sweep. Fail loudly instead.
     assert_that(files).described_as(
-        f"no modules found under {DEFINITIONS_PACKAGE} to analyse",
+        f"no modules found under {', '.join(GATE_PACKAGES)} to analyse",
     ).is_not_empty()
     completed = subprocess.run(  # nosec B603 - fixed argv, no shell
         [
@@ -135,10 +145,10 @@ def _measure_duplicate_code_count(*, pylint_executable: str) -> int:
     )
 
 
-def test_pylint_is_scoped_to_the_definitions_package() -> None:
-    """The gate stays scoped to the package #2311 deduplicates."""
+def test_pylint_is_scoped_to_the_definition_packages() -> None:
+    """The gate stays scoped to the modules #2311 deduplicates."""
     assert_that(_lintro_pylint_config()["include"]).is_equal_to(
-        [DEFINITIONS_PACKAGE],
+        list(GATE_PACKAGES),
     )
 
 
@@ -175,7 +185,8 @@ def _over_baseline_message(*, count: int, baseline: int) -> str:
         what to do when the live count is lower than the baseline instead.
     """
     return (
-        f"pylint reports {count} duplicate-code findings on {DEFINITIONS_PACKAGE} "
+        f"pylint reports {count} duplicate-code findings on "
+        f"{', '.join(GATE_PACKAGES)} "
         f"but the recorded baseline is {baseline}; the baseline may only shrink, "
         "so remove the new duplication rather than raising the number (#2293). "
         "A live count *below* the baseline never fails here — it is the prompt "

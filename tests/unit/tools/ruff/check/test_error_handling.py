@@ -9,7 +9,7 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def test_execute_ruff_check_handles_timeout(
@@ -21,7 +21,7 @@ def test_execute_ruff_check_handles_timeout(
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with patch(
-        "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+        "lintro.tools.ruff.check.run_subprocess_with_timeout",
         side_effect=subprocess.TimeoutExpired(cmd=["ruff"], timeout=30),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -49,10 +49,10 @@ def test_execute_ruff_check_handles_format_timeout(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=lint_issues,
         ),
     ):
@@ -88,12 +88,12 @@ def test_execute_ruff_check_subprocess_failure_respected(
     """
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             # Subprocess fails (exit code != 0) but produces empty/no output
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             # No issues parsed from output
             return_value=[],
         ),

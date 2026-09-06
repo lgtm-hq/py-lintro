@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def test_execute_ruff_check_normalizes_format_paths_to_absolute(
@@ -31,14 +31,14 @@ def test_execute_ruff_check_normalizes_format_paths_to_absolute(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_format_check_output",
+            "lintro.tools.ruff.check.parse_ruff_format_check_output",
             return_value=["test.py"],  # Relative path from format check
         ),
         patch("os.path.isabs", return_value=False),

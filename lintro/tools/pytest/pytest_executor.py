@@ -9,15 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from lintro.tools.implementations.pytest.addopts_coverage import (
+from lintro.tools.pytest.addopts_coverage import (
     config_addopts_enable_coverage,
 )
-from lintro.tools.implementations.pytest.collection import get_cpu_count
-from lintro.tools.implementations.pytest.markers import collect_tests_once
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.collection import get_cpu_count
+from lintro.tools.pytest.markers import collect_tests_once
+from lintro.tools.pytest.pytest_config import PytestConfiguration
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 @dataclass

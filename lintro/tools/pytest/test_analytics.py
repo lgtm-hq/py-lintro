@@ -11,13 +11,13 @@ from typing import Any
 from loguru import logger
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
-from lintro.tools.implementations.pytest.collection import (
+from lintro.tools.pytest.collection import (
     compute_updated_flaky_test_history,
     extract_all_test_results_from_junit,
     is_ci_environment,
     save_flaky_test_history,
 )
-from lintro.tools.implementations.pytest.output import detect_flaky_tests
+from lintro.tools.pytest.output import detect_flaky_tests
 
 # Constants for pytest configuration
 PYTEST_SLOW_TEST_THRESHOLD: float = 1.0  # Warn if any test takes > 1 second

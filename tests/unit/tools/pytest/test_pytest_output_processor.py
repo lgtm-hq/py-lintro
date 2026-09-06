@@ -1,4 +1,4 @@
-"""Tests for lintro.tools.implementations.pytest.pytest_output_processor module."""
+"""Tests for lintro.tools.pytest.pytest_output_processor module."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from assertpy import assert_that
 
 def test_pytest_output_processor_exports_constants() -> None:
     """Module exports expected constants."""
-    from lintro.tools.implementations.pytest.pytest_output_processor import (
+    from lintro.tools.pytest.pytest_output_processor import (
         PYTEST_FLAKY_FAILURE_RATE,
         PYTEST_FLAKY_MIN_RUNS,
         PYTEST_SLOW_TEST_THRESHOLD,
@@ -22,7 +22,7 @@ def test_pytest_output_processor_exports_constants() -> None:
 
 def test_pytest_output_processor_exports_parse_function() -> None:
     """Module exports parse_pytest_output_with_fallback."""
-    from lintro.tools.implementations.pytest.pytest_output_processor import (
+    from lintro.tools.pytest.pytest_output_processor import (
         parse_pytest_output_with_fallback,
     )
 
@@ -32,7 +32,7 @@ def test_pytest_output_processor_exports_parse_function() -> None:
 
 def test_pytest_output_processor_exports_analytics_functions() -> None:
     """Module exports test analytics functions."""
-    from lintro.tools.implementations.pytest.pytest_output_processor import (
+    from lintro.tools.pytest.pytest_output_processor import (
         check_total_time_warning,
         detect_and_log_flaky_tests,
         detect_and_log_slow_tests,
@@ -45,7 +45,7 @@ def test_pytest_output_processor_exports_analytics_functions() -> None:
 
 def test_pytest_output_processor_exports_coverage_functions() -> None:
     """Module exports coverage processing functions."""
-    from lintro.tools.implementations.pytest.pytest_output_processor import (
+    from lintro.tools.pytest.pytest_output_processor import (
         extract_coverage_report,
         parse_coverage_summary,
     )
@@ -56,7 +56,7 @@ def test_pytest_output_processor_exports_coverage_functions() -> None:
 
 def test_pytest_output_processor_exports_formatter_functions() -> None:
     """Module exports formatter functions."""
-    from lintro.tools.implementations.pytest.pytest_output_processor import (
+    from lintro.tools.pytest.pytest_output_processor import (
         build_output_with_failures,
         format_pytest_issue,
         format_pytest_issues_table,
@@ -71,7 +71,7 @@ def test_pytest_output_processor_exports_formatter_functions() -> None:
 
 def test_pytest_output_processor_all_attribute() -> None:
     """Module __all__ contains expected exports."""
-    from lintro.tools.implementations.pytest import pytest_output_processor
+    from lintro.tools.pytest import pytest_output_processor
 
     expected = {
         "PYTEST_FLAKY_FAILURE_RATE",

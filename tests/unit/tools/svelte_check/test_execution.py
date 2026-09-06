@@ -89,6 +89,33 @@ def test_check_no_svelte_config_proceeds_with_defaults(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_skips_when_node_modules_is_missing(
+    svelte_check_plugin: SvelteCheckPlugin,
+    tmp_path: Path,
+) -> None:
+    """The shared node_modules gate is wired into ``check`` before the command.
+
+    svelte-check ships inside the project it lints, so an uninstalled project
+    is a skip rather than a failure — and the subprocess must never be reached.
+
+    Args:
+        svelte_check_plugin: The SvelteCheckPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    svelte_file = tmp_path / "test.svelte"
+    svelte_file.write_text("<script>\nlet count = 0;\n</script>\n<h1>{count}</h1>")
+    (tmp_path / "package.json").write_text('{"name": "demo"}\n')
+
+    with patch.object(svelte_check_plugin, "_run_subprocess") as mock_run:
+        result = svelte_check_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.skipped).is_true()
+    assert_that(result.skip_reason).is_equal_to("node_modules not found")
+    assert_that(result.output).contains("--auto-install")
+    mock_run.assert_not_called()
+
+
 def test_check_with_mocked_subprocess_success(
     svelte_check_plugin: SvelteCheckPlugin,
     tmp_path: Path,

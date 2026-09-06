@@ -9,16 +9,16 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from lintro.tools.implementations.pytest.collection import (
+from lintro.tools.pytest.collection import (
     get_parallel_workers_from_preset,
 )
-from lintro.tools.implementations.pytest.coverage_source import (
+from lintro.tools.pytest.coverage_source import (
     resolve_coverage_sources,
 )
-from lintro.tools.implementations.pytest.markers import check_plugin_installed
+from lintro.tools.pytest.markers import check_plugin_installed
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 # Constants for pytest configuration
 PYTEST_TEST_MODE_ENV: str = "LINTRO_TEST_MODE"

@@ -7,7 +7,7 @@ from typing import cast
 from assertpy import assert_that
 
 from lintro.parsers.pytest.pytest_issue import PytestIssue
-from lintro.tools.implementations.pytest.pytest_result_processor import (
+from lintro.tools.pytest.pytest_result_processor import (
     PytestResultProcessor,
 )
 

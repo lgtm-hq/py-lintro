@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def test_execute_ruff_check_uses_cwd_for_config_discovery(
@@ -38,11 +38,11 @@ def test_execute_ruff_check_uses_cwd_for_config_discovery(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             side_effect=fake_run,
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
     ):
@@ -80,11 +80,11 @@ def test_execute_ruff_check_with_config_args(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             side_effect=fake_run,
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
     ):

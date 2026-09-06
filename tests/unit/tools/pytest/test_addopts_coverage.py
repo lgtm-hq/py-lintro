@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.implementations.pytest.addopts_coverage import (
+from lintro.tools.pytest.addopts_coverage import (
     config_addopts_enable_coverage,
 )
-from lintro.tools.implementations.pytest.pytest_command_builder import (
+from lintro.tools.pytest.pytest_command_builder import (
     add_coverage_options,
 )
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
-from lintro.tools.implementations.pytest.pytest_executor import PytestExecutor
+from lintro.tools.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.pytest_executor import PytestExecutor
 
 # Minimal pytest.ini whose addopts force coverage on, mirroring the project
 # configuration that triggered issue #726.

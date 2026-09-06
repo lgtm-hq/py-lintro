@@ -18,7 +18,7 @@ from lintro.enums.tool_name import ToolName
 # Some tools need special initialization (mocked dependencies)
 TOOL_SPECS = [
     # (tool_name, module_path, class_name, timeout, priority, can_fix)
-    (ToolName.RUFF, "lintro.tools.definitions.ruff", "RuffPlugin", 30, 85, True),
+    (ToolName.RUFF, "lintro.tools.ruff.definition", "RuffPlugin", 30, 85, True),
     (ToolName.BLACK, "lintro.tools.definitions.black", "BlackPlugin", 30, 90, True),
     (ToolName.CLIPPY, "lintro.tools.definitions.clippy", "ClippyPlugin", 120, 85, True),
     (ToolName.MYPY, "lintro.tools.definitions.mypy", "MypyPlugin", 60, 82, False),
@@ -40,7 +40,7 @@ TOOL_SPECS = [
     ),
     (
         ToolName.PYTEST,
-        "lintro.tools.definitions.pytest",
+        "lintro.tools.pytest.definition",
         "PytestPlugin",
         300,
         90,

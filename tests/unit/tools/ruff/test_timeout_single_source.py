@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.ruff import RUFF_DEFAULT_TIMEOUT as DEFINITION_TIMEOUT
-from lintro.tools.implementations.ruff.check import (
+from lintro.tools.ruff.check import (
     RUFF_DEFAULT_TIMEOUT as CHECK_TIMEOUT,
 )
-from lintro.tools.implementations.ruff.fix import RUFF_DEFAULT_TIMEOUT as FIX_TIMEOUT
+from lintro.tools.ruff.definition import RUFF_DEFAULT_TIMEOUT as DEFINITION_TIMEOUT
+from lintro.tools.ruff.fix import RUFF_DEFAULT_TIMEOUT as FIX_TIMEOUT
 
 
 def _argv_tokens(*, calls: list[dict[str, object]]) -> list[list[str]]:
@@ -68,7 +68,7 @@ def test_ruff_check_routes_through_prepare_execution(
         mock_ruff_tool: Mock RuffTool instance for testing.
         ruff_execution_context: Factory for mock execution contexts.
     """
-    from lintro.tools.implementations.ruff.check import execute_ruff_check
+    from lintro.tools.ruff.check import execute_ruff_check
 
     # The shared fixture leaves format_check False, but RuffPlugin's defaults
     # set it True, so production runs both `ruff check` and `ruff format
@@ -94,15 +94,15 @@ def test_ruff_check_routes_through_prepare_execution(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             side_effect=fake_run,
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_format_check_output",
+            "lintro.tools.ruff.check.parse_ruff_format_check_output",
             return_value=[],
         ),
     ):
@@ -135,7 +135,7 @@ def test_ruff_fix_routes_through_prepare_execution(
         ruff_execution_context: Factory for mock execution contexts.
         sample_ruff_json_empty_output: Sample empty JSON output from ruff.
     """
-    from lintro.tools.implementations.ruff.fix import execute_ruff_fix
+    from lintro.tools.ruff.fix import execute_ruff_fix
 
     # The shared fixture carries no ``format`` key, but RuffPlugin's defaults
     # set it True, so production also runs `ruff format --check` and `ruff
@@ -195,7 +195,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
     import os
 
     with patch.dict(os.environ, {"LINTRO_TEST_MODE": "1"}):
-        from lintro.tools.definitions.ruff import RuffPlugin
+        from lintro.tools.ruff.definition import RuffPlugin
 
         plugin = RuffPlugin()
 
@@ -246,7 +246,7 @@ def test_ruff_plugin_check_and_fix_invoke_prepare(
         patch.object(plugin, "prepare", side_effect=fake_prepare),
         patch.object(plugin, "_run_subprocess", side_effect=fake_fix_run),
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             side_effect=fake_check_run,
         ),
     ):

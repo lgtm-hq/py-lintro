@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 # =============================================================================

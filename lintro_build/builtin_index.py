@@ -64,6 +64,13 @@ _FOOTER = ")\n"
 # Decorator name that marks a definition module as contributing a registry entry.
 REGISTER_TOOL_NAME = "register_tool"
 
+# Import prefix and module suffix of a per-tool package's plugin module, e.g.
+# ``lintro.tools.ruff.definition`` (#2311). A definition module that is only a
+# re-export shim for one of those still contributes a registry entry, because
+# importing it imports the package module that applies ``@register_tool``.
+PER_TOOL_PACKAGE_PREFIX = "lintro.tools."
+DEFINITION_MODULE_SUFFIX = ".definition"
+
 
 def resolve_paths(repo_root: Path) -> tuple[Path, Path]:
     """Derive the generator's input and output paths from a repository root.
@@ -129,21 +136,44 @@ def _is_register_tool_decorator(node: ast.AST) -> bool:
     return False
 
 
-def _source_registers_tool(*, source: str, path: Path) -> bool:
-    """Return whether Python source applies ``@register_tool``.
+def _is_definition_reexport(node: ast.AST) -> bool:
+    """Return whether ``node`` imports from a per-tool package's plugin module.
 
-    Parsed with :mod:`ast` so comments and string literals cannot count as a
-    registration. The generator stays stdlib-only: importing the registry at
-    generation time would pull the ``lintro`` package (and its import cycle
-    with ``lintro.tools``) into minimal CI containers.
+    ``from lintro.tools.ruff.definition import RuffPlugin`` is the re-export
+    shim #2311 leaves in ``lintro/tools/definitions`` when a tool moves into
+    its own package. Importing the shim imports that module, so the shim still
+    contributes a registry entry.
+
+    Args:
+        node: An AST node from the module being inspected.
+
+    Returns:
+        True when the node is such an import.
+    """
+    if not isinstance(node, ast.ImportFrom) or node.module is None:
+        return False
+    return node.module.startswith(PER_TOOL_PACKAGE_PREFIX) and node.module.endswith(
+        DEFINITION_MODULE_SUFFIX,
+    )
+
+
+def _source_registers_tool(*, source: str, path: Path) -> bool:
+    """Return whether Python source contributes a registry entry.
+
+    True when the module applies ``@register_tool`` itself, and also when it is
+    a re-export shim for a per-tool package's ``definition`` module, which
+    applies the decorator on its behalf. Parsed with :mod:`ast` so comments and
+    string literals cannot count as a registration. The generator stays
+    stdlib-only: importing the registry at generation time would pull the
+    ``lintro`` package (and its import cycle with ``lintro.tools``) into
+    minimal CI containers.
 
     Args:
         source: Module source text.
         path: Path of the file, used in parse-error messages.
 
     Returns:
-        True when a class or function in the module is decorated with
-        ``register_tool``.
+        True when the module registers a tool directly or re-exports one.
 
     Raises:
         ValueError: When ``source`` is not valid Python.
@@ -155,6 +185,8 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
         raise ValueError(msg) from exc
 
     for node in ast.walk(tree):
+        if _is_definition_reexport(node):
+            return True
         decorator_list = getattr(node, "decorator_list", None)
         if not decorator_list:
             continue
@@ -164,17 +196,20 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
 
 
 def collect_registering_module_names(definitions_dir: Path) -> list[str]:
-    """Collect the definition modules that register a tool.
+    """Collect the definition modules that contribute a registry entry.
 
     Registration is detected by walking each module's AST for a
-    ``register_tool`` decorator (a ``Name`` or ``Attribute``). Comments and
-    docstrings that mention the decorator do not count.
+    ``register_tool`` decorator (a ``Name`` or ``Attribute``), or for an import
+    from a per-tool package's ``definition`` module, which is what a re-export
+    shim carries instead (#2311). Comments and docstrings that mention the
+    decorator do not count.
 
     Args:
         definitions_dir: Directory holding the builtin tool definition modules.
 
     Returns:
-        Sorted module base names whose source applies ``@register_tool``.
+        Sorted module base names whose source applies ``@register_tool`` or
+        re-exports a per-tool package's plugin.
 
     Raises:
         FileNotFoundError: When ``definitions_dir`` does not exist.

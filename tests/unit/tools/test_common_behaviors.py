@@ -108,7 +108,7 @@ TOOLS_THAT_CANNOT_FIX = [
         id="mypy",
     ),
     pytest.param(
-        "lintro.tools.definitions.pytest.PytestPlugin",
+        "lintro.tools.pytest.definition.PytestPlugin",
         "cannot automatically fix",
         id="pytest",
     ),

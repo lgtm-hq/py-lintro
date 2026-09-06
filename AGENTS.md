@@ -145,20 +145,23 @@ when it factors the pattern.
 
 ## Duplicate code (#2293)
 
-`pylint`'s `duplicate-code` checker (`R0801`) runs on `lintro/tools/definitions` only —
-the scope comes from `[tool.lintro.pylint] include` in `pyproject.toml`, which also
-records `duplicate_code_baseline`, the number of clone sets present when the gate
-landed. pylint has no per-finding baseline, so the ratchet is a count:
-`lintro/utils/duplicate_code.py` takes the `R0801` findings out of the pylint result and
-fails the run only when the count is **higher** than the baseline. **The baseline may
-only shrink** — lower it in the pull request that removes duplication, never raise it,
-and never raise `min-similarity-lines`. #2311 factors the definition template and is
-done when the number reaches 0; `tests/unit/test_duplicate_code_baseline.py` fails if
-the baseline grows above the ceiling recorded there, or if a live pylint run reports
-**more** findings than the baseline. That live check is `<=`, not `==`: the `R0801`
-count depends on the resolved pylint/astroid build as well as on the code (the same tree
-reported 34 on one CI interpreter and 33 on another, #2365), and a count below the
-baseline is the prompt to lower the baseline, not a failure.
+`pylint`'s `duplicate-code` checker (`R0801`) runs on the tool-definition modules only —
+the scope comes from `[tool.lintro.pylint] include` in `pyproject.toml`, which lists
+`lintro/tools/definitions` plus every per-tool `lintro/tools/<name>` package #2311 has
+moved a definition into, and also records `duplicate_code_baseline`, the number of clone
+sets present when the gate landed. When a tool moves out of `lintro/tools/definitions`,
+add its package to `include` in the same PR so the gate's scope follows it. pylint has
+no per-finding baseline, so the ratchet is a count: `lintro/utils/duplicate_code.py`
+takes the `R0801` findings out of the pylint result and fails the run only when the
+count is **higher** than the baseline. **The baseline may only shrink** — lower it in
+the pull request that removes duplication, never raise it, and never raise
+`min-similarity-lines`. #2311 factors the definition template and is done when the
+number reaches 0; `tests/unit/test_duplicate_code_baseline.py` fails if the baseline
+grows above the ceiling recorded there, or if a live pylint run reports **more**
+findings than the baseline. That live check is `<=`, not `==`: the `R0801` count depends
+on the resolved pylint/astroid build as well as on the code (the same tree reported 34
+on one CI interpreter and 33 on another, #2365), and a count below the baseline is the
+prompt to lower the baseline, not a failure.
 
 ## Docs site (optional secondary product)
 

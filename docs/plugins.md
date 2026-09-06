@@ -11,6 +11,20 @@ formatting tools. Built-in tools live in `lintro/tools/definitions/`; external t
 ship in their own distributions and are discovered automatically at startup via Python
 entry points in the **`lintro.tools`** group.
 
+A tool with helper modules of its own gets a package instead of a single module (#2311):
+
+```text
+lintro/tools/<tool>/
+├── __init__.py      # re-exports the plugin and the helpers other packages use
+├── definition.py    # @register_tool plugin class + its ToolDefinition
+└── ...              # command builders, executors, per-tool processing
+lintro/tools/definitions/<tool>.py   # re-export shim, so discovery still finds it
+```
+
+`ruff` and `pytest` are the worked examples. Plugin discovery scans
+`lintro/tools/definitions/`, so the shim is what registers the tool until discovery
+moves to the per-tool packages.
+
 An external plugin gets the exact same lifecycle as a built-in tool: config injection,
 file discovery, subprocess execution, output normalization, and per-invocation execution
 isolation.
@@ -392,9 +406,11 @@ if skip_result is not None:
     return skip_result
 ```
 
-`tool_label` is the human-facing tool name; it names the tool in both the log lines and
-the `Skipping <tool>: ...` message, so it is the spelling users see rather than the
-registered snake_case name.
+`tool_label` is the human-facing tool name; it names the tool in the log lines and in
+the `Skipping <tool>: ...` messages, so it is the spelling users see rather than the
+registered snake_case name. The one outcome it does not reach is the plain
+missing-`node_modules` skip: that path logs nothing and returns the unprefixed
+`node_modules not found. Use --auto-install to install dependencies.`
 
 ### Execution Isolation (important for correctness)
 
@@ -489,7 +505,7 @@ A minimal third-party plugin distribution contains:
 
 See the built-in plugins in `lintro/tools/definitions/` for complete examples:
 
-- `ruff.py` - Python linter with fix support
+- `lintro/tools/ruff/definition.py` - Python linter with fix support
 - `bandit.py` - Security scanner (no fix)
 - `prettier.py` - JavaScript/TypeScript formatter
 - `hadolint.py` - Dockerfile linter

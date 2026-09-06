@@ -25,7 +25,7 @@ from lintro.plugins.base import BaseToolPlugin
 PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[str]]] = [
     (
         ToolName.RUFF,
-        "lintro.tools.definitions.ruff.RuffPlugin",
+        "lintro.tools.ruff.definition.RuffPlugin",
         True,
         ToolType.LINTER | ToolType.FORMATTER,
         ["Python", "linter"],
@@ -81,7 +81,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.PYTEST,
-        "lintro.tools.definitions.pytest.PytestPlugin",
+        "lintro.tools.pytest.definition.PytestPlugin",
         False,
         ToolType.TEST_RUNNER,
         ["test"],

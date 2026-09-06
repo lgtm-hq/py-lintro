@@ -20,7 +20,7 @@ Mirror the closest existing tool:
 | Tool type              | Reference                                |
 | ---------------------- | ---------------------------------------- |
 | Simple linter (no fix) | `lintro/tools/definitions/actionlint.py` |
-| Linter + formatter     | `lintro/tools/definitions/ruff.py`       |
+| Linter + formatter     | `lintro/tools/ruff/definition.py`        |
 | Security scanner       | `lintro/tools/definitions/bandit.py`     |
 | Shell tool             | `lintro/tools/definitions/shellcheck.py` |
 
@@ -53,7 +53,10 @@ overview of how Lintro dogfoods its own codebase.
 
 ## Step 1 — Plugin definition
 
-Create `lintro/tools/definitions/<tool>.py`.
+Create `lintro/tools/definitions/<tool>.py`. A tool that needs helper modules of its own
+gets a package instead — `lintro/tools/<tool>/definition.py` next to its helpers, with
+`lintro/tools/definitions/<tool>.py` left as a re-export shim so discovery finds it (see
+`lintro/tools/ruff/`).
 
 Structure (mirrored from your reference tool):
 

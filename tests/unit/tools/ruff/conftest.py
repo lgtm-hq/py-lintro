@@ -13,7 +13,7 @@ from lintro.enums.tool_name import ToolName
 from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
 
 def make_ruff_execution_context(
@@ -106,7 +106,7 @@ def ruff_plugin() -> Generator[RuffPlugin, None, None]:
     Yields:
         RuffPlugin: Configured RuffPlugin instance.
     """
-    from lintro.tools.definitions.ruff import RuffPlugin
+    from lintro.tools.ruff.definition import RuffPlugin
 
     with patch.dict(os.environ, {"LINTRO_TEST_MODE": "1"}):
         yield RuffPlugin()
