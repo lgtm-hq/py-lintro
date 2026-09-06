@@ -38,6 +38,7 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.errors import McpError
 from lintro.mcp.toolkits import review as mcp_review
+from tests.unit.ai.review.test_cli_mcp_parity import CLI_ONLY_KWARGS
 
 # Keys both CLI and MCP currently forward into ``run_review``. Adapter-only
 # kwargs (CLI progress / custom agents; MCP has neither) are listed separately
@@ -60,14 +61,11 @@ _SHARED_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
     },
 )
 
-_CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = frozenset(
-    {
-        "context_window_override",
-        "progress",
-        "custom_agents",
-        "run_builtin_checklist",
-    },
-)
+# One CLI-only allowlist for the whole suite (#2298): the exact set-difference
+# ratchet lives in ``test_cli_mcp_parity``, and this module asserts the weaker
+# "these are present on the CLI and absent on MCP" property against the same
+# list, so Phase 3 cannot shrink one story and leave the other behind.
+_CLI_ONLY_RUN_REVIEW_KWARGS: frozenset[str] = CLI_ONLY_KWARGS
 
 
 @pytest.fixture(autouse=True)

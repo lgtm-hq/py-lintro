@@ -1,0 +1,14 @@
+[
+  {
+    "file": "src/auth/session.py",
+    "overview": "Adds an explicit expired branch and a module-level constant."
+  },
+  {
+    "file": "assets/logo.png",
+    "overview": "Binary asset replaced; not reviewable as text."
+  },
+  {
+    "file": "src/auth/tokens.py",
+    "overview": "Renamed module gains a verify keyword defaulting to False."
+  }
+]

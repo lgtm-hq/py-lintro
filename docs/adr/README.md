@@ -26,6 +26,8 @@ ingestion evaluation) and the resulting decision is distilled here.
 | [0004](0004-release-automation-version-pr-flow.md)       | Automated release via a version-PR flow        | Accepted |
 | [0005](0005-uv-and-bun-toolchain.md)                     | uv for Python and bun for JavaScript           | Accepted |
 | [0006](0006-ai-effective-config-and-review-execution.md) | One effective AI config and shared review path | Accepted |
+| [0007](0007-review-resume-and-artifact-state.md)         | File-level review resume and artifact state    | Accepted |
+| [0008](0008-ai-review-architecture-invariants.md)        | AI review architecture invariants              | Accepted |
 
 ## Writing a new ADR
 

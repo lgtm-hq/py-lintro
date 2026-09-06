@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "answer": "yes",
+    "evidence": "src/auth/tokens.py:1 defaults to no verification",
+    "question": ""
+  },
+  {
+    "id": 2,
+    "answer": "no",
+    "evidence": "signature widened compatibly",
+    "question": ""
+  }
+]

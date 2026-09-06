@@ -1,0 +1,36 @@
+{
+  "fast_path": [
+    {
+      "id": 1,
+      "files": [
+        "src/auth/session.py",
+        "assets/logo.png",
+        "src/auth/tokens.py"
+      ],
+      "diff": "diff --git a/src/auth/session.py b/src/auth/session.py\nindex 1111111..2222222 100644\n--- a/src/auth/session.py\n+++ b/src/auth/session.py\n@@ -1,6 +1,9 @@\n from __future__ import annotations\n\n+API_KEY = \"example_placeholder_value_not_real\"\n+\n def is_active(status: str) -> bool:\n-    return status == \"active\"\n+    if status == \"expired\":\n+        return False\n+    return True\ndiff --git a/assets/logo.png b/assets/logo.png\nindex 3333333..4444444 100644\nBinary files a/assets/logo.png and b/assets/logo.png differ\ndiff --git a/src/auth/token_utils.py b/src/auth/tokens.py\nsimilarity index 92%\nrename from src/auth/token_utils.py\nrename to src/auth/tokens.py\nindex 5555555..6666666 100644\n--- a/src/auth/token_utils.py\n+++ b/src/auth/tokens.py\n@@ -1,4 +1,4 @@\n-def decode(token: str) -> dict[str, str]:\n+def decode(token: str, *, verify: bool = False) -> dict[str, str]:\n     return {}\n",
+      "relationship": "directory-prefix",
+      "metadata_note": null
+    }
+  ],
+  "forced_semantic": [
+    {
+      "id": 1,
+      "files": [
+        "src/auth/session.py",
+        "src/auth/tokens.py"
+      ],
+      "diff": "diff --git a/src/auth/session.py b/src/auth/session.py\nindex 1111111..2222222 100644\n--- a/src/auth/session.py\n+++ b/src/auth/session.py\n@@ -1,6 +1,9 @@\n from __future__ import annotations\n\n+API_KEY = \"example_placeholder_value_not_real\"\n+\n def is_active(status: str) -> bool:\n-    return status == \"active\"\n+    if status == \"expired\":\n+        return False\n+    return True\ndiff --git a/src/auth/token_utils.py b/src/auth/tokens.py\nsimilarity index 92%\nrename from src/auth/token_utils.py\nrename to src/auth/tokens.py\nindex 5555555..6666666 100644\n--- a/src/auth/token_utils.py\n+++ b/src/auth/tokens.py\n@@ -1,4 +1,4 @@\n-def decode(token: str) -> dict[str, str]:\n+def decode(token: str, *, verify: bool = False) -> dict[str, str]:\n     return {}\n",
+      "relationship": "directory-prefix",
+      "metadata_note": null
+    },
+    {
+      "id": 2,
+      "files": [
+        "assets/logo.png"
+      ],
+      "diff": "diff --git a/assets/logo.png b/assets/logo.png\nindex 3333333..4444444 100644\nBinary files a/assets/logo.png and b/assets/logo.png differ\n",
+      "relationship": "single-file",
+      "metadata_note": null
+    }
+  ]
+}

@@ -49,8 +49,12 @@ rather than re-testing those topics:
 | Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                     | error-mapping characterization               |
 | MCP run-metadata key set     | Agents depend on a stable `run` object                                                             | metadata key characterization                |
 
-Prompt golden fixtures, orchestrator phase isolation, and provider lifecycle wiring are
-deferred to Phases 3–5 (and coordinated with #1884 / #1885).
+Prompt golden fixtures landed in Phase 1 after all —
+[ADR-0008](0008-ai-review-architecture-invariants.md) records the invariants and #2298
+adds the suite under `tests/unit/ai/review/golden/`. Orchestrator phase isolation and
+provider lifecycle wiring remain deferred to Phases 3–5, coordinated with
+[#1884](https://github.com/lgtm-hq/py-lintro/issues/1884) and
+[#1885](https://github.com/lgtm-hq/py-lintro/issues/1885).
 
 ## Decision
 

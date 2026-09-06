@@ -1,0 +1,8 @@
+{
+  "deciding_factor": "A credential is committed in the session module.",
+  "failure_mechanism": "The constant ships in the wheel and is readable by anyone who installs it.",
+  "files_needing_attention": [
+    "src/auth/session.py",
+    "src/auth/tokens.py"
+  ]
+}
