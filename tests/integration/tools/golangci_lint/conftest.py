@@ -83,8 +83,10 @@ def _isolated_go_env(monkeypatch: pytest.MonkeyPatch) -> None:
     workspace naming modules the staged fixture does not contain) makes the
     build fail and the seeded findings disappear, leaving only a position-less
     ``(module)`` diagnostic. The staged fixtures are self-contained
-    stdlib-only modules, so neither variable can help them and both are
-    cleared. ``GOCACHE``/``GOMODCACHE`` are deliberately left alone: Go's
+    stdlib-only modules, so neither variable can help them. ``GOFLAGS`` is
+    cleared; ``GOWORK`` is pinned to ``off`` rather than cleared, because an
+    unset ``GOWORK`` still lets Go discover a ``go.work`` above the temporary
+    directory. ``GOCACHE``/``GOMODCACHE`` are deliberately left alone: Go's
     caches are content-addressed and concurrency-safe, and a per-test cache
     would recompile the standard library for every test.
 
@@ -92,4 +94,4 @@ def _isolated_go_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch: Pytest environment patcher.
     """
     monkeypatch.delenv("GOFLAGS", raising=False)
-    monkeypatch.delenv("GOWORK", raising=False)
+    monkeypatch.setenv("GOWORK", "off")
