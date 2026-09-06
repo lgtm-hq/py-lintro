@@ -12,7 +12,7 @@ from assertpy import assert_that
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.buf import BufPlugin
+from lintro.tools.buf.definition import BufPlugin
 
 
 def test_doc_url_for_lint_rule(buf_plugin: BufPlugin) -> None:

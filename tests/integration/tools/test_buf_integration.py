@@ -11,7 +11,7 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.buf import BufPlugin
+from lintro.tools.buf.definition import BufPlugin
 from tests.integration._tools import require_tool
 
 pytestmark = require_tool("buf")

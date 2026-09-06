@@ -10,7 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.gitleaks import GitleaksPlugin
+from lintro.tools.gitleaks.definition import GitleaksPlugin
 from tests.test_samples_helpers import copy_sample
 
 

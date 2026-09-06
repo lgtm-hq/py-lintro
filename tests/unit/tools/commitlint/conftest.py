@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.commitlint import CommitlintPlugin
+from lintro.tools.commitlint.definition import CommitlintPlugin
 
 
 @pytest.fixture

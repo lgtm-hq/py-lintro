@@ -10,7 +10,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
-from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin
 from tests.unit.tools.golangci_lint.conftest import (
     GOLANGCI_JSON_NO_ISSUES,
     GOLANGCI_JSON_ONE_ISSUE,
@@ -286,7 +286,7 @@ def test_fix_skips_without_go_mod(
 
 def test_find_module_roots_returns_each_module(tmp_path: Path) -> None:
     """Two sibling modules without a parent go.mod both become roots."""
-    from lintro.tools.definitions.golangci_lint import _find_go_module_roots
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
 
     mod_a = tmp_path / "svc-a"
     mod_b = tmp_path / "svc-b"
@@ -322,7 +322,7 @@ def test_check_covers_all_selected_modules(
         return (False, GOLANGCI_JSON_TWO_ISSUES)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: _fake_run(**kwargs),
     ):
         result = golangci_lint_plugin.check(
@@ -356,7 +356,7 @@ def test_check_disambiguates_paths_across_modules(
     _make_go_module(mod_b)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: (False, GOLANGCI_JSON_ONE_ISSUE),
     ):
         result = golangci_lint_plugin.check(
@@ -401,7 +401,7 @@ def test_check_timeout_in_one_module_preserves_others(
         raise subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: _fake_run(**kwargs),
     ):
         result = golangci_lint_plugin.check(
@@ -428,7 +428,7 @@ def test_fix_initial_check_timeout_reports_no_phantom_issue(
     _make_go_module(tmp_path)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1),
     ):
         result = golangci_lint_plugin.fix([str(tmp_path)], {})

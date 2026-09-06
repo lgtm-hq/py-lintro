@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.cargo_deny import CargoDenyPlugin
+from lintro.tools.cargo_deny.definition import CargoDenyPlugin
 
 
 @pytest.fixture

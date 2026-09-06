@@ -18,6 +18,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.clippy.clippy_issue import ClippyIssue
+from lintro.tools.clippy.definition import ClippyPlugin
 from lintro.tools.core.batch_runner import (
     DEFAULT_BATCH_CHECK_POLICY,
     BatchCheckPolicy,
@@ -25,7 +26,6 @@ from lintro.tools.core.batch_runner import (
     BatchSuccess,
     batch_check_result,
 )
-from lintro.tools.definitions.clippy import ClippyPlugin
 from lintro.tools.definitions.oxfmt import OxfmtPlugin
 from lintro.tools.definitions.oxlint import OxlintPlugin
 

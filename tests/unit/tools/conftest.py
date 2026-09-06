@@ -20,7 +20,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.clippy import ClippyPlugin
+    from lintro.tools.clippy.definition import ClippyPlugin
     from lintro.tools.definitions.mypy import MypyPlugin
     from lintro.tools.definitions.tsc import TscPlugin
 
@@ -94,7 +94,7 @@ def clippy_plugin() -> ClippyPlugin:
     Returns:
         A ClippyPlugin instance.
     """
-    from lintro.tools.definitions.clippy import ClippyPlugin
+    from lintro.tools.clippy.definition import ClippyPlugin
 
     return ClippyPlugin()
 

@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.black import BLACK_DEFAULT_TIMEOUT, BlackPlugin
+from lintro.tools.black.definition import BLACK_DEFAULT_TIMEOUT, BlackPlugin
 
 
 def _record_black_argv(

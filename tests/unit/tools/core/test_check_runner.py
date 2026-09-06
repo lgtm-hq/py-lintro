@@ -18,9 +18,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.check_runner import PerFileCheckPolicy
-from lintro.tools.definitions.dotenv_linter import DotenvLinterPlugin
 from lintro.tools.definitions.pydoclint import PydoclintPlugin
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 
 #: One shellcheck finding in the json1 format the plugin asks for.
 SHELLCHECK_FINDING: str = """[

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin
 
 # Real golangci-lint JSON output with two findings, used to drive mocked runs.
 GOLANGCI_JSON_TWO_ISSUES = (

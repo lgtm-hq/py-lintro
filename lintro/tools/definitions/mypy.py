@@ -458,7 +458,7 @@ class MypyPlugin(BaseToolPlugin):
             # import BaseToolPlugin`` resolved to ``Any`` and every ``type:
             # ignore`` comment was reported as unused (#492). Paths are made
             # relative to the project root so mypy resolves the full module
-            # path (e.g. ``lintro.tools.definitions.clippy``).
+            # path (e.g. ``lintro.tools.clippy.definition``).
             project_root = str(Path.cwd())
             effective_cwd = project_root
             mypy_targets = [

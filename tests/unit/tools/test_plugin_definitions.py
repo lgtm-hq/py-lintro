@@ -33,7 +33,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.BLACK,
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         True,
         ToolType.FORMATTER,
         ["Python", "formatter"],
@@ -73,7 +73,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.BANDIT,
-        "lintro.tools.definitions.bandit.BanditPlugin",
+        "lintro.tools.bandit.definition.BanditPlugin",
         False,
         ToolType.SECURITY,
         ["security", "Python"],

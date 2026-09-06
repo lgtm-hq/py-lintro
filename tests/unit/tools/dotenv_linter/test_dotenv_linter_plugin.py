@@ -15,7 +15,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
-from lintro.tools.definitions.dotenv_linter import (
+from lintro.tools.dotenv_linter.definition import (
     DOTENV_LINTER_DEFAULT_TIMEOUT,
     DotenvLinterPlugin,
 )

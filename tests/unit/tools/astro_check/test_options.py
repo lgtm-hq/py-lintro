@@ -9,7 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.astro_check import (
+from lintro.tools.astro_check.definition import (
     ASTRO_CHECK_DEFAULT_PRIORITY,
     ASTRO_CHECK_DEFAULT_TIMEOUT,
     ASTRO_CHECK_FILE_PATTERNS,

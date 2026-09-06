@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.bandit import BanditPlugin
+from lintro.tools.bandit.definition import BanditPlugin
 
 
 def test_check_garbage_stdout_with_zero_exit_is_not_clean(tmp_path: Path) -> None:
@@ -36,7 +36,7 @@ def test_check_garbage_stdout_with_zero_exit_is_not_clean(tmp_path: Path) -> Non
             return_value=None,
         ),
         patch(
-            "lintro.tools.definitions.bandit.subprocess.run",
+            "lintro.tools.bandit.definition.subprocess.run",
             return_value=completed,
         ),
     ):
@@ -70,7 +70,7 @@ def test_check_valid_json_reports_no_parse_failures(tmp_path: Path) -> None:
             return_value=None,
         ),
         patch(
-            "lintro.tools.definitions.bandit.subprocess.run",
+            "lintro.tools.bandit.definition.subprocess.run",
             return_value=completed,
         ),
     ):

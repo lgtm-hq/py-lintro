@@ -13,7 +13,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.cargo_audit import (
+from lintro.tools.cargo_audit.definition import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
 )

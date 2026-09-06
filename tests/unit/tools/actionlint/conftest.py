@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.actionlint import ActionlintPlugin
+from lintro.tools.actionlint.definition import ActionlintPlugin
 
 
 @pytest.fixture

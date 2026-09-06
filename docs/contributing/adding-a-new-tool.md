@@ -19,9 +19,9 @@ Mirror the closest existing tool:
 
 | Tool type              | Reference                                |
 | ---------------------- | ---------------------------------------- |
-| Simple linter (no fix) | `lintro/tools/definitions/actionlint.py` |
+| Simple linter (no fix) | `lintro/tools/actionlint/definition.py`  |
 | Linter + formatter     | `lintro/tools/ruff/definition.py`        |
-| Security scanner       | `lintro/tools/definitions/bandit.py`     |
+| Security scanner       | `lintro/tools/bandit/definition.py`      |
 | Shell tool             | `lintro/tools/definitions/shellcheck.py` |
 
 Read all files for that reference tool (definition, parser package, unit tests,
@@ -54,9 +54,18 @@ overview of how Lintro dogfoods its own codebase.
 ## Step 1 — Plugin definition
 
 Create `lintro/tools/definitions/<tool>.py`. A tool that needs helper modules of its own
-gets a package instead — `lintro/tools/<tool>/definition.py` next to its helpers, with
-`lintro/tools/definitions/<tool>.py` left as a re-export shim so discovery finds it (see
-`lintro/tools/ruff/`).
+gets a package instead (see `lintro/tools/ruff/`):
+
+- `lintro/tools/<tool>/definition.py` — the plugin and its `ToolDefinition`, next to the
+  helper modules it delegates to.
+- `lintro/tools/<tool>/__init__.py` — the package's import surface: re-export the plugin
+  class, its module-level constants and every helper other packages import, and list
+  them in `__all__`, so no caller reaches past the package.
+- `lintro/tools/definitions/<tool>.py` — a re-export shim carrying the same names, so
+  plugin discovery (which scans that package) still registers the tool.
+- `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include` in
+  the same change. The duplicate-code gate's scope follows the files, so a package left
+  out of that list is a definition that silently escapes the ratchet.
 
 Structure (mirrored from your reference tool):
 
@@ -576,7 +585,10 @@ Implementation checklist:
 
 - [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
       `ToolDefinition`; for a tool with helper modules, those three live in
-      `lintro/tools/<tool>/definition.py` and this module is the re-export shim
+      `lintro/tools/<tool>/definition.py`, `lintro/tools/<tool>/__init__.py` re-exports
+      them, and this module is the re-export shim
+- [ ] `pyproject.toml` — `[tool.lintro.pylint] include` gains `lintro/tools/<tool>` when
+      the tool is a package (duplicate-code gate scope follows the files)
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
