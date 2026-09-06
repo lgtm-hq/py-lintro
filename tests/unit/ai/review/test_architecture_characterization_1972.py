@@ -362,18 +362,18 @@ def test_cli_and_mcp_pass_the_same_shared_run_review_kwargs(
     assert_that(cli_calls).is_length(1)
     cli_kwargs = {key: value for key, value in cli_calls[0].items() if key != "context"}
 
-    assert_that(set(mcp_kwargs) & _SHARED_RUN_REVIEW_KWARGS).is_equal_to(
-        _SHARED_RUN_REVIEW_KWARGS,
-    )
-    assert_that(set(cli_kwargs) & _SHARED_RUN_REVIEW_KWARGS).is_equal_to(
-        _SHARED_RUN_REVIEW_KWARGS,
-    )
-    assert_that(set(cli_kwargs) & _CLI_ONLY_RUN_REVIEW_KWARGS).is_equal_to(
-        _CLI_ONLY_RUN_REVIEW_KWARGS,
-    )
-    # #2300: one call site, so the kwarg *names* no longer diverge — the
-    # adapter policy is carried by value, and MCP carries the defaults.
-    assert_that(set(cli_kwargs)).is_equal_to(set(mcp_kwargs))
+    # Since #2301 both surfaces hand over one options object, so a field name
+    # being present proves nothing about forwarding — every field is always
+    # there. What the two name sets still pin is that the allowlists above
+    # describe real options: a renamed or deleted `ReviewSessionOptions` field
+    # fails here rather than quietly emptying an allowlist. The forwarding
+    # itself is asserted by value, below and in `test_cli_mcp_parity`.
+    option_fields = set(mcp_kwargs)
+    assert_that(_SHARED_RUN_REVIEW_KWARGS - option_fields).is_empty()
+    assert_that(_CLI_ONLY_RUN_REVIEW_KWARGS - option_fields).is_empty()
+    # #2300: one call site, so the field names no longer diverge — the adapter
+    # policy is carried by value, and MCP carries the defaults.
+    assert_that(set(cli_kwargs)).is_equal_to(option_fields)
     assert_that(
         {key: mcp_kwargs[key] for key in _DEFAULT_POLICY_KWARGS},
     ).is_equal_to(_DEFAULT_POLICY_KWARGS)

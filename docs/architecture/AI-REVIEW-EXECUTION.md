@@ -62,7 +62,7 @@ planning, chunk fan-out, per-chunk passes, prompts, merge and result-assembly mo
 without changing prompts, findings, severity, or exit semantics. Every provider call
 continues through `call_ai`; prompt redaction remains mandatory.
 
-`lintro/ai/review/orchestrator.py` is now the sequence and nothing else — 586 lines,
+`lintro/ai/review/orchestrator.py` is now the sequence and nothing else. It sits well
 below the 800-line `[tool.lintro.module_size]` threshold, so it no longer needs a
 baseline entry, and it carries no `C901` / `PLR0912` / `PLR0913` / `PLR0915`
 suppression. `run_review_async` reads as three steps:

@@ -297,10 +297,13 @@ def assemble_review_result(
         for item in plan.resume.classified
         if item.need is not FileReviewNeed.COVERED and item.path not in covered_now
     )
+    # Built once: the membership test below runs per classified file, and a
+    # large diff would otherwise rebuild the same set for every one of them.
+    awaiting = set(awaiting_paths)
     awaiting_reasons = tuple(
         (item.path, item.flag_reason)
         for item in plan.resume.classified
-        if item.path in set(awaiting_paths) and item.flag_reason
+        if item.path in awaiting and item.flag_reason
     )
     # The validation span (context-finding rejection, coverage and resume
     # bookkeeping, flag reconciliation) and the run total are closed here so
