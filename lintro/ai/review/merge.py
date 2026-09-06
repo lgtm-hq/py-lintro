@@ -92,14 +92,17 @@ class ChunkReviewPartial:
 def parse_review_response(*, content: str) -> dict[str, Any]:
     """Parse and validate AI review JSON response.
 
+    A thin re-export of
+    :func:`~lintro.ai.json_response.parse_review_response_payload` that keeps
+    the parser reachable from the review package. ``ValueError`` from invalid
+    JSON or a missing required key propagates to the caller, which turns it
+    into a schema-reminder retry rather than treating the chunk as parsed.
+
     Args:
         content: Raw or fenced JSON model response.
 
     Returns:
         Parsed review response dictionary.
-
-    Raises:
-        ValueError: When JSON is invalid or missing required keys.
     """
     return parse_review_response_payload(content=content)
 
